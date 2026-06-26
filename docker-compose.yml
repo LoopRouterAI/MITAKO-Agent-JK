@@ -1,0 +1,29 @@
+# MITAKO 生产辅助服务 — Redis + Celery SLA Worker
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  celery-worker:
+    build: .
+    command: celery -A sla_worker.celery_app worker --loglevel=info --pool=solo
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - REDIS_HOST=redis
+      - SLA_WORKER_MODE=celery
+    depends_on:
+      - redis
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  celery-beat:
+    build: .
+    command: celery -A sla_worker.celery_app beat --loglevel=info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+    depends_on:
+      - redis
+    restart: unless-stopped

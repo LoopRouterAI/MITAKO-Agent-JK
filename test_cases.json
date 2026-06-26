@@ -1,0 +1,95 @@
+[
+  {
+    "case_id": "TC_001_DELAY_COMPENSATE",
+    "title": "发货延迟与自动免邮券补偿流程",
+    "user_id": "usr_001",
+    "steps": [
+      {
+        "step": 1,
+        "input": "我去年6月买的排球少年吧唧到现在都没出荷！你们是不是跑路了？",
+        "expected_intent": "物流追踪/催发货",
+        "expected_emotion_level": 3,
+        "assert": {
+          "should_call_api": ["query_order", "query_supply_chain"],
+          "reply_contains": ["排球少年", "登校系列", "海关", "延期"]
+        }
+      },
+      {
+        "step": 2,
+        "input": "一直让我等，有没有赔偿？我的等待不是白费的！",
+        "expected_intent": "退款退货/补偿",
+        "expected_emotion_level": 4,
+        "assert": {
+          "should_call_api": ["compensate"],
+          "reply_contains": ["免邮券", "22", "补偿"]
+        }
+      },
+      {
+        "step": 3,
+        "input": "22块免邮券打发叫花子呢？我要退现金，不然我去黑猫起诉你们！",
+        "expected_intent": "投诉升级",
+        "expected_emotion_level": 5,
+        "assert": {
+          "should_trigger_action": "transfer_to_human",
+          "reply_contains": ["主管", "请稍等"]
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "TC_002_GASHAPON_RAGE",
+    "title": "盲盒吞烫质疑与非酋心理抚慰",
+    "user_id": "usr_002",
+    "steps": [
+      {
+        "step": 1,
+        "input": "我连抽了20发大赏都是普款，你们是不是吞烫了？概率肯定被你们改了！",
+        "expected_intent": "盲盒相关/吞烫质疑",
+        "expected_emotion_level": 4,
+        "assert": {
+          "should_call_api": [],
+          "reply_contains": ["随机", "理解", "失落", "非酋"]
+        }
+      },
+      {
+        "step": 2,
+        "input": "好吧，我想把这些重复的普款处理掉，你们有置换区吗？",
+        "expected_intent": "盲盒相关/置换区咨询",
+        "expected_emotion_level": 2,
+        "assert": {
+          "should_call_api": [],
+          "reply_contains": ["置换区", "交换"],
+          "has_meme": "cheer"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "TC_003_HIGH_VALUE_DAMAGE",
+    "title": "高额商品破损退款（触发人工风控限额）",
+    "user_id": "usr_003",
+    "steps": [
+      {
+        "step": 1,
+        "input": "我买的魈手办到了，结果外盒全烂了，里面手办也有划痕，太气人了！",
+        "expected_intent": "换货补发/商品破损",
+        "expected_emotion_level": 4,
+        "assert": {
+          "should_call_api": [],
+          "reply_contains": ["非常抱歉", "上传图片", "凭证"]
+        }
+      },
+      {
+        "step": 2,
+        "input": "我不换了，这可是980元！我要直接全额退现金！",
+        "expected_intent": "退款退货/申请退款",
+        "expected_emotion_level": 4,
+        "assert": {
+          "should_trigger_action": "transfer_to_human",
+          "reason": "大额退款(>100元)禁止AI自动流转，必须转人工",
+          "reply_contains": ["超出", "权限", "主管"]
+        }
+      }
+    ]
+  }
+]

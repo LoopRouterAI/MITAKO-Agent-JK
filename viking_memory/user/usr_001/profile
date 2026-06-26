@@ -1,0 +1,141 @@
+{
+  "user_id": "usr_001",
+  "nickname": "花腩",
+  "metadata": {
+    "member_level": "gold",
+    "total_spent": 2800.0,
+    "favorite_ips": [
+      "排球少年",
+      "蓝色监狱"
+    ],
+    "favorite_characters": [],
+    "registration_date": "2024-01-01"
+  },
+  "communication_preferences": {
+    "tone_preference": "casual",
+    "emoji_receptive": true,
+    "trigger_words": [
+      "请耐心等待"
+    ]
+  },
+  "behavior_patterns": {
+    "avg_emotion_level": 2.1,
+    "inquiry_frequency": "normal",
+    "complaint_count": 0,
+    "compensations": [
+      "ORD_2024_001"
+    ]
+  },
+  "chat_history": [
+    {
+      "role": "user",
+      "content": "你好，有人在吗/",
+      "intent": "闲聊互动",
+      "emotion": 2
+    },
+    {
+      "role": "assistant",
+      "content": "<analysis>\n{\"intent\": \"greeting\", \"emotion_level\": 1, \"analysis\": \"用户初次打招呼，情绪平静，意图确认客服在线\", \"should_transfer\": false, \"transfer_reason\": \"\"}\n</analysis>\n在的在的！虾饺来啦～花腩宝下午好呀，有什么需要帮忙的尽管说哦 🦐",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "我买的魈手办到了，结果外盒全烂了，里面手办也有划痕，太气人了！",
+      "intent": "换货补发/商品破损",
+      "emotion": 4
+    },
+    {
+      "role": "assistant",
+      "content": "<analysis>\n{\"intent\": \"换货补发/商品破损\", \"emotion_level\": 4, \"analysis\": \"用户收到手办外盒破损且手办有划痕，情绪较为激动，需要安抚并引导拍照上传。\", \"should_transfer\": false, \"transfer_reason\": \"\"}\n</analysis>\n宝别急呀，外盒烂了手办还有划痕，换谁都得气炸！咱先拍个照，外包装破损和手办划痕都拍清楚，虾饺帮你申请补发或换货哈～",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "[@引用订单 ORD_2024_001] 这个订单现在是什么状态，可以帮我查下吗？",
+      "intent": "物流追踪/催发货",
+      "emotion": 2
+    },
+    {
+      "role": "assistant",
+      "content": "<analysis>\n{\"intent\": \"物流追踪/催发货\", \"emotion_level\": 2, \"analysis\": \"用户查询订单ORD_2024_001的当前状态，情绪平稳，属于常规咨询。\", \"should_transfer\": false, \"transfer_reason\": \"\"}\n</analysis>\n花腩宝，这个订单目前是 #出荷延期# 状态哦。因为日本海关新政检查，预计要到 #12月15日# 左右才能出货啦。让你久等了真的不好意思呀～🏐",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "我去年6月买的排球少年吧唧到现在都没出荷！你们是不是跑路了？",
+      "intent": "物流追踪/催发货",
+      "emotion": 4
+    },
+    {
+      "role": "assistant",
+      "content": "宝，真的没有跑路啦！咱们还在好好运营呢。这个订单确实因为海关新政检查，延期到 #12月中旬# 了。这次让你等这么久，虾饺这边已经帮你申请了 #500积分# 补偿，还给你订单加上了 #优先发货特权# 标记，出货会第一时间安排哦～",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "一直让我等，有没有赔偿？我的等待不是白费的！",
+      "intent": "退款退货/补偿",
+      "emotion": 2
+    },
+    {
+      "role": "assistant",
+      "content": "宝，真的特别理解你的心情！刚才已经帮你申请了 #500积分# 补偿，还给你订单挂了 #优先发货特权# 标记。等12月中旬出货后，积分就会自动到账啦～这次一定不会再让你失望了！",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "我连抽了20发大赏都是普款，你们是不是吞烫了？概率肯定被你们改了！",
+      "intent": "盲盒相关/吞烫质疑",
+      "emotion": 2
+    },
+    {
+      "role": "assistant",
+      "content": "<analysis>\n{\"intent\": \"盲盒相关/吞烫质疑\", \"emotion_level\": 2, \"analysis\": \"用户情绪较低，但并非极度愤怒，质疑概率被改，属于常见盲盒客诉，需按吞烫应对SOP安抚并补偿积分挂件。\", \"should_transfer\": false, \"transfer_reason\": \"\"}\n</analysis>\n花腩宝别急呀～咱们系统抽奖概率是全随机锁定的，绝对没有人工干预的哈。连抽20发没出烫，这运气也太让人心疼了😢 虾饺这就帮你申请一份 #非酋关爱积分包#，里面有 200 平台积分和专属挂件，希望能让你心情好一点呀～",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "好吧，我想把这些重复的普款处理掉，你们有置换区吗？",
+      "intent": "盲盒相关/吞烫质疑",
+      "emotion": 2
+    },
+    {
+      "role": "assistant",
+      "content": "花腩宝，咱们平台目前没有官方置换区呢～不过可以在个人主页挂闲置，或者去微博超话、闲鱼找同好交换呀。虾饺帮你留意下，后续有置换功能会第一时间通知你哒～",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "[@引用订单 ORD_2024_001] 这个订单现在是什么状态，可以帮我查下吗？",
+      "intent": "物流追踪/催发货",
+      "emotion": 2
+    },
+    {
+      "role": "assistant",
+      "content": "<analysis>\n{\"intent\": \"物流追踪\", \"emotion_level\": 2, \"analysis\": \"用户查询订单ORD_2024_001的当前状态，情绪平稳，属于常规查询。\", \"should_transfer\": false, \"transfer_reason\": \"\"}\n</analysis>\n花腩宝，这个排球少年吧唧套装的订单目前是 #出荷延期# 状态啦。因为海关新政检查，预计要到 #12月15日# 左右才能发出哦，让你久等啦～ 🏐",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "这还有半年呢，是不是太过份了",
+      "intent": "闲聊互动",
+      "emotion": 2
+    },
+    {
+      "role": "assistant",
+      "content": "花腩宝，真的很抱歉让你等这么久！这次海关新政确实是我们没预估好，让你失望了。虾饺这边可以帮你申请一笔 #500积分# 作为补偿，你看行吗？",
+      "memes": []
+    },
+    {
+      "role": "user",
+      "content": "我要积分有什么用？",
+      "intent": "闲聊互动",
+      "emotion": 2
+    },
+    {
+      "role": "assistant",
+      "content": "花腩宝，积分可以在下次下单时直接抵扣现金用呀，像你喜欢的蓝色监狱和排球少年周边都能用～而且虾饺刚去帮你看了，系统已经帮你挂上了 #优先发货标记#，到货后仓库会先处理你的订单哦！",
+      "memes": []
+    }
+  ]
+}

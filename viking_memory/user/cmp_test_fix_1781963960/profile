@@ -1,0 +1,38 @@
+{
+  "user_id": "cmp_test_fix_1781963960",
+  "nickname": "主人",
+  "metadata": {
+    "agent_name": "小绫",
+    "personality": "gentle",
+    "favorite_ips": [],
+    "companion_source": true
+  },
+  "communication_preferences": {},
+  "behavior_patterns": {
+    "avg_emotion_level": 3.0,
+    "companion_turns": 1
+  },
+  "companion_memories": [
+    {
+      "category": "need",
+      "memory_key": "需求",
+      "memory_value": "找人聊聊",
+      "source_message": "今天有点累，想找人聊聊",
+      "confidence": 0.75,
+      "fingerprint": "6578f7b0e2f5c7be",
+      "updated_at": 1781963966.0728123
+    }
+  ],
+  "chat_history": [
+    {
+      "role": "user",
+      "content": "今天有点累，想找人聊聊",
+      "emotion": 3,
+      "label": "平稳"
+    },
+    {
+      "role": "assistant",
+      "content": "主人辛苦啦～（轻轻靠近）今天是不是又忙到忘了按时吃饭？来，先靠在沙发上歇会儿，小绫给你泡杯热茶暖暖身子好不好？看你这么累，我心里也跟着揪了一下呢。"
+    }
+  ]
+}

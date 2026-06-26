@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MITAKO 虾淘 AI 智能客服系统</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts Outfit & Noto Sans SC & JetBrains Mono -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <style>
+    body {
+      font-family: 'Outfit', 'Noto Sans SC', sans-serif;
+      background-color: #ffffff;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(200, 255, 26, 0.12) 0px, transparent 55%),
+        radial-gradient(at 100% 100%, rgba(123, 97, 255, 0.08) 0px, transparent 55%);
+      color: #1e293b;
+    }
+
+    /* Dopamine Console for Reasoning Terminal */
+    .mono-font {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Web Design Engineer Light-Dopamine Cards - Soft green border and glow */
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(183, 245, 0, 0.18);
+      box-shadow: 0 15px 35px rgba(183, 245, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.01);
+    }
+
+    .glow-active {
+      box-shadow: 0 0 30px rgba(200, 255, 26, 0.15);
+    }
+
+    /* Smooth Message Entry */
+    .msg-transition {
+      opacity: 0;
+      transform: translateY(14px);
+      animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes fadeInUp {
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Jumping Dots Loading (Type-in-progress) */
+    .dot-pulse {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .pulse-item {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background-color: #7B61FF;
+      animation: bounce 1.2s infinite ease-in-out;
+    }
+    .pulse-item:nth-child(2) { animation-delay: 0.2s; }
+    .pulse-item:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-5px); }
+    }
+
+    /* Input Focus Highlight */
+    .focus-ring:focus {
+      outline: none;
+      border-color: rgba(123, 97, 255, 0.4);
+      box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.12);
+    }
+
+    /* Multicolored Dopamine Coupon edge */
+    .coupon-card {
+      position: relative;
+      background: #ffffff;
+      border: 1.5px solid rgba(255, 139, 56, 0.25);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 10px 25px rgba(255, 139, 56, 0.06);
+    }
+    .coupon-card::before, .coupon-card::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 8px;
+      background-size: 16px 16px;
+      z-index: 10;
+    }
+    .coupon-card::before {
+      left: -4px;
+      background-image: radial-gradient(circle, transparent 4px, #ffffff 4px);
+    }
+    .coupon-card::after {
+      right: -4px;
+      background-image: radial-gradient(circle, transparent 4px, #ffffff 4px);
+    }
+
+    /* Stamp graphic */
+    .stamp-badge {
+      border: 2px dashed rgba(255, 139, 56, 0.6);
+      color: rgba(255, 139, 56, 0.85);
+      font-size: 9px;
+      font-weight: 900;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 6px;
+      transform: rotate(-12deg);
+      display: inline-block;
+      letter-spacing: 1.5px;
+      background: rgba(255, 139, 56, 0.04);
+      box-shadow: 0 0 0 2px rgba(255, 139, 56, 0.03);
+    }
+
+    /* Light terminal scrollbar */
+    .console-scroll::-webkit-scrollbar {
+      width: 4px;
+    }
+    .console-scroll::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.03);
+    }
+    .console-scroll::-webkit-scrollbar-thumb {
+      background: rgba(0, 0, 0, 0.1);
+      border-radius: 2px;
+    }
+    .console-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 0, 0, 0.2);
+    }
+  </style>
+</head>
+<body class="text-slate-700 min-h-[100dvh] flex flex-col p-4 md:p-6">
+
+  <!-- 顶部精细控制条 (Taste Skill - Minimalist Header) -->
+  <header class="w-full max-w-7xl mx-auto mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 glass-panel rounded-2xl p-4.5 glow-active">
+    <div class="flex items-center gap-3.5">
+      <!-- Dopamine splash logo container -->
+      <div class="relative flex items-center justify-center py-2.5 px-4 rounded-xl overflow-hidden flex-shrink-0 select-none">
+        <svg class="absolute inset-0 w-full h-full opacity-90 scale-110 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M15,35 Q30,8 70,18 T92,60 Q85,92 38,82 T8,55 Z" fill="#C8FF1A" />
+          <circle cx="78" cy="22" r="9" fill="#42C8FF" opacity="0.85" />
+          <circle cx="18" cy="78" r="7" fill="#7B61FF" opacity="0.65" />
+        </svg>
+        <span class="relative text-lg font-black italic tracking-tight text-slate-900 font-sans flex items-center gap-0.5" style="font-family: 'Outfit', sans-serif;">
+          Mitako<span class="text-[9px] font-bold not-italic px-1.5 py-0.5 rounded-md bg-[#FF8B38] text-white ml-1 shadow-sm">虾淘</span>
+        </span>
+      </div>
+      <div>
+        <h1 class="text-xs font-bold tracking-tight text-slate-800 flex items-center gap-1.5">
+          MITAKO 智能客服 Agent <span class="text-[8px] font-bold tracking-wider text-slate-800 bg-[#C8FF1A] border border-[#B7F500]/30 px-2 py-0.5 rounded-md uppercase">Production Ready</span>
+        </h1>
+        <p class="text-[10px] text-slate-500">基于 Agnes-2.0-Flash 真实多模态分析与 OpenViking 记忆框架</p>
+      </div>
+    </div>
+    
+    <!-- Test Case 快捷测试面板 -->
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-[10px] text-slate-500 font-medium mr-1 flex items-center gap-1.5">
+        <i class="fa-solid fa-square-rss text-[#7B61FF] text-[9px]"></i>一键回归测试:
+      </span>
+      <button onclick="runTestCase(0)" class="text-[10px] font-bold bg-slate-50 hover:bg-[#C8FF1A]/10 text-slate-700 hover:text-slate-900 border border-slate-200/60 hover:border-[#B7F500]/50 px-3 py-1.5 rounded-xl transition-all duration-300 flex items-center gap-1.5 active:scale-95 shadow-sm">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#B7F500]"></span> 场景 1: 延期与自动券补偿
+      </button>
+      <button onclick="runTestCase(1)" class="text-[10px] font-bold bg-slate-50 hover:bg-[#7B61FF]/10 text-slate-700 hover:text-[#7B61FF] border border-slate-200/60 hover:border-[#7B61FF]/50 px-3 py-1.5 rounded-xl transition-all duration-300 flex items-center gap-1.5 active:scale-95 shadow-sm">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#7B61FF]"></span> 场景 2: 盲盒非酋心理抚慰
+      </button>
+      <button onclick="runTestCase(2)" class="text-[10px] font-bold bg-slate-50 hover:bg-[#42C8FF]/10 text-slate-700 hover:text-[#42C8FF] border border-slate-200/60 hover:border-[#42C8FF]/50 px-3 py-1.5 rounded-xl transition-all duration-300 flex items-center gap-1.5 active:scale-95 shadow-sm">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#42C8FF]"></span> 场景 3: 手办破损风控限额
+      </button>
+      <button onclick="clearChat()" class="text-[10px] font-bold text-slate-500 hover:text-rose-500 bg-slate-100 hover:bg-rose-50 px-3 py-1.5 rounded-xl border border-slate-200/60 hover:border-rose-200 transition-all duration-300 active:scale-95 shadow-sm">
+        <i class="fa-solid fa-rotate-left mr-1"></i>重置
+      </button>
+    </div>
+  </header>
+
+  <!-- 双栏演示主大屏 -->
+  <main class="w-full max-w-7xl mx-auto flex-1 grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
+    
+    <!-- 左栏：客服交互窗口 (占比 7) -->
+    <section class="md:col-span-7 flex flex-col glass-panel rounded-2xl overflow-hidden min-h-[580px] md:min-h-0 glow-active">
+      
+      <!-- 客服气泡头部 -->
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+        <div class="flex items-center gap-3">
+          <div class="relative flex-shrink-0">
+            <!-- 加载真实的看板娘头像 -->
+            <img src="/templates/xiaojiao_avatar.png" alt="虾饺" 
+                 class="w-11 h-11 rounded-xl border border-slate-200/50 shadow-sm object-cover flex-shrink-0">
+            <span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-400 border-2 border-white rounded-full"></span>
+          </div>
+          <div>
+            <h2 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              首席客服看板娘 - 虾饺 
+              <span class="text-[8px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-1.5 py-0.5 rounded-md">在线</span>
+            </h2>
+            <p class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+              <span>IP偏好与沟通记录已载入 (viking://)</span>
+            </p>
+            <div class="flex flex-wrap items-center gap-1.5 mt-2 select-none">
+              <!-- OpenViking 记忆状态胶囊 -->
+              <span id="badgeViking" class="text-[9px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/60 px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300">
+                <i class="fa-solid fa-brain text-[8px]"></i><span id="vikingText">Viking: 未装载</span>
+              </span>
+              <!-- 意图识别胶囊 -->
+              <span id="badgeIntent" class="text-[9px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/60 px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300">
+                <i class="fa-solid fa-wand-magic-sparkles text-[8px]"></i><span id="intentText">意图: 等待中</span>
+              </span>
+              <!-- 情绪评级胶囊 -->
+              <span id="badgeEmotionPill" class="text-[9px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/60 px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300">
+                <i class="fa-solid fa-face-smile text-[8px]"></i><span id="emotionTextPill">情绪: --</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <!-- 会员级选择 -->
+          <select id="userSelector" onchange="switchUser()" class="text-xs bg-slate-50 border border-slate-200/80 rounded-lg px-2.5 py-1.5 text-slate-700 outline-none focus:border-[#7B61FF]/40 transition-all duration-300 shadow-sm font-semibold">
+            <option value="usr_001">金牌会员：花腩 (排球少年登校系列延期)</option>
+            <option value="usr_002">银牌会员：小圆 (20连盲盒未中)</option>
+            <option value="usr_003">白金会员：阿光 (980元魈手办外包装破损)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 对话消息列表 -->
+      <div id="chatHistory" class="flex-1 overflow-y-auto p-5 space-y-5 flex flex-col">
+        
+        <!-- 虾饺问候气泡 -->
+        <div class="flex items-start gap-3 max-w-[85%] msg-transition">
+          <img src="/templates/xiaojiao_avatar.png" alt="虾饺" class="w-10 h-10 rounded-lg border border-slate-200/40 flex-shrink-0 object-cover">
+          <div class="bg-gradient-to-br from-[#C8FF1A] to-[#B7F500] border border-[#B7F500]/30 text-slate-900 px-4 py-2.5 rounded-xl rounded-tl-none shadow-sm text-sm font-medium leading-relaxed">
+            嗨~ 终于等到你啦！我是虾淘的客服助手“虾饺”~ <br>
+            有什么是虾饺可以帮你的吗？不管是查订单、问物流，随时吩咐我哦！ 🥟
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 人工主管接管横幅 -->
+      <div id="transferBanner" class="hidden px-5 py-3 bg-rose-500/5 border-t border-b border-rose-500/10 flex items-center justify-between transition-all duration-300">
+        <div class="flex items-center gap-2 text-rose-400 text-xs font-medium">
+          <i class="fa-solid fa-headset animate-pulse text-[10px]"></i>
+          <span>当前会话已成功接入【售后财务/法务客服主管】，AI 已退出承接。</span>
+        </div>
+        <button onclick="restoreAI()" class="text-[10px] font-bold text-white bg-rose-600 hover:bg-rose-500 px-3 py-1.5 rounded-lg transition-colors">
+          切回 AI 客服
+        </button>
+      </div>
+
+      <!-- 聊天输入框 -->
+      <div class="p-4 border-t border-slate-100 bg-slate-50/50 flex items-center gap-3">
+        <input id="chatInput" type="text" placeholder="向“虾饺”发送消息，例如：我的排球少年吧唧延期多久了？" 
+               class="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 placeholder-slate-400 focus-ring transition-all duration-300 focus:border-[#7B61FF]"
+               onkeydown="if(event.key==='Enter') sendMessage()">
+        <button id="sendBtn" onclick="sendMessage()" class="bg-gradient-to-tr from-[#7B61FF] to-[#42C8FF] hover:from-[#6348eb] hover:to-[#22bdfa] text-white font-bold px-5 py-3 rounded-xl shadow-md shadow-[#7B61FF]/10 transition-all duration-300 text-sm flex items-center gap-1.5 active:scale-95">
+          <span>发送</span><i class="fa-solid fa-paper-plane text-xs"></i>
+        </button>
+      </div>
+
+    </section>
+
+    <!-- 右栏：Agent 监控追踪面板 (占比 5) -->
+    <section class="md:col-span-5 flex flex-col glass-panel rounded-2xl overflow-hidden min-h-[500px] md:min-h-0 glow-active">
+      
+      <!-- 调试面板头部 -->
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-server text-[#42C8FF] text-xs"></i>
+          <h2 class="text-sm font-bold tracking-wide text-slate-800">Agent 运行态追踪器</h2>
+        </div>
+        <span class="text-[9px] font-bold text-[#7B61FF] bg-[#7B61FF]/10 border border-[#7B61FF]/20 px-2.5 py-0.5 rounded-md">
+          SSE Channel
+        </span>
+      </div>
+
+      <!-- 情绪与意图大屏监控 -->
+      <div class="p-4 bg-slate-50/30 border-b border-slate-100 grid grid-cols-2 gap-4">
+        <div>
+          <span class="text-[9px] text-slate-400 font-semibold block mb-1.5 uppercase tracking-wider">识别出的意图标签</span>
+          <div id="debugIntent" class="text-xs font-bold text-slate-700 bg-white border border-slate-200/80 px-3 py-2.5 rounded-xl shadow-sm">
+            等待输入...
+          </div>
+        </div>
+        <div>
+          <span class="text-[9px] text-slate-400 font-semibold block mb-1.5 uppercase tracking-wider">用户情绪分级</span>
+          <div id="debugEmotion" class="text-xs font-bold text-slate-700 bg-white border border-slate-200/80 px-3 py-2.5 rounded-xl flex items-center justify-between shadow-sm">
+            <span>等待输入...</span>
+            <span id="emotionBadge" class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 标签导航 -->
+      <div class="flex border-b border-slate-100 bg-slate-50/20 text-xs">
+        <button id="tabReasoningBtn" onclick="switchTab('reasoning')" class="flex-1 py-3 text-center font-bold text-[#7B61FF] border-b-2 border-[#7B61FF] transition-all">
+          Agnes 深度推理 (Deep Reasoning)
+        </button>
+        <button id="tabNodesBtn" onclick="switchTab('nodes')" class="flex-1 py-3 text-center font-bold text-slate-400 border-b-2 border-transparent hover:text-slate-600 transition-all">
+          状态机时序节点
+        </button>
+      </div>
+
+      <!-- Agnes 深度推理思考控制台 -->
+      <div id="panelReasoning" class="flex-1 flex flex-col p-4 bg-white relative overflow-hidden">
+        <!-- 二次元轻量插画背景 (微弱透明) -->
+        <div class="absolute right-4 bottom-4 w-32 h-32 opacity-[0.06] pointer-events-none select-none">
+          <svg viewBox="0 0 100 100" class="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="50" r="40" stroke="#7B61FF" stroke-width="4" stroke-dasharray="6 6" />
+            <path d="M30 45 C 35 30, 65 30, 70 45" stroke="#7B61FF" stroke-width="4" stroke-linecap="round" />
+            <path d="M35 55 Q 50 65, 65 55" stroke="#7B61FF" stroke-width="4" stroke-linecap="round" />
+            <circle cx="40" cy="48" r="4" fill="#7B61FF" />
+            <circle cx="60" cy="48" r="4" fill="#7B61FF" />
+          </svg>
+        </div>
+
+        <div class="flex justify-between items-center mb-2 text-[10px] text-slate-400 font-bold tracking-wider">
+          <span>REAL-TIME COGNITIVE TRAJECTORY</span>
+          <button onclick="toggleReasoningText()" id="toggleReasoningBtn" class="text-slate-400 hover:text-[#7B61FF] flex items-center gap-1 font-bold transition-all">
+            <i class="fa-solid fa-eye-slash"></i><span>折叠推理</span>
+          </button>
+        </div>
+        
+        <!-- 推理流式打印终端 (亮色极客白终端) -->
+        <div id="reasoningConsole" class="flex-1 overflow-y-auto bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-xs leading-relaxed text-slate-600 console-scroll max-h-[380px] lg:max-h-none shadow-inner">
+          <div id="reasoningText" class="whitespace-pre-wrap"><span class="text-slate-400 italic">等待大模型触发推理...</span></div>
+          <span id="consoleCursor" class="inline-block w-1.5 h-3.5 bg-[#7B61FF] ml-0.5 animate-pulse hidden"></span>
+        </div>
+      </div>
+
+      <!-- 状态机节点轨迹面板 -->
+      <div id="panelNodes" class="flex-1 hidden overflow-y-auto p-5 space-y-3 font-mono text-[11px] leading-relaxed text-slate-600 bg-white relative">
+        <div class="text-slate-400 italic text-center py-12 flex flex-col items-center justify-center gap-3">
+          <svg class="w-16 h-16 opacity-20" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="8" y="8" width="48" height="48" rx="12" stroke="#7B61FF" stroke-width="3" stroke-dasharray="4 4" />
+            <circle cx="32" cy="32" r="8" fill="#C8FF1A" opacity="0.6" />
+            <path d="M20 32 H 44" stroke="#7B61FF" stroke-width="3" stroke-linecap="round" />
+          </svg>
+          <span>暂无节点轨迹，请在左侧发送指令触发状态机运行...</span>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- 页脚 -->
+  <footer class="w-full max-w-7xl mx-auto mt-6 text-center text-[10px] text-slate-500 tracking-wider">
+    MITAKO 虾淘 首席客服看板娘对话大屏 Demo 版 · 100% 真实大模型实时驱动
+  </footer>
+
+  <!-- ==================== [DEBUG LOG PANEL - PRODUCTION REMOVABLE] ==================== -->
+  <div id="debugLogPanel" class="fixed bottom-6 right-6 z-50 flex flex-col items-end w-80 lg:w-[460px]">
+    <!-- 悬浮小球 (折叠状态展示) -->
+    <button id="btnToggleLog" onclick="toggleLogPanel()" class="w-12 h-12 rounded-full bg-white border-2 border-primary-dopamine text-slate-700 hover:text-slate-900 flex items-center justify-center shadow-lg hover:scale-105 transition-all duration-300 active:scale-95 relative">
+      <i class="fa-solid fa-bug text-sm text-primary-dopamine"></i>
+      <span class="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+        <span id="logStatusIndicator" class="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+      </span>
+    </button>
+    
+    <!-- 日志面板本体 (展开状态展示，默认折叠) -->
+    <div id="logPanelContent" class="hidden mt-3 w-full bg-white border border-slate-200 rounded-2xl p-4.5 shadow-2xl flex flex-col max-h-[500px] transition-all duration-300">
+      
+      <!-- 面板头部 -->
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-terminal text-primary-dopamine text-sm"></i>
+          <h3 class="font-bold text-slate-800 text-xs tracking-wider">大模型 API 原始日志</h3>
+        </div>
+        <div class="flex items-center gap-2.5">
+          <span id="logStatusText" class="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-2 py-1 rounded-md">🟢 已连接</span>
+          <button onclick="toggleLogPanel()" class="text-slate-400 hover:text-slate-600">
+            <i class="fa-solid fa-xmark text-sm"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 日志滚动区 -->
+      <div id="logScrollContainer" class="flex-1 overflow-y-auto space-y-4 pr-1 scroll-smooth max-h-[380px] console-scroll">
+        <div class="text-xs text-slate-400 italic text-center py-8">
+          等待发起 API 请求，日志就绪...
+        </div>
+      </div>
+      
+      <!-- 面板底部状态 -->
+      <div class="border-t border-slate-100 pt-2.5 mt-3 flex justify-between items-center text-xs text-slate-400 font-bold">
+        <span>当前模型: agnes-2.0-flash</span>
+        <button onclick="clearLogs()" class="hover:text-rose-500 transition-colors flex items-center gap-1">
+          <i class="fa-solid fa-trash-can"></i>清除日志
+        </button>
+      </div>
+
+    </div>
+  </div>
+  <!-- ==================== [END OF DEBUG LOG PANEL] ==================== -->
+
+  <!-- JS 控制流逻辑 -->
+  <script>
+    let chatHistoryData = [];
+    let currentUserId = "usr_001";
+    let isTransfered = false;
+    let currentTab = "reasoning";
+    let isReasoningCollapsed = false;
+    let vikingOverrideVal = "auto";
+
+    // --- 打字机队列与调试日志变量定义 ---
+    let typingQueue = [];
+    let isTyping = false;
+    let speedMultiplier = 1.0;
+    let fullReplyText = "";
+    let currentEmotionLevel = 2;
+    let isLogPanelOpen = false;
+    let currentLogCardId = null;
+
+    function toggleLogPanel() {
+      const content = document.getElementById("logPanelContent");
+      isLogPanelOpen = !isLogPanelOpen;
+      if (isLogPanelOpen) {
+        content.classList.remove("hidden");
+      } else {
+        content.classList.add("hidden");
+      }
+    }
+
+    function clearLogs() {
+      document.getElementById("logScrollContainer").innerHTML = `
+        <div class="text-[10px] text-slate-400 italic text-center py-8">
+          日志已清空。等待发起 API 请求...
+        </div>
+      `;
+      currentLogCardId = null;
+    }
+
+    // 处理并渲染大模型原始 API 日志数据，强化文字对比度，并提供复制功能
+    function handleApiLog(data) {
+      const container = document.getElementById("logScrollContainer");
+      if (container.querySelector(".italic")) {
+        container.innerHTML = "";
+      }
+
+      const statusIndicator = document.getElementById("logStatusIndicator");
+      const statusText = document.getElementById("logStatusText");
+
+      // 1. 请求发起
+      if (data.status === "requesting") {
+        currentLogCardId = "log_" + data.stage + "_" + Date.now();
+        
+        // 状态指示灯与文字改为黄色
+        statusIndicator.className = "relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-400 animate-pulse";
+        statusText.className = "text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200/60 px-1.5 py-0.5 rounded-md";
+        statusText.innerText = `🟡 正在请求 (尝试 ${data.attempt}/3)`;
+
+        const card = document.createElement("div");
+        card.id = currentLogCardId;
+        card.className = "border border-slate-200 rounded-xl p-3.5 bg-slate-50 space-y-3 text-xs text-slate-800 shadow-sm";
+        
+        const stageLabel = data.stage === "intent_classify" ? "意图与情绪检测" : "客服回复生成";
+        
+        card.innerHTML = `
+          <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+            <span class="font-bold text-[#7B61FF] text-xs">[阶段: ${stageLabel}]</span>
+            <span class="font-mono text-slate-600 font-bold text-xs">Model: ${data.model}</span>
+          </div>
+          <div>
+            <span class="text-slate-500 font-bold">API Key:</span> 
+            <span class="font-mono bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-800 font-semibold">${data.api_key}</span>
+          </div>
+          <div>
+            <span class="text-slate-500 font-bold">尝试次数:</span> 
+            <span class="font-bold text-slate-800">Attempt ${data.attempt}</span>
+          </div>
+          <div class="space-y-1.5">
+            <div class="flex justify-between items-center">
+              <span class="text-slate-500 font-bold">原始 Request Payload (含 Prompt):</span>
+              <div class="flex gap-2">
+                <button onclick="copyToClipboard('${currentLogCardId}_prompt_val', this)" class="text-[#7B61FF] hover:text-[#6348eb] font-bold text-xs flex items-center gap-0.5"><i class="fa-solid fa-copy"></i>[ 复制 ]</button>
+                <button onclick="togglePromptDetail('${currentLogCardId}_prompt')" class="text-slate-500 hover:text-slate-700 font-bold text-xs">展开/折叠</button>
+              </div>
+            </div>
+            <div id="${currentLogCardId}_prompt_val" class="hidden">${escapeHtml(JSON.stringify(data.payload, null, 2))}</div>
+            <pre id="${currentLogCardId}_prompt" class="hidden font-mono bg-slate-950 border border-slate-800 p-3 rounded-lg text-xs text-slate-100 overflow-x-auto max-h-40 leading-relaxed shadow-inner">${escapeHtml(JSON.stringify(data.payload, null, 2))}</pre>
+          </div>
+          <div class="space-y-1.5">
+            <div class="flex justify-between items-center">
+              <span class="text-slate-500 font-bold">原始 Response 流 (Completions):</span>
+              <button onclick="copyToClipboard('${currentLogCardId}_response', this)" class="text-[#7B61FF] hover:text-[#6348eb] font-bold text-xs flex items-center gap-0.5"><i class="fa-solid fa-copy"></i>[ 复制 ]</button>
+            </div>
+            <div id="${currentLogCardId}_response" class="font-mono bg-slate-950 border border-slate-800 p-3 rounded-lg text-xs text-slate-100 overflow-y-auto max-h-40 whitespace-pre-wrap leading-relaxed shadow-inner">连接中，正在读取流响应...</div>
+          </div>
+        `;
+        container.appendChild(card);
+      } 
+      // 2. 流响应接收
+      else if (data.status === "chunk" && currentLogCardId) {
+        const respBox = document.getElementById(currentLogCardId + "_response");
+        if (respBox) {
+          if (respBox.innerText.includes("正在读取") || respBox.innerText.includes("连接中")) {
+            respBox.innerText = "";
+          }
+          respBox.innerText += data.chunk + "\n";
+          respBox.scrollTop = respBox.scrollHeight;
+        }
+      } 
+      // 3. 指数退避重试警告
+      else if (data.status === "retrying" && currentLogCardId) {
+        statusIndicator.className = "relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-400 animate-pulse";
+        statusText.className = "text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200/60 px-1.5 py-0.5 rounded-md";
+        statusText.innerText = `🟡 429/503 重试 (Attempt ${data.attempt}/3)`;
+
+        const card = document.getElementById(currentLogCardId);
+        if (card) {
+          const warnBox = document.createElement("div");
+          warnBox.className = "mt-2 p-2 bg-[#FF8B38]/10 border border-[#FF8B38]/20 rounded-lg text-[#FF8B38] font-bold text-xs leading-relaxed";
+          warnBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1"></i>遇到软错误，重试中: ${data.error_msg}`;
+          card.appendChild(warnBox);
+        }
+      } 
+      // 4. 调用完成
+      else if (data.status === "success" && currentLogCardId) {
+        statusIndicator.className = "relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500";
+        statusText.className = "text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200/60 px-1.5 py-0.5 rounded-md";
+        statusText.innerText = "🟢 已连接";
+
+        const card = document.getElementById(currentLogCardId);
+        if (card) {
+          let usageBox = card.querySelector(".usage-box");
+          if (!usageBox) {
+            usageBox = document.createElement("div");
+            usageBox.className = "usage-box mt-3 border-t border-slate-200 pt-2 flex justify-between items-center font-bold text-slate-500 text-xs";
+            card.appendChild(usageBox);
+          }
+          const u = data.usage || {};
+          usageBox.innerHTML = `
+            <span>输入 Token: <span class="text-slate-800 font-mono">${u.prompt_tokens || 0}</span></span>
+            <span>输出 Token: <span class="text-slate-800 font-mono">${u.completion_tokens || 0}</span></span>
+            <span>总计 Token: <span class="text-[#7B61FF] font-mono">${u.total_tokens || 0}</span></span>
+          `;
+        }
+      }
+
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function togglePromptDetail(id) {
+      const pre = document.getElementById(id);
+      if (pre) {
+        pre.classList.toggle("hidden");
+      }
+    }
+
+    async function copyToClipboard(elementId, btn) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      
+      let textToCopy = el.innerText || el.textContent;
+      textToCopy = textToCopy.trim();
+      
+      const originalText = btn.innerHTML;
+      const doSuccessFeedback = () => {
+        btn.innerHTML = `<i class="fa-solid fa-check text-emerald-500 mr-0.5"></i>复制成功!`;
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+        }, 1200);
+      };
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(textToCopy);
+          doSuccessFeedback();
+          return;
+        } catch (err) {
+          console.warn("navigator.clipboard.writeText 复制失败，尝试 fallback: ", err);
+        }
+      }
+
+      // Fallback 方案
+      const textArea = document.createElement("textarea");
+      textArea.value = textToCopy;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          doSuccessFeedback();
+        } else {
+          console.error("execCommand copy 失败");
+          btn.innerHTML = `<i class="fa-solid fa-xmark text-rose-500 mr-0.5"></i>复制失败`;
+          setTimeout(() => { btn.innerHTML = originalText; }, 1200);
+        }
+      } catch (err) {
+        console.error("Fallback execCommand 复制发生异常: ", err);
+      }
+      document.body.removeChild(textArea);
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function changeTheme(theme) {
+      document.body.className = document.body.className.replace(/theme-\w+/g, "");
+      document.body.classList.add("theme-" + theme);
+      
+      let primaryColor = "#B7F500"; // Lime
+      if (theme === 'purple') primaryColor = "#7B61FF"; // Purple
+      else if (theme === 'coral') primaryColor = "#FF8B38"; // Coral
+
+      const buttons = document.querySelectorAll("#tweaksContent button[onclick^='changeTheme']");
+      buttons.forEach(btn => {
+        if (btn.getAttribute("onclick").includes(theme)) {
+          btn.className = `py-1.5 px-2 bg-white border border-[${primaryColor}] text-[${primaryColor}] rounded-lg hover:bg-slate-50 transition-all text-[10px] font-bold font-mono text-center shadow-[0_0_8px_rgba(123,97,255,0.06)]`;
+          btn.style.borderColor = primaryColor;
+          btn.style.color = primaryColor;
+        } else {
+          btn.className = "py-1.5 px-2 bg-slate-50 border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-100 transition-all text-[10px] font-medium font-mono text-center";
+          btn.style.borderColor = "";
+          btn.style.color = "";
+        }
+      });
+      
+      const styleEl = document.getElementById("themeStyle") || document.createElement("style");
+      styleEl.id = "themeStyle";
+      
+      styleEl.innerHTML = `
+        #consoleCursor { background-color: ${primaryColor} !important; }
+        .text-primary-dopamine { color: ${primaryColor} !important; }
+        .border-primary-dopamine { border-color: ${primaryColor} !important; }
+        .bg-primary-dopamine-light { background-color: ${primaryColor}12 !important; }
+      `;
+      document.head.appendChild(styleEl);
+    }
+
+    function updateSpeedMultiplier() {
+      const slider = document.getElementById("speedSlider");
+      speedMultiplier = parseFloat(slider.value);
+      document.getElementById("speedVal").innerText = speedMultiplier.toFixed(1) + "x";
+    }
+
+    function overrideVikingLevel() {
+      vikingOverrideVal = document.getElementById("vikingLevelOverride").value;
+    }
+
+    function processTypingQueue() {
+      if (typingQueue.length === 0) {
+        isTyping = false;
+        return;
+      }
+      isTyping = true;
+      const char = typingQueue.shift();
+      const replyContainer = document.getElementById("tempReply");
+      
+      if (replyContainer) {
+        if (replyContainer.querySelector(".dot-pulse")) {
+          replyContainer.innerHTML = "";
+        }
+        fullReplyText += char;
+        replyContainer.innerHTML = formatText(fullReplyText);
+      }
+      
+      const chatBox = document.getElementById("chatHistory");
+      chatBox.scrollTop = chatBox.scrollHeight;
+      
+      let baseDelay = 12;
+      if (currentEmotionLevel === 3) baseDelay = 20;
+      else if (currentEmotionLevel === 4) baseDelay = 40;
+      else if (currentEmotionLevel >= 5) baseDelay = 65;
+      
+      const delay = Math.max(1, baseDelay / speedMultiplier);
+      setTimeout(processTypingQueue, delay);
+    }
+
+    function updateEmotionPill(level) {
+      const pill = document.getElementById("badgeEmotionPill");
+      const pillText = document.getElementById("emotionTextPill");
+      if (!pill || !pillText) return;
+      
+      let colorClass = "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20";
+      let text = `情绪: L${level} (平静)`;
+      
+      if (level === 3) {
+        colorClass = "text-amber-400 bg-amber-500/10 border border-amber-500/20";
+        text = `情绪: L${level} (催促)`;
+      } else if (level === 4) {
+        colorClass = "text-orange-400 bg-orange-500/10 border border-orange-500/20 animate-pulse";
+        text = `情绪: L${level} (愤怒)`;
+      } else if (level >= 5) {
+        colorClass = "text-rose-400 bg-rose-500/10 border border-rose-500/20 animate-bounce shadow-[0_0_12px_rgba(244,63,94,0.3)]";
+        text = `情绪: L${level} (高危)`;
+      }
+      
+      pill.className = `text-[9px] font-semibold ${colorClass} px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300`;
+      pillText.innerText = text;
+    }
+
+    // 前端表情映射标签 (低饱和度的内建 emoji/轻拟物图标 fallback，替代刺眼的外部大动图以保障品味)
+    const MEME_MAP = {
+      kowtow: "🙇‍♀️",
+      apologize: "🙏",
+      hug: "🤗",
+      comfort: "💞",
+      cry: "😢",
+      run: "🏃‍♀️",
+      cheer: "✨",
+      love: "💖",
+      think: "🤔",
+      sweat: "😅",
+      salute: "🫡"
+    };
+
+    function switchTab(tab) {
+      currentTab = tab;
+      const rBtn = document.getElementById("tabReasoningBtn");
+      const nBtn = document.getElementById("tabNodesBtn");
+      const rPanel = document.getElementById("panelReasoning");
+      const nPanel = document.getElementById("panelNodes");
+
+      if (tab === "reasoning") {
+        rBtn.className = "flex-1 py-3 text-center font-semibold text-sky-400 border-b-2 border-sky-400 transition-all";
+        nBtn.className = "flex-1 py-3 text-center font-semibold text-slate-400 border-b-2 border-transparent transition-all";
+        rPanel.classList.remove("hidden");
+        nPanel.classList.add("hidden");
+      } else {
+        rBtn.className = "flex-1 py-3 text-center font-semibold text-slate-400 border-b-2 border-transparent transition-all";
+        nBtn.className = "flex-1 py-3 text-center font-semibold text-sky-400 border-b-2 border-sky-400 transition-all";
+        rPanel.classList.add("hidden");
+        nPanel.classList.remove("hidden");
+      }
+    }
+
+    function toggleReasoningText() {
+      const btn = document.getElementById("toggleReasoningBtn");
+      const consoleEl = document.getElementById("reasoningConsole");
+      isReasoningCollapsed = !isReasoningCollapsed;
+
+      if (isReasoningCollapsed) {
+        btn.innerHTML = `<i class="fa-solid fa-eye"></i><span>展开推理</span>`;
+        consoleEl.style.display = "none";
+      } else {
+        btn.innerHTML = `<i class="fa-solid fa-eye-slash"></i><span>折叠推理</span>`;
+        consoleEl.style.display = "block";
+      }
+    }
+
+    function switchUser() {
+      currentUserId = document.getElementById("userSelector").value;
+      clearChat();
+      
+      let greeting = "";
+      if (currentUserId === "usr_001") {
+        greeting = "嗨~ 花腩！我是虾饺。今天又是出荷跟催单高发的一天呢~ 虾饺帮你瞄了一眼，你的排球少年周边一直压在供应链清关里，虾饺帮你时刻盯着呢，随时叫我哈~ 🥟";
+      } else if (currentUserId === "usr_002") {
+        greeting = "呜呜，小圆你来啦！又在烦恼盲盒吞烫的事情嘛？抱抱，今天想跟虾饺聊点什么吗？ 🥟";
+      } else {
+        greeting = "您好，阿光先生。我是虾淘客服看板娘虾饺，听说您的魈比例手办外包破损了，别急别急，虾饺这就在线帮您核验凭证处理！ 🥟";
+      }
+      
+      appendMessage("assistant", greeting);
+    }
+
+    function clearChat() {
+      document.getElementById("chatHistory").innerHTML = "";
+      document.getElementById("panelNodes").innerHTML = `<div class="text-slate-500 italic text-center py-12">暂无节点轨迹，请在左侧发送指令触发状态机运行...</div>`;
+      document.getElementById("reasoningText").innerHTML = `<span class="text-slate-600 italic">等待大模型触发推理...</span>`;
+      document.getElementById("consoleCursor").classList.add("hidden");
+      document.getElementById("debugIntent").innerText = "等待输入...";
+      document.getElementById("debugEmotion").innerHTML = `<span>等待输入...</span><span class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>`;
+      
+      // 重置头部可视化胶囊
+      document.getElementById("vikingText").innerText = "Viking: 未装载";
+      document.getElementById("badgeViking").className = "text-[9px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/60 px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300";
+      document.getElementById("intentText").innerText = "意图: 等待中";
+      document.getElementById("badgeIntent").className = "text-[9px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/60 px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300";
+      document.getElementById("emotionTextPill").innerText = "情绪: --";
+      document.getElementById("badgeEmotionPill").className = "text-[9px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/60 px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300";
+
+      // 重置打字机与队列状态
+      typingQueue = [];
+      isTyping = false;
+      fullReplyText = "";
+      currentEmotionLevel = 2;
+
+      chatHistoryData = [];
+      isTransfered = false;
+      document.getElementById("transferBanner").classList.add("hidden");
+      document.getElementById("chatInput").disabled = false;
+      document.getElementById("sendBtn").disabled = false;
+    }
+
+    // 文本格式化与二次元表情内嵌
+    function formatText(text) {
+      let formatted = text.replace(/\n/g, "<br>");
+      
+      // 替换表情标签为精致的单色内嵌标牌
+      const memeRegex = /<meme:\s*(\w+)>/g;
+      formatted = formatted.replace(memeRegex, (match, tag) => {
+        const symbol = MEME_MAP[tag.toLowerCase()];
+        if (symbol) {
+          return `<span class="inline-flex items-center gap-1 text-[#7B61FF] bg-[#7B61FF]/10 border border-[#7B61FF]/20 px-2 py-0.5 rounded-md text-xs font-semibold ml-1.5 select-none">${symbol} ${tag}</span>`;
+        }
+        return `<span class="inline-flex items-center gap-1 text-slate-500 bg-slate-100 border border-slate-200/60 px-2 py-0.5 rounded-md text-xs ml-1.5 select-none">[${tag}]</span>`;
+      });
+
+      formatted = formatted.replace(/<action:\s*\w+>/g, "");
+      return formatted;
+    }
+
+    function appendMessage(role, content) {
+      const chatBox = document.getElementById("chatHistory");
+      const bubble = document.createElement("div");
+      
+      bubble.className = `flex items-start gap-3.5 max-w-[85%] msg-transition ${role === 'user' ? 'self-end flex-row-reverse' : ''}`;
+      
+      const avatarHtml = role === 'user' 
+        ? `<div class="w-10 h-10 rounded-lg bg-[#7B61FF]/10 border border-[#7B61FF]/25 text-[#7B61FF] flex items-center justify-center text-sm flex-shrink-0">👤</div>`
+        : `<img src="/templates/xiaojiao_avatar.png" alt="虾饺" class="w-10 h-10 rounded-lg border border-slate-200/50 flex-shrink-0 object-cover">`;
+      
+      const textBg = role === 'user' 
+        ? 'bg-gradient-to-br from-[#7B61FF] to-[#6366f1] text-white rounded-tr-none border border-[#7B61FF]/20 shadow-sm' 
+        : 'bg-gradient-to-br from-[#C8FF1A] to-[#B7F500] border border-[#B7F500]/30 text-slate-900 font-semibold rounded-tl-none shadow-sm';
+      
+      bubble.innerHTML = `
+        ${avatarHtml}
+        <div class="${textBg} px-4 py-2.5 rounded-xl text-sm leading-relaxed">
+          ${formatText(content)}
+        </div>
+      `;
+      chatBox.appendChild(bubble);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function appendCard(cardType, cardData) {
+      const chatBox = document.getElementById("chatHistory");
+      const cardContainer = document.createElement("div");
+      cardContainer.className = "flex items-start gap-3.5 max-w-[85%] msg-transition";
+      
+      let html = "";
+      if (cardType === "compensation") {
+        html = `
+          <img src="/templates/xiaojiao_avatar.png" alt="虾饺" class="w-10 h-10 rounded-lg border border-white/5 flex-shrink-0 object-cover">
+          <!-- 采用 Taste Skill CSS 凹折凹槽锯齿卡片 -->
+          <div class="coupon-card p-5 shadow-lg w-[320px] relative">
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-[9px] font-bold text-amber-400 tracking-widest uppercase">自动延迟补偿已发放</span>
+              <span class="text-[8px] text-slate-500">免邮券核销</span>
+            </div>
+            
+            <div class="flex items-center gap-3.5 bg-slate-950/50 p-4 rounded-lg border border-white/5 relative overflow-hidden">
+              <span class="absolute -right-2 -bottom-2 text-5xl opacity-[0.02] font-black select-none text-white">¥</span>
+              <div class="text-3xl font-black tracking-tight text-amber-400 flex items-baseline">
+                <span class="text-sm font-semibold mr-0.5">¥</span>22
+              </div>
+              <div class="text-left flex-1 border-l border-white/5 pl-3.5">
+                <h4 class="text-xs font-bold text-slate-200">免邮补偿专用券</h4>
+                <p class="text-[9px] text-slate-400 mt-1">有效期 30 天 · 已自动激活</p>
+              </div>
+            </div>
+            
+            <div class="flex justify-between items-end mt-4">
+              <p class="text-[9px] text-amber-400/80 flex items-center gap-1 font-medium leading-relaxed max-w-[180px]">
+                <i class="fa-solid fa-circle-check text-emerald-400 text-[10px]"></i><span>${cardData.msg}</span>
+              </p>
+              <!-- 复古红字印章 -->
+              <div class="stamp-badge select-none absolute right-3.5 bottom-3.5">COMPENSATED</div>
+            </div>
+          </div>
+        `;
+      } else if (cardType === "order_progress") {
+        let stepsHtml = "";
+        cardData.progress_steps.forEach((step, idx) => {
+          let color = "bg-slate-900 border border-white/5 text-slate-600";
+          if (step.status === "completed") {
+            color = "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 shadow-inner";
+          } else if (step.status === "current") {
+            color = "bg-sky-500/15 border border-sky-500/35 text-sky-400 shadow-inner";
+          } else if (step.status === "delayed") {
+            // 出荷延期黄光脉冲警示
+            color = "bg-amber-500/15 border border-amber-500/40 text-amber-400 animate-pulse shadow-inner";
+          }
+          
+          stepsHtml += `
+            <div class="flex flex-col items-center relative z-10 flex-1">
+              <div class="w-6.5 h-6.5 rounded-lg ${color} flex items-center justify-center text-[10px] font-bold">
+                ${idx+1}
+              </div>
+              <span class="text-[9px] text-slate-300 mt-2 font-medium">${step.label}</span>
+              <span class="text-[8px] text-slate-500 mt-0.5 scale-90 whitespace-nowrap">${step.date}</span>
+            </div>
+          `;
+        });
+
+        html = `
+          <img src="/templates/xiaojiao_avatar.png" alt="虾饺" class="w-10 h-10 rounded-lg border border-white/5 flex-shrink-0 object-cover">
+          <div class="bg-slate-900/80 border border-white/5 p-4.5 rounded-xl shadow-xl text-sm w-[380px] glow-active">
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-[10px] font-bold text-sky-400 tracking-wider">包裹物流信息卡片</span>
+              <span class="text-[9px] text-slate-500 font-mono">ID: #${cardData.order_id}</span>
+            </div>
+            
+            <div class="bg-slate-950/45 p-3 rounded-lg border border-white/5 mb-3.5 flex items-center gap-3">
+              <div class="w-10 h-10 bg-slate-900 rounded-md flex items-center justify-center text-lg border border-white/5">
+                🎁
+              </div>
+              <div class="text-left flex-1 min-w-0">
+                <h4 class="text-xs font-bold text-slate-200 truncate">${cardData.item_name}</h4>
+                <p class="text-[9px] text-slate-400 mt-0.5">总价: ¥${cardData.total_amount}</p>
+              </div>
+            </div>
+
+            <!-- Bento 流程进度 -->
+            <div class="flex items-center justify-between relative px-2 py-3 bg-slate-950/35 rounded-lg border border-white/5">
+              ${stepsHtml}
+            </div>
+
+            ${cardData.delay_reason ? `
+              <div class="mt-3 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-lg text-[9px] text-amber-400 flex items-start gap-1.5">
+                <i class="fa-solid fa-triangle-exclamation mt-0.5 text-amber-500"></i>
+                <span class="leading-relaxed">供应链异常说明：${cardData.delay_reason}</span>
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }
+
+      cardContainer.innerHTML = html;
+      chatBox.appendChild(cardContainer);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function sendMessage(overrideText = null) {
+      if (isTransfered && !overrideText) return;
+
+      const input = document.getElementById("chatInput");
+      const text = overrideText ? overrideText : input.value.trim();
+      if (!text) return;
+
+      if (!overrideText) {
+        input.value = "";
+      }
+
+      appendMessage("user", text);
+
+      // 清空右侧 Deep Reasoning 和 状态机面板
+      document.getElementById("reasoningText").innerHTML = "";
+      document.getElementById("consoleCursor").classList.remove("hidden");
+      document.getElementById("panelNodes").innerHTML = "";
+
+      // 临时流式回复气泡
+      const chatBox = document.getElementById("chatHistory");
+      const bubble = document.createElement("div");
+      bubble.className = "flex items-start gap-3.5 max-w-[85%] msg-transition";
+      bubble.innerHTML = `
+        <img src="/templates/xiaojiao_avatar.png" alt="虾饺" class="w-10 h-10 rounded-lg border border-slate-200/50 flex-shrink-0 object-cover">
+        <div class="bg-slate-50 border border-slate-200/60 text-slate-500 px-4 py-2.5 rounded-xl rounded-tl-none shadow-sm text-sm" id="tempReply">
+          <div class="dot-pulse"><span class="pulse-item"></span><span class="pulse-item"></span><span class="pulse-item"></span></div>
+        </div>
+      `;
+      chatBox.appendChild(bubble);
+      chatBox.scrollTop = chatBox.scrollHeight;
+
+      const replyContainer = document.getElementById("tempReply");
+      
+      // 重置打字队列及回复内容
+      typingQueue = [];
+      isTyping = false;
+      fullReplyText = "";
+      
+      let reasoningBuffer = "";
+
+      try {
+        const response = await fetch("/api/v1/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            // 组装 user_id 覆盖标识传入后端
+            user_id: currentUserId,
+            session_id: "session_" + currentUserId,
+            content: text,
+            history: chatHistoryData
+          })
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          sseBuffer += decoder.decode(value);
+          // 健壮支持 \n\n 和 \r\n\r\n 换行分包机制
+          const sseBlocks = sseBuffer.split(/\r?\n\r?\n/);
+          sseBuffer = sseBlocks.pop(); // 保存未完成的块
+
+          for (let block of sseBlocks) {
+            block = block.trim();
+            if (!block) continue;
+
+            const sseLines = block.split("\n");
+            let eventType = "chunk";
+            let dataStr = "";
+
+            for (let sseLine of sseLines) {
+              sseLine = sseLine.trim();
+              if (sseLine.startsWith("event:")) {
+                eventType = sseLine.substring(6).trim();
+              } else if (sseLine.startsWith("data:")) {
+                dataStr = sseLine.substring(5).trim();
+              }
+            }
+
+            if (!dataStr) continue;
+            let eventData = {};
+            try {
+              // 强力清洗 Windows 下 sse-starlette 可能多带的 \r (回车符)
+              const cleanDataStr = dataStr.replace(/\r/g, "").trim();
+              eventData = JSON.parse(cleanDataStr);
+            } catch (err) {
+              console.error("Parse error:", dataStr, err);
+              continue;
+            }
+
+            if (eventType === "thinking") {
+              if (eventData.type === "llm_thinking") {
+                reasoningBuffer += eventData.content;
+                document.getElementById("reasoningText").innerText = reasoningBuffer;
+                const rConsole = document.getElementById("reasoningConsole");
+                rConsole.scrollTop = rConsole.scrollHeight;
+              } else {
+                handleNodeLog(eventData);
+              }
+            } else if (eventType === "chunk") {
+              // 推入本地平滑打字机队列
+              typingQueue.push(eventData.content);
+              if (!isTyping) {
+                processTypingQueue();
+              }
+            } else if (eventType === "card") {
+              // 适当延迟下发，让打字机吐字看起来连贯
+              setTimeout(() => {
+                appendCard(eventData.type, eventData.data);
+              }, 400);
+            } else if (eventType === "transfer") {
+              handleTransfer(eventData);
+            } else if (eventType === "api_log") {
+              handleApiLog(eventData);
+            } else if (eventType === "done") {
+              document.getElementById("consoleCursor").classList.add("hidden");
+              // 稍等以保证打字机打完最后几个字后再存入 history
+              const checkDoneTimer = setInterval(() => {
+                if (typingQueue.length === 0 && !isTyping) {
+                  clearInterval(checkDoneTimer);
+                  chatHistoryData.push({"role": "user", "content": text});
+                  chatHistoryData.push({"role": "assistant", "content": fullReplyText});
+                }
+              }, 200);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("SSE Connection Error: ", e);
+        if (!isTransfered) {
+          replyContainer.innerHTML = "虾饺这边连接大模型网络出现了一些小阻碍，您可以稍后或者重置再试哦~ <span class='inline-flex items-center gap-1 text-[#7B61FF] bg-[#7B61FF]/10 border border-[#7B61FF]/25 px-2 py-0.5 rounded-md text-xs font-semibold ml-1.5'>😅 sweat</span>";
+        }
+        document.getElementById("consoleCursor").classList.add("hidden");
+      }
+    }
+
+    function handleNodeLog(data) {
+      const panel = document.getElementById("panelNodes");
+      
+      if (panel.querySelector(".italic")) {
+        panel.innerHTML = "";
+      }
+
+      if (data.status === "start") {
+        const logItem = document.createElement("div");
+        logItem.id = "node_" + data.node;
+        logItem.className = "flex items-start gap-2 border-l-2 border-[#7B61FF]/30 pl-3.5 py-1.5 transition-all duration-300";
+        logItem.innerHTML = `
+          <span class="w-1.5 h-1.5 rounded-full bg-[#7B61FF] animate-ping mt-1.5 flex-shrink-0"></span>
+          <div class="flex-1 min-w-0 text-xs">
+            <span class="text-[#7B61FF] font-bold tracking-wide">[运行: ${data.node}]</span>
+            <span class="text-slate-600 font-semibold ml-1.5">${data.desc}</span>
+          </div>
+        `;
+        panel.appendChild(logItem);
+      } else {
+        const logItem = document.getElementById("node_" + data.node);
+        if (logItem) {
+          logItem.className = "flex items-start gap-2 border-l-2 border-emerald-200 pl-3.5 py-1.5 text-slate-500 transition-all duration-300";
+          logItem.innerHTML = `
+            <i class="fa-solid fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-xs"></i>
+            <div class="flex-1 min-w-0 text-xs">
+              <span class="text-emerald-600 font-bold tracking-wide">[完成: ${data.node}]</span>
+              <span class="text-slate-500 ml-1.5">${data.desc || '已执行完成。'}</span>
+            </div>
+          `;
+        }
+
+        // --- 头部胶囊可视化联动逻辑 ---
+        if (data.node === "load_memory" && data.desc) {
+          const levelMatch = data.desc.match(/级别=(L\d)/);
+          const casesMatch = data.desc.match(/包含\s*(\d+)\s*条历史纠纷/);
+          const vikingTextEl = document.getElementById("vikingText");
+          const badgeViking = document.getElementById("badgeViking");
+          if (levelMatch && vikingTextEl && badgeViking) {
+            const level = levelMatch[1];
+            const casesCount = casesMatch ? casesMatch[1] : "0";
+            vikingTextEl.innerText = `Viking: 已装载 ${level} (${casesCount}条纠纷)`;
+            badgeViking.className = "text-[9px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300 shadow-[0_0_12px_rgba(16,185,129,0.15)] animate-pulse";
+            setTimeout(() => {
+              badgeViking.classList.remove("animate-pulse");
+            }, 1500);
+          }
+        }
+
+        if (data.node === "intent_classify" && data.desc) {
+          // 情绪意图标签面板同步
+          const intentMatch = data.desc.match(/意图=【(.*?)】/);
+          const emotionMatch = data.desc.match(/情绪等级=【Level\s*(\d+)】/);
+          
+          if (intentMatch) {
+            const intentVal = intentMatch[1];
+            document.getElementById("debugIntent").innerText = intentVal;
+            // 更新头部意图胶囊
+            const intentTextEl = document.getElementById("intentText");
+            const badgeIntent = document.getElementById("badgeIntent");
+            if (intentTextEl && badgeIntent) {
+              intentTextEl.innerText = `意图: ${intentVal}`;
+              badgeIntent.className = "text-[9px] font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300 shadow-[0_0_12px_rgba(99,102,241,0.15)]";
+            }
+          }
+          if (emotionMatch) {
+            const emotionVal = parseInt(emotionMatch[1]);
+            updateEmotionBadge(emotionVal);
+            // 更新头部情绪胶囊
+            updateEmotionPill(emotionVal);
+          }
+        }
+      }
+      panel.scrollTop = panel.scrollHeight;
+    }
+
+    function updateEmotionBadge(level) {
+      const label = document.getElementById("debugEmotion");
+      const badge = document.getElementById("emotionBadge");
+      
+      let colorClass = "bg-emerald-500";
+      let text = `Level ${level} (平静/感谢)`;
+      
+      if (level === 3) {
+        colorClass = "bg-amber-500 ring-4 ring-amber-500/10";
+        text = `Level ${level} (焦虑/不满)`;
+      } else if (level === 4) {
+        colorClass = "bg-orange-500 ring-4 ring-orange-500/10";
+        text = `Level ${level} (明显愤怒)`;
+      } else if (level >= 5) {
+        colorClass = "bg-rose-500 ring-4 ring-rose-500/10";
+        text = `Level ${level} (高危客诉/法务)`;
+      }
+      
+      label.innerHTML = `<span>${text}</span>`;
+      badge.className = `w-2.5 h-2.5 rounded-full ${colorClass}`;
+      label.appendChild(badge);
+    }
+
+    function handleTransfer(data) {
+      isTransfered = true;
+      document.getElementById("transferBanner").classList.remove("hidden");
+      document.getElementById("chatInput").disabled = true;
+      document.getElementById("sendBtn").disabled = true;
+      
+      // 如果大模型已经吐出了正式回复（fullReplyText 不为空），那我们就不需要覆写 replyContainer。
+      // 只有在 fullReplyText 为空（例如大模型未生成文本 chunk）时，我们才用保底的转接提示填充，防止卡在 Loading。
+      const replyContainer = document.getElementById("tempReply");
+      if (replyContainer && !fullReplyText) {
+        replyContainer.className = "bg-gradient-to-br from-[#FF8B38]/10 to-[#FF8B38]/20 border border-[#FF8B38]/30 text-[#FF8B38] px-4 py-2.5 rounded-xl rounded-tl-none shadow-sm text-sm font-semibold";
+        replyContainer.innerHTML = formatText("这件事超出了虾饺的权限范围，虾饺已经为您加急联系了人类客服主管，请稍等哦~ <meme: run>");
+        fullReplyText = "这件事超出了虾饺的权限范围，虾饺已经为您加急联系了人类客服主管，请稍等哦~ <meme: run>";
+      }
+    }
+
+    let testCasesList = [];
+
+    async function loadTestCases() {
+      try {
+        const r = await fetch("/api/v1/test_cases");
+        testCasesList = await r.json();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function runTestCase(caseIndex) {
+      if (testCasesList.length === 0) {
+        await loadTestCases();
+      }
+      if (caseIndex >= testCasesList.length) return;
+
+      const testCase = testCasesList[caseIndex];
+      clearChat();
+      
+      const userSelector = document.getElementById("userSelector");
+      userSelector.value = testCase.user_id;
+      currentUserId = testCase.user_id;
+      
+      let stepIdx = 0;
+
+      async function runNextStep() {
+        if (stepIdx >= testCase.steps.length) return;
+
+        const step = testCase.steps[stepIdx];
+        const chatInput = document.getElementById("chatInput");
+        chatInput.value = "";
+        
+        let charIdx = 0;
+        const typingTimer = setInterval(async () => {
+          if (charIdx < step.input.length) {
+            chatInput.value += step.input[charIdx];
+            charIdx++;
+          } else {
+            clearInterval(typingTimer);
+            setTimeout(async () => {
+              chatInput.value = "";
+              await sendMessage(step.input);
+              stepIdx++;
+              // 出发下个 Case 等待 5.5s 以放缓节奏呈现完整的 LLM 交互
+              setTimeout(runNextStep, 5500);
+            }, 500);
+          }
+        }, 25);
+      }
+
+      runNextStep();
+    }
+
+    window.onload = async () => {
+      await loadTestCases();
+      switchUser();
+      switchTab("reasoning");
+    };
+  </script>
+</body>
+</html>

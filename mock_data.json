@@ -1,0 +1,338 @@
+{
+  "users": {
+    "usr_001": {
+      "user_id": "usr_001",
+      "nickname": "花腩",
+      "member_level": "gold",
+      "member_label": "金牌会员",
+      "total_spent": 2800.0,
+      "favorite_ips": ["排球少年", "蓝色监狱"],
+      "communication_preferences": {
+        "tone_preference": "casual",
+        "emoji_receptive": true,
+        "trigger_words": ["请耐心等待"]
+      }
+    },
+    "usr_002": {
+      "user_id": "usr_002",
+      "nickname": "小圆",
+      "member_level": "silver",
+      "member_label": "银牌会员",
+      "total_spent": 560.0,
+      "favorite_ips": ["蓝色监狱"],
+      "communication_preferences": {
+        "tone_preference": "casual",
+        "emoji_receptive": true,
+        "trigger_words": []
+      }
+    },
+    "usr_003": {
+      "user_id": "usr_003",
+      "nickname": "阿光",
+      "member_level": "platinum",
+      "member_label": "白金会员",
+      "total_spent": 9800.0,
+      "favorite_ips": ["原神"],
+      "communication_preferences": {
+        "tone_preference": "formal",
+        "emoji_receptive": false,
+        "trigger_words": []
+      }
+    }
+  },
+  "orders": {
+    "ORD_2024_001": {
+      "order_id": "ORD_2024_001",
+      "user_id": "usr_001",
+      "status": "pending_shipment",
+      "status_label": "出荷延期",
+      "order_type": "purchase",
+      "created_at": "2024-06-01T10:30:00Z",
+      "items": [
+        {
+          "item_id": "itm_hq_001",
+          "name": "排球少年 登校系列 吧唧套装",
+          "quantity": 10,
+          "price": 33.0,
+          "thumb_emoji": "🏐"
+        }
+      ],
+      "total_amount": 330.0,
+      "expected_shukka_date": "2024-09-01",
+      "delay_days": 180,
+      "is_compensable": true,
+      "tags": ["needs_attention", "delay_risk", "had_consultation"],
+      "thumb_gradient": "from-orange-400 to-rose-400"
+    },
+    "ORD_2024_088": {
+      "order_id": "ORD_2024_088",
+      "user_id": "usr_001",
+      "status": "delivered",
+      "status_label": "已完成",
+      "order_type": "purchase",
+      "created_at": "2024-11-12T08:00:00Z",
+      "items": [
+        {
+          "item_id": "itm_bl_stand",
+          "name": "蓝色监狱 亚克力立牌 · 洁世一",
+          "quantity": 1,
+          "price": 89.0,
+          "thumb_emoji": "⚽"
+        }
+      ],
+      "total_amount": 89.0,
+      "expected_shukka_date": "2024-11-20",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": [],
+      "thumb_gradient": "from-sky-400 to-indigo-500"
+    },
+    "ORD_2025_012": {
+      "order_id": "ORD_2025_012",
+      "user_id": "usr_001",
+      "status": "pending_shipment",
+      "status_label": "抽奖待发货",
+      "order_type": "lottery",
+      "created_at": "2025-01-08T14:20:00Z",
+      "items": [
+        {
+          "item_id": "itm_lottery_hq",
+          "name": "【抽奖】排球少年 限定色纸（免单中奖）",
+          "quantity": 1,
+          "price": 0.0,
+          "thumb_emoji": "🎁"
+        }
+      ],
+      "total_amount": 0.0,
+      "expected_shukka_date": "2025-02-01",
+      "delay_days": 45,
+      "is_compensable": false,
+      "tags": ["lottery_win"],
+      "thumb_gradient": "from-amber-300 to-yellow-400"
+    },
+    "ORD_2023_055": {
+      "order_id": "ORD_2023_055",
+      "user_id": "usr_001",
+      "status": "refunded",
+      "status_label": "已退款",
+      "order_type": "purchase",
+      "created_at": "2023-08-15T09:00:00Z",
+      "items": [
+        {
+          "item_id": "itm_old_badge",
+          "name": "排球少年 旧款徽章（错版）",
+          "quantity": 2,
+          "price": 58.0,
+          "thumb_emoji": "🔄"
+        }
+      ],
+      "total_amount": 116.0,
+      "expected_shukka_date": "2023-09-01",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": ["refund_history", "had_consultation"],
+      "thumb_gradient": "from-slate-300 to-slate-400"
+    },
+    "ORD_2025_002": {
+      "order_id": "ORD_2025_002",
+      "user_id": "usr_002",
+      "status": "delivered",
+      "status_label": "已完成",
+      "order_type": "purchase",
+      "created_at": "2025-01-02T11:00:00Z",
+      "items": [
+        {
+          "item_id": "itm_bl_box",
+          "name": "蓝色监狱 大赏盲盒 20抽连包",
+          "quantity": 1,
+          "price": 300.0,
+          "thumb_emoji": "🎲"
+        }
+      ],
+      "total_amount": 300.0,
+      "expected_shukka_date": "2025-01-01",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": ["had_consultation"],
+      "thumb_gradient": "from-violet-400 to-purple-600"
+    },
+    "ORD_2025_044": {
+      "order_id": "ORD_2025_044",
+      "user_id": "usr_002",
+      "status": "in_transit",
+      "status_label": "运输中",
+      "order_type": "purchase",
+      "created_at": "2025-02-10T16:30:00Z",
+      "items": [
+        {
+          "item_id": "itm_bl_keychain",
+          "name": "蓝色监狱 Q版挂件 · 千切",
+          "quantity": 3,
+          "price": 39.0,
+          "thumb_emoji": "🔑"
+        }
+      ],
+      "total_amount": 117.0,
+      "expected_shukka_date": "2025-02-15",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": [],
+      "thumb_gradient": "from-cyan-400 to-blue-500"
+    },
+    "ORD_2024_033": {
+      "order_id": "ORD_2024_033",
+      "user_id": "usr_002",
+      "status": "pending_shipment",
+      "status_label": "抽奖待发货",
+      "order_type": "lottery",
+      "created_at": "2024-12-20T20:00:00Z",
+      "items": [
+        {
+          "item_id": "itm_lottery_bl",
+          "name": "【活动抽奖】蓝色监狱 隐藏款徽章",
+          "quantity": 1,
+          "price": 0.0,
+          "thumb_emoji": "✨"
+        }
+      ],
+      "total_amount": 0.0,
+      "expected_shukka_date": "2025-01-20",
+      "delay_days": 30,
+      "is_compensable": false,
+      "tags": ["lottery_win", "needs_attention"],
+      "thumb_gradient": "from-pink-400 to-fuchsia-500"
+    },
+    "ORD_2025_003": {
+      "order_id": "ORD_2025_003",
+      "user_id": "usr_003",
+      "status": "delivered",
+      "status_label": "已签收·待售后",
+      "order_type": "purchase",
+      "created_at": "2025-05-18T10:00:00Z",
+      "items": [
+        {
+          "item_id": "itm_ys_figure",
+          "name": "原神 魈 1/7 比例手办（现货）",
+          "quantity": 1,
+          "price": 980.0,
+          "thumb_emoji": "🗡️"
+        }
+      ],
+      "total_amount": 980.0,
+      "expected_shukka_date": "2025-05-20",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": ["needs_attention", "had_consultation", "damage_claim"],
+      "thumb_gradient": "from-emerald-500 to-teal-600"
+    },
+    "ORD_2025_120": {
+      "order_id": "ORD_2025_120",
+      "user_id": "usr_003",
+      "status": "pending_shipment",
+      "status_label": "预售未到货",
+      "order_type": "preorder",
+      "created_at": "2024-12-01T09:00:00Z",
+      "items": [
+        {
+          "item_id": "itm_ys_pre",
+          "name": "原神 钟离 1/7 手办（预售定金）",
+          "quantity": 1,
+          "price": 1280.0,
+          "thumb_emoji": "🪨"
+        }
+      ],
+      "total_amount": 1280.0,
+      "expected_shukka_date": "2025-08-01",
+      "delay_days": 90,
+      "is_compensable": true,
+      "tags": ["delay_risk", "preorder"],
+      "thumb_gradient": "from-amber-500 to-orange-600"
+    },
+    "ORD_2024_050": {
+      "order_id": "ORD_2024_050",
+      "user_id": "usr_003",
+      "status": "delivered",
+      "status_label": "已完成",
+      "order_type": "purchase",
+      "created_at": "2024-07-22T12:00:00Z",
+      "items": [
+        {
+          "item_id": "itm_ys_acrylic",
+          "name": "原神 胡桃 亚克力立牌",
+          "quantity": 1,
+          "price": 68.0,
+          "thumb_emoji": "🌸"
+        }
+      ],
+      "total_amount": 68.0,
+      "expected_shukka_date": "2024-08-01",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": [],
+      "thumb_gradient": "from-rose-400 to-pink-500"
+    }
+  },
+  "logistics": {
+    "ORD_2024_001": {
+      "order_id": "ORD_2024_001",
+      "carrier": "—",
+      "tracking_number": "待出荷",
+      "status": "pending",
+      "timeline": [
+        {"time": "2024-06-01T10:30:00Z", "status": "订单已创建，等待厂家出荷"},
+        {"time": "2024-10-15T08:00:00Z", "status": "供应链公告：海关新政检查，出荷顺延至12月中旬"}
+      ]
+    },
+    "ORD_2025_012": {
+      "order_id": "ORD_2025_012",
+      "carrier": "—",
+      "tracking_number": "待出荷",
+      "status": "pending",
+      "timeline": [
+        {"time": "2025-01-08T14:20:00Z", "status": "抽奖奖品已登记，排队等待仓库拣货"}
+      ]
+    },
+    "ORD_2025_044": {
+      "order_id": "ORD_2025_044",
+      "carrier": "圆通速递",
+      "tracking_number": "YT_MOCK_044",
+      "status": "in_transit",
+      "timeline": [
+        {"time": "2025-02-16T09:00:00Z", "status": "已从虾淘日本仓出库"},
+        {"time": "2025-02-18T14:00:00Z", "status": "清关完成，国内运输中"}
+      ]
+    },
+    "ORD_2025_003": {
+      "order_id": "ORD_2025_003",
+      "carrier": "顺丰速运",
+      "tracking_number": "SF_MOCK_003",
+      "status": "delivered",
+      "timeline": [
+        {"time": "2025-05-22T08:00:00Z", "status": "顺丰已揽收"},
+        {"time": "2025-05-23T14:30:00Z", "status": "已送达 虾淘前置仓"},
+        {"time": "2025-05-24T10:00:00Z", "status": "已派送 签收人：本人签收（快递柜）"}
+      ]
+    },
+    "ORD_2025_120": {
+      "order_id": "ORD_2025_120",
+      "carrier": "—",
+      "tracking_number": "预售未出荷",
+      "status": "preorder",
+      "timeline": [
+        {"time": "2024-12-01T09:00:00Z", "status": "预售定金已确认，等待厂商排期"}
+      ]
+    }
+  },
+  "supply_chain_warnings": [
+    {
+      "warning_id": "W_2024_001",
+      "ip_name": "排球少年",
+      "product_line": "登校系列",
+      "severity": "high",
+      "reason": "日本发货港口受海关新政检查，出荷清关进度延误至12月月中",
+      "original_shukka_date": "2024-09-01",
+      "revised_shukka_date": "2024-12-15",
+      "public_notice": "各位购买排球少年登校系列的小伙伴，因海外港口政策调整，该批次将延期至12月中旬出荷..."
+    }
+  ]
+}

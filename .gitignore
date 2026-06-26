@@ -1,0 +1,26 @@
+# MITAKO Agent — 私人仓库跨设备同步
+# 说明：.env 与 data/*.db  intentionally 纳入版本库，便于私人仓库同步配置与业务数据
+
+# Python / Node 依赖环境（各设备本地安装）
+venv/
+node_modules/
+
+# 本地索引与工具缓存（非项目状态）
+.codegraph/
+
+# Python 字节码
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite 运行时锁文件（不提交；主库 .db 文件会提交）
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+
+# 临时与演示产物
+scratch/
+PPT-*/
+
+# 测试 HTML 报告（可本地重跑生成）
+tests/reports/*.html

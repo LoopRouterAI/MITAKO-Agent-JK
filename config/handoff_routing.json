@@ -1,0 +1,31 @@
+{
+  "default_required_tier": "standard",
+  "rules": [
+    {
+      "id": "high_emotion_supervisor",
+      "enabled": false,
+      "label": "高情绪会话路由至总部主管队列",
+      "condition": {
+        "emotion_level_gte": 5
+      },
+      "required_tier": "supervisor"
+    },
+    {
+      "id": "vip_supervisor",
+      "enabled": false,
+      "label": "白金会员路由至 VIP 组",
+      "condition": {
+        "member_level_in": [
+          "白金会员",
+          "白金"
+        ]
+      },
+      "required_tier": "supervisor"
+    }
+  ],
+  "sla": {
+    "first_response_seconds": 180,
+    "reply_timeout_seconds": 300,
+    "auto_transfer_enabled": true
+  }
+}
