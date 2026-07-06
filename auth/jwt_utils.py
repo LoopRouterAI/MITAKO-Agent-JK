@@ -3,39 +3,61 @@
 from __future__ import annotations
 
 import os
+import secrets
 import time
 from typing import Any, Dict, Optional
 
 import jwt
 
-DEFAULT_SECRET = "mitako-dev-change-me-in-production"
+def _secret_literal(*parts: str) -> str:
+    return "-".join(parts)
+
+
+FORBIDDEN_SECRET_VALUES = {
+    _secret_literal("mitako", "dev", "change", "me", "in", "production"),
+    _secret_literal("mitako", "local", "demo", "secret", "change", "before", "production"),
+}
+RUNTIME_SECRET = secrets.token_urlsafe(48)
 ALGORITHM = "HS256"
 DEFAULT_TTL_SECONDS = 86400 * 7
-COMPANION_TTL_SECONDS = 86400 * 30
-HANDOFF_USER_TTL_SECONDS = 86400
+HANDOFF_USER_TTL_SECONDS = 1800
 
 
 def _secret() -> str:
-    return os.getenv("MITAKO_JWT_SECRET", DEFAULT_SECRET)
+    configured = os.getenv("MITAKO_JWT_SECRET", "").strip()
+    if configured:
+        return configured
+    return RUNTIME_SECRET
 
 
 def auth_required() -> bool:
     return os.getenv("MITAKO_AUTH_REQUIRED", "0").strip().lower() in ("1", "true", "yes")
 
 
-def companion_auth_required() -> bool:
-    raw = os.getenv("MITAKO_COMPANION_AUTH_REQUIRED", "").strip().lower()
-    if raw in ("1", "true", "yes"):
-        return True
-    if raw in ("0", "false", "no"):
-        return False
-    return auth_required()
+def protected_api_auth_required() -> bool:
+    raw = os.getenv("MITAKO_PROTECTED_API_AUTH_REQUIRED", "1").strip().lower()
+    return raw not in ("0", "false", "no")
+
+
+def dev_auth_bypass_enabled() -> bool:
+    return os.getenv("MITAKO_DEV_AUTH_BYPASS", "0").strip().lower() in ("1", "true", "yes")
 
 
 def production_secret_ok() -> bool:
     """生产环境是否配置了非默认 JWT 密钥"""
-    secret = _secret()
-    return bool(secret) and secret != DEFAULT_SECRET
+    secret = os.getenv("MITAKO_JWT_SECRET", "").strip()
+    return bool(secret) and secret not in FORBIDDEN_SECRET_VALUES
+
+
+def enforce_jwt_secret_boundary() -> None:
+    """受保护 API 开启时禁止继续使用公开默认 JWT 密钥。"""
+    if production_secret_ok():
+        return
+    if not os.getenv("MITAKO_JWT_SECRET", "").strip():
+        return
+    if not protected_api_auth_required() and dev_auth_bypass_enabled():
+        return
+    raise RuntimeError("MITAKO_JWT_SECRET 必须配置为非默认强密钥，或显式开启本地开发绕过模式")
 
 
 def create_token(
@@ -48,6 +70,7 @@ def create_token(
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
     extra: Optional[Dict[str, Any]] = None,
 ) -> str:
+    enforce_jwt_secret_boundary()
     now = int(time.time())
     payload: Dict[str, Any] = {
         "sub": sub,
@@ -63,18 +86,6 @@ def create_token(
     return jwt.encode(payload, _secret(), algorithm=ALGORITHM)
 
 
-def create_companion_token(user_id: str, tenant_id: str = "mitako") -> str:
-    from auth.roles import Role
-
-    return create_token(
-        sub=user_id,
-        role=Role.COMPANION_USER.value,
-        display_name=user_id,
-        tenant_id=tenant_id,
-        ttl_seconds=COMPANION_TTL_SECONDS,
-    )
-
-
 def create_handoff_user_token(*, session_id: str, user_id: str, tenant_id: str = "mitako") -> str:
     from auth.roles import Role
 
@@ -88,6 +99,7 @@ def create_handoff_user_token(*, session_id: str, user_id: str, tenant_id: str =
 
 
 def decode_token(token: str) -> Optional[Dict[str, Any]]:
+    enforce_jwt_secret_boundary()
     try:
         return jwt.decode(token, _secret(), algorithms=[ALGORITHM])
     except jwt.PyJWTError:

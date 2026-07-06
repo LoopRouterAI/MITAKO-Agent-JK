@@ -10,8 +10,11 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
-_DB_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-_DB_PATH = os.path.join(_DB_DIR, "auth.db")
+from runtime_paths import db_path
+
+_AUTH_DB_PATH = db_path("MITAKO_AUTH_DB_PATH", "auth.db")
+_DB_DIR = str(_AUTH_DB_PATH.parent)
+_DB_PATH = str(_AUTH_DB_PATH)
 _lock = threading.RLock()
 _db_ready = False
 
@@ -20,7 +23,6 @@ _DEFAULT_ROLE_MAPPING = {
     "supervisor": ["mitako-supervisor"],
     "bpo_manager": ["mitako-bpo"],
     "desk_agent": ["mitako-desk"],
-    "companion_ops": ["mitako-companion-ops"],
     "qc_viewer": ["mitako-qc"],
 }
 
@@ -35,7 +37,7 @@ _DEMO_TENANTS = [
     },
     {
         "tenant_id": "bpo-east",
-        "name": "外包华东 BPO",
+        "name": "客服中心·华东组",
         "sso_enabled": 1,
         "oidc_issuer": "https://demo-idp.local",
         "oidc_client_id": "mitako-bpo-east",
@@ -81,8 +83,8 @@ def _ensure_db() -> None:
         if "oidc_userinfo_url" not in cols:
             conn.execute("ALTER TABLE tenants ADD COLUMN oidc_userinfo_url TEXT")
             conn.commit()
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(auth_users)").fetchall()}
-        if "tenant_id" not in cols:
+        user_cols = {r[1] for r in conn.execute("PRAGMA table_info(auth_users)").fetchall()}
+        if user_cols and "tenant_id" not in user_cols:
             conn.execute("ALTER TABLE auth_users ADD COLUMN tenant_id TEXT DEFAULT 'mitako'")
             conn.commit()
         count = conn.execute("SELECT COUNT(*) FROM tenants").fetchone()[0]
@@ -101,6 +103,13 @@ def _ensure_db() -> None:
                         t["oidc_client_id"], "demo-secret", t["oidc_redirect_uri"], now, now,
                     ),
                 )
+            conn.commit()
+        else:
+            now = time.time()
+            conn.execute(
+                "UPDATE tenants SET name = ?, updated_at = ? WHERE tenant_id = ? AND name LIKE ?",
+                ("客服中心·华东组", now, "bpo-east", "%外包%"),
+            )
             conn.commit()
     finally:
         conn.close()
@@ -174,4 +183,3 @@ def get_role_mapping(tenant_id: str) -> Dict[str, List[str]]:
         return _DEFAULT_ROLE_MAPPING
     mapping = tenant.get("role_mapping") or _DEFAULT_ROLE_MAPPING
     return {str(k): list(v) if isinstance(v, list) else [str(v)] for k, v in mapping.items()}
-

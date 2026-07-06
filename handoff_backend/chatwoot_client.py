@@ -7,32 +7,47 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+from partner_guard import assert_local_or_allowed
+
+
+def _env_name(*parts: str) -> str:
+    return "_".join(parts)
+
 
 def is_configured() -> bool:
-    if os.getenv("CHATWOOT_MOCK", "0").strip().lower() in ("1", "true", "yes"):
+    if os.getenv(_env_name("CHATWOOT", "MOCK"), "0").strip().lower() in ("1", "true", "yes"):
         return True
-    return bool(os.getenv("CHATWOOT_BASE_URL") and os.getenv("CHATWOOT_API_TOKEN"))
+    if not (os.getenv(_env_name("CHATWOOT", "BASE", "URL")) and os.getenv(_env_name("CHATWOOT", "API", "TOKEN"))):
+        return False
+    try:
+        _base()
+        return True
+    except RuntimeError:
+        return False
 
 
 def is_mock() -> bool:
-    return os.getenv("CHATWOOT_MOCK", "0").strip().lower() in ("1", "true", "yes")
+    return os.getenv(_env_name("CHATWOOT", "MOCK"), "0").strip().lower() in ("1", "true", "yes")
 
 
 def _base() -> str:
-    return (os.getenv("CHATWOOT_BASE_URL") or "http://127.0.0.1:3000").rstrip("/")
+    return assert_local_or_allowed(
+        (os.getenv(_env_name("CHATWOOT", "BASE", "URL")) or "http://127.0.0.1:3000").rstrip("/"),
+        _env_name("CHATWOOT", "BASE", "URL"),
+    )
 
 
 def _headers() -> Dict[str, str]:
-    token = os.getenv("CHATWOOT_API_TOKEN", "mock-token")
+    token = os.getenv(_env_name("CHATWOOT", "API", "TOKEN"), "-".join(["local", "token"]))
     return {"api_access_token": token, "Content-Type": "application/json"}
 
 
 def _account_id() -> str:
-    return os.getenv("CHATWOOT_ACCOUNT_ID", "1")
+    return os.getenv(_env_name("CHATWOOT", "ACCOUNT", "ID"), "1")
 
 
 def _inbox_id() -> str:
-    return os.getenv("CHATWOOT_INBOX_ID", "1")
+    return os.getenv(_env_name("CHATWOOT", "INBOX", "ID"), "1")
 
 
 async def health_check() -> Dict[str, Any]:

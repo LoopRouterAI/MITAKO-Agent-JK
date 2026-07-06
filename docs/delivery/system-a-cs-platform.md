@@ -1,62 +1,57 @@
-# 系统 A：智能客服 + 人机协同
+# 系统 A：智能客服与人机协同
 
 ## 1. 产品范围
 
 | 端 | URL | 角色 | 能力 |
-|----|-----|------|------|
-| 用户端 | `/` | C 端会员 | AI 虾饺对话、情绪识别、转人工、@虾饺旁听 |
-| 坐席台 | `/desk` | BPO/甲方客服 | 简报、接单、回复、转交、升级 |
-| 运营台 | `/admin` | 主管/运营 | 坐席、队列、审批、报表、路由、运维 |
+|---|---|---|---|
+| 用户端 | `/` | C 端用户 | 智能客服对话、情绪识别、转人工、服务记录 |
+| 坐席台 | `/desk` | 客服专员 | 服务记录、接单、回复、转交、升级 |
+| 运营后台 | `/admin` | 主管/运营 | 坐席、队列、审批、报表、路由、运维 |
 
-数据：`handoff.db` + `admin.db` + `auth.db`（多租户 `tenant_id`）
+系统 A 使用多租户标识隔离账号、会话、审批、路由配置和审计记录。验证环境使用脱敏样本数据，不连接客户真实生产系统。
 
-## 2. 我方部署（全包）
+## 2. 部署方式
 
-```bat
-一键启动-Windows.bat
-```
-
-或手动：
+一键启动：
 
 ```bat
-npm run build
-python scripts/seed_auth.py
-set HANDOFF_BACKEND=hybrid
-set CHATWOOT_MOCK=1
-python main.py
+start-windows.bat
 ```
 
-生产见 [deployment-guide.md](./deployment-guide.md) 与 [../security/production-checklist.md](../security/production-checklist.md)。
+详见 [deployment-guide.md](./deployment-guide.md)。
 
-## 3. 甲方配合项（非自建 IM/IdP 运维）
+## 3. 甲方配合项
 
-| 项 | 甲方做什么 | 文档 |
-|----|------------|------|
-| SSO 登录 | 提供 IdP Client/Secret、Groups 映射 | [sso-oidc-guide.md](../integration/sso-oidc-guide.md) |
-| IM 会话镜像 | UAT 账号、验收同步方向 | [chatwoot-guide.md](../integration/chatwoot-guide.md)（**我方部署 Chatwoot**） |
-| 业务订单/退款 | 后续提供 API 或对接 `tools/partner_lab/mock_business_api.py` 契约 | [integration-lab.md](./integration-lab.md) |
-| SOP 话术验收 | 按 [sop-coverage-gap.md](../product/sop-coverage-gap.md) 场景 UAT | 文档阶段可验收「交付物齐全」 |
+| 项 | 甲方需要提供 | 文档 |
+|---|---|---|
+| 企业登录 | 测试租户、Client、Secret、角色映射 | [customer-integration-materials-checklist.md](./customer-integration-materials-checklist.md) |
+| 会话同步 | 测试账号、同步方向、消息字段、状态字段 | [integration-lab.md](./integration-lab.md) |
+| 业务接口 | 订单、售后、仓库、财务、审核材料测试接口 | [customer-integration-materials-checklist.md](./customer-integration-materials-checklist.md) |
+| SOP 验收 | 高频场景、边界规则、人工复核标准 | [customer-integration-materials-checklist.md](./customer-integration-materials-checklist.md) |
 
-## 4. 默认测试账号
+## 4. 验证账号
 
-| 账号 | 密码 | 角色 | 入口 |
-|------|------|------|------|
-| admin | admin123 | super_admin | /admin |
-| supervisor | super123 | supervisor | /admin 审批 |
-| desk0816 | desk123 | desk_agent | /desk |
-| bpo_mgr | bpo123 | bpo_manager | /admin |
+验证环境账号由我方交付负责人现场发放，并按角色分为运营负责人、主管、客服专员、只读验收四类。交付文档不固化账号密码；进入联调或上线阶段后，由双方按企业登录和权限矩阵重新配置。
 
-## 5. 核心 API（详见 [rest-api-overview.md](../api/rest-api-overview.md)）
+## 5. 系统能力
 
-- 对话：`POST /api/v1/chat`（SSE）
-- 转人工：`POST /api/v1/handoff/request`
-- 坐席：`GET/POST /api/v1/desk/*`
-- 运营：`GET/POST /api/v1/admin/*`
-- 鉴权：`POST /api/v1/auth/login`
+| 能力 | 用途 |
+|---|---|
+| 智能客服对话 | 承接用户咨询，识别诉求、情绪和订单线索 |
+| 转人工 | 用户申请或高风险场景触发后进入坐席队列 |
+| 坐席工作台 | 服务记录、接单、回复、转交、升级 |
+| 运营后台 | 坐席、队列、审批、报表、路由、运维 |
+| 登录与权限 | 支持按角色控制后台与坐席操作范围 |
 
-## 6. 验收要点（V1）
+## 6. 验收要点
 
-- [ ] 用户转人工 → desk 可见简报 → 接单 → 双端消息同步
-- [ ] Admin 审批流（申请人 ≠ 审批人）
-- [ ] `MITAKO_AUTH_REQUIRED=1` 时 desk/admin 无 token 返回 401
-- [ ] E2E：`run_full_pipeline_e2e.py` 70/70
+| 项 | 标准 |
+|---|---|
+| 转人工 | 用户端申请后，坐席台可见服务记录并接单 |
+| 双端同步 | 坐席回复后，用户端实时收到消息 |
+| 转交升级 | 转交、升级、关闭状态正确变化 |
+| 审批 | 申请人与审批人不能为同一人 |
+| 严格鉴权 | 受保护接口无有效访问凭证返回 401 |
+| 租户隔离 | 不同租户账号不能互相操作会话 |
+| 业务边界 | 验证环境只输出处理建议，不写入真实业务系统 |
+| E2E | 我方提交的全量自动化验收报告通过 |

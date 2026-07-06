@@ -1,20 +1,22 @@
-/** MITAKO 设计 token — 品牌多巴胺体系 */
+/** MITAKO 工具型视觉 token：白底、柔和多巴胺点缀、轻边框、8px 圆角。 */
 :root {
-  --mitako-lime: #c8ff1a;
-  --mitako-lime-deep: #b7f500;
+  --mitako-lime: #c8ec5f;
+  --mitako-lime-deep: #7fa431;
+  --mitako-lime-soft: #f4ffd8;
   --mitako-purple: #7b61ff;
-  --mitako-purple-deep: #6348eb;
+  --mitako-purple-deep: #4b35c9;
   --mitako-sky: #42c8ff;
   --mitako-orange: #ff8b38;
-  --mitako-ink: #0f172a;
-  --mitako-muted: #64748b;
-  --mitako-border: rgba(15, 23, 42, 0.08);
-  --surface-glass: rgba(255, 255, 255, 0.86);
-  --surface-muted: rgba(248, 250, 252, 0.9);
-  --shadow-soft: 0 8px 32px rgba(123, 97, 255, 0.06);
-  --shadow-lime: 0 8px 28px rgba(183, 245, 0, 0.12);
-  --radius-panel: 1.25rem;
-  --radius-bubble: 1rem;
+  --mitako-pink: #ff6ec7;
+  --mitako-ink: #111411;
+  --mitako-muted: #5f6a61;
+  --mitako-border: rgba(16, 19, 31, 0.12);
+  --surface-glass: rgba(255, 255, 255, 0.94);
+  --surface-muted: rgba(247, 250, 240, 0.94);
+  --shadow-soft: 0 16px 38px rgba(16, 19, 31, 0.08);
+  --shadow-lime: 0 12px 28px rgba(127, 164, 49, 0.18);
+  --radius-panel: 8px;
+  --radius-bubble: 8px;
   --radius-pill: 999px;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -39,10 +41,8 @@
 
 .glass-panel {
   background: var(--surface-glass);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(183, 245, 0, 0.14);
-  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--mitako-border);
+  box-shadow: var(--shadow-lime);
   border-radius: var(--radius-panel);
 }
 
@@ -55,18 +55,18 @@
   min-width: 44px;
 }
 
-/* 仅键盘聚焦时可见的跳过链接 */
 .skip-link {
   position: absolute;
   left: -9999px;
   top: 0;
   z-index: 100;
   padding: 0.75rem 1rem;
-  background: var(--mitako-purple);
-  color: #fff;
-  font-weight: 700;
+  background: var(--mitako-lime);
+  color: var(--mitako-ink);
+  font-weight: 800;
   font-size: 0.875rem;
-  border-radius: 0 0 0.75rem 0;
+  border: 2px solid var(--mitako-ink);
+  border-radius: 0 0 8px 0;
   text-decoration: none;
 }
 .skip-link:focus-visible {
@@ -108,11 +108,10 @@
   background: rgba(0, 0, 0, 0.02);
 }
 .console-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(17, 20, 17, 0.18);
   border-radius: 2px;
 }
 
-/* 移动端触摸滚动 — 隐藏系统滚动条，保留手势滚动 */
 .touch-scroll {
   overflow: auto;
   overscroll-behavior: contain;

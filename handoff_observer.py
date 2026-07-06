@@ -12,6 +12,19 @@ import httpx
 from llm_models import DEFAULT_MODEL_ID, get_model_api_key, get_model_config
 
 _MENTION_RE = re.compile(r"@虾饺\s*")
+_FORBIDDEN_TERMS = (
+    "真实意图",
+    "移交摘要",
+    "移交简报",
+    "外包",
+    "甲方",
+    "总部",
+    "主管",
+    "Mock",
+    "mock",
+    "系统评级",
+    "AI 对话回顾",
+)
 
 
 def strip_mention(text: str) -> str:
@@ -24,12 +37,19 @@ def is_observer_request(text: str) -> bool:
 
 def _fallback_observer_reply(user_text: str, brief: Optional[Dict[str, Any]] = None) -> str:
     """无 LLM 密钥时的规则兜底"""
-    intent = (brief or {}).get("true_intent") or "您的诉求"
-    return (
-        f"（旁听）我理解您希望专员尽快跟进。{intent[:40]}… "
+    summary = (brief or {}).get("summary") or "您的诉求"
+    return _sanitize_observer_reply(
+        f"我理解您希望客服尽快跟进。{summary[:40]}… "
         "我已帮您向当前专员同步「希望确认具体进度与时间节点」；"
         "具体补偿或退款方案仍需专员按政策核实，我会协助催促处理进度～"
     )
+
+
+def _sanitize_observer_reply(text: str) -> str:
+    clean = text or ""
+    for term in _FORBIDDEN_TERMS:
+        clean = clean.replace(term, "服务记录")
+    return clean.strip()
 
 
 async def generate_observer_reply(
@@ -48,7 +68,6 @@ async def generate_observer_reply(
 
     cfg = get_model_config(model_id)
     summary = (brief or {}).get("summary") or ""
-    true_intent = (brief or {}).get("true_intent") or ""
     system = (
         "你是 MITAKO 客服 AI「虾饺」，当前处于人工接入后的旁听模式。\n"
         "规则：\n"
@@ -57,15 +76,16 @@ async def generate_observer_reply(
         "3. 禁止替用户索要退现金、超额赔偿、越权承诺；\n"
         "4. 涉及补偿/退款时，说明需由当前人工专员按政策核定；\n"
         "5. 回复简短（2-4 句），语气温柔专业，可用 #词块# 高亮关键动作。\n"
-        "6. 不要输出 analysis JSON 或 action 标签。"
+        "6. 不要输出 analysis JSON 或 action 标签。\n"
+        "7. 不要提及移交简报、真实意图、外包、甲方、总部、主管、Mock 或任何内部系统信息。"
     )
     context_lines = []
     for m in (recent_messages or [])[-6:]:
         role = m.get("role", "")
-        content = (m.get("content") or "")[:200]
+        content = _sanitize_observer_reply((m.get("content") or "")[:200])
         context_lines.append(f"{role}: {content}")
     user_payload = (
-        f"移交摘要：{summary}\n真实意图：{true_intent}\n"
+        f"用户服务记录：{summary}\n"
         f"近期对话：\n" + "\n".join(context_lines) + "\n"
         f"用户 @虾饺 说：{prompt_user}\n请给出旁听协助回复："
     )
@@ -93,7 +113,7 @@ async def generate_observer_reply(
             content = data["choices"][0]["message"]["content"].strip()
             if any(w in content for w in ("退现金", "全额退款", "一定赔", "保证赔")):
                 return _fallback_observer_reply(prompt_user, brief)
-            return content
+            return _sanitize_observer_reply(content)
     except Exception:
         return _fallback_observer_reply(prompt_user, brief)
 

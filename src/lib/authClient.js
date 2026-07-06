@@ -47,7 +47,7 @@ export function authHeaders(extra = {}) {
 export async function fetchAuthStatus() {
   const r = await fetch('/api/v1/auth/status');
   const data = await r.json();
-  return Boolean(data.auth_required);
+  return Boolean(data.protected_api_auth_required ?? data.auth_required);
 }
 
 export async function login(username, password, tenantId = 'mitako') {
@@ -68,6 +68,8 @@ export async function authFetch(url, options = {}) {
   if (r.status === 401) {
     clearAuthSession();
     window.dispatchEvent(new CustomEvent('mitako:auth:logout'));
+  } else if (r.status === 403) {
+    window.dispatchEvent(new CustomEvent('mitako:auth:forbidden'));
   }
   return r;
 }

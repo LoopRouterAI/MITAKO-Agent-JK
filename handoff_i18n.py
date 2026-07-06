@@ -7,19 +7,19 @@ from typing import Any, Dict, Tuple
 _TEMPLATES: Dict[str, Tuple[str, str]] = {
     "transfer": (
         "handoff.sysTransfer",
-        "会话已由 {from_agent} 转交至 {to_agent} 待确认接管。{note}",
+        "已为您转接更合适的客服专员继续处理，请稍候。",
     ),
     "escalate": (
         "handoff.sysEscalate",
-        "已升级至总部客诉队列，请主管确认接管。{note}",
+        "已为您升级处理，客服团队会继续跟进。",
     ),
     "sla_timeout": (
         "handoff.sysSlaTimeout",
-        "因 SLA 超时（{reason}），系统已将会话转交至 {to_agent} 待确认接管。",
+        "已为您转接下一位客服专员继续处理，请稍候。",
     ),
     "closed": (
         "handoff.sysClosed",
-        "{note}",
+        "本次服务已结束，如需继续咨询可以重新发起会话。",
     ),
 }
 
@@ -27,10 +27,9 @@ _TEMPLATES: Dict[str, Tuple[str, str]] = {
 def build_system_message(kind: str, **params: Any) -> Tuple[str, Dict[str, Any]]:
     key, fallback = _TEMPLATES.get(kind, ("handoff.sysGeneric", "{text}"))
     safe = {k: str(v or "") for k, v in params.items()}
-    if kind == "closed" and not safe.get("note"):
-        safe["note"] = "会话已结束"
-    if kind == "transfer" and not safe.get("note"):
-        safe["note"] = ""
+    if kind in ("transfer", "escalate", "sla_timeout", "closed"):
+        safe.pop("note", None)
+        safe.pop("reason", None)
     try:
         content = fallback.format(**safe)
     except KeyError:

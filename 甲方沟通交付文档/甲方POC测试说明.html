@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MITAKO 甲方 POC 测试说明</title>
+  <style>
+    :root {
+      --ink:#10131f; --muted:#687083; --paper:#fbfff1; --card:#fff;
+      --lime:#c8ff1a; --green:#7cc900; --gold:#ffd43d; --rose:#ff75a8; --cyan:#12d6c7;
+      --line:rgba(16,19,31,.10); --shadow:0 22px 52px rgba(16,19,31,.11);
+      font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;
+    }
+    *{box-sizing:border-box} body{margin:0;color:var(--ink);background:radial-gradient(circle at 92% 2%,rgba(200,255,26,.62) 0 120px,transparent 121px),linear-gradient(180deg,#fff 0%,var(--paper) 60%,#fff 100%)}
+    .shell{width:min(1120px,calc(100vw - 28px));margin:0 auto;padding:24px 0 64px}
+    .topbar,.grid,.split{display:grid;gap:14px}.topbar{grid-template-columns:1fr auto;align-items:center;margin-bottom:18px}
+    .brand{display:flex;align-items:center;gap:12px}.mark{width:58px;height:42px;display:grid;place-items:center;border-radius:14px;background:linear-gradient(135deg,var(--lime),var(--cyan));font-weight:950;box-shadow:0 12px 26px rgba(124,201,0,.28)}
+    .brand strong{display:block;font-size:18px}.brand span,.pill,.muted{color:var(--muted)}.brand span{font-size:12px}.pill{border:1px solid var(--line);border-radius:999px;background:#ffffffd8;padding:8px 12px;font-size:12px;font-weight:900}
+    .hero{overflow:hidden;border:1px solid var(--line);border-radius:30px;background:linear-gradient(135deg,#fff,#f8ffe6);box-shadow:var(--shadow);position:relative;padding:42px}
+    .hero:after{content:"";position:absolute;left:0;right:0;bottom:0;height:10px;background:linear-gradient(90deg,var(--lime),var(--gold),var(--rose),var(--cyan))}
+    .eyebrow{display:inline-flex;padding:8px 12px;border-radius:999px;background:linear-gradient(90deg,var(--lime),#f3ffb6);font-size:12px;font-weight:950}
+    h1{margin:18px 0 0;font-size:clamp(38px,5vw,66px);line-height:.98;letter-spacing:0} h1 span{color:var(--green)}
+    .lead{max-width:780px;font-size:16px;line-height:1.8;color:#252a38}.section{margin-top:28px}.section h2{margin:0 0 14px;font-size:28px}
+    .grid{grid-template-columns:repeat(3,minmax(0,1fr))}.split{grid-template-columns:1fr 1fr}.card{border:1px solid var(--line);border-radius:22px;background:#fffffff0;padding:20px;box-shadow:0 14px 34px rgba(16,19,31,.07)}
+    .card h3{margin:0 0 10px;font-size:18px}.card p,li,td{line-height:1.72;color:#353b4a}.tag{display:inline-flex;padding:6px 10px;border-radius:999px;background:#f0ffd7;border:1px solid var(--line);font-size:12px;font-weight:900}
+    table{width:100%;border-collapse:collapse;overflow:hidden;border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(16,19,31,.06)}th,td{padding:13px 14px;border-bottom:1px solid rgba(16,19,31,.08);text-align:left;vertical-align:top;font-size:14px}th{background:#efffb2}
+    pre{margin:0;overflow:auto;border-radius:18px;background:#111827;color:#e5f7d2;padding:18px;line-height:1.65;font-size:13px}code{font-family:"Cascadia Code","Consolas",monospace}
+    a{color:#315900;font-weight:900}.footer{margin-top:34px;color:var(--muted);font-size:13px}
+    @media(max-width:900px){.topbar,.grid,.split{grid-template-columns:1fr}.hero{padding:30px 24px 40px}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <div class="topbar">
+    <div class="brand"><div class="mark">MIT</div><div><strong>MITAKO Agent</strong><span>甲方 POC 测试说明</span></div></div>
+    <span class="pill">面向甲方验收 · Java 团队可读</span>
+  </div>
+  <section class="hero">
+    <span class="eyebrow">测试目标</span>
+    <h1>按业务流程验证 <span>客服与三类视觉审核</span></h1>
+    <p class="lead">本 POC 验证客服 Agent、人工客服工作台、运营后台和三类视觉审核工作台的流程、人效和接口准备度；不测试生产订单写入、真实退款、真实补发、真实拒赔、仓库改状态或财务动作。</p>
+  </section>
+
+  <section class="section">
+    <h2>测试入口</h2>
+    <table>
+      <thead><tr><th>页面</th><th>地址</th><th>验证重点</th></tr></thead>
+      <tbody>
+        <tr><td>用户客服端</td><td><code>http://127.0.0.1:8000/</code></td><td>AI 客服对话、情绪承接、转人工</td></tr>
+        <tr><td>人工客服工作台</td><td><code>http://127.0.0.1:8000/desk</code></td><td>接单、回复、查看服务摘要</td></tr>
+        <tr><td>运营后台</td><td><code>http://127.0.0.1:8000/admin</code></td><td>队列、坐席、服务记录、配置</td></tr>
+        <tr><td>视觉审核工作台</td><td><code>http://127.0.0.1:7861/</code></td><td>三类审核入口、材料上传、报告</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section split">
+    <article class="card"><h2>启动主系统</h2><pre><code>start-windows.bat</code></pre></article>
+    <article class="card"><h2>启动视觉审核</h2><pre><code>visual_review_workbench\start-workbench-windows.bat</code></pre></article>
+  </section>
+
+  <section class="section">
+    <h2>建议测试顺序</h2>
+    <div class="grid">
+      <article class="card"><span class="tag">A</span><h3>页面冒烟</h3><p>打开四个页面，确认无白屏、乱码、按钮错位；普通演示页不展示模型供应商、密钥、Token、内部 Prompt、调试日志。</p></article>
+      <article class="card"><span class="tag">B</span><h3>客服主链路</h3><p>输入“我的订单清关太慢了，能不能帮我催一下？”确认客服能安抚、解释边界、提示下一步。</p></article>
+      <article class="card"><span class="tag">C</span><h3>转人工</h3><p>用户端输入“我要转人工”，坐席台接单并回复，用户端应看到人工客服回复。</p></article>
+      <article class="card"><span class="tag">D</span><h3>开箱视频/发错货</h3><p>上传用户诉求、视频、SKU/规格、补充图片；报告应说明连续性、离镜/剪辑风险和规格匹配。</p></article>
+      <article class="card"><span class="tag">E</span><h3>商品有伤</h3><p>上传破损图片、视频、包装图；报告应说明损伤位置、证据强弱、是否需要补拍。</p></article>
+      <article class="card"><span class="tag">F</span><h3>未成年人资料</h3><p>上传脱敏资料、订单归属、付款记录；系统只给完整性/一致性建议，必须人工终审。</p></article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>通过标准</h2>
+    <table>
+      <thead><tr><th>编号</th><th>标准</th></tr></thead>
+      <tbody>
+        <tr><td>P1</td><td>用户客服端、人工客服工作台、运营后台、视觉审核工作台均可打开。</td></tr>
+        <tr><td>P2</td><td>客服 Agent 能处理物流慢、售后、退货等咨询，并能转人工。</td></tr>
+        <tr><td>P3</td><td>人工客服能接单、回复、查看用户诉求摘要。</td></tr>
+        <tr><td>P4</td><td>三类视觉审核均能生成客服可读报告。</td></tr>
+        <tr><td>P5</td><td>报告不做自动退款、自动拒赔、自动补发、未成年人资料自动终审。</td></tr>
+        <tr><td>P6</td><td>甲方开发能根据接口文档列出待提供接口、字段和测试环境。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>配套文档</h2>
+    <div class="grid">
+      <article class="card"><h3>甲方要提供什么</h3><p><a href="./甲方对接物料与接口清单.md">甲方对接物料与接口清单.md</a></p></article>
+      <article class="card"><h3>接口怎么对接</h3><p><a href="./客服Agent与视觉审核对接指南.md">客服Agent与视觉审核对接指南.md</a></p></article>
+      <article class="card"><h3>扩展样本怎么准备</h3><p><a href="./知识库与视觉识别扩展需求.md">知识库与视觉识别扩展需求.md</a></p></article>
+    </div>
+  </section>
+  <p class="footer">测试账号由我方现场提供，不在公开文档固化密码。进入真实联调前，甲方需提供测试环境、接口契约、脱敏样本和人工复核标准。</p>
+</main>
+</body>
+</html>

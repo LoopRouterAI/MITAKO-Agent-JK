@@ -6,6 +6,8 @@ import time
 from threading import Lock
 from typing import Any, Dict, List, Tuple
 
+from runtime_paths import viking_memory_dir
+
 # DeepSeek V4 Flash @ SenseNova 平台配额：每 5 小时 500 次
 DEFAULT_WINDOW_SECONDS = 5 * 3600
 DEFAULT_MAX_REQUESTS = 500
@@ -15,8 +17,7 @@ class LLMRateLimiter:
     """按 model_id 记录调用时间戳，滑动窗口内限制最大请求次数"""
 
     def __init__(self, state_path: str = None):
-        base_dir = os.path.dirname(__file__)
-        memory_dir = os.path.join(base_dir, "viking_memory")
+        memory_dir = str(viking_memory_dir())
         os.makedirs(memory_dir, exist_ok=True)
         self.state_path = state_path or os.path.join(memory_dir, "llm_rate_limit.json")
         self._lock = Lock()

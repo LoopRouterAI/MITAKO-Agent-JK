@@ -1,0 +1,79 @@
+{
+  "review_mode": "strict",
+  "provider_default": "apiyi_gemini_35_flash",
+  "provider_fallback_order": [
+    "brouter_gemini_35_flash",
+    "apiyi_gemini_35_flash",
+    "brouter_gemini_31_flash_lite",
+    "apiyi_gemini_31_flash_lite",
+    "apiyi_gpt_55_responses",
+    "mtuo_gpt_55_responses"
+  ],
+  "frame_strategy": "provider_default",
+  "frame_profiles": {
+    "provider_default": {
+      "mode": "vendor_video_understanding",
+      "fps": null,
+      "description": "公开视频链接直读模式，适合低成本初筛；严格检查剪辑、离镜和证据留存时，请切换到自建抽帧链路。"
+    },
+    "1fps": {
+      "mode": "local_ffmpeg",
+      "fps": 1,
+      "scene_cut": true,
+      "description": "下载授权视频后每秒抽 1 帧，适合证据帧留存、商品有伤初筛和普通连续性复核。"
+    },
+    "2fps": {
+      "mode": "local_ffmpeg",
+      "fps": 2,
+      "scene_cut": true,
+      "description": "下载授权视频后每 0.5 秒抽 1 帧，适合严格检查短暂离镜、疑似剪辑和画面连续性。"
+    }
+  },
+  "strict_checks": {
+    "detect_cut": true,
+    "object_left_frame": true,
+    "six_sides_required": true,
+    "shipping_label_visible_before_open": true,
+    "damage_visible": true,
+    "minor_material_desensitized": true,
+    "manual_review_confidence_lt": 0.8
+  },
+  "confidence_thresholds": {
+    "auto_pass_for_low_risk_only": 0.92,
+    "manual_review_below": 0.8,
+    "reject_automation_below": 0.65
+  },
+  "models": {
+    "gemini_35_flash": {
+      "display_name": "标准审核档位",
+      "model": "gemini-3.5-flash",
+      "role": "视频和图片主审核理解"
+    },
+    "gemini_31_flash_lite": {
+      "display_name": "快速初筛档位",
+      "model": "gemini-3.1-flash-lite",
+      "role": "高并发低成本初筛"
+    },
+    "gpt_55": {
+      "display_name": "复核辅助档位",
+      "model": "gpt-5.5",
+      "role": "结论复核、SOP 边界检查和客服话术辅助"
+    },
+    "qwen_35_flash": {
+      "display_name": "候选审核档位",
+      "model": "qwen3.5-flash",
+      "role": "多模型选型和双盲候选"
+    },
+    "doubao_seed_20_lite": {
+      "display_name": "快速候选档位",
+      "model": "doubao-seed-2.0-lite",
+      "role": "成本敏感场景的候选复核"
+    }
+  },
+  "report": {
+    "show_backend_config": false,
+    "show_provider_chain": false,
+    "show_frame_strategy": true,
+    "show_cost_estimate": false
+  }
+}

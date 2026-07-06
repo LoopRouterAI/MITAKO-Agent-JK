@@ -6,6 +6,7 @@ import t from '../../i18n/index.js';
 import { StreamCursor } from './XiaoJiaoLoadingBubble.jsx';
 import { resolveSpeakerStyle, SPEAKER } from '../../constants/chatSpeakers.js';
 import { useMessageWindow } from '../../hooks/useMessageWindow.js';
+import { MITAKO_AGENT_AVATAR } from '../../constants/memeMap.js';
 
 function BotBubble({ msg, isStreaming, showStreamCursor, cardCallbacks }) {
   if (msg.type === 'custom') {
@@ -43,11 +44,11 @@ function LeftAvatar({ user }) {
   if (speaker === SPEAKER.HUMAN) {
     return (
       <div
-        className={`relative w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 self-start bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-md ${style.ringClass}`}
+        className={`relative w-10 h-10 rounded-[8px] border border-slate-200 flex items-center justify-center flex-shrink-0 self-start bg-[var(--mitako-lime)] text-[var(--mitako-ink)] shadow-[0_10px_24px_rgba(127,164,49,.14)] ${style.ringClass}`}
         aria-hidden="true"
       >
         <Headphones className="w-5 h-5" strokeWidth={2.2} />
-        <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 py-px rounded-md bg-white text-teal-700 border border-teal-200 leading-none">
+        <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 py-px rounded-[8px] bg-white text-[var(--mitako-ink)] border border-[var(--mitako-ink)] leading-none">
           {user?.badge || style.badge}
         </span>
       </div>
@@ -57,13 +58,13 @@ function LeftAvatar({ user }) {
   return (
     <div className="relative flex-shrink-0 self-start">
       <img
-        src={user?.avatar || '/xiaojiao_avatar.png'}
+        src={user?.avatar || MITAKO_AGENT_AVATAR}
         alt={user?.name || t('agent.name')}
         width={40}
         height={40}
-        className={`w-10 h-10 rounded-xl border-2 border-white object-cover shadow-md ${style.ringClass}`}
+        className={`w-10 h-10 rounded-[8px] border border-slate-200 object-cover shadow-[0_10px_24px_rgba(127,164,49,.14)] ${style.ringClass}`}
       />
-      <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 py-px rounded-md bg-[var(--mitako-purple)] text-white border border-[#7B61FF]/40 leading-none">
+      <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 py-px rounded-[8px] bg-[var(--mitako-lime)] text-[var(--mitako-ink)] border border-[var(--mitako-ink)] leading-none">
         AI
       </span>
     </div>
@@ -80,7 +81,7 @@ export default function MessageList({
   onConfirmWelcomeOrder,
   onBrowseWelcomeOrders,
 }) {
-  const { visibleMessages, hasOlder, loadingOlder, hiddenCount } = useMessageWindow(messages, scrollRef);
+  const { visibleMessages, hasOlder, loadingOlder, hiddenCount, loadOlder } = useMessageWindow(messages, scrollRef);
 
   const cardCallbacks = {
     onConfirmHandoff,
@@ -98,8 +99,10 @@ export default function MessageList({
         <div className="flex justify-center pb-1">
           <button
             type="button"
+            onClick={loadOlder}
             disabled={loadingOlder}
-            className="text-[11px] font-semibold text-slate-500 bg-white border border-slate-200 rounded-full px-3 py-1.5 shadow-sm disabled:opacity-60"
+            aria-label={loadingOlder ? t('chat.loadingOlder') : t('chat.loadOlder', 'zh-CN', { count: hiddenCount })}
+            className="text-[11px] font-semibold text-[var(--mitako-ink)] bg-white border border-slate-200 rounded-[8px] px-3 py-1.5 disabled:opacity-60"
           >
             {loadingOlder ? t('chat.loadingOlder') : t('chat.loadOlder', 'zh-CN', { count: hiddenCount })}
           </button>
@@ -109,8 +112,8 @@ export default function MessageList({
         if (msg.position === 'right') {
           return (
             <div key={msg._id} className="flex justify-end animate-fade-up">
-              <div className="max-w-[88%] px-4 py-3.5 rounded-2xl rounded-tr-md bg-gradient-to-br from-[var(--mitako-purple)] to-[var(--mitako-purple-deep)] text-white text-[15px] font-medium leading-relaxed shadow-md text-pretty">
-                {msg.content.text}
+              <div className="max-w-[88%] px-4 py-3.5 rounded-[8px] bg-[var(--mitako-lime)] border border-slate-200 text-[var(--mitako-ink)] text-[15px] font-medium leading-relaxed shadow-[0_12px_28px_rgba(127,164,49,.16)] text-pretty">
+                <RichTextContent text={msg.content.text} variant="user" />
               </div>
             </div>
           );
@@ -128,8 +131,8 @@ export default function MessageList({
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-[11px] font-bold ${style.labelClass}`}>{displayName}</span>
                 {agentId && (
-                  <span className="text-[9px] font-mono font-bold text-teal-700 bg-teal-50 border border-teal-200/80 px-1.5 py-0.5 rounded-md">
-                    {agentId}
+                  <span className="text-[9px] font-bold text-[var(--mitako-ink)] bg-white border border-[var(--mitako-ink)] px-1.5 py-0.5 rounded-[8px]">
+                    {t('speakers.humanBadge')}
                   </span>
                 )}
               </div>

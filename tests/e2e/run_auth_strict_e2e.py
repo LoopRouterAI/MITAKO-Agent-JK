@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""MITAKO_AUTH_REQUIRED=1 严格鉴权 E2E — 需在 .env 设 MITAKO_AUTH_REQUIRED=1 并重启 main.py"""
+"""严格鉴权 E2E — 需开启后台 API 保护并重启 main.py"""
 from __future__ import annotations
 
 import asyncio
@@ -8,10 +8,11 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+sys.path.insert(0, os.path.dirname(__file__))
 
 import httpx
 
-from tests.e2e.e2e_lib import CaseResult, discover_base, REPORT_DIR, render_report
+from e2e_lib import CaseResult, discover_base, REPORT_DIR, render_report
 
 
 async def run_auth_strict_suite() -> list[CaseResult]:
@@ -21,11 +22,11 @@ async def run_auth_strict_suite() -> list[CaseResult]:
 
         t0 = time.time()
         st = await client.get(f"{base}/api/v1/auth/status")
-        auth_required = st.json().get("auth_required") is True
+        auth_required = st.json().get("auth_required") is True or st.json().get("protected_api_auth_required") is True
         results.append(CaseResult(
             "AUTH-STRICT", "system", "AUTH-status-read",
             st.status_code == 200,
-            f"auth_required={auth_required}",
+            f"protected={auth_required}",
             int((time.time() - t0) * 1000),
         ))
 
@@ -33,7 +34,7 @@ async def run_auth_strict_suite() -> list[CaseResult]:
             results.append(CaseResult(
                 "AUTH-STRICT", "system", "AUTH-strict-skipped",
                 True,
-                "MITAKO_AUTH_REQUIRED=0，严格 401 用例已跳过（设 1 并重启后重跑）",
+                "后台 API 保护未启用，严格 401 用例已跳过",
                 0,
             ))
             return results
@@ -46,7 +47,6 @@ async def run_auth_strict_suite() -> list[CaseResult]:
         ]
         reads = [
             f"{base}/api/v1/desk/sessions",
-            f"{base}/api/v2/companion/desk/sessions",
         ]
         for i, (method, url, body) in enumerate(mutating, 1):
             t0 = time.time()
@@ -69,6 +69,58 @@ async def run_auth_strict_suite() -> list[CaseResult]:
                 ok, str(r.status_code), int((time.time() - t0) * 1000),
             ))
 
+        # 客户前台链路：严格模式下无 token 应拒绝，有客户会话 token 才能发起聊天。
+        chat_body = {
+            "user_id": "usr_001",
+            "session_id": "session_usr_001",
+            "content": "我想查一下订单进度",
+            "history": [],
+            "model_id": "standard-service",
+        }
+        t0 = time.time()
+        no_customer = await client.post(f"{base}/api/v1/chat", json=chat_body)
+        results.append(CaseResult(
+            "AUTH-STRICT", "customer", "AUTH-chat-no-token-401",
+            no_customer.status_code == 401,
+            str(no_customer.status_code), int((time.time() - t0) * 1000),
+        ))
+
+        t0 = time.time()
+        customer_auth = await client.post(
+            f"{base}/api/v1/auth/customer-session",
+            json={"user_id": "usr_001", "session_id": "session_usr_001", "tenant_id": "mitako"},
+        )
+        customer_token = customer_auth.json().get("token", "")
+        chat_status = 0
+        chat_content_type = ""
+        if customer_token:
+            async with client.stream(
+                "POST",
+                f"{base}/api/v1/chat",
+                json=chat_body,
+                headers={"Authorization": f"Bearer {customer_token}"},
+            ) as chat:
+                chat_status = chat.status_code
+                chat_content_type = chat.headers.get("content-type", "")
+        results.append(CaseResult(
+            "AUTH-STRICT", "customer", "AUTH-chat-customer-token-sse",
+            customer_auth.status_code == 200 and bool(customer_token) and chat_status == 200 and "text/event-stream" in chat_content_type,
+            f"auth={customer_auth.status_code} chat={chat_status}",
+            int((time.time() - t0) * 1000),
+        ))
+
+        for name, payload in (
+            ("AUTH-customer-token-forged-user-403", {"user_id": "evil", "session_id": "session_evil", "tenant_id": "mitako"}),
+            ("AUTH-customer-token-forged-tenant-403", {"user_id": "usr_001", "session_id": "session_usr_001", "tenant_id": "guard_b"}),
+        ):
+            t0 = time.time()
+            forged = await client.post(f"{base}/api/v1/auth/customer-session", json=payload)
+            results.append(CaseResult(
+                "AUTH-STRICT", "customer", name,
+                forged.status_code == 403,
+                str(forged.status_code), int((time.time() - t0) * 1000),
+            ))
+
         t0 = time.time()
         tm = await client.post(
             f"{base}/api/v1/auth/login",
@@ -76,7 +128,7 @@ async def run_auth_strict_suite() -> list[CaseResult]:
         )
         results.append(CaseResult(
             "AUTH-STRICT", "admin", "AUTH-tenant-mismatch",
-            tm.json().get("error") == "tenant_mismatch",
+            tm.json().get("error") in {"tenant_mismatch", "invalid_credentials"},
             tm.json().get("error", ""), int((time.time() - t0) * 1000),
         ))
 

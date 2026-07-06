@@ -11,7 +11,7 @@ export default function DeskApp() {
   const refresh = useCallback(async () => {
     const required = await fetchAuthStatus();
     setAuthRequired(required);
-    if (!required) setUser({ username: 'dev', role: 'desk_agent', agent_id: 'CS-0816' });
+    if (!required) setUser({ username: '客服账号', display_name: '客服账号', role: 'desk_agent', agent_id: 'CS-0816' });
     else if (!getAuthUser()) setUser(null);
     else setUser(getAuthUser());
     setReady(true);

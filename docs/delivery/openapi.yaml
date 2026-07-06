@@ -1,0 +1,191 @@
+openapi: 3.0.3
+info:
+  title: MITAKO 客服 Agent 与视觉审核 POC 对接契约
+  version: 0.2.0-poc
+  description: >
+    本契约用于 POC 联调和 Java 技术栈复现。甲方后台业务接口、客户接口和订单接口在当前项目中均为 Mock 或契约占位，
+    不代表已接入甲方生产系统。
+servers:
+  - url: http://127.0.0.1:8000
+    description: 主客服 Agent POC
+  - url: http://127.0.0.1:7861
+    description: 视觉审核工作台 POC
+paths:
+  /api/v1/auth/customer-session:
+    post:
+      summary: 签发客户前台会话令牌
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerSessionAuthRequest'
+      responses:
+        '200':
+          description: 已签发客户会话令牌
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+  /api/v1/chat:
+    post:
+      summary: 客户侧客服 Agent SSE 对话
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: text/event-stream
+        '401':
+          description: 缺少客户会话令牌
+  /api/v1/handoff/request:
+    post:
+      summary: 客户确认转人工
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffRequest'
+      responses:
+        '200':
+          description: 返回人工转接简报、队列状态与 handoff_token
+  /api/v1/desk/sessions:
+    get:
+      summary: 人工客服读取待处理队列
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 会话队列
+  /api/v1/desk/session/{sessionId}/accept:
+    post:
+      summary: 人工客服原子接单
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent_id:
+                  type: string
+      responses:
+        '200':
+          description: 接单结果
+  /api/review-folder:
+    post:
+      summary: 视觉审核文件夹证据包
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [scenario, files]
+              properties:
+                scenario:
+                  type: string
+                  enum: [video_unboxing, product_damage, minor_material]
+                ticket_id:
+                  type: string
+                user_id:
+                  type: string
+                order_no:
+                  type: string
+                customer_claim:
+                  type: string
+                order_item:
+                  type: string
+                sku:
+                  type: string
+                product_master_data:
+                  type: string
+                warehouse_master_data:
+                  type: string
+                conversation_history:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '200':
+          description: 公开脱敏审核报告地址
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    CustomerSessionAuthRequest:
+      type: object
+      required: [user_id, session_id]
+      properties:
+        user_id:
+          type: string
+        session_id:
+          type: string
+        tenant_id:
+          type: string
+          default: mitako
+    AuthTokenResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        token:
+          type: string
+        user:
+          type: object
+    ChatRequest:
+      type: object
+      required: [user_id, session_id, content]
+      properties:
+        user_id:
+          type: string
+        session_id:
+          type: string
+        content:
+          type: string
+        history:
+          type: array
+          items:
+            type: object
+        model_id:
+          type: string
+        active_order_id:
+          type: string
+    HandoffRequest:
+      type: object
+      required: [user_id, session_id]
+      properties:
+        user_id:
+          type: string
+        session_id:
+          type: string
+        history:
+          type: array
+          items:
+            type: object
+        reason:
+          type: string
+        last_user_message:
+          type: string

@@ -4,7 +4,7 @@
     {
       "id": "high_emotion_supervisor",
       "enabled": false,
-      "label": "高情绪会话路由至总部主管队列",
+      "label": "高关注会话路由至升级处理队列",
       "condition": {
         "emotion_level_gte": 5
       },

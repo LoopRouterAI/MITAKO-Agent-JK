@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-双系统快速冒烟 — 验证五端可访问 + 系统 A/B 核心 API（非 Playwright 全量 E2E）
+客服系统快速冒烟 — 验证用户端、坐席台、运营台核心 API（非 Playwright 全量 E2E）
 
 用法:
   python scripts/dual_system_smoke_test.py
@@ -14,14 +14,17 @@ import sys
 import urllib.error
 import urllib.request
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 DEFAULT_BASE = "http://127.0.0.1:8000"
 
 PAGES = [
     ("A-用户端", "/"),
     ("A-坐席台", "/desk"),
     ("A-运营台", "/admin"),
-    ("B-Companion", "/companion"),
-    ("B-CompanionDesk", "/companion-desk"),
 ]
 
 
@@ -59,9 +62,9 @@ def run(base: str) -> int:
             ok_count += 1
         print(f"  [{mark}] {name} {detail}")
 
-    print(f"=== 双系统冒烟 @ {base} ===\n")
+    print(f"=== MITAKO 客服系统冒烟 @ {base} ===\n")
 
-    print("--- 服务与五端页面 ---")
+    print("--- 服务与三端页面 ---")
     code, st = _req("GET", f"{base}/api/v1/auth/status")
     check("服务存活", code == 200 and st.get("ok"), f"auth_required={st.get('auth_required')}")
     for label, path in PAGES:
@@ -69,7 +72,7 @@ def run(base: str) -> int:
         ok = code == 200 and (body.get("html_len", 0) > 100 or body.get("ok"))
         check(f"页面-{label}", ok, f"{path} -> {code}")
 
-    print("\n--- 系统 A · 智能客服 API ---")
+    print("\n--- 智能客服 API ---")
     code, lr = _req(
         "POST",
         f"{base}/api/v1/auth/login",
@@ -92,43 +95,16 @@ def run(base: str) -> int:
     code, ag = _req("GET", f"{base}/api/v1/admin/agents", headers=ah)
     check("A-admin坐席", code == 200 and ag.get("ok") is True, f"agents={len(ag.get('agents') or [])}")
 
-    print("\n--- 系统 B · Companion API ---")
-    uid = "smoke_companion_user"
-    code, pr = _req(
-        "PUT",
-        f"{base}/api/v2/companion/persona/{uid}",
-        {
-            "agent_name": "小虾",
-            "user_title": "主人",
-            "personality": "gentle",
-            "onboarded": True,
-        },
-    )
-    check("B-persona", code == 200 and pr.get("ok") is True, uid)
-    code, wl = _req("GET", f"{base}/api/v2/companion/wishlist/{uid}")
-    check("B-wishlist", code == 200 and wl.get("ok") is True, "")
-
-    code, cr = _req(
-        "POST",
-        f"{base}/api/v1/auth/login",
-        {"username": "comp_ops", "password": "comp123", "tenant_id": "mitako"},
-    )
-    comp_token = cr.get("token", "")
-    check("B-comp_ops登录", code == 200 and bool(comp_token), cr.get("error", "")[:40])
-    ch = {"Authorization": f"Bearer {comp_token}"} if comp_token else {}
-    code, cs = _req("GET", f"{base}/api/v2/companion/desk/sessions", headers=ch)
-    check("B-companion-desk", code == 200 and cs.get("ok") is True, f"sessions={len(cs.get('sessions') or [])}")
-
     print(f"\n=== 结果 {ok_count}/{total} ===")
     if ok_count == total:
-        print("双系统冒烟通过。手工 UAT 见 docs/delivery/testing-guide.md §3")
+        print("客服系统冒烟通过。手工 UAT 见 docs/delivery/testing-guide.md")
         return 0
-    print("存在失败项，请确认已运行 双系统测试-手工UAT-Windows.bat 或 一键启动-Windows.bat")
+    print("存在失败项，请确认已运行 一键启动-Windows.bat 并查看服务日志")
     return 1
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="MITAKO 双系统冒烟测试")
+    p = argparse.ArgumentParser(description="MITAKO 客服系统冒烟测试")
     p.add_argument("--base", default=DEFAULT_BASE, help="MITAKO 基址")
     args = p.parse_args()
     return run(args.base.rstrip("/"))

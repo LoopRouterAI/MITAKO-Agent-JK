@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""FastAPI 鉴权依赖 — MITAKO_AUTH_REQUIRED=1 时生效"""
+"""FastAPI 鉴权依赖 — 后台/坐席默认保护，开发旁路需显式开启。"""
 from __future__ import annotations
 
 from typing import FrozenSet, Optional
 
 from fastapi import Depends, HTTPException, Request, WebSocket
 
-from auth.jwt_utils import auth_required, companion_auth_required, decode_token
+from auth.jwt_utils import auth_required, decode_token, dev_auth_bypass_enabled, protected_api_auth_required
 from auth.roles import Role
 
 
@@ -22,9 +22,17 @@ def extract_bearer_token(request: Request) -> Optional[str]:
 
 
 def extract_ws_token(websocket: WebSocket) -> Optional[str]:
-    token = websocket.query_params.get("token")
-    if token:
-        return token.strip()
+    protocol = websocket.headers.get("sec-websocket-protocol") or ""
+    for part in protocol.split(","):
+        part = part.strip()
+        if part.startswith("handoff."):
+            return part[len("handoff.") :].strip()
+    import os
+
+    if os.getenv("MITAKO_ALLOW_HANDOFF_QUERY_TOKEN", "0").strip().lower() in {"1", "true", "yes"}:
+        token = websocket.query_params.get("token")
+        if token:
+            return token.strip()
     auth = websocket.headers.get("Authorization") or ""
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
@@ -49,14 +57,18 @@ def _synthetic_super_admin() -> dict:
 
 
 def require_roles(allowed: FrozenSet[str]):
-    """返回 FastAPI Depends；鉴权关闭时返回 synthetic super_admin"""
+    """返回 FastAPI Depends；后台/坐席 API 默认必须登录。"""
 
     def _dep(request: Request) -> dict:
-        if not auth_required():
+        if not protected_api_auth_required():
             # 鉴权关闭时仍优先解析 Bearer，便于 E2E 验证职责分离等身份相关逻辑
             user = get_current_user_optional(request)
             if user:
+                if user.get("role") not in allowed:
+                    raise HTTPException(status_code=403, detail="权限不足")
                 return user
+            if not dev_auth_bypass_enabled():
+                raise HTTPException(status_code=401, detail="protected_api_token_required")
             return _synthetic_super_admin()
         user = get_current_user_optional(request)
         if not user:
@@ -68,25 +80,8 @@ def require_roles(allowed: FrozenSet[str]):
     return Depends(_dep)
 
 
-def require_companion_user(expected_user_id: str):
-    """Companion C 端 API — token.sub 必须与 user_id 一致"""
-
-    def _dep(request: Request) -> dict:
-        if not companion_auth_required():
-            return {"sub": expected_user_id, "role": Role.COMPANION_USER.value, "tenant_id": "mitako"}
-        token = _extract_bearer(request)
-        user = decode_token(token) if token else None
-        if not user or user.get("role") != Role.COMPANION_USER.value:
-            raise HTTPException(status_code=401, detail="companion_token_required")
-        if user.get("sub") != expected_user_id:
-            raise HTTPException(status_code=403, detail="companion_user_mismatch")
-        return user
-
-    return Depends(_dep)
-
-
 def tenant_allowed(user: dict, tenant_id: str) -> bool:
-    if not auth_required():
+    if not protected_api_auth_required() and dev_auth_bypass_enabled():
         return True
     return (user.get("tenant_id") or "mitako") == (tenant_id or "mitako")
 
@@ -100,7 +95,7 @@ def resolve_handoff_ws_user(websocket: WebSocket, session_id: str, session_user_
     """WebSocket 连接鉴权 — 坐席 JWT 或 handoff_user 会话 token"""
     from auth.roles import DESK_ACCESS_ROLES
 
-    if not auth_required():
+    if not protected_api_auth_required() and dev_auth_bypass_enabled():
         return _synthetic_super_admin()
     token = extract_ws_token(websocket)
     user = decode_token(token) if token else None

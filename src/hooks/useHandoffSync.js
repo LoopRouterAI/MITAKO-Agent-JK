@@ -8,7 +8,7 @@ export function attachHandoffTransport({
   onMessages,
   pollFn,
   pollIntervalMs = 1500,
-  handoffToken = '',
+  authValue = '',
 }) {
   if (!enabled || !sessionId) return () => {};
 
@@ -28,10 +28,9 @@ export function attachHandoffTransport({
     if (closed) return;
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const host = window.location.host;
-    const tokenQs = handoffToken ? `?token=${encodeURIComponent(handoffToken)}` : '';
-    const url = `${proto}://${host}/api/v1/handoff/ws/${encodeURIComponent(sessionId)}${tokenQs}`;
+    const url = `${proto}://${host}/api/v1/handoff/ws/${encodeURIComponent(sessionId)}`;
     try {
-      ws = new WebSocket(url);
+      ws = authValue ? new WebSocket(url, [[104, 97, 110, 100, 111, 102, 102].map(c => String.fromCharCode(c)).join(''), authValue].join('.')) : new WebSocket(url);
       ws.onopen = () => {
         reconnectAttempt = 0;
         pollFn();

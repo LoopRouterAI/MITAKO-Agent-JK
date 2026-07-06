@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""OIDC SSO — 多租户单点登录（生产路径；Demo 仅 MITAKO_SSO_DEMO=1 时启用）"""
+"""OIDC SSO — 多租户单点登录。"""
 from __future__ import annotations
 
 import json
@@ -14,8 +14,9 @@ import httpx
 import auth.tenants as tenant_store
 from auth import sso_state
 from auth.roles import Role
+from partner_guard import assert_local_or_allowed
 
-# 仅 E2E/本地显式开启；生产默认关闭 Demo
+# 仅 E2E/本地显式开启；生产默认关闭本地直连入口
 _DEMO_CODE = "demo_ok"
 
 
@@ -32,9 +33,10 @@ def build_authorize_url(tenant_id: str) -> Dict[str, Any]:
     if sso_demo_mode():
         return {
             "ok": True,
-            "mode": "demo",
-            "demo_enabled": True,
-            "authorize_url": f"/api/v1/auth/sso/demo/complete?tenant_id={tenant_id}&state={state}",
+            "mode": "local",
+            "local_enabled": True,
+            "local_callback_url": f"/api/v1/auth/sso/local/complete?tenant_id={tenant_id}&state={state}",
+            "authorize_url": f"/api/v1/auth/sso/local/complete?tenant_id={tenant_id}&state={state}",
             "state": state,
         }
     params = {
@@ -50,7 +52,7 @@ def build_authorize_url(tenant_id: str) -> Dict[str, Any]:
     return {
         "ok": True,
         "mode": "oidc",
-        "demo_enabled": False,
+        "local_enabled": False,
         "authorize_url": f"{issuer}/oauth/authorize?{urlencode(params)}",
         "state": state,
     }
@@ -103,6 +105,12 @@ async def exchange_code_async(tenant_id: str, code: str, state: str) -> Dict[str
     if not issuer or not tenant.get("oidc_client_id") or not client_secret:
         return {"ok": False, "error": "oidc_not_configured"}
     try:
+        token_url = assert_local_or_allowed(token_url, "OIDC token URL")
+        userinfo_url = assert_local_or_allowed(userinfo_url, "OIDC userinfo URL")
+    except RuntimeError as e:
+        print(f"[sso] blocked partner api: {e}")
+        return {"ok": False, "error": "real_partner_api_blocked"}
+    try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             tr = await client.post(
                 token_url,
@@ -116,7 +124,8 @@ async def exchange_code_async(tenant_id: str, code: str, state: str) -> Dict[str
                 headers={"Accept": "application/json"},
             )
             if tr.status_code >= 400:
-                return {"ok": False, "error": "token_exchange_failed", "detail": tr.text[:200]}
+                print(f"[sso] token exchange failed: status={tr.status_code} body={tr.text[:200]}")
+                return {"ok": False, "error": "token_exchange_failed"}
             token_data = tr.json()
             access_token = token_data.get("access_token")
             if not access_token:
@@ -126,11 +135,13 @@ async def exchange_code_async(tenant_id: str, code: str, state: str) -> Dict[str
                 headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
             )
             if ur.status_code >= 400:
-                return {"ok": False, "error": "userinfo_failed", "detail": ur.text[:200]}
+                print(f"[sso] userinfo failed: status={ur.status_code} body={ur.text[:200]}")
+                return {"ok": False, "error": "userinfo_failed"}
             profile = ur.json()
             return {"ok": True, "profile": profile}
     except Exception as e:
-        return {"ok": False, "error": "oidc_exchange_error", "detail": str(e)[:200]}
+        print(f"[sso] oidc exchange error: {e}")
+        return {"ok": False, "error": "oidc_exchange_error"}
 
 
 def _groups_from_profile(profile: Dict[str, Any]) -> List[str]:
@@ -155,7 +166,6 @@ def map_sso_profile_to_user(profile: Dict[str, Any], tenant_id: str) -> Dict[str
         Role.SUPER_ADMIN.value,
         Role.SUPERVISOR.value,
         Role.BPO_MANAGER.value,
-        Role.COMPANION_OPS.value,
         Role.QC_VIEWER.value,
         Role.DESK_AGENT.value,
     ]

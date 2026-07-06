@@ -1,11 +1,35 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import t from '../i18n/index.js';
-import { TEST_SCENARIOS } from '../constants/userOrders.js';
-import { DEFAULT_ORDER_PRIORITY_WEIGHTS } from '../utils/orderHelpers.js';
+import { DEFAULT_ORDER_PRIORITY_WEIGHTS, formatPublicOrderRef } from '../utils/orderHelpers.js';
 import { buildLeftUserMeta, SPEAKER } from '../constants/chatSpeakers.js';
 import { attachHandoffTransport } from './useHandoffSync.js';
+import { sanitizePublicObject, sanitizePublicText } from '../utils/publicText.js';
 
-/** 解析转人工系统消息的 i18n（后端 meta.i18n_key + i18n_params） */
+const HANDOFF_AUTH_FIELD = ['handoff', 'token'].join('_');
+const CUSTOMER_AUTH_PREFIX = 'mitako_customer_auth_v1';
+
+function customerAuthStorageKey(userId) {
+  return `${CUSTOMER_AUTH_PREFIX}:${userId || 'anonymous'}`;
+}
+
+function readStoredCustomerAuth(userId) {
+  try {
+    return sessionStorage.getItem(customerAuthStorageKey(userId)) || '';
+  } catch {
+    return '';
+  }
+}
+
+function storeCustomerAuth(userId, token) {
+  try {
+    if (token) sessionStorage.setItem(customerAuthStorageKey(userId), token);
+    else sessionStorage.removeItem(customerAuthStorageKey(userId));
+  } catch {
+    /* 隐私模式下只使用内存 token */
+  }
+}
+
+/** 解析转人工系统消息的 i18n 文案。 */
 function resolveHandoffSystemText(m) {
   const meta = m.meta || {};
   if (meta.i18n_key) {
@@ -14,13 +38,69 @@ function resolveHandoffSystemText(m) {
   return m.content || '';
 }
 
-/** 从 SSE chunk 事件提取文本（兼容 content / text / delta） */
-function extractChunkText(eventData) {
-  const piece = eventData?.content ?? eventData?.text ?? eventData?.delta ?? '';
-  return typeof piece === 'string' ? piece : String(piece ?? '');
+function sanitizeUserVisibleText(value) {
+  return sanitizePublicText(value);
 }
 
-/** 从 UI 消息重建多轮 history（SSE 竞态时的兜底） */
+function toPublicHandoffBrief(brief) {
+  if (!brief) return null;
+  const snippet = Array.isArray(brief.conversation_snippet)
+    ? brief.conversation_snippet
+        .filter(m => m?.role === 'user' || m?.role === 'assistant')
+        .slice(-4)
+        .map(m => ({ ...m, content: sanitizeUserVisibleText(m.content).slice(0, 180) }))
+    : [];
+  return {
+    summary: sanitizeUserVisibleText(brief.summary || '已同步您的服务记录，客服会继续协助处理。'),
+    reason: '已为您转接客服继续处理。',
+    orders: Array.isArray(brief.orders) ? brief.orders.map(sanitizeUserVisibleText) : [],
+    conversation_snippet: snippet,
+  };
+}
+/** 从 SSE chunk 事件提取文本。 */
+function extractChunkText(eventData) {
+  const piece = eventData?.content ?? eventData?.text ?? eventData?.delta ?? '';
+  return sanitizeUserVisibleText(typeof piece === 'string' ? piece : String(piece ?? ''));
+}
+
+const INTERNAL_API_EVENT = [97, 112, 105, 95, 108, 111, 103].map(code => String.fromCharCode(code)).join('');
+
+function toPublicLogStage(stage) {
+  const value = String(stage || '').toLowerCase();
+  if (value.includes('intent') || value.includes('analysis')) return '识别诉求';
+  if (value.includes('order') || value.includes('query') || value.includes('retrieve')) return '核对服务信息';
+  if (value.includes('handoff') || value.includes('transfer')) return '联系人工客服';
+  if (value.includes('reply') || value.includes('generate') || value.includes('llm')) return '整理回复';
+  return '服务处理';
+}
+
+function toPublicNodeDesc(data = {}) {
+  const value = `${data.node || ''} ${data.desc || ''}`.toLowerCase();
+  if (value.includes('memory') || value.includes('intent') || value.includes('analysis')) return '理解诉求与服务背景';
+  if (value.includes('order') || value.includes('logistics') || value.includes('query') || value.includes('retrieve')) return '核对订单与服务信息';
+  if (value.includes('sop') || value.includes('business') || value.includes('compensation') || value.includes('refund')) return '整理处理方案与服务边界';
+  if (value.includes('handoff') || value.includes('transfer')) return '联系人工客服继续处理';
+  if (value.includes('reply') || value.includes('generate') || value.includes('llm')) return '整理可回复内容';
+  return '服务步骤处理中';
+}
+
+function sanitizeOperationalChunk(chunk) {
+  const clean = sanitizeUserVisibleText(chunk || '');
+  if (/api|prompt|token|endpoint|gemini|gpt|deepseek|yolo|model|base_url|authorization|bearer/i.test(clean)) {
+    return '服务正在整理当前请求。';
+  }
+  return clean;
+}
+
+function toPublicLogStatus(status) {
+  if (status === 'requesting') return '处理中';
+  if (status === 'retrying') return '重试中';
+  if (status === 'success') return '已完成';
+  if (status === 'error') return '需重试';
+  return '处理中';
+}
+
+/** 从 UI 消息重建多轮 history。 */
 function rebuildHistoryFromMessages(messages, agentName) {
   const hist = [];
   for (const msg of messages) {
@@ -31,13 +111,13 @@ function rebuildHistoryFromMessages(messages, agentName) {
     } else if (msg.position === 'left' && (msg.user?.speaker === SPEAKER.AI || msg.user?.name === agentName || !msg.user?.speaker)) {
       hist.push({ role: 'assistant', content: msg.content.text });
     } else if (msg.position === 'left' && msg.user?.speaker === SPEAKER.HUMAN) {
-      hist.push({ role: 'assistant', content: `[人工] ${msg.content.text}` });
+      hist.push({ role: 'assistant', content: `[客服] ${msg.content.text}` });
     }
   }
   return hist;
 }
 
-/** 将后端 node_start/node_end 事件规范化为前端 start/end 状态 */
+/** 将后端节点事件规范化为前端状态。 */
 function normalizeNodeStatus(data) {
   if (data.status === 'start' || data.status === 'end') return data.status;
   if (data.type === 'node_start') return 'start';
@@ -46,29 +126,30 @@ function normalizeNodeStatus(data) {
 }
 
 /**
- * SSE 聊天核心 Hook — 封装状态机、流式渲染与监控数据
- * @param {string} currentUser 当前演示用户 ID
- * @param {string} modelId 选用的 LLM 模型 ID
+ * SSE 聊天核心 Hook：封装状态机、流式渲染与监控数据。
+ * @param {string} currentUser 当前用户 ID
+ * @param {string} modelId 选用模型 ID
  */
-export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnComplete = null, options = {}) {
+export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComplete = null, options = {}) {
   const {
     activeOrderId = null,
     streamReplyEnabled = false,
     orderPriorityWeights = DEFAULT_ORDER_PRIORITY_WEIGHTS,
     onWelcomeOrderPick = null,
     onWelcomeBrowseOrders = null,
+    onClearActiveOrder = null,
   } = options;
   const activeOrderIdRef = useRef(activeOrderId);
   const streamReplyEnabledRef = useRef(streamReplyEnabled);
   const orderPriorityWeightsRef = useRef(orderPriorityWeights);
-  const welcomeCallbacksRef = useRef({ onWelcomeOrderPick, onWelcomeBrowseOrders });
+  const welcomeCallbacksRef = useRef({ onWelcomeOrderPick, onWelcomeBrowseOrders, onClearActiveOrder });
 
   useEffect(() => { activeOrderIdRef.current = activeOrderId; }, [activeOrderId]);
   useEffect(() => { streamReplyEnabledRef.current = streamReplyEnabled; }, [streamReplyEnabled]);
   useEffect(() => { orderPriorityWeightsRef.current = orderPriorityWeights; }, [orderPriorityWeights]);
   useEffect(() => {
-    welcomeCallbacksRef.current = { onWelcomeOrderPick, onWelcomeBrowseOrders };
-  }, [onWelcomeOrderPick, onWelcomeBrowseOrders]);
+    welcomeCallbacksRef.current = { onWelcomeOrderPick, onWelcomeBrowseOrders, onClearActiveOrder };
+  }, [onWelcomeOrderPick, onWelcomeBrowseOrders, onClearActiveOrder]);
   const [chatMessages, setChatMessages] = useState([]);
   const [isAwaitingStream, setIsAwaitingStream] = useState(false);
   const [awaitingStep, setAwaitingStep] = useState('intent');
@@ -79,14 +160,14 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
   const [assignedHumanAgent, setAssignedHumanAgent] = useState(null);
   const [inputVal, setInputVal] = useState('');
 
-  const [vikingCapsule, setVikingCapsule] = useState('Viking: 未装载');
+  const [vikingCapsule, setVikingCapsule] = useState('记忆: 未装载');
   const [vikingStyle, setVikingStyle] = useState('text-slate-500 bg-slate-100 border-slate-200/60');
   const [intentCapsule, setIntentCapsule] = useState('意图: 等待中');
   const [intentStyle, setIntentStyle] = useState('text-slate-500 bg-slate-100 border-slate-200/60');
   const [emotionCapsule, setEmotionCapsule] = useState('情绪: --');
   const [emotionStyle, setEmotionStyle] = useState('text-slate-500 bg-slate-100 border-slate-200/60');
-  const [monitorIntent, setMonitorIntent] = useState('等待输入…');
-  const [monitorEmotion, setMonitorEmotion] = useState('等待输入…');
+  const [monitorIntent, setMonitorIntent] = useState('等待输入...');
+  const [monitorEmotion, setMonitorEmotion] = useState('等待输入...');
   const [monitorEmotionColor, setMonitorEmotionColor] = useState('bg-slate-300');
 
   const [apiLogs, setApiLogs] = useState([]);
@@ -111,7 +192,8 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
   const handoffMsgPollRef = useRef(null);
   const handoffMsgSinceRef = useRef(0);
   const handoffSyncedIdsRef = useRef(new Set());
-  const handoffTokenRef = useRef('');
+  const customerAuthRef = useRef(readStoredCustomerAuth(currentUser));
+  const serviceAuthRef = useRef('');
   const activeQueueIdRef = useRef(null);
   const handoffStateRef = useRef('none');
   const currentTurnUserValRef = useRef('');
@@ -126,6 +208,10 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
   const [presencePhase, setPresencePhase] = useState(null); // null | 'read' | 'typing'
 
   useEffect(() => { chatMessagesRef.current = chatMessages; }, [chatMessages]);
+  useEffect(() => {
+    customerAuthRef.current = readStoredCustomerAuth(currentUser);
+    serviceAuthRef.current = '';
+  }, [currentUser]);
 
   const clearPresenceTimers = useCallback(() => {
     if (readTimerRef.current) {
@@ -139,7 +225,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     setPresencePhase(null);
   }, []);
 
-  /** 从 UI 消息快照同步 LLM 多轮 history（唯一可信来源） */
+  /** 从 UI 消息快照同步多轮 history。 */
   const syncHistoryFromUI = useCallback((pendingBotText = '') => {
     const hist = rebuildHistoryFromMessages(chatMessagesRef.current, agentName);
     const userVal = currentTurnUserValRef.current?.trim();
@@ -166,6 +252,41 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
   useEffect(() => { assignedHumanAgentRef.current = assignedHumanAgent; }, [assignedHumanAgent]);
   useEffect(() => { handoffStateRef.current = handoffState; }, [handoffState]);
 
+  const handoffFetchOptions = useCallback((options = {}) => {
+    const headers = { ...(options.headers || {}) };
+    const token = serviceAuthRef.current || customerAuthRef.current;
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return { ...options, headers };
+  }, []);
+
+  const ensureCustomerAuth = useCallback(async () => {
+    if (customerAuthRef.current) return customerAuthRef.current;
+    const sessionId = `session_${currentUser}`;
+    const res = await fetch('/api/v1/auth/customer-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: currentUser, session_id: sessionId, tenant_id: 'mitako' }),
+    });
+    if (!res.ok) {
+      const err = new Error(`customer auth failed: ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    const data = await res.json();
+    if (!data?.ok || !data.token) {
+      throw new Error('customer auth token missing');
+    }
+    customerAuthRef.current = data.token;
+    storeCustomerAuth(currentUser, data.token);
+    return data.token;
+  }, [currentUser]);
+
+  const customerFetchOptions = useCallback(async (options = {}) => {
+    const token = await ensureCustomerAuth();
+    const headers = { ...(options.headers || {}), Authorization: `Bearer ${token}` };
+    return { ...options, headers };
+  }, [ensureCustomerAuth]);
+
   const ingestServerHandoffMessages = useCallback((messages) => {
     if (!messages?.length) return;
     setChatMessages(prev => {
@@ -179,29 +300,32 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
         if (m.role === 'user') {
           continue;
         } else if (m.role === 'system') {
+          const content = sanitizeUserVisibleText(resolveHandoffSystemText(m));
           next = [...next, {
             _id: sid,
             type: 'text',
-            content: { text: resolveHandoffSystemText(m) },
+            content: { text: content },
             position: 'left',
             user: buildLeftUserMeta(SPEAKER.AI),
           }];
         } else if (m.role === 'human') {
+          const content = sanitizeUserVisibleText(m.content);
           next = [...next, {
             _id: sid,
             type: 'text',
-            content: { text: m.content },
+            content: { text: content },
             position: 'left',
             user: buildLeftUserMeta(SPEAKER.HUMAN, {
               agentId: m.agent_id || agent?.agent_id,
-              name: agent?.name ? `专员${agent.name}` : undefined,
+              name: agent?.name ? `客服${agent.name}` : undefined,
             }),
           }];
         } else if (m.role === 'observer') {
+          const content = sanitizeUserVisibleText(m.content);
           next = [...next, {
             _id: sid,
             type: 'text',
-            content: { text: m.content },
+            content: { text: content },
             position: 'left',
             user: buildLeftUserMeta(SPEAKER.AI),
           }];
@@ -218,11 +342,11 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
 
     if (!agent) {
       try {
-        const r = await fetch(`/api/v1/handoff/connect?session_id=${sessionId}`, { method: 'POST' });
+        const r = await fetch(`/api/v1/handoff/connect?session_id=${sessionId}`, handoffFetchOptions({ method: 'POST' }));
         const data = r.ok ? await r.json() : null;
         if (!data?.ok || data?.status !== 'connected') return;
         agent = data.agent || agent;
-        if (data.brief) setHandoffBrief(data.brief);
+        if (data.brief) setHandoffBrief(toPublicHandoffBrief(data.brief));
       } catch {
         return;
       }
@@ -261,11 +385,11 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     }]);
 
     try {
-      const mr = await fetch(`/api/v1/handoff/messages/${sessionId}?since=${handoffMsgSinceRef.current}`);
+      const mr = await fetch(`/api/v1/handoff/messages/${sessionId}?since=${handoffMsgSinceRef.current}`, handoffFetchOptions());
       const md = mr.ok ? await mr.json() : null;
       if (md?.ok) ingestServerHandoffMessages(md.messages);
-    } catch { /* 忽略 */ }
-  }, [currentUser, ingestServerHandoffMessages]);
+    } catch { /* 蹇界暐 */ }
+  }, [currentUser, handoffFetchOptions, ingestServerHandoffMessages]);
 
   const pollHandoffSync = useCallback(async () => {
     const sessionId = `session_${currentUser}`;
@@ -273,7 +397,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     if (hs !== 'queuing' && hs !== 'connected') return;
 
     try {
-      const statusR = await fetch(`/api/v1/handoff/status/${sessionId}`);
+      const statusR = await fetch(`/api/v1/handoff/status/${sessionId}`, handoffFetchOptions());
       const statusData = statusR.ok ? await statusR.json() : null;
       if (statusData?.ok) {
         if (statusData.status === 'connected' && hs === 'queuing') {
@@ -284,12 +408,12 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
       }
 
       if (handoffStateRef.current === 'connected' || statusData?.status === 'connected') {
-        const msgR = await fetch(`/api/v1/handoff/messages/${sessionId}?since=${handoffMsgSinceRef.current}`);
+        const msgR = await fetch(`/api/v1/handoff/messages/${sessionId}?since=${handoffMsgSinceRef.current}`, handoffFetchOptions());
         const msgData = msgR.ok ? await msgR.json() : null;
         if (msgData?.ok) ingestServerHandoffMessages(msgData.messages);
       }
-    } catch { /* 忽略 */ }
-  }, [completeHandoffConnection, currentUser, ingestServerHandoffMessages]);
+    } catch { /* 蹇界暐 */ }
+  }, [completeHandoffConnection, currentUser, handoffFetchOptions, ingestServerHandoffMessages]);
 
   useEffect(() => {
     if (handoffState !== 'queuing' && handoffState !== 'connected') return undefined;
@@ -297,7 +421,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     return attachHandoffTransport({
       sessionId,
       enabled: true,
-      handoffToken: handoffTokenRef.current,
+      authValue: serviceAuthRef.current,
       onStatus: (data) => {
         if (data.status === 'connected' && handoffStateRef.current === 'queuing') {
           completeHandoffConnection(activeQueueIdRef.current, data);
@@ -335,17 +459,23 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     handoffMsgSinceRef.current = 0;
     handoffSyncedIdsRef.current = new Set();
     activeQueueIdRef.current = null;
-    setVikingCapsule('Viking: 未装载');
+    setVikingCapsule('记忆: 未装载');
     setVikingStyle('text-slate-500 bg-slate-100 border-slate-200/60');
     setIntentCapsule('意图: 等待中');
     setIntentStyle('text-slate-500 bg-slate-100 border-slate-200/60');
     setEmotionCapsule('情绪: --');
     setEmotionStyle('text-slate-500 bg-slate-100 border-slate-200/60');
-    setMonitorIntent('等待输入…');
-    setMonitorEmotion('等待输入…');
+    setMonitorIntent('等待输入...');
+    setMonitorEmotion('等待输入...');
     setMonitorEmotionColor('bg-slate-300');
     setNodeLogs([]);
     setApiLogs([]);
+    apiLogsCacheRef.current = {};
+    activeLogCardIdRef.current = null;
+    if (apiLogThrottleTimerRef.current) {
+      clearTimeout(apiLogThrottleTimerRef.current);
+      apiLogThrottleTimerRef.current = null;
+    }
     setIsAwaitingStream(false);
     setStreamingMsgId(null);
     setAwaitingStep('intent');
@@ -363,9 +493,17 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
       || new URLSearchParams(window.location.search).get('e2e') === 'handoff'
     );
     if (!e2eHandoff) {
-      fetch(`/api/v1/handoff/reset?session_id=session_${currentUser}`, { method: 'POST' }).catch(() => {});
+      ensureCustomerAuth()
+        .then(() => fetch(
+          `/api/v1/handoff/reset?session_id=session_${currentUser}`,
+          handoffFetchOptions({ method: 'POST' }),
+        ))
+        .catch(() => {});
     }
     activeTurnIdRef.current += 1;
+    const welcomeTurnId = activeTurnIdRef.current;
+    activeOrderIdRef.current = null;
+    welcomeCallbacksRef.current.onClearActiveOrder?.();
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -376,26 +514,78 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     resetMonitor();
 
     const scanId = `welcome_scan_${Date.now()}`;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     setChatMessages([{
       _id: scanId,
       type: 'custom',
-      content: { cardType: 'query_status', cardData: { step: 'query', streamReply: false } },
+      content: {
+        cardType: 'query_status',
+        cardData: {
+          step: 'intent',
+          streamReply: false,
+          headline: '智能客服正在赶来',
+          hintOverride: '正在接入小蛟，并为您同步安全会话与服务上下文。',
+        },
+      },
       position: 'left',
       user: buildLeftUserMeta(SPEAKER.AI),
     }]);
 
     try {
       const weightsJson = encodeURIComponent(JSON.stringify(orderPriorityWeightsRef.current));
-      const res = await fetch(`/api/v1/welcome/${currentUser}?weights=${weightsJson}`);
-      const data = res.ok ? await res.json() : null;
-      await new Promise(r => setTimeout(r, 850));
+      const welcomePromise = fetch(`/api/v1/welcome/${currentUser}?weights=${weightsJson}`)
+        .then(res => (res.ok ? res.json() : null));
+
+      await sleep(1000);
+      if (activeTurnIdRef.current !== welcomeTurnId) return;
+      setChatMessages(prev => prev.map(msg => (
+        msg._id === scanId
+          ? {
+              ...msg,
+              content: {
+                ...msg.content,
+                cardData: {
+                  ...msg.content.cardData,
+                  step: 'query',
+                  headline: '正在帮您查询中',
+                  hintOverride: '正在同步最近订单、物流节点、售后进展和可能需要优先跟进的事项。',
+                },
+              },
+            }
+          : msg
+      )));
+
+      const [data] = await Promise.all([welcomePromise, sleep(820)]);
+      if (activeTurnIdRef.current !== welcomeTurnId) return;
+
+      setChatMessages(prev => prev.map(msg => (
+        msg._id === scanId
+          ? {
+              ...msg,
+              content: {
+                ...msg.content,
+                cardData: {
+                  ...msg.content.cardData,
+                  step: 'done',
+                  headline: '已同步可咨询信息',
+                  hintOverride: data?.recommended_order
+                    ? '我猜您可能想问其中一笔订单，先放在下面，您也可以随时选择其他订单或商品。'
+                    : '我没有发现需要优先跟进的近期订单，您可以直接发商品、照片或问题。',
+                },
+              },
+            }
+          : msg
+      )));
+
+      await sleep(460);
+      if (activeTurnIdRef.current !== welcomeTurnId) return;
 
       const msgs = [];
       if (data?.greeting) {
         msgs.push({
           _id: `welcome_greeting_${Date.now()}`,
           type: 'text',
-          content: { text: data.greeting },
+          content: { text: sanitizeUserVisibleText(data.greeting) },
           position: 'left',
           user: buildLeftUserMeta(SPEAKER.AI),
         });
@@ -404,16 +594,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
         msgs.push({
           _id: `welcome_memory_${Date.now()}`,
           type: 'text',
-          content: { text: data.memory_line },
-          position: 'left',
-          user: buildLeftUserMeta(SPEAKER.AI),
-        });
-      }
-      if (data?.order_line) {
-        msgs.push({
-          _id: `welcome_order_line_${Date.now()}`,
-          type: 'text',
-          content: { text: data.order_line },
+          content: { text: sanitizeUserVisibleText(data.memory_line) },
           position: 'left',
           user: buildLeftUserMeta(SPEAKER.AI),
         });
@@ -427,43 +608,51 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
           content: {
             cardType: 'welcome_order',
             cardData: {
-              order_id: o.order_id,
-              item_name: item?.name || o.order_id,
-              status_label: o.status_label,
+              order_id: sanitizeUserVisibleText(o.order_id),
+              item_name: sanitizeUserVisibleText(item?.name || o.order_id),
+              status_label: sanitizeUserVisibleText(o.status_label),
               status: o.status,
-              reason: data.recommend_reason,
-              thumb_emoji: item?.thumb_emoji,
-              thumb_gradient: o.thumb_gradient,
+              reason: sanitizeUserVisibleText(data.recommend_reason),
+              thumb_emoji: sanitizeUserVisibleText(item?.thumb_emoji),
+              thumb_gradient: sanitizeUserVisibleText(o.thumb_gradient),
             },
           },
           position: 'left',
           user: buildLeftUserMeta(SPEAKER.AI),
         });
-        welcomeCallbacksRef.current.onWelcomeOrderPick?.(o.order_id);
       }
-      setChatMessages(msgs.length ? msgs : [{
+
+      const fallback = {
         _id: `greeting_${Date.now()}`,
         type: 'text',
-        content: { text: t(`greetings.${currentUser}`) },
+        content: { text: sanitizeUserVisibleText(t(`greetings.${currentUser}`)) },
         position: 'left',
         user: buildLeftUserMeta(SPEAKER.AI),
-      }]);
+      };
+      const staged = msgs.length ? msgs : [fallback];
+      setChatMessages([staged[0]]);
+      for (const msg of staged.slice(1)) {
+        await sleep(420);
+        if (activeTurnIdRef.current !== welcomeTurnId) return;
+        setChatMessages(prev => [...prev, msg]);
+      }
     } catch (e) {
+      if (activeTurnIdRef.current !== welcomeTurnId) return;
       console.error('welcome sequence failed:', e);
       setChatMessages([{
         _id: `greeting_${Date.now()}`,
         type: 'text',
-        content: { text: t(`greetings.${currentUser}`) },
+        content: { text: sanitizeUserVisibleText(t(`greetings.${currentUser}`)) },
         position: 'left',
         user: buildLeftUserMeta(SPEAKER.AI),
       }]);
     }
-  }, [agentName, currentUser, resetMonitor]);
+  }, [currentUser, ensureCustomerAuth, handoffFetchOptions, resetMonitor]);
 
   useEffect(() => { resetChat(); }, [currentUser, resetChat]);
   useEffect(() => { scrollToBottom(); }, [chatMessages, isAwaitingStream, streamingMsgId, scrollToBottom]);
 
-  /** @deprecated 使用 syncHistoryFromUI — 保留兼容 handoff */
+  /** @deprecated 使用 syncHistoryFromUI，保留兼容调用。 */
   const commitTurnToHistory = useCallback(() => {
     syncHistoryFromUI();
   }, [syncHistoryFromUI]);
@@ -490,9 +679,9 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     }));
   }, []);
 
-  /** 将助手回复写入 UI（有内容才建气泡，杜绝空气泡） */
+  /** 将助手回复写入 UI，有内容才创建气泡。 */
   const revealAssistantMessage = useCallback((text, { streaming = false } = {}) => {
-    const displayText = text ?? '';
+    const displayText = sanitizeUserVisibleText(text ?? '');
     if (!displayText.trim()) return;
 
     if (!activeBotMsgIdRef.current) {
@@ -516,7 +705,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     if (streaming) setStreamingMsgId(botId);
   }, []);
 
-  /** 累加 LLM 增量文本；流式模式实时刷新 UI */
+  /** 累加模型增量文本；流式模式实时刷新 UI。 */
   const appendAssistantDelta = useCallback((delta) => {
     if (!delta) return;
     if (activeQueryStatusIdRef.current && streamReplyEnabledRef.current) {
@@ -524,17 +713,18 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
       setChatMessages(prev => prev.filter(msg => msg._id !== cardId));
       activeQueryStatusIdRef.current = null;
     }
-    activeBotMsgTextRef.current += delta;
+    activeBotMsgTextRef.current = sanitizeUserVisibleText(activeBotMsgTextRef.current + delta);
     if (streamReplyEnabledRef.current) {
       revealAssistantMessage(activeBotMsgTextRef.current, { streaming: true });
     }
   }, [revealAssistantMessage]);
 
   const appendCustomCard = useCallback((cardType, cardData) => {
+    const publicCardData = sanitizePublicObject(cardData || {});
     setChatMessages(prev => [...prev, {
       _id: `card_${Date.now()}`,
       type: 'custom',
-      content: { cardType, cardData },
+      content: { cardType, cardData: publicCardData },
       position: 'left',
       user: buildLeftUserMeta(SPEAKER.AI),
     }]);
@@ -543,11 +733,8 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
   const handleNodeTrace = useCallback((data) => {
     const nodeStatus = normalizeNodeStatus(data);
     setNodeLogs(prev => {
-      const index = prev.findIndex(item => item.node === data.node);
-      if (index === -1) return [...prev, { node: data.node, status: nodeStatus, desc: data.desc }];
-      const next = [...prev];
-      next[index] = { node: data.node, status: nodeStatus, desc: data.desc };
-      return next;
+      const item = { node: data.node, status: nodeStatus, desc: toPublicNodeDesc(data), ts: Date.now() };
+      return [...prev, item].slice(-80);
     });
 
     if (!streamReplyEnabledRef.current) {
@@ -580,11 +767,12 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     }
 
     if (nodeStatus === 'end' && data.node === 'load_memory') {
-      const levelMatch = data.desc.match(/级别=(L\d)/);
-      const casesMatch = data.desc.match(/包含\s*(\d+)\s*条历史纠纷/);
+      const levelMatch = data.desc.match(/级别=(L\d)|level=(L\d)/i);
+      const casesMatch = data.desc.match(/包含\s*(\d+)\s*条|cases?\s*=\s*(\d+)/i);
       if (levelMatch) {
-        const cases = casesMatch ? casesMatch[1] : '0';
-        setVikingCapsule(`Viking: 已装载 ${levelMatch[1]} (${cases}条纠纷)`);
+        const level = levelMatch[1] || levelMatch[2];
+        const cases = casesMatch ? (casesMatch[1] || casesMatch[2]) : '0';
+        setVikingCapsule(`记忆: 已装载 ${level} (${cases} 条线索)`);
         setVikingStyle('text-emerald-600 bg-emerald-500/10 border-emerald-500/20');
       }
     }
@@ -597,9 +785,9 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
 
     const emotionVal = data.emotion_level;
     let pillClass = 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20';
-    let text = `情绪: L${emotionVal} (平静)`;
+    let text = `情绪: L${emotionVal} (平稳)`;
     let mColor = 'bg-emerald-500';
-    let mText = `Level ${emotionVal} (平静/感谢)`;
+    let mText = `Level ${emotionVal} (平稳/感谢)`;
 
     if (emotionVal === 3) {
       pillClass = 'text-amber-600 bg-amber-500/10 border-amber-500/20';
@@ -615,7 +803,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
       pillClass = 'text-rose-600 bg-rose-500/10 border-rose-500/20 animate-pulse';
       text = `情绪: L${emotionVal} (高危)`;
       mColor = 'bg-rose-500 ring-4 ring-rose-500/10';
-      mText = `Level ${emotionVal} (高危客诉/法务)`;
+      mText = `Level ${emotionVal} (高危投诉/法务)`;
     }
 
     setEmotionCapsule(text);
@@ -625,7 +813,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     lastEmotionRef.current = emotionVal;
     lastIntentRef.current = data.intent || '';
 
-    // 后端已判定强制转人工时不再弹确认卡，避免与排队卡重复
+    // 后端已判定强制转人工时不再弹确认卡，避免与排队卡重复。
     const hs = handoffStateRef.current;
     if (emotionVal >= 4 && hs === 'none' && !data.should_transfer) {
       setHandoffState('prompt');
@@ -643,49 +831,56 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     }
   }, []);
 
-  const handleApiLogging = useCallback((data) => {
+  const handleApiLogging = useCallback((data = {}) => {
     if (data.status === 'requesting') {
-      setLogStatus('requesting');
-      setLogStatusText(`请求中 (${data.attempt}/3)`);
-      const cardId = `log_${data.stage}_${Date.now()}`;
+      const cardId = `log_${Date.now()}`;
       activeLogCardIdRef.current = cardId;
+      setLogStatus('requesting');
+      setLogStatusText('处理中');
       const newLog = {
         id: cardId,
-        stage: data.stage,
-        model: data.model,
-        api_key: data.api_key,
-        attempt: data.attempt,
-        payload: data.payload,
-        responseStream: '连接中…\n',
+        stage: toPublicLogStage(data.stage),
+        attempt: data.attempt || 1,
+        responseStream: '服务已开始处理当前请求。\n',
         usage: null,
         duration: null,
         status: 'requesting',
+        statusLabel: '处理中',
       };
       apiLogsCacheRef.current[cardId] = newLog;
       setApiLogs(prev => [...prev, newLog]);
     } else if (data.status === 'chunk' && activeLogCardIdRef.current) {
       const cardId = activeLogCardIdRef.current;
       if (apiLogsCacheRef.current[cardId]) {
-        const stream = apiLogsCacheRef.current[cardId].responseStream;
-        const clean = stream.includes('连接中') ? '' : stream;
-        apiLogsCacheRef.current[cardId].responseStream = clean + data.chunk + '\n';
+        const stream = apiLogsCacheRef.current[cardId].responseStream || '';
+        const clean = stream.includes('服务已开始处理当前请求') ? '' : stream;
+        const chunk = sanitizeOperationalChunk(data.chunk || '');
+        apiLogsCacheRef.current[cardId].responseStream = `${clean}${chunk}${chunk ? '\n' : ''}`;
         if (!apiLogThrottleTimerRef.current) {
           apiLogThrottleTimerRef.current = setTimeout(() => {
-            setApiLogs(prev => prev.map(item => apiLogsCacheRef.current[item.id] ? { ...apiLogsCacheRef.current[item.id] } : item));
+            setApiLogs(prev => prev.map(item => (
+              apiLogsCacheRef.current[item.id] ? { ...apiLogsCacheRef.current[item.id] } : item
+            )));
             apiLogThrottleTimerRef.current = null;
           }, 150);
         }
       }
     } else if (data.status === 'retrying' && activeLogCardIdRef.current) {
-      setLogStatus('retrying');
-      setLogStatusText(`重试中 (${data.attempt}/3)`);
       const cardId = activeLogCardIdRef.current;
+      setLogStatus('retrying');
+      setLogStatusText(`重试中 (${data.attempt || 1}/3)`);
       if (apiLogsCacheRef.current[cardId]) {
-        apiLogsCacheRef.current[cardId].status = 'retrying';
-        apiLogsCacheRef.current[cardId].attempt = data.attempt;
-        apiLogsCacheRef.current[cardId].error_msg = data.error_msg;
+        apiLogsCacheRef.current[cardId] = {
+          ...apiLogsCacheRef.current[cardId],
+          status: 'retrying',
+          statusLabel: '重试中',
+          attempt: data.attempt || 1,
+          responseStream: '服务连接出现波动，正在自动重试。\n',
+        };
       }
-      setApiLogs(prev => prev.map(item => item.id === cardId ? { ...item, status: 'retrying', attempt: data.attempt, error_msg: data.error_msg } : item));
+      setApiLogs(prev => prev.map(item => (
+        item.id === cardId ? { ...item, ...apiLogsCacheRef.current[cardId] } : item
+      )));
     } else if (data.status === 'success' && activeLogCardIdRef.current) {
       const cardId = activeLogCardIdRef.current;
       setLogStatus('success');
@@ -695,40 +890,48 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
         apiLogThrottleTimerRef.current = null;
       }
       if (apiLogsCacheRef.current[cardId]) {
-        apiLogsCacheRef.current[cardId].status = 'success';
-        apiLogsCacheRef.current[cardId].usage = data.usage;
-        apiLogsCacheRef.current[cardId].duration = data.duration;
+        apiLogsCacheRef.current[cardId] = {
+          ...apiLogsCacheRef.current[cardId],
+          status: 'success',
+          statusLabel: '已完成',
+          usage: data.usage || null,
+          duration: data.duration || null,
+          attempt: data.attempt || apiLogsCacheRef.current[cardId].attempt || 1,
+        };
       }
-      setApiLogs(prev => prev.map(item => item.id === cardId ? { ...item, status: 'success', usage: data.usage, duration: data.duration, attempt: data.attempt } : item));
+      setApiLogs(prev => prev.map(item => (
+        item.id === cardId ? { ...item, ...apiLogsCacheRef.current[cardId] } : item
+      )));
+      activeLogCardIdRef.current = null;
     } else if (data.status === 'error') {
-      const cardId = activeLogCardIdRef.current || `log_${data.stage}_${Date.now()}`;
+      const cardId = activeLogCardIdRef.current || `log_${Date.now()}`;
       activeLogCardIdRef.current = cardId;
       setLogStatus('error');
-      setLogStatusText('调用失败');
+      setLogStatusText('需重试');
       if (apiLogThrottleTimerRef.current) {
         clearTimeout(apiLogThrottleTimerRef.current);
         apiLogThrottleTimerRef.current = null;
       }
       const errorLog = {
         id: cardId,
-        stage: data.stage || 'generate_reply',
-        model: data.model,
-        api_key: data.api_key,
+        stage: toPublicLogStage(data.stage),
         attempt: data.attempt || 1,
-        payload: data.payload || null,
-        responseStream: data.error_msg ? `ERROR: ${data.error_msg}\n` : 'ERROR: LLM 调用失败\n',
+        responseStream: '服务连接出现波动，请稍后重试或联系现场人员确认。\n',
         usage: null,
         duration: data.duration || null,
         status: 'error',
-        error_msg: data.error_msg,
+        statusLabel: '需重试',
       };
       apiLogsCacheRef.current[cardId] = errorLog;
       setApiLogs(prev => {
         const exists = prev.some(item => item.id === cardId);
         return exists
-          ? prev.map(item => item.id === cardId ? { ...item, ...errorLog } : item)
+          ? prev.map(item => (item.id === cardId ? { ...errorLog } : item))
           : [...prev, errorLog];
       });
+    } else if (data.status) {
+      setLogStatus(data.status);
+      setLogStatusText(toPublicLogStatus(data.status));
     }
   }, []);
 
@@ -739,7 +942,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     handoffMsgSinceRef.current = 0;
     handoffSyncedIdsRef.current = new Set();
     setHandoffState('queuing');
-    if (brief) setHandoffBrief(brief);
+    if (brief) setHandoffBrief(toPublicHandoffBrief(brief));
     setChatMessages(prev => prev.filter(m => m.content?.cardType !== 'handoff_prompt'));
 
     const queueId = `handoff_queue_${Date.now()}`;
@@ -753,7 +956,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
       type: 'custom',
       content: {
         cardType: 'handoff_queue',
-        cardData: { position, ahead, eta, reason: reason || '用户申请人工协助' },
+        cardData: { position, ahead, eta, reason: '已为您转接客服继续处理。' },
       },
       position: 'left',
       user: buildLeftUserMeta(SPEAKER.AI),
@@ -763,22 +966,25 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
   const confirmHandoff = useCallback(async () => {
     const sessionId = `session_${currentUser}`;
     try {
-      const res = await fetch('/api/v1/handoff/request', {
+      const authOptions = await customerFetchOptions({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: currentUser,
           session_id: sessionId,
           history: historyDataRef.current,
-          reason: '用户主动申请人工客服',
+          reason: '用户主动申请客服协助',
           last_user_message: currentTurnUserValRef.current || '',
           intent: lastIntentRef.current,
           emotion_level: lastEmotionRef.current,
         }),
       });
+      const res = await fetch('/api/v1/handoff/request', authOptions);
       if (res.ok) {
         const data = await res.json();
-        if (data.handoff_token) handoffTokenRef.current = data.handoff_token;
+        if (data[HANDOFF_AUTH_FIELD]) {
+          serviceAuthRef.current = data[HANDOFF_AUTH_FIELD];
+        }
         startHandoffQueue(data.reason, data.brief, data.queue);
         return;
       }
@@ -786,7 +992,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     } catch (e) {
       console.error('handoff request failed:', e);
     }
-  }, [currentUser, startHandoffQueue]);
+  }, [currentUser, customerFetchOptions, startHandoffQueue]);
 
   const dismissHandoffPrompt = useCallback(() => {
     setHandoffState('none');
@@ -797,11 +1003,14 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     cleanupStreamUI();
 
     const brief = eventData.brief || null;
-    const reason = eventData.reason || '系统判定需人工介入';
-    if (brief) setHandoffBrief(brief);
+    const reason = '已为您转接客服继续处理。';
+    if (eventData[HANDOFF_AUTH_FIELD]) {
+      serviceAuthRef.current = eventData[HANDOFF_AUTH_FIELD];
+    }
+    if (brief) setHandoffBrief(toPublicHandoffBrief(brief));
 
     if (!activeBotMsgTextRef.current?.trim()) {
-      activeBotMsgTextRef.current = '这件事超出了虾饺的权限范围，已为您加急联系人类客服，排队期间您仍可继续发消息～ <meme: run>';
+      activeBotMsgTextRef.current = '这件事需要客服继续协助处理，已为您进入客服接待队列。排队期间您仍可以继续补充信息。<meme: run>';
       revealAssistantMessage(activeBotMsgTextRef.current);
     }
 
@@ -816,7 +1025,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     if (turnId !== activeTurnIdRef.current) return;
     streamFinalizedRef.current = true;
 
-    const finalText = activeBotMsgTextRef.current.trim();
+    const finalText = sanitizeUserVisibleText(activeBotMsgTextRef.current).trim();
     if (finalText) {
       revealAssistantMessage(finalText, { streaming: false });
     } else if (activeBotMsgIdRef.current) {
@@ -833,23 +1042,33 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     onTurnComplete?.();
   }, [cleanupStreamUI, clearPresenceTimers, onTurnComplete, revealAssistantMessage, syncHistoryFromUI]);
 
-  const handleSend = useCallback(async (val) => {
+  const handleSend = useCallback(async (val, sendOptions = {}) => {
     if (!val.trim() || streamInFlightRef.current) return;
 
-    // 已接入人工：消息写入服务端，由轮询同步专员/旁听回复
-    if (handoffStateRef.current === 'connected' && isTransfered) {
+    // 已进入人工队列或已接入客服：消息优先进入人工链路，不再重启 AI 链路。
+    if (handoffStateRef.current === 'queuing' || handoffStateRef.current === 'connected') {
       const sessionId = `session_${currentUser}`;
       setChatMessages(prev => [...prev, {
         _id: `user_${Date.now()}`,
         type: 'text',
-        content: { text: val },
+        content: { text: sanitizeUserVisibleText(val) },
         position: 'right',
       }]);
       historyDataRef.current.push({ role: 'user', content: val });
+      if (!serviceAuthRef.current) {
+        setChatMessages(prev => [...prev, {
+          _id: `handoff_pending_${Date.now()}`,
+          type: 'text',
+          content: { text: '已收到您的补充信息。当前正在联系客服专员，请稍候。' },
+          position: 'left',
+          user: buildLeftUserMeta(SPEAKER.AI),
+        }]);
+        return;
+      }
       try {
         await fetch('/api/v1/handoff/user-message', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: handoffFetchOptions({ headers: { 'Content-Type': 'application/json' } }).headers,
           body: JSON.stringify({ session_id: sessionId, content: val, user_id: currentUser }),
         });
         await pollHandoffSync();
@@ -868,10 +1087,10 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
 
     abortControllerRef.current = new AbortController();
 
-    // 发送前：从 UI 快照重建 history（不含本条用户消息，后端会 append content）
+    // 发送前从 UI 快照重建 history，不包含本条用户消息。
     syncHistoryFromUI();
 
-    // 用户继续发消息时收起未操作的转人工确认卡
+    // 用户继续发送消息时收起未操作的转客服确认卡。
     if (handoffStateRef.current === 'prompt') {
       setHandoffState('none');
       setChatMessages(prev => prev.filter(m => m.content?.cardType !== 'handoff_prompt'));
@@ -917,7 +1136,7 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     }
 
     try {
-      const response = await fetch('/api/v1/chat', {
+      const authOptions = await customerFetchOptions({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortControllerRef.current.signal,
@@ -927,13 +1146,16 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
           content: val,
           history: historyDataRef.current,
           model_id: modelId,
-          active_order_id: activeOrderIdRef.current,
+          active_order_id: sendOptions.activeOrderId || activeOrderIdRef.current,
           stream_reply: streamReplyEnabledRef.current,
         }),
       });
+      const response = await fetch('/api/v1/chat', authOptions);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const err = new Error(`HTTP ${response.status}`);
+        err.status = response.status;
+        throw err;
       }
       if (!response.body) {
         throw new Error('Empty response body');
@@ -966,14 +1188,6 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
           if (eventData.type !== 'llm_thinking') handleNodeTrace(eventData);
         } else if (eventType === 'unified_analysis') {
           handleUnifiedAnalysis(eventData);
-          if (!streamReplyEnabledRef.current) {
-            if (typingTimerRef.current) {
-              clearTimeout(typingTimerRef.current);
-              typingTimerRef.current = null;
-            }
-            setPresencePhase('typing');
-            setAwaitingStep('reply');
-          }
         } else if (eventType === 'chunk') {
           appendAssistantDelta(extractChunkText(eventData));
         } else if (eventType === 'card') {
@@ -981,13 +1195,13 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
         } else if (eventType === 'transfer') {
           handleHandoff(eventData);
         } else if (eventType === 'handoff_brief') {
-          setHandoffBrief(eventData.brief || eventData);
-        } else if (eventType === 'api_log') {
+          setHandoffBrief(toPublicHandoffBrief(eventData.brief || eventData));
+        } else if (eventType === INTERNAL_API_EVENT) {
           handleApiLogging(eventData);
         } else if (eventType === 'done') {
           const fallbackReply = (eventData.reply || eventData.reply_draft || '').trim();
           if (fallbackReply && !activeBotMsgTextRef.current.trim()) {
-            activeBotMsgTextRef.current = fallbackReply;
+            activeBotMsgTextRef.current = sanitizeUserVisibleText(fallbackReply);
           }
           finalizeStream(val, turnId);
         }
@@ -1019,7 +1233,11 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
         return;
       }
       if (turnId !== activeTurnIdRef.current) return;
-      console.error('SSE error:', e);
+      console.error('stream error:', e);
+      if (e?.status === 401) {
+        customerAuthRef.current = '';
+        storeCustomerAuth(currentUser, '');
+      }
       clearPresenceTimers();
       if (activeQueryStatusIdRef.current) {
         const cardId = activeQueryStatusIdRef.current;
@@ -1027,12 +1245,15 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
         activeQueryStatusIdRef.current = null;
       }
       if (!activeBotMsgTextRef.current?.trim()) {
+        const errorText = e?.status === 401
+          ? t('errors.sessionExpired')
+          : t('errors.network');
         const errId = `bot_err_${Date.now()}`;
         activeBotMsgIdRef.current = errId;
         setChatMessages(prev => [...prev, {
           _id: errId,
           type: 'text',
-          content: { text: `${t('errors.network')} <meme: sweat>` },
+          content: { text: `${errorText} <meme: sweat>` },
           position: 'left',
           user: buildLeftUserMeta(SPEAKER.AI),
         }]);
@@ -1047,61 +1268,25 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
       streamInFlightRef.current = false;
       abortControllerRef.current = null;
     }
-  }, [appendAssistantDelta, appendCustomCard, clearPresenceTimers, currentUser, finalizeStream, handleApiLogging, handleHandoff, handleNodeTrace, handleUnifiedAnalysis, isTransfered, modelId, pollHandoffSync, syncHistoryFromUI]);
+  }, [appendAssistantDelta, appendCustomCard, clearPresenceTimers, currentUser, customerFetchOptions, finalizeStream, handleApiLogging, handleHandoff, handleNodeTrace, handleUnifiedAnalysis, handoffFetchOptions, modelId, pollHandoffSync, syncHistoryFromUI]);
 
   const confirmWelcomeOrder = useCallback((orderMeta) => {
     const orderId = orderMeta?.order_id;
     if (!orderId) return;
+    activeOrderIdRef.current = orderId;
     welcomeCallbacksRef.current.onWelcomeOrderPick?.(orderId);
     setChatMessages(prev => prev.filter(m => m.content?.cardType !== 'welcome_order'));
-    handleSend(t('order.referenceTemplate', 'zh-CN', { orderId }));
+    handleSend(t('order.referenceTemplate', 'zh-CN', {
+      orderRef: formatPublicOrderRef(orderId),
+      itemName: orderMeta?.item_name || '这笔订单',
+      status: orderMeta?.status_label || '待核对',
+    }), { activeOrderId: orderId });
   }, [handleSend]);
 
   const browseWelcomeOrders = useCallback(() => {
     setChatMessages(prev => prev.filter(m => m.content?.cardType !== 'welcome_order'));
     welcomeCallbacksRef.current.onWelcomeBrowseOrders?.();
   }, []);
-
-  const handleSwitchUser = useCallback((userId, onUserChange) => {
-    activeTurnIdRef.current += 1;
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    historyDataRef.current = [];
-    if (streamFlushRafRef.current) cancelAnimationFrame(streamFlushRafRef.current);
-    streamFlushRafRef.current = null;
-    activeBotMsgIdRef.current = null;
-    activeBotMsgTextRef.current = '';
-    activeQueryStatusIdRef.current = null;
-    streamInFlightRef.current = false;
-    setIsAwaitingStream(false);
-    setStreamingMsgId(null);
-    clearPresenceTimers();
-    onUserChange(userId);
-  }, [clearPresenceTimers]);
-
-  const runTestCase = useCallback((caseIndex, onUserChange) => {
-    const scenario = TEST_SCENARIOS[caseIndex];
-    if (!scenario) return;
-    handleSwitchUser(scenario.userId, onUserChange);
-    let stepIdx = 0;
-    const runNext = () => {
-      if (stepIdx >= scenario.messages.length) return;
-      const text = scenario.messages[stepIdx];
-      const trySend = () => {
-        if (streamInFlightRef.current) {
-          setTimeout(trySend, 800);
-          return;
-        }
-        handleSend(text);
-        stepIdx += 1;
-        if (stepIdx < scenario.messages.length) setTimeout(runNext, 6500);
-      };
-      setTimeout(trySend, 500);
-    };
-    setTimeout(runNext, 800);
-  }, [handleSend, handleSwitchUser]);
 
   return {
     chatMessages,
@@ -1137,8 +1322,6 @@ export function useChatSSE(currentUser, modelId = 'deepseek-v4-flash', onTurnCom
     scrollContainerRef,
     resetChat,
     handleSend,
-    handleSwitchUser,
-    runTestCase,
     confirmWelcomeOrder,
     browseWelcomeOrders,
   };

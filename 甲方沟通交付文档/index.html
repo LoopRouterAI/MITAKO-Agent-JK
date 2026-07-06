@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MITAKO 客服 Agent 与视觉审核对接指南</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #10131f;
+      --muted: #687083;
+      --paper: #fbfff1;
+      --card: #ffffff;
+      --lime: #c8ff1a;
+      --green: #7cc900;
+      --gold: #ffd43d;
+      --rose: #ff75a8;
+      --cyan: #12d6c7;
+      --violet: #8b5cf6;
+      --line: rgba(16, 19, 31, .10);
+      --shadow: 0 22px 52px rgba(16, 19, 31, .11);
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 92% 2%, rgba(200, 255, 26, .64) 0 120px, transparent 121px),
+        radial-gradient(circle at 12% 18%, rgba(18, 214, 199, .16), transparent 260px),
+        radial-gradient(circle at 88% 44%, rgba(255, 117, 168, .14), transparent 250px),
+        linear-gradient(180deg, #fff 0%, var(--paper) 52%, #fff 100%);
+    }
+    .shell { width: min(1180px, calc(100vw - 28px)); margin: 0 auto; padding: 22px 0 64px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .mark { width: 58px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(135deg, var(--lime), var(--cyan)); box-shadow: 0 12px 26px rgba(124, 201, 0, .28); font-weight: 950; }
+    .brand strong { display: block; font-size: 18px; line-height: 1; }
+    .brand span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .pill { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.82); padding: 8px 12px; font-size: 12px; font-weight: 900; }
+    .hero { position: relative; overflow: hidden; display: grid; grid-template-columns: 1.18fr .82fr; gap: 22px; border: 1px solid var(--line); border-radius: 30px; background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(248,255,230,.94)); box-shadow: var(--shadow); }
+    .hero::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 10px; background: linear-gradient(90deg, var(--lime), var(--gold), var(--rose), var(--violet), var(--cyan)); }
+    .hero-copy { padding: 42px 42px 50px; }
+    .eyebrow { display: inline-flex; padding: 8px 12px; border-radius: 999px; background: linear-gradient(90deg, var(--lime), #f3ffb6); font-size: 12px; font-weight: 950; }
+    h1 { margin: 18px 0 0; font-size: clamp(38px, 5vw, 68px); line-height: .96; letter-spacing: 0; text-wrap: pretty; }
+    h1 span { color: var(--green); }
+    .lead { max-width: 780px; color: #252a38; font-size: 16px; line-height: 1.8; }
+    .hero-panel { padding: 30px; border-left: 1px solid var(--line); background: linear-gradient(145deg, var(--lime), #fff2a1); }
+    .metric { display: grid; gap: 10px; }
+    .metric div { border: 1px solid rgba(16,19,31,.10); border-radius: 20px; background: rgba(255,255,255,.84); padding: 16px; box-shadow: 0 12px 28px rgba(16,19,31,.08); }
+    .metric b { display: block; font-size: 28px; }
+    .metric span { color: var(--muted); font-size: 13px; }
+    .section { margin-top: 28px; }
+    .section h2 { margin: 0 0 14px; font-size: 28px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card { border: 1px solid var(--line); border-radius: 22px; background: rgba(255,255,255,.9); padding: 20px; box-shadow: 0 14px 34px rgba(16,19,31,.07); }
+    .card h3 { margin: 0 0 10px; font-size: 18px; }
+    .card p, li { color: #353b4a; line-height: 1.72; }
+    .tag { display: inline-flex; padding: 6px 10px; border-radius: 999px; background: #f0ffd7; border: 1px solid var(--line); font-size: 12px; font-weight: 900; }
+    .doc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .doc-actions a, .doc-actions button {
+      appearance: none;
+      border: 1px solid rgba(16,19,31,.12);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--ink);
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 900;
+      text-decoration: none;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(16,19,31,.06);
+      transition: transform .16s ease, box-shadow .16s ease, background .16s ease;
+    }
+    .doc-actions a:first-child { background: linear-gradient(90deg, var(--lime), #f5ffbb); }
+    .doc-actions a:hover, .doc-actions button:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(16,19,31,.10); }
+    .flow { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+    .step { position: relative; min-height: 110px; border-radius: 20px; padding: 16px; background: #fff; border: 1px solid var(--line); box-shadow: 0 10px 26px rgba(16,19,31,.07); }
+    .step b { display: block; font-size: 13px; color: var(--green); }
+    .step span { display: block; margin-top: 8px; font-size: 13px; line-height: 1.55; }
+    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 18px; background: #fff; box-shadow: 0 10px 28px rgba(16,19,31,.06); }
+    th, td { padding: 13px 14px; border-bottom: 1px solid rgba(16,19,31,.08); text-align: left; vertical-align: top; font-size: 14px; }
+    th { background: #efffb2; font-size: 13px; }
+    pre { margin: 0; overflow: auto; border-radius: 18px; background: #111827; color: #e5f7d2; padding: 18px; line-height: 1.65; font-size: 13px; }
+    code { font-family: "Cascadia Code", "Consolas", monospace; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .footer { margin-top: 34px; color: var(--muted); font-size: 13px; }
+    .toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; border-radius: 999px; background: #10131f; color: #fff; padding: 11px 16px; font-size: 13px; font-weight: 900; box-shadow: 0 16px 40px rgba(16,19,31,.22); transition: opacity .18s ease, transform .18s ease; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    @media (max-width: 920px) {
+      .hero, .split { grid-template-columns: 1fr; }
+      .hero-panel { border-left: 0; border-top: 1px solid var(--line); }
+      .grid, .flow { grid-template-columns: 1fr; }
+      .hero-copy { padding: 30px 24px 40px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="topbar">
+      <div class="brand"><div class="mark">MIT</div><div><strong>MITAKO Agent</strong><span>客服 Agent 与视觉审核对接指南</span></div></div>
+      <span class="pill">面向甲方 · Java 技术栈友好</span>
+    </div>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">对接目标</span>
+        <h1>把客服工作台、人工复核与 <span>三类视觉审核</span> 打通</h1>
+        <p class="lead">当前 POC 聚焦“客服主链路 + 开箱视频审核 + 商品有伤审核 + 未成年人资料审核”。系统给人工客服提供证据摘要、置信度、缺失材料和复核建议，不直接替甲方执行退款、补发、拒赔、仓库或财务动作。</p>
+      </div>
+      <aside class="hero-panel">
+        <div class="metric">
+          <div><b>3</b><span>独立审核入口：开箱视频、商品有伤、未成年人资料</span></div>
+          <div><b>4</b><span>核心对象：工单、订单、商品主数据、用户材料</span></div>
+          <div><b>1</b><span>统一人工复核链路：审核摘要进入客服工作台</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section">
+      <h2>POC 怎么测试</h2>
+      <div class="grid">
+        <article class="card"><span class="tag">现场验收</span><h3>按业务顺序测试</h3><p>先做页面冒烟，再测客服主链路、转人工、三类视觉审核，最后由 Java 开发核对接口契约。</p></article>
+        <article class="card"><span class="tag">测试说明</span><h3>甲方 POC 测试说明</h3><p>查看启动方式、测试话术、通过标准和甲方需补充材料：<a href="./甲方POC测试说明.html">打开 HTML</a> / <a href="./甲方POC测试说明.md">打开 MD</a></p></article>
+        <article class="card"><span class="tag">边界</span><h3>只验证流程与人效</h3><p>本轮不测试生产退款、补发、拒赔、仓库改状态或财务动作；真实联调前先确认测试环境和回滚方案。</p></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>交付文档入口</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="tag">甲方要具体做什么</span>
+          <h3>甲方对接物料与接口清单</h3>
+          <p>给 CEO、客服负责人、IT/Java 开发和项目经理确认：需要准备哪些 SOP、样本、字段、接口、测试环境、权限和上线前确认项。</p>
+          <div class="doc-actions">
+            <a href="./甲方对接物料与接口清单.html">在线浏览 HTML</a>
+            <a href="./甲方对接物料与接口清单.md" download>下载 MD</a>
+            <button type="button" data-copy-md="./甲方对接物料与接口清单.md">复制 MD</button>
+          </div>
+        </article>
+        <article class="card">
+          <span class="tag">接口文档 / 对接说明</span>
+          <h3>客服 Agent 与视觉审核对接指南</h3>
+          <p>说明工单、订单、SKU、材料、审核任务、回调、鉴权、重试、Java 调用示例和上线验收口径，便于甲方开发直接评估。</p>
+          <div class="doc-actions">
+            <a href="./客服Agent与视觉审核对接指南.html">在线浏览 HTML</a>
+            <a href="./客服Agent与视觉审核对接指南.md" download>下载 MD</a>
+            <button type="button" data-copy-md="./客服Agent与视觉审核对接指南.md">复制 MD</button>
+          </div>
+        </article>
+        <article class="card">
+          <span class="tag">POC 验收</span>
+          <h3>甲方 POC 测试说明</h3>
+          <p>用于会议现场或远程验收：启动地址、测试顺序、通过标准、已知边界和甲方后续需补充的真实数据准备。</p>
+          <div class="doc-actions">
+            <a href="./甲方POC测试说明.html">在线浏览 HTML</a>
+            <a href="./甲方POC测试说明.md" download>下载 MD</a>
+            <button type="button" data-copy-md="./甲方POC测试说明.md">复制 MD</button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>联调与验收附件</h2>
+      <div class="grid">
+        <article class="card"><span class="tag">接口契约</span><h3>OpenAPI 契约草案</h3><p>用于甲方 Java 团队评估鉴权、聊天、转人工和视觉审核文件夹证据包接口。</p><div class="doc-actions"><a href="../docs/delivery/openapi.yaml">打开 YAML</a></div></article>
+        <article class="card"><span class="tag">Java 接入</span><h3>Spring Boot 调用样例</h3><p>包含客户会话令牌、SSE 对话、重试和幂等注意事项。</p><div class="doc-actions"><a href="../docs/delivery/java-client-sample.md">打开 MD</a></div></article>
+        <article class="card"><span class="tag">UAT</span><h3>POC UAT 验收表</h3><p>用于双方现场逐项签收，不把 Mock 接口误认为生产接入。</p><div class="doc-actions"><a href="../docs/delivery/poc-uat-checklist.md">打开 MD</a></div></article>
+        <article class="card"><span class="tag">安全合规</span><h3>数据安全与模型合规清单</h3><p>覆盖未成年人资料、公开报告脱敏、模型调用和业务接口边界。</p><div class="doc-actions"><a href="../docs/delivery/data-model-compliance-checklist.md">打开 MD</a></div></article>
+        <article class="card"><span class="tag">容量规划</span><h3>容量规划与并发建议</h3><p>说明 POC 到试点阶段的并发、队列、文件大小、重试和人工复核容量估算方式。</p><div class="doc-actions"><a href="../docs/delivery/capacity-planning.md">打开 MD</a></div></article>
+        <article class="card"><span class="tag">运维观测</span><h3>可观测性与运维值班手册</h3><p>说明可用率、延迟、429 重试、视觉审核成功率、人工介入率和异常处置口径。</p><div class="doc-actions"><a href="../docs/delivery/observability-runbook.md">打开 MD</a></div></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>端到端流程</h2>
+      <div class="flow">
+        <div class="step"><b>01 用户提交</b><span>App / 小程序提交咨询、视频、图片和诉求文本。</span></div>
+        <div class="step"><b>02 Java 后台同步</b><span>同步工单、订单、SKU、物流、历史投诉和材料地址。</span></div>
+        <div class="step"><b>03 创建审核任务</b><span>按三类任务入口生成独立审核队列。</span></div>
+        <div class="step"><b>04 证据摘要</b><span>输出置信度、证据链、缺失材料、复核建议。</span></div>
+        <div class="step"><b>05 人工确认</b><span>坐席抽检、逐条复核、补件或升级。</span></div>
+        <div class="step"><b>06 回写工单</b><span>人工结论回写甲方系统，客服 Agent 继续服务表达。</span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>三类独立入口</h2>
+      <div class="grid">
+        <article class="card"><span class="tag">开箱视频审核</span><h3>重点看连续性与规格匹配</h3><p>关注箱体和商品是否离开画面、是否存在剪辑断点、用户实物与订单 SKU / 规格 / 角色 / 款式是否一致。</p></article>
+        <article class="card"><span class="tag">商品有伤审核</span><h3>重点看损伤证据强弱</h3><p>关注损伤位置、包装状态、拍摄质量、图片真实性风险和是否需要补拍关键角度。</p></article>
+        <article class="card"><span class="tag">未成年人资料审核</span><h3>重点看材料完整与隐私</h3><p>关注监护人关系、订单归属、付款记录、材料缺失和隐私保护，最终必须人工确认。</p></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>接口总览</h2>
+      <table>
+        <thead><tr><th>方向</th><th>方法</th><th>路径</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td>甲方 -> MITAKO</td><td>POST</td><td><code>/openapi/v1/tickets/sync</code></td><td>同步客服工单与上下文</td></tr>
+          <tr><td>甲方 -> MITAKO</td><td>POST</td><td><code>/openapi/v1/review-tasks</code></td><td>创建视觉审核任务</td></tr>
+          <tr><td>甲方 -> MITAKO</td><td>POST</td><td><code>/openapi/v1/review-tasks/{taskId}/materials</code></td><td>上传或追加材料</td></tr>
+          <tr><td>甲方 -> MITAKO</td><td>GET</td><td><code>/openapi/v1/review-tasks/{taskId}</code></td><td>查询审核进度和摘要</td></tr>
+          <tr><td>甲方 -> MITAKO</td><td>POST</td><td><code>/openapi/v1/human-decisions</code></td><td>回写人工最终处理意见</td></tr>
+          <tr><td>MITAKO -> 甲方</td><td>POST</td><td><code>{callbackBase}/mitako/review-result</code></td><td>审核完成回调</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section split">
+      <article class="card">
+        <h2>鉴权与重试</h2>
+        <pre><code>Authorization: Bearer &lt;access_token&gt;
+X-Timestamp: 1783216400000
+X-Nonce: 3a7d6a0b9f
+X-Signature: HMAC-SHA256(...)
+Idempotency-Key: ticketId-taskType-requestId</code></pre>
+        <p>429、502、503、504 使用指数退避重试；400、401、403、409 不自动重试。所有写请求必须带幂等键。</p>
+      </article>
+      <article class="card">
+        <h2>Java 调用示例</h2>
+        <pre><code>WebClient client = WebClient.builder()
+  .baseUrl("https://mitako-gateway.example.com")
+  .defaultHeader("Content-Type", "application/json")
+  .build();
+
+client.post()
+  .uri("/openapi/v1/review-tasks")
+  .header("Authorization", "Bearer " + token)
+  .header("Idempotency-Key", idempotencyKey)
+  .bodyValue(payload)
+  .retrieve()
+  .bodyToMono(String.class);</code></pre>
+      </article>
+    </section>
+
+    <section class="section">
+      <h2>状态机</h2>
+      <table>
+        <thead><tr><th>状态</th><th>含义</th><th>下一步</th></tr></thead>
+        <tbody>
+          <tr><td><code>CREATED</code></td><td>任务已创建</td><td>等待材料或进入队列</td></tr>
+          <tr><td><code>MATERIAL_READY</code></td><td>材料已齐</td><td>开始审核</td></tr>
+          <tr><td><code>AI_REVIEWING</code></td><td>正在生成证据摘要</td><td>等待结果</td></tr>
+          <tr><td><code>NEED_MORE_MATERIAL</code></td><td>材料不足</td><td>通知客服补件</td></tr>
+          <tr><td><code>REVIEW_COMPLETED</code></td><td>审核摘要完成</td><td>进入人工复核或抽检</td></tr>
+          <tr><td><code>HUMAN_CONFIRMED</code></td><td>人工已确认</td><td>回写甲方工单</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>上线前确认</h2>
+      <div class="grid">
+        <div class="card"><h3>客服负责人</h3><p>确认三类审核的通过、拒绝、补件、升级标准。</p></div>
+        <div class="card"><h3>Java 开发负责人</h3><p>确认字段、鉴权、回调、重试、幂等和网关策略。</p></div>
+        <div class="card"><h3>合规负责人</h3><p>确认未成年人资料、隐私字段、材料保留周期和审计要求。</p></div>
+      </div>
+    </section>
+
+    <p class="footer">当前文档为对接与验收指南。实际生产写入动作以甲方业务系统、人工坐席和双方上线审批为准。</p>
+  </main>
+  <div class="toast" id="toast">已复制 MD</div>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const toast = document.getElementById("toast");
+      const showToast = (text) => {
+        toast.textContent = text;
+        toast.classList.add("show");
+        window.setTimeout(() => toast.classList.remove("show"), 1600);
+      };
+      const copyText = async (text) => {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      };
+      document.querySelectorAll("[data-copy-md]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          try {
+            const response = await fetch(button.dataset.copyMd);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            await copyText(await response.text());
+            showToast("已复制 MD");
+          } catch (error) {
+            console.error("复制 MD 失败", error);
+            showToast("复制失败，请打开 HTML 页内复制");
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

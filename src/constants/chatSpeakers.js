@@ -1,4 +1,5 @@
 import t from '../i18n/index.js';
+import { MITAKO_AGENT_AVATAR } from './memeMap.js';
 
 /** 对话发言者类型与视觉配置 */
 export const SPEAKER = {
@@ -8,14 +9,14 @@ export const SPEAKER = {
 
 export const AI_AGENT = {
   speaker: SPEAKER.AI,
-  avatar: '/xiaojiao_avatar.png',
+  avatar: MITAKO_AGENT_AVATAR,
   name: () => t('agent.name'),
   badge: 'AI',
-  badgeClass: 'bg-[var(--mitako-purple)] text-white border-[#7B61FF]/30',
-  labelClass: 'text-[var(--mitako-purple)]',
+  badgeClass: 'bg-[var(--mitako-lime)] text-[var(--mitako-ink)] border-[var(--mitako-ink)]',
+  labelClass: 'text-[var(--mitako-ink)]',
   bubbleClass:
-    'rounded-2xl rounded-tl-md bg-gradient-to-br from-white via-[#7B61FF]/[0.06] to-[#C8FF1A]/[0.08] border border-[#7B61FF]/15 text-slate-800 shadow-[0_4px_20px_rgba(123,97,255,0.08)]',
-  ringClass: 'ring-2 ring-[#7B61FF]/20',
+    'rounded-[8px] bg-white border-2 border-[var(--mitako-ink)] text-[var(--mitako-ink)] shadow-[4px_4px_0_rgba(17,20,17,0.92)]',
+  ringClass: 'ring-2 ring-[var(--mitako-lime)]',
 };
 
 export const HUMAN_AGENT = {
@@ -23,11 +24,11 @@ export const HUMAN_AGENT = {
   avatar: null, // 使用 Lucide 图标占位
   name: () => t('speakers.humanName'),
   badge: t('speakers.humanBadge'),
-  badgeClass: 'bg-teal-600 text-white border-teal-500/30',
-  labelClass: 'text-teal-700',
+  badgeClass: 'bg-[var(--mitako-lime)] text-[var(--mitako-ink)] border-[var(--mitako-ink)]',
+  labelClass: 'text-[var(--mitako-ink)]',
   bubbleClass:
-    'rounded-2xl rounded-tl-md bg-gradient-to-br from-teal-50 via-white to-emerald-50/80 border border-teal-200/80 text-slate-800 shadow-[0_4px_18px_rgba(20,184,166,0.12)]',
-  ringClass: 'ring-2 ring-teal-400/25',
+    'rounded-[8px] bg-[var(--mitako-lime)] border-2 border-[var(--mitako-ink)] text-[var(--mitako-ink)] shadow-[4px_4px_0_rgba(17,20,17,0.92)]',
+  ringClass: 'ring-2 ring-[var(--mitako-lime)]',
 };
 
 /** 构建 left 侧消息 user 元数据 */

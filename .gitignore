@@ -1,26 +1,51 @@
-# MITAKO Agent — 私人仓库跨设备同步
-# 说明：.env 与 data/*.db  intentionally 纳入版本库，便于私人仓库同步配置与业务数据
+# MITAKO Agent 本地开发忽略项
 
-# Python / Node 依赖环境（各设备本地安装）
+# 运行环境与依赖
 venv/
 node_modules/
-
-# 本地索引与工具缓存（非项目状态）
-.codegraph/
-
-# Python 字节码
 __pycache__/
 *.py[cod]
 *$py.class
 
-# SQLite 运行时锁文件（不提交；主库 .db 文件会提交）
-data/*.db-wal
-data/*.db-shm
-data/*.db-journal
+# 本地配置与密钥
+.env
+.env.*
+!.env.example
 
-# 临时与演示产物
+# 本地数据库、运行时记忆、缓存
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite3
+viking_memory/
+tmp/
 scratch/
-PPT-*/
+logs/
 
-# 测试 HTML 报告（可本地重跑生成）
+# 本地索引与工具状态
+.codegraph/
+.cursor/
+archive/
+
+# 测试与演示产物
 tests/reports/*.html
+!tests/reports/customer_chat_acceptance_*.html
+tests/reports/*.md
+!tests/reports/customer_chat_acceptance_*.md
+tests/reports/screenshots/*.png
+tests/reports/visual_review_ui_checks/
+poc/visual_review_poc/reports/
+poc/visual_review_poc/uploaded_videos/
+poc/visual_review_poc/downloaded_videos/
+poc/visual_review_poc/sample_videos/
+docs/三大审核场景的小量样本/
+dist/memes/
+
+# 打包与大模型文件
+*.zip
+*.pt
+!poc/**/README.md
+
+# 本地 PPT/PDF 素材目录按需保留
+PPT-*/
+*.pdf

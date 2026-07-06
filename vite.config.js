@@ -10,8 +10,6 @@ export default defineConfig({
       input: {
         main: 'index.html',
         desk: 'desk.html',
-        companion: 'companion.html',
-        companionDesk: 'companion-desk.html',
         admin: 'admin.html',
       },
     },

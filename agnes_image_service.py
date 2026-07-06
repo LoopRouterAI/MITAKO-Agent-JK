@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
 
 from dotenv import load_dotenv
 from image_models import get_image_api_key, get_image_model_config
-from llm_models import mask_api_key
 
-load_dotenv()
+try:
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
+except Exception:
+    pass
 
 
 def _has_valid_key(api_key: Optional[str]) -> bool:
@@ -59,10 +62,6 @@ async def generate_image_agnes(
         raise RuntimeError("Agnes 生图 API 未返回图片 URL")
 
     return {
-        "model": cfg["label"],
-        "model_id": cfg["id"],
         "urls": urls,
         "created": data.get("created"),
-        "api_key_masked": mask_api_key(api_key),
-        "request": payload,
     }

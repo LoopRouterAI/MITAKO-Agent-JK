@@ -48,24 +48,13 @@ async def admin_auth_headers(client: httpx.AsyncClient, base: str) -> Dict[str, 
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
-async def companion_auth_headers(client: httpx.AsyncClient, base: str, user_id: str) -> Dict[str, str]:
-    """Companion 用户 token — onboarding 后签发"""
-    pr = await client.put(
-        f"{base}/api/v2/companion/persona/{user_id}",
-        json={"agent_name": "E2E伴", "user_title": "主人", "personality": "gentle", "onboarded": True},
-    )
-    if pr.status_code != 200:
-        return {}
-    token = pr.json().get("companion_token")
-    return {"Authorization": f"Bearer {token}"} if token else {}
-
-
 async def _probe_handoff_server(client: httpx.AsyncClient, url: str) -> bool:
     """确认端口上的服务可正常处理转人工（排除旧进程 / 半崩溃实例）"""
     try:
-        r = await client.get(f"{url}/api/v1/handoff/routing", timeout=2.0)
+        r = await client.get(f"{url}/api/v1/auth/status", timeout=2.0)
         if r.status_code != 200 or not r.json().get("ok"):
             return False
+        auth_status = r.json()
         probe_sid = f"e2e_probe_{int(time.time())}"
         pr = await client.post(
             f"{url}/api/v1/handoff/request",
@@ -82,8 +71,12 @@ async def _probe_handoff_server(client: httpx.AsyncClient, url: str) -> bool:
         )
         if pr.status_code != 200 or not pr.json().get("ok"):
             return False
-        st = await client.get(f"{url}/api/v1/auth/status")
-        auth_on = st.json().get("auth_required") if st.status_code == 200 else False
+        token = pr.json().get("handoff_token") or ""
+        status_headers = {"Authorization": f"Bearer {token}"} if token else {}
+        sr = await client.get(f"{url}/api/v1/handoff/status/{probe_sid}", headers=status_headers)
+        if sr.status_code != 200 or sr.json().get("status") in ("none", None):
+            return False
+        auth_on = bool(auth_status.get("protected_api_auth_required") or auth_status.get("auth_required"))
         reset_headers = await admin_auth_headers(client, url) if auth_on else {}
         await client.post(
             f"{url}/api/v1/handoff/reset",

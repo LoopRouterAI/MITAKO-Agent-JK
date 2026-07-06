@@ -1,84 +1,79 @@
-# 部署指南（双系统合一进程）
+# 部署指南
 
-## 1. 环境要求
+## 环境要求
 
-| 项 | 版本 |
-|----|------|
-| OS | Windows 11 / Server 2019+ |
-| Python | 3.11+（项目 `venv`） |
-| Node | 18+（`npm run build`） |
-| Redis | 可选；生产 + 多实例 **强烈建议** |
-| GPU | 非必须（LLM 走云端 API） |
+| 项目 | 要求 |
+|---|---|
+| 系统 | Windows 11 / Windows Server 2019+ / Ubuntu 22.04+ |
+| Python | 3.11+ |
+| Node.js | 18+ |
+| 浏览器 | Chrome / Edge 最新稳定版 |
 
-## 2. 首次部署
+## 本地验证启动
+
+Windows：
 
 ```bat
-cd MITAKO_Agent
-setup_venv.bat          REM 若已有 venv 可跳过
+setup_venv.bat
 npm install
-npm run build
-python scripts/seed_auth.py
-```
-
-## 3. 开发 / UAT 启动
-
-```bat
 一键启动-Windows.bat
 ```
 
-默认 env：
+Ubuntu：
 
-```env
-APP_PORT=8000
-HANDOFF_BACKEND=hybrid
-CHATWOOT_MOCK=1
-MITAKO_AUTH_REQUIRED=0
-MITAKO_SSO_DEMO=0
+```bash
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
+npm install
+chmod +x ./一键启动-Ubuntu.sh
+./一键启动-Ubuntu.sh
 ```
 
-## 4. 生产启动（摘要）
+启动成功后访问：
 
-```env
-MITAKO_AUTH_REQUIRED=1
-MITAKO_JWT_SECRET=<随机长密钥>
-MITAKO_SSO_DEMO=0
-REDIS_HOST=<redis>
-HANDOFF_BACKEND=hybrid
-CHATWOOT_MOCK=0
-CHATWOOT_BASE_URL=https://im.<交付域名>
-ALLOW_PORT_FALLBACK=0
+| 页面 | 地址 |
+|---|---|
+| 用户端智能客服 | `http://127.0.0.1:8000/` |
+| 人工客服工作台 | `http://127.0.0.1:8000/desk` |
+| 运营后台 | `http://127.0.0.1:8000/admin` |
+
+## 视觉审核工作台
+
+视觉审核工作台独立启动，默认用于开箱视频审核、商品有伤审核、未成年人资料审核。
+
+```bat
+venv\Scripts\python.exe poc\visual_review_poc\workbench_server.py
 ```
 
-完整清单：[production-checklist.md](../security/production-checklist.md)
+默认地址：
 
-## 5. 端口
+```text
+http://127.0.0.1:7861/
+```
 
-| 端口 | 服务 |
-|------|------|
-| 8000 | MITAKO 主服务（五端 SPA + API） |
-| 9101 | 甲方模拟 IdP（联调实验室，可选） |
-| 9102 | 甲方模拟 Chatwoot（联调实验室，可选） |
-| 9103 | 甲方模拟业务 API（联调实验室，可选） |
+## 验证环境边界
 
-## 6. 静态资源
+- 验证包使用脱敏样例数据，不连接甲方生产系统。
+- 订单、售后、仓库、财务和私域触达动作只展示流程和建议，不写入甲方真实业务系统。
+- 视觉审核工作台可处理本地上传视频、图片、文本和常见公开视频链接；上线前仍需甲方提供脱敏样例、审核规则和人工复核标准。
+- 客服主站右侧观察面板用于坐席/运营调试，可折叠；普通用户侧不展示内部处理细节。
+- 上线前必须启用正式访问保护、固定访问白名单，并完成数据备份与恢复演练。
 
-`npm run build` → `dist/`（`index.html` `desk.html` `admin.html` `companion.html` `companion-desk.html`）
+## 上线前门禁
 
-## 7. 数据文件
+我方实施负责人发布前执行：
 
-| 路径 | 内容 |
-|------|------|
-| `data/handoff.db` | 转人工会话 |
-| `data/admin.db` | 坐席、审批 |
-| `data/companion.db` | Companion |
-| `data/auth.db` | 账号、租户 |
+```bat
+npm run build
+python scripts/dual_system_smoke_test.py
+python tests/e2e/run_enterprise_production_e2e.py
+python scripts/check_visual_workbench_smoke.py
+```
 
-备份：停机复制 `data/` 目录。
+如需单独验证数据目录隔离和租户迁移备份：
 
-## 8. 我方 vs 甲方
-
-| 我方全包 | 甲方配合 |
-|----------|----------|
-| MITAKO 应用部署 | SSO IdP 凭据 / Groups |
-| Chatwoot 实例部署 | UAT 账号、验收签字 |
-| 联调实验室模拟终端 | 业务 API 契约评审（后续） |
+```bat
+set MITAKO_DATA_DIR=tmp\release-data-check
+python scripts/check_data_isolation.py
+python scripts/check_auth_migration_dry_run.py
+```

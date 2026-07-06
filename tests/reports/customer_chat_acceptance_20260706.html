@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>用户端客服交互验收报告 2026-07-06</title>
+  <style>
+    :root {
+      --ink: #111411;
+      --lime: #c7f35f;
+      --soft: #f5ffe2;
+      --line: #d8ded0;
+      --muted: #667085;
+      --ok: #147a3f;
+      --warn: #9a5b00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(135deg, #fff 0%, #f5ffe2 42%, #fff2dd 100%);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      line-height: 1.6;
+    }
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 32px auto;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: rgba(255,255,255,.94);
+      box-shadow: 8px 8px 0 rgba(17,20,17,.9);
+      overflow: hidden;
+    }
+    header {
+      padding: 28px;
+      border-bottom: 2px solid var(--ink);
+      background: var(--lime);
+    }
+    h1 { margin: 0; font-size: clamp(26px, 4vw, 42px); line-height: 1.1; }
+    .meta { margin-top: 8px; font-weight: 700; color: #334155; }
+    section { padding: 24px 28px; border-bottom: 1px solid var(--line); }
+    h2 { margin: 0 0 14px; font-size: 20px; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .tile {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+    }
+    .tile strong { display: block; font-size: 22px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--soft); font-size: 13px; }
+    .pass { color: var(--ok); font-weight: 900; white-space: nowrap; }
+    .risk { color: var(--warn); font-weight: 800; }
+    code { padding: 2px 5px; border-radius: 5px; background: #f1f5f9; font-family: Consolas, monospace; }
+    footer { padding: 18px 28px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 780px) {
+      main { width: calc(100% - 18px); margin: 10px auto; }
+      header, section, footer { padding: 18px; }
+      .summary { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>用户端客服交互最后一轮需求验收报告</h1>
+    <div class="meta">生成日期：2026-07-06 · 范围：模拟数据、订单/商品工具、加载节奏、演示用户切换</div>
+  </header>
+
+  <section>
+    <div class="summary">
+      <div class="tile"><span>结论</span><strong>通过</strong><small>最后一轮 5 项需求均已实现</small></div>
+      <div class="tile"><span>验证</span><strong>8/8</strong><small>双系统烟测通过</small></div>
+      <div class="tile"><span>补齐</span><strong>报告</strong><small>此前缺少验收进度报告，现已补齐</small></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>验收清单</h2>
+    <table>
+      <thead><tr><th>编号</th><th>需求</th><th>状态</th><th>证据</th></tr></thead>
+      <tbody>
+        <tr><td>A1</td><td>区分“需关注”和“在途/待发”，刚发货与 180 天延期不能混在一起</td><td class="pass">通过</td><td><code>OrderPickerOverlay.jsx</code> 使用 <code>hasAttentionSignal</code>，普通待出库不直接进入风险队列</td></tr>
+        <tr><td>A2</td><td>商品 List 需要像正常电商用户</td><td class="pass">通过</td><td><code>ChatInput.jsx</code> 商品样本 11 条，覆盖现货、预售、盲抽、破损售后、规格咨询</td></tr>
+        <tr><td>A3</td><td>长列表浮层需要滚动边界和羽化体验</td><td class="pass">通过</td><td>商品抽屉和订单抽屉均有顶部/底部渐隐、<code>overscroll-contain</code>、<code>scrollbar-gutter: stable</code></td></tr>
+        <tr><td>A4</td><td>清空对话后需要 Loading 和查询过程</td><td class="pass">通过</td><td><code>useChatSSE.js</code> 分阶段展示“智能客服正在赶来 / 正在帮您查询中 / 已同步可咨询信息”</td></tr>
+        <tr><td>A5</td><td>需要切换模拟用户，覆盖正常、新用户、抽奖、破损、未成年人退款等场景</td><td class="pass">通过</td><td><code>App.jsx</code> 6 个用户；<code>mock_data.json</code> 6 个用户、16 笔订单；新用户无推荐订单</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>自动检查结果</h2>
+    <table>
+      <thead><tr><th>检查项</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td><code>mock_data.json</code> JSON 解析</td><td class="pass">通过</td></tr>
+        <tr><td><code>python -m py_compile business_api.py main.py</code></td><td class="pass">通过</td></tr>
+        <tr><td><code>npm run build</code></td><td class="pass">通过</td></tr>
+        <tr><td><code>python scripts/dual_system_smoke_test.py</code></td><td class="pass">通过，8/8</td></tr>
+        <tr><td><code>/api/v1/orders/usr_004?sort=priority</code></td><td class="pass">通过，返回 3 笔订单</td></tr>
+        <tr><td><code>/api/v1/welcome/usr_005</code></td><td class="pass">通过，无推荐订单</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>剩余风险</h2>
+    <table>
+      <thead><tr><th>风险</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td class="risk">真实甲方接口未接入</td><td>当前仍是 POC Mock，符合 Spec Kit 边界；正式接入需按对接文档补订单、物流、售后、商品、地址接口。</td></tr>
+        <tr><td class="risk">演示数据不是生产数据</td><td>样本只用于展示流程覆盖，不代表真实用户分布。</td></tr>
+        <tr><td class="risk">本报告未附浏览器截图</td><td>本轮以代码、构建、接口、烟测为验收依据；如要对甲方展示，可再补用户端截图。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>对应 Markdown：<code>tests/reports/customer_chat_acceptance_20260706.md</code></footer>
+</main>
+</body>
+</html>

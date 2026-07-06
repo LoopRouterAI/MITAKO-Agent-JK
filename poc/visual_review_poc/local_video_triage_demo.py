@@ -1,0 +1,884 @@
+# -*- coding: utf-8 -*-
+"""Gemini 3.5 Flash 单样本视觉审核。
+
+只做一件事：把一个本地视频抽帧 + 同目录补充图片 + 用户诉求交给 Gemini 3.5 Flash，
+生成一份可复盘 HTML。没有模型选型或双盲。
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import html
+import json
+import mimetypes
+import os
+import random
+import re
+import sys
+import time
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+import cv2
+import httpx
+import numpy as np
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from runtime_paths import app_root
+
+ROOT = app_root()
+POC_DIR = ROOT / "poc" / "visual_review_poc"
+REPORT_DIR = POC_DIR / "reports"
+TMP_DIR = ROOT / "tmp" / "visual_review_gemini35"
+SAMPLE_LABELS = ROOT / "docs" / "三大审核场景的小量样本" / "sample_labels.json"
+MODEL = "gemini-3.5-flash"
+GEMINI_35_FLASH_INPUT_USD_PER_1M = 1.50
+GEMINI_35_FLASH_OUTPUT_USD_PER_1M = 9.00
+GEMINI_PRICING_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
+DEFAULT_POLICY = {
+    "auto_confidence": 0.80,
+    "manual_confidence": 0.65,
+}
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Gemini 3.5 Flash 单样本视觉审核")
+    parser.add_argument("--video", required=True, help="本地视频路径")
+    parser.add_argument("--scenario", choices=["video_unboxing", "product_damage", "minor_material"], default="", help="强制指定审核场景")
+    parser.add_argument("--context-json", default="", help="客服证据包上下文 JSON")
+    parser.add_argument("--fps", type=float, default=1.0, help="抽帧频率，默认 1fps")
+    parser.add_argument("--max-frames", type=int, default=12, help="最多抽取帧数")
+    parser.add_argument("--api-frame-limit", type=int, default=12, help="最多送入模型的帧数")
+    parser.add_argument("--probe-seconds", type=float, default=0.0, help="只审核开头多少秒；0 表示覆盖全视频均匀抽帧")
+    parser.add_argument("--frame-width", type=int, default=960, help="抽帧图片最大宽度")
+    parser.add_argument("--supplemental-image-limit", type=int, default=12, help="同目录最多送入多少张补充图片")
+    parser.add_argument("--request-timeout", type=int, default=300, help="单次请求超时秒数")
+    parser.add_argument("--soft-retries", type=int, default=3, help="429/5xx 等软错误重试次数")
+    return parser.parse_args()
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def load_env() -> None:
+    load_env_file(ROOT / ".env")
+    load_env_file(ROOT.parent / "JK-PromptReview" / ".env")
+
+
+def h(value: Any) -> str:
+    return html.escape(str(value if value is not None else ""))
+
+
+def json_block(data: Any) -> str:
+    return h(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="ignore").strip() if path.exists() else ""
+
+
+def read_json(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(read_text(path) or "null")
+    except Exception:
+        return None
+
+
+def mime_for(path: Path) -> str:
+    return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+
+def encode_base64(path: Path) -> str:
+    return base64.b64encode(path.read_bytes()).decode("ascii")
+
+
+def image_meta(path: Path) -> Dict[str, Any]:
+    meta = {"bytes": path.stat().st_size if path.exists() else None, "width": None, "height": None, "has_exif": None}
+    try:
+        image = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        if image is not None:
+            meta["height"], meta["width"] = image.shape[:2]
+    except Exception:
+        pass
+    try:
+        from PIL import Image
+
+        with Image.open(path) as pil_image:
+            meta["has_exif"] = bool(pil_image.getexif())
+    except Exception:
+        meta["has_exif"] = None
+    return meta
+
+
+def infer_scenario(claim: str) -> str:
+    text = str(claim or "")
+    if any(word in text for word in ("有伤", "折损", "破损", "划痕", "损坏", "瑕疵")):
+        return "product_damage"
+    if any(word in text for word in ("未成年", "未成年人", "监护", "家长", "退费")):
+        return "minor_material"
+    return "video_unboxing"
+
+
+def format_time(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    remain = seconds - minutes * 60
+    return f"{minutes:02d}:{remain:05.2f}"
+
+
+def resize_frame(frame: Any, width: int) -> Any:
+    height, current_width = frame.shape[:2]
+    if current_width <= width:
+        return frame
+    ratio = width / current_width
+    return cv2.resize(frame, (width, int(height * ratio)), interpolation=cv2.INTER_AREA)
+
+
+def sample_video_frames(video: Path, fps: float, max_frames: int, probe_seconds: float, frame_width: int, run_dir: Path) -> Dict[str, Any]:
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise SystemExit(f"视频无法读取：{video}")
+    native_fps = cap.get(cv2.CAP_PROP_FPS) or 25
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    duration = total_frames / native_fps if native_fps else 0
+    scan_frames = total_frames
+    if probe_seconds > 0:
+        scan_frames = min(total_frames, int(native_fps * probe_seconds))
+    step = max(int(round(native_fps / max(fps, 0.1))), 1)
+    candidates = list(range(0, max(scan_frames, 1), step))
+    if len(candidates) > max_frames:
+        positions = [round(i * (len(candidates) - 1) / max(max_frames - 1, 1)) for i in range(max_frames)]
+        candidates = [candidates[pos] for pos in positions]
+
+    frame_dir = run_dir / "frames"
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    frames: List[Dict[str, Any]] = []
+    for frame_number in candidates:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        frame = resize_frame(frame, frame_width)
+        timestamp_seconds = round(frame_number / native_fps, 2) if native_fps else 0.0
+        path = frame_dir / f"frame_{len(frames) + 1:03d}_{timestamp_seconds:.2f}s.jpg"
+        cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, 84])
+        frames.append(
+            {
+                "frame_index": len(frames) + 1,
+                "timestamp": format_time(timestamp_seconds),
+                "timestamp_seconds": timestamp_seconds,
+                "file": path.name,
+                "path": str(path),
+                "uri": path.resolve().as_uri(),
+            }
+        )
+    cap.release()
+    if not frames:
+        raise SystemExit("没有抽到可用帧")
+    return {
+        "native_fps": round(native_fps, 2),
+        "duration_seconds": round(duration, 2),
+        "fps_requested": fps,
+        "probe_seconds": probe_seconds,
+        "sampled_frames": len(frames),
+        "frames": frames,
+    }
+
+
+def find_supplemental_images(video: Path, limit: int, resource_fields: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    images = [p for p in sorted(video.parent.iterdir()) if p.is_file() and p.suffix.lower() in image_exts]
+    return [
+        {
+            "image_index": index + 1,
+            "file": p.name,
+            "path": str(p),
+            "uri": p.resolve().as_uri(),
+            "mime_type": mime_for(p),
+            "fields": resource_fields.get(p.name, []),
+            **image_meta(p),
+        }
+        for index, p in enumerate(images[:limit])
+    ]
+
+
+def load_case(video: Path, supplemental_limit: int) -> Dict[str, Any]:
+    claim = read_text(video.parent / "content.txt")
+    manifest = {}
+    try:
+        manifest = json.loads(read_text(video.parent / "manifest.json") or "{}")
+    except Exception:
+        manifest = {}
+    evidence_assets = [
+        {
+            "file": item.get("local_file"),
+            "fields": item.get("fields") or [],
+            "status": item.get("status"),
+        }
+        for item in (manifest.get("resources") or [])
+        if item.get("local_file")
+    ]
+    resource_fields = {str(item.get("local_file")): item.get("fields") or [] for item in (manifest.get("resources") or []) if item.get("local_file")}
+    scenario = infer_scenario(claim)
+    structured_business_context = {
+        "order_items": read_json(video.parent / "order_items.json") or manifest.get("order_items") or [],
+        "product_master_data": read_json(video.parent / "product_master.json") or manifest.get("product_master_data") or {},
+        "warehouse_master_data": read_json(video.parent / "warehouse_master.json") or manifest.get("warehouse_master_data") or {},
+        "sku_master_data": read_json(video.parent / "sku_master.json") or manifest.get("sku_master_data") or {},
+    }
+    return {
+        "case_id": video.parent.name,
+        "scenario": scenario,
+        "scenario_label": {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "未成年人资料审核"}.get(scenario, scenario),
+        "video_file": video.name,
+        "video_path": str(video),
+        "customer_claim": claim,
+        "order_context": {
+            "ticket_id": manifest.get("id"),
+            "order_no": manifest.get("order_no"),
+            "tag": manifest.get("tag"),
+            "created_at": manifest.get("created_at"),
+        },
+        "evidence_assets": evidence_assets,
+        "structured_business_context": structured_business_context,
+        "supplemental_images": find_supplemental_images(video, supplemental_limit, resource_fields),
+    }
+
+
+def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: str) -> Dict[str, Any]:
+    """把工作台录入的客服证据包并入模型上下文。"""
+    if scenario:
+        case["scenario"] = scenario
+        case["scenario_label"] = {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "未成年人资料审核"}[scenario]
+    try:
+        context = json.loads(raw_context) if raw_context else {}
+    except json.JSONDecodeError:
+        context = {}
+    if not isinstance(context, dict):
+        context = {}
+    customer_claim = str(context.get("customer_claim") or "").strip()
+    if customer_claim:
+        case["customer_claim"] = customer_claim
+    order_context = case.setdefault("order_context", {})
+    for key in ("ticket_id", "user_id", "order_no", "logistics_status", "complaint_stage"):
+        value = str(context.get(key) or "").strip()
+        if value:
+            order_context[key] = value
+    structured = case.setdefault("structured_business_context", {})
+    frontdesk_fields = {
+        "order_item": str(context.get("order_item") or "").strip(),
+        "sku": str(context.get("sku") or "").strip(),
+        "product_master_data": str(context.get("product_master_data") or "").strip(),
+        "warehouse_master_data": str(context.get("warehouse_master_data") or "").strip(),
+        "conversation_history": str(context.get("conversation_history") or "").strip(),
+        "customer_tone": str(context.get("customer_tone") or "").strip(),
+    }
+    structured["frontdesk_evidence_package"] = {key: value for key, value in frontdesk_fields.items() if value}
+    return case
+
+
+def load_report_label(case_id: str) -> Dict[str, Any]:
+    if not SAMPLE_LABELS.exists():
+        return {"available": False}
+    try:
+        labels = json.loads(SAMPLE_LABELS.read_text(encoding="utf-8-sig")).get("samples") or {}
+    except Exception:
+        return {"available": False}
+    item = labels.get(case_id)
+    if not item:
+        return {"available": False}
+    return {
+        "available": True,
+        "source": "sample_labels.json，仅报告侧评测使用，未发送给模型",
+        "expected_predicted_label": item.get("expected_predicted_label"),
+        "human_conclusion": item.get("human_conclusion"),
+        "previous_human_conclusion": item.get("previous_human_conclusion"),
+    }
+
+
+def scenario_rules(scenario: str) -> str:
+    if scenario == "product_damage":
+        return """商品有伤专项规则：
+- 判断图片/视频是否能看到真实破损、折痕、划痕、压痕、掉漆或污损，并说明位置、数量、严重程度。
+- 判断证据是否像真实手机/相机拍摄：看纹理、光影、透视、噪点、EXIF 是否缺失、分辨率是否过低、是否存在 Gemini/OpenAI/豆包等 AI 水印或生成痕迹。
+- 缺 EXIF 不能单独否定用户，但应作为可信度因素；如果图像疑似 AI 生成、过度锐化、局部纹理异常或只给裁剪局部，应降低置信度并要求补拍。
+- 输出 positive 需要说明破损清晰可见且与用户诉求一致；输出 review 需要说明缺少哪类补拍角度。"""
+    if scenario == "minor_material":
+        return """未成年人资料审核专项规则：
+- 只判断材料是否完整、清晰、前后一致，不识别或暴露真实身份。
+- 必须要求人工终审；不得自动通过、自动退费或自动拒绝。
+- 重点检查监护关系证明、订单主体、付款主体、资料遮挡、重复使用和篡改痕迹。"""
+    return """开箱/发错货专项规则：
+- 如果订单截图/商品信息明确显示购买规格，实物包装或合格证明示另一个规格，并且能对应到同一角色/款式/SKU，这是强支持证据。
+- 缺 SKU 主数据时，不要机械降级为 review；要看订单截图、实物合格证、补充图和视频连续性是否已经形成足够证据链。
+- 如果视频连续性高、换货风险低，补充图片能对应同一实物，可以提高置信度；如果商品多次离镜、跳切或关键物品未从箱中出现，要降低置信度并说明。"""
+
+
+def build_system_prompt(scenario: str = "video_unboxing") -> str:
+    objective = {
+        "video_unboxing": "用户提供的实物、包装/合格证、开箱过程和补充图片，是否支持“发错货/发错尺寸/规格不一致”的用户诉求。",
+        "product_damage": "用户提供的视频、补充图片和工单材料，是否支持“商品到手已有破损/压痕/划痕/折损/污损”等商品有伤诉求，并判断图片真实性与证据强度。",
+        "minor_material": "用户提交的未成年人/监护人相关资料是否完整、清晰、前后一致，是否足以进入人工退费/售后终审。",
+    }.get(scenario, "用户提供的视觉材料是否支持当前售后诉求。")
+    return f"""你是二次元电商售后“{ {'video_unboxing': '开箱视频/发错货', 'product_damage': '商品有伤', 'minor_material': '未成年人资料'}.get(scenario, '视觉审核') }”首席视觉质检员。
+你的任务不是聊天，也不是业务裁决，而是围绕一个明确目标做证据审查：{objective}
+
+你擅长：
+- 从用户诉求中拆出“用户认为应该收到什么”和“用户认为实际收到什么”。
+- 从订单截图、商品截图、SKU/规格字段、补充图片中提取原始商品名、角色、款式、尺寸、数量、随机/盲抽规则。
+- 从实物图、包装袋、合格证、尺子或对比图中判断用户提供的实物到底是什么规格。
+- 逐帧审查开箱视频是否连续可信：箱子是否从未拆封开始，商品是否持续在镜头内，是否离镜、跳切、换手、遮挡、剪辑或可疑替换。
+- 同时给出支持证据和反证。证据足够时要敢于输出 positive 或 negative；证据不足时才输出 review。
+- 尺寸争议不能只看一个数字，要核对数字属于商品主体、原袋/外包装、展示卡、合格证还是官方销售口径。但如果订单截图明确承诺某规格，实物合格证/包装明确显示同一角色的另一规格，且视频连续性低可疑，可以形成高置信发错证据。
+
+硬边界：
+- 不自动退款、不自动拒赔、不自动补发、不自动定责。
+- business_action_allowed 必须为 false，human_required 必须为 true。
+- 只能使用提供的帧编号和时间戳，不能编造未提供的视频时间点。
+- 不要输出隐藏思维链；但必须输出可审计的审核方法、证据、反证、时间戳、结论论证和不确定性。
+
+{scenario_rules(scenario)}
+"""
+
+
+def build_user_prompt(case: Dict[str, Any], frame_sample: Dict[str, Any], frames: List[Dict[str, Any]]) -> str:
+    frame_inventory = [
+        {"frame_index": f["frame_index"], "timestamp": f["timestamp"], "file": f["file"]}
+        for f in frames
+    ]
+    image_inventory = [{"image_index": i["image_index"], "file": i["file"]} for i in case["supplemental_images"]]
+    scenario_label = case.get("scenario_label") or "视觉审核"
+    return f"""请审核一个{scenario_label}售后材料包。
+
+审核目标：
+判断用户诉求是否被当前证据支持。你必须把用户申诉文本、订单信息、SKU/规格、物流进度、历史投诉、人工客服对话、视频帧和补充图片作为同一个证据包综合判断；同时说明证据链强弱、是否需要人工补件、哪些时间戳或图片支撑结论。
+
+用户诉求：
+{case.get("customer_claim") or "未提供"}
+
+订单/工单上下文：
+{json.dumps(case.get("order_context") or {{}}, ensure_ascii=False)}
+
+结构化业务上下文：
+{json.dumps(case.get("structured_business_context") or {{}}, ensure_ascii=False)}
+
+证据资源字段说明：
+{json.dumps(case.get("evidence_assets") or [], ensure_ascii=False)}
+
+抽帧策略：
+{json.dumps({k: frame_sample[k] for k in ("fps_requested", "native_fps", "duration_seconds", "probe_seconds", "sampled_frames")}, ensure_ascii=False)}
+
+送入模型的视频帧清单：
+{json.dumps(frame_inventory, ensure_ascii=False)}
+
+送入模型的补充图片清单：
+{json.dumps(image_inventory, ensure_ascii=False)}
+
+请严格输出一个 JSON 对象，字段如下：
+- decision: pass / manual_review / request_more_material / fail。只表示 POC 流转，不代表业务裁决。
+- predicted_label: positive / negative / review。positive=材料支持用户当前诉求；negative=材料不支持或反驳用户当前诉求；review=证据不足。
+- confidence: 0 到 1。
+- system_yes_no: YES / NO / REVIEW。给后端策略用：YES=支持用户诉求；NO=不支持用户诉求；REVIEW=证据不足或需人工逐条复核。
+- confidence_reason: 为什么给这个置信度。
+- visual_evidence_verdict: 用一句话说明视觉质检结论，例如“视觉证据高度支持用户发错尺寸诉求”。这是证据结论，不是退款/补发等业务动作。
+- customer_claim_parse: 拆解 expected_item、claimed_received_item、claimed_mismatch_type。
+- expected_order_item: 从结构化字段或订单截图/商品截图中提取的原始商品名、SKU、规格、角色、款式、数量；没有就写 null，并说明从哪些图片尝试提取。
+- actual_received_item: 从实物图、包装、合格证、视频帧中提取的实际商品、角色、规格、尺寸、数量。
+- audit_methods: 实际使用的审核方法数组。
+- frame_findings: 每帧一句客观观察，必须含 frame_index、timestamp、visible_facts、risk。
+- supporting_evidence: 支持用户诉求的证据数组，每项含 source_type、frame_index/image_index、timestamp、file、description、confidence。
+- challenging_evidence: 反驳或削弱用户诉求的证据数组，每项含 source_type、frame_index/image_index、timestamp、file、description、confidence。
+- continuity_assessment: 包含 package_visible、shipping_label_visible、opening_action_visible、item_left_frame、suspected_cut、swap_risk_level、continuity_score、reason。
+- size_sku_assessment: 包含 order_required_size、actual_certificate_size、same_character_or_sku、master_data_used、master_data_missing、size_mouth_conflict、assessment。
+- issue_timestamps: 问题帧数组，只能使用上面帧清单中的时间戳。
+- skeptical_questions: 你主动质疑自己结论的问题数组。
+- material_gaps: 还缺什么材料。
+- conclusion_argument: 包含 support、challenge、why_not_final_business_decision。
+- business_action_allowed: false。
+- human_required: true。
+- business_follow_up_reason: 说明为什么还需要人工客服做业务跟进；如果视觉证据已经很强，要明确“人工跟进不是因为证据不足，而是因为业务动作需要客服系统执行”。
+- next_step: 给人工客服的下一步业务跟进建议，不能直接退款、拒赔、补发或定责。高置信 positive 时不要写得像“还没判断出来”，应写“按高度支持用户诉求的证据进入人工售后处理，并补充核对订单/SKU/仓库/物流记录用于业务闭环”。
+- model_limitations: 本次判断的局限。
+"""
+
+
+def gemini_channels() -> List[Dict[str, Any]]:
+    channels: List[Dict[str, Any]] = []
+    apiyi_key = os.getenv("APIYI_API_KEY", "")
+    if apiyi_key:
+        base = os.getenv("APIYI_GEMINI_BASE_URL", "https://api.apiyi.com").rstrip("/")
+        channels.append(
+            {
+                "channel": "API Yi Gemini 原生",
+                "model": MODEL,
+                "endpoint": f"{base}/v1beta/models/{MODEL}:generateContent",
+                "headers": {"x-goog-api-key": apiyi_key, "Content-Type": "application/json"},
+                "soft_retries": 3,
+            }
+        )
+    brouter_key = os.getenv("BRouter_API_KEY", "")
+    if brouter_key:
+        base = os.getenv("BROUTER_GEMINI_BASE_URL", "https://api.bananarouter.com").rstrip("/")
+        routed_model = f"gemini/{MODEL}"
+        channels.append(
+            {
+                "channel": "BananaRouter Gemini 原生",
+                "model": routed_model,
+                "endpoint": f"{base}/v1beta/models/{routed_model}:generateContent",
+                "headers": {"Authorization": f"Bearer {brouter_key}", "Content-Type": "application/json"},
+                "soft_retries": 1,
+            }
+        )
+    return channels
+
+
+def classify_error(status: Optional[int], text: str) -> str:
+    if status in {408, 409, 425, 429, 500, 502, 503, 504}:
+        return "soft"
+    lowered = (text or "").lower()
+    return "soft" if any(t in lowered for t in ("timeout", "rate limit", "overloaded", "temporarily")) else "hard"
+
+
+def post_json(channel: Dict[str, Any], payload: Dict[str, Any], timeout: int, soft_retries: int) -> Dict[str, Any]:
+    attempts = max(soft_retries, channel.get("soft_retries", 0)) + 1
+    last: Dict[str, Any] = {}
+    for attempt in range(1, attempts + 1):
+        started = time.time()
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(channel["endpoint"], headers=channel["headers"], json=payload)
+            latency = round(time.time() - started, 2)
+            if response.status_code < 400:
+                return {"ok": True, "attempt": attempt, "status_code": response.status_code, "latency_seconds": latency, "data": response.json()}
+            last = {
+                "ok": False,
+                "attempt": attempt,
+                "status_code": response.status_code,
+                "latency_seconds": latency,
+                "error_type": classify_error(response.status_code, response.text),
+                "error": response.text[:1500],
+                "retry_after": response.headers.get("Retry-After"),
+            }
+        except Exception as exc:
+            last = {"ok": False, "attempt": attempt, "status_code": None, "latency_seconds": round(time.time() - started, 2), "error_type": classify_error(None, str(exc)), "error": str(exc)[:1500]}
+        if last.get("error_type") != "soft" or attempt == attempts:
+            return last
+        retry_after = last.get("retry_after")
+        delay = min(float(retry_after), 30) if retry_after and str(retry_after).replace(".", "", 1).isdigit() else min(2 ** (attempt - 1), 10) + random.uniform(0.1, 0.5)
+        time.sleep(delay)
+    return last
+
+
+def extract_text(data: Dict[str, Any]) -> str:
+    parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+    return "\n".join(str(p.get("text", "")) for p in parts if isinstance(p, dict) and p.get("text")).strip()
+
+
+def extract_usage(data: Dict[str, Any]) -> Dict[str, Any]:
+    usage = data.get("usageMetadata") or {}
+    return {
+        "input_tokens": usage.get("promptTokenCount"),
+        "output_tokens": (usage.get("candidatesTokenCount") or 0) + (usage.get("thoughtsTokenCount") or 0),
+        "total_tokens": usage.get("totalTokenCount"),
+        "raw": usage,
+    }
+
+
+def estimate_cost(usage: Dict[str, Any]) -> Dict[str, Any]:
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    usd = input_tokens / 1_000_000 * GEMINI_35_FLASH_INPUT_USD_PER_1M + output_tokens / 1_000_000 * GEMINI_35_FLASH_OUTPUT_USD_PER_1M
+    return {
+        "estimated_usd": round(usd, 6),
+        "input_usd_per_1m": GEMINI_35_FLASH_INPUT_USD_PER_1M,
+        "output_usd_per_1m": GEMINI_35_FLASH_OUTPUT_USD_PER_1M,
+        "basis": "Google Gemini API Gemini 3.5 Flash 官方价格基准；第三方渠道可能另有加价。",
+        "source": GEMINI_PRICING_SOURCE,
+    }
+
+
+def parse_model_json(text: str) -> Dict[str, Any]:
+    cleaned = text.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        value = json.loads(cleaned)
+        return value if isinstance(value, dict) else {"raw_value": value}
+    except Exception:
+        match = re.search(r"\{.*\}", cleaned, re.S)
+        if match:
+            try:
+                value = json.loads(match.group(0))
+                return value if isinstance(value, dict) else {"raw_value": value}
+            except Exception:
+                pass
+    return {"raw_text": text}
+
+
+def enforce_boundary(result: Dict[str, Any]) -> Dict[str, Any]:
+    output = dict(result)
+    output["business_action_allowed"] = False
+    output["human_required"] = True
+    next_step = str(output.get("next_step") or "")
+    risky = ("退款", "退货", "退换", "理赔", "补偿", "赔付", "拒赔", "拒绝", "补发", "同意")
+    if any(word in next_step for word in risky):
+        output["next_step"] = "输出证据摘要并转人工复核，不直接退款、拒赔、补发或定责。"
+        output["boundary_enforced"] = True
+    return output
+
+
+def build_payload(system_prompt: str, user_prompt: str, frames: List[Dict[str, Any]], images: List[Dict[str, Any]]) -> Dict[str, Any]:
+    parts: List[Dict[str, Any]] = [{"text": user_prompt}]
+    for frame in frames:
+        path = Path(frame["path"])
+        parts.append({"text": f"视频帧 {frame['frame_index']} / {frame['timestamp']} / {frame['file']}"})
+        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": encode_base64(path)}})
+    for image in images:
+        path = Path(image["path"])
+        parts.append({"text": f"补充图片 {image['image_index']} / {image['file']}"})
+        parts.append({"inline_data": {"mime_type": image["mime_type"], "data": encode_base64(path)}})
+    return {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"parts": parts}],
+        "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1, "maxOutputTokens": 8192},
+    }
+
+
+def call_gemini(payload: Dict[str, Any], timeout: int, soft_retries: int) -> Dict[str, Any]:
+    attempts: List[Dict[str, Any]] = []
+    for channel in gemini_channels():
+        response = post_json(channel, payload, timeout, soft_retries)
+        attempt = {
+            "channel": channel["channel"],
+            "model": channel["model"],
+            "status_code": response.get("status_code"),
+            "latency_seconds": response.get("latency_seconds"),
+            "attempt": response.get("attempt"),
+            "ok": response.get("ok"),
+            "error_type": response.get("error_type"),
+            "error": response.get("error"),
+        }
+        if response.get("ok"):
+            raw_text = extract_text(response["data"])
+            parsed = enforce_boundary(parse_model_json(raw_text))
+            usage = extract_usage(response["data"])
+            attempt.update({"raw_text": raw_text, "parsed": parsed, "usage": usage, "cost": estimate_cost(usage)})
+            attempts.append(attempt)
+            return {"status": "success", "winner": attempt, "attempts": attempts}
+        attempts.append(attempt)
+        if response.get("error_type") == "soft":
+            continue
+    return {"status": "failed", "winner": None, "attempts": attempts}
+
+
+def evaluate(parsed: Dict[str, Any], label: Dict[str, Any]) -> Dict[str, Any]:
+    if not label.get("available"):
+        return {"available": False, "note": "没有报告侧人工标签。"}
+    expected = str(label.get("expected_predicted_label") or "")
+    actual = str(parsed.get("predicted_label") or "")
+    return {
+        "available": True,
+        "definition": "命中只表示模型 predicted_label 与报告侧人工标签一致；人工标签未发送给模型。",
+        "expected_predicted_label": expected,
+        "actual_predicted_label": actual,
+        "hit": actual == expected,
+        "status": "match" if actual == expected else "label_conflict",
+    }
+
+
+def policy_decision(parsed: Dict[str, Any], policy: Dict[str, Any] = DEFAULT_POLICY) -> Dict[str, Any]:
+    label = str(parsed.get("predicted_label") or "").lower()
+    confidence = float(parsed.get("confidence") or 0)
+    if label in {"positive", "negative"} and confidence >= float(policy["auto_confidence"]):
+        return {
+            "system_yes_no": "YES" if label == "positive" else "NO",
+            "review_mode": "high_confidence_sample_review",
+            "action": "高置信参考结论，可进入人工抽检队列。",
+            "threshold": policy,
+        }
+    if confidence < float(policy["manual_confidence"]) or label == "review":
+        return {
+            "system_yes_no": "REVIEW",
+            "review_mode": "full_manual_review",
+            "action": "低置信或证据不足，要求人工逐条查看。",
+            "threshold": policy,
+        }
+    return {
+        "system_yes_no": "REVIEW",
+        "review_mode": "manual_review",
+        "action": "中等置信，建议人工复核后再进入业务处理。",
+        "threshold": policy,
+    }
+
+
+def detail(title: str, data: Any, open_: bool = True) -> str:
+    return f"<details {'open' if open_ else ''}><summary>{h(title)}</summary><pre>{json_block(data)}</pre></details>"
+
+
+def render_html(report: Dict[str, Any]) -> str:
+    parsed = ((report.get("gemini") or {}).get("winner") or {}).get("parsed") or {}
+    winner = (report.get("gemini") or {}).get("winner") or {}
+    evaluation = report.get("evaluation") or {}
+    frames = report.get("frames") or []
+    images = report.get("supplemental_images") or []
+    hit_text = "命中" if evaluation.get("hit") else "未命中" if evaluation.get("available") else "未评测"
+    size_sku = parsed.get("size_sku_assessment") or {}
+    continuity = parsed.get("continuity_assessment") or {}
+    supporting = parsed.get("supporting_evidence") or []
+    challenging = parsed.get("challenging_evidence") or []
+    policy = report.get("policy_decision") or policy_decision(parsed)
+    cost = winner.get("cost") or estimate_cost(winner.get("usage") or {})
+    label = str(parsed.get("predicted_label") or "")
+    confidence = parsed.get("confidence")
+    if parsed.get("visual_evidence_verdict"):
+        visual_verdict = str(parsed.get("visual_evidence_verdict"))
+    elif label == "positive":
+        visual_verdict = f"视觉证据支持用户诉求，置信度 {confidence}。"
+    elif label == "negative":
+        visual_verdict = f"视觉证据不支持用户诉求，置信度 {confidence}。"
+    else:
+        visual_verdict = f"视觉证据仍需复核，置信度 {confidence}。"
+    follow_up_reason = parsed.get("business_follow_up_reason") or "这里的人工跟进不是在否定视觉结论，而是因为退款、补发、拒赔、库存核对等业务动作必须由客服系统或人工坐席执行。"
+
+    def evidence_cards(items: List[Dict[str, Any]], empty: str) -> str:
+        if not items:
+            return f'<p class="muted">{h(empty)}</p>'
+        cards = []
+        for item in items:
+            source = item.get("file") or item.get("timestamp") or item.get("source_type") or "-"
+            cards.append(
+                '<div class="evidence-card">'
+                f'<small>{h(item.get("source_type") or "evidence")} · {h(source)}</small>'
+                f'<p>{h(item.get("description") or item)}</p>'
+                f'<b>置信度 {h(item.get("confidence"))}</b>'
+                '</div>'
+            )
+        return "".join(cards)
+
+    frame_figures = "".join(
+        f'<figure><a class="media-link" href="#frame-{h(f["frame_index"])}" title="点击放大">'
+        f'<img src="{h(f["uri"])}" alt="{h(f["file"])}"></a>'
+        f'<figcaption>帧{h(f["frame_index"])} · {h(f["timestamp"])} · 点击放大</figcaption></figure>'
+        for f in frames
+    )
+    image_figures = "".join(
+        f'<figure><a class="media-link" href="#image-{h(i["image_index"])}" title="点击放大">'
+        f'<img src="{h(i["uri"])}" alt="{h(i["file"])}"></a>'
+        f'<figcaption>补充图{h(i["image_index"])} · {h(i["file"])} · 点击放大</figcaption></figure>'
+        for i in images
+    )
+    lightboxes = "".join(
+        f'<a id="frame-{h(f["frame_index"])}" class="lightbox" href="#" aria-label="关闭放大图">'
+        f'<img src="{h(f["uri"])}" alt="{h(f["file"])}">'
+        f'<span>帧{h(f["frame_index"])} · {h(f["timestamp"])} · 点击任意处关闭</span></a>'
+        for f in frames
+    ) + "".join(
+        f'<a id="image-{h(i["image_index"])}" class="lightbox" href="#" aria-label="关闭放大图">'
+        f'<img src="{h(i["uri"])}" alt="{h(i["file"])}">'
+        f'<span>补充图{h(i["image_index"])} · {h(i["file"])} · 点击任意处关闭</span></a>'
+        for i in images
+    )
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gemini 3.5 Flash 单样本审核报告</title>
+  <style>
+    body {{ margin:0; font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif; color:#182421; background:#f6fbf7; }}
+    main {{ max-width:1280px; margin:0 auto; padding:24px 16px 56px; }}
+    section {{ background:white; border:1px solid #dce8e3; border-radius:8px; padding:18px; margin:14px 0; box-shadow:0 12px 34px rgba(20,40,34,.07); }}
+    h1 {{ margin:0 0 8px; font-size:30px; letter-spacing:0; }}
+    h2 {{ margin:0 0 12px; font-size:20px; letter-spacing:0; }}
+    p, li {{ line-height:1.7; }}
+    .muted {{ color:#66736f; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; }}
+    .cell {{ border:1px solid #dce8e3; border-radius:8px; padding:10px; background:#fbfdf9; }}
+    .cell small {{ display:block; color:#66736f; margin-bottom:5px; }}
+    .wide {{ grid-column:1 / -1; }}
+    .evidence-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; }}
+    .evidence-card {{ border:1px solid #dce8e3; border-radius:8px; padding:12px; background:#fbfdf9; }}
+    .evidence-card small {{ display:block; color:#66736f; margin-bottom:6px; }}
+    .evidence-card p {{ margin:0 0 8px; }}
+    .pill {{ display:inline-flex; border-radius:999px; padding:5px 10px; border:1px solid #c9ded5; background:#eaf7ef; color:#0f5d3f; font-size:12px; }}
+    .fail {{ background:#fde8e5; color:#8f2f2a; border-color:#f2beb9; }}
+    .media {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; }}
+    figure {{ margin:0; border:1px solid #dce8e3; border-radius:8px; overflow:hidden; background:white; }}
+    .media-link {{ display:block; cursor:zoom-in; }}
+    .media img {{ display:block; width:100%; aspect-ratio:16/9; object-fit:cover; background:#111; }}
+    figcaption {{ padding:7px 9px; color:#66736f; font-size:12px; }}
+    .lightbox {{ position:fixed; inset:0; z-index:50; display:none; place-items:center; padding:24px; background:rgba(7,16,13,.88); cursor:zoom-out; text-decoration:none; }}
+    .lightbox:target {{ display:grid; }}
+    .lightbox img {{ max-width:96vw; max-height:86vh; width:auto; height:auto; object-fit:contain; border-radius:8px; background:#111; box-shadow:0 20px 80px rgba(0,0,0,.45); }}
+    .lightbox span {{ margin-top:12px; color:#fff; font-size:14px; }}
+    details {{ border:1px dashed #d1e2db; border-radius:8px; padding:9px 11px; margin:10px 0; background:#fbfdf9; }}
+    summary {{ cursor:pointer; font-weight:700; }}
+    pre {{ white-space:pre-wrap; word-break:break-word; max-height:520px; overflow:auto; background:#14221e; color:#eaf4ef; border-radius:8px; padding:12px; font-size:12px; }}
+  </style>
+</head>
+<body>
+{lightboxes}
+<main>
+  <section>
+    <span class="pill">单样本审计</span>
+    <h1>Gemini 3.5 Flash 单样本审核报告</h1>
+    <p>本报告只验证一个开箱/发错货样本能否被 Gemini 3.5 Flash 审核清楚；不做模型选型，不设计多模型复核。</p>
+  </section>
+
+  <section>
+    <h2>审核目标与证据包</h2>
+    <div class="grid">
+      <div class="cell"><small>用户诉求</small><b>{h((report.get("case") or {}).get("customer_claim"))}</b></div>
+      <div class="cell"><small>视频帧</small><b>{h(len(frames))} 张</b></div>
+      <div class="cell"><small>补充图片</small><b>{h(len(images))} 张</b></div>
+      <div class="cell"><small>结构化主数据</small><b>{h("已提供" if any((report.get("case") or {}).get("structured_business_context", {}).values()) else "未提供，需从图片证据提取")}</b></div>
+      <div class="cell wide"><small>本轮判断目标</small><b>核对订单要求的角色/款式/尺寸与用户实际收到的实物、包装、合格证是否一致，并评估开箱视频一镜到底可信度和调包风险。</b></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>模型到底说了什么</h2>
+    <div class="grid">
+      <div class="cell"><small>API 状态</small><b>{h(report["gemini"].get("status"))}</b></div>
+      <div class="cell"><small>模型</small><b>{h(winner.get("model") or MODEL)}</b></div>
+      <div class="cell"><small>模型结论 decision</small><b>{h(parsed.get("decision"))}</b></div>
+      <div class="cell"><small>诉求标签 predicted_label</small><b>{h(parsed.get("predicted_label"))}</b></div>
+      <div class="cell"><small>后端可读结论</small><b>{h(parsed.get("system_yes_no") or policy.get("system_yes_no"))}</b></div>
+      <div class="cell"><small>置信度</small><b>{h(parsed.get("confidence"))}</b></div>
+      <div class="cell"><small>历史标签对比</small><b>{h(hit_text)}</b></div>
+      <div class="cell"><small>耗时</small><b>{h(winner.get("latency_seconds"))}s</b></div>
+      <div class="cell"><small>Token</small><b>{h((winner.get("usage") or {}).get("total_tokens"))}</b></div>
+      <div class="cell"><small>估算成本</small><b>${h(cost.get("estimated_usd"))}</b></div>
+      <div class="cell wide"><small>策略动作</small><b>{h(policy.get("action"))}</b><p class="muted">阈值：高置信 ≥ {h((policy.get("threshold") or {}).get("auto_confidence"))}；低置信 &lt; {h((policy.get("threshold") or {}).get("manual_confidence"))}。</p></div>
+    </div>
+    <p><b>视觉质检结论：</b>{h(visual_verdict)}</p>
+    <p><b>模型核心理由：</b>{h(parsed.get("confidence_reason"))}</p>
+    <p><b>业务跟进建议：</b>{h(parsed.get("next_step"))}</p>
+    <p><b>为什么还要人工：</b>{h(follow_up_reason)}</p>
+    <p><b>历史标签对比是什么意思：</b>这是报告侧用本地人工标签做的回归对照，不是 Gemini 输出，也不是业务裁决。如果旧人工标签被复盘修正，报告会按修正后的标签重新评测。</p>
+    <p><b>是否泄题：</b>这是报告侧说明，不是 Gemini 输出。发送给模型的是用户诉求、订单上下文、抽帧帧号/时间戳、补充图片文件名和图片内容；没有发送 sample_labels.json、human_conclusion、expected_predicted_label 或人工答案。</p>
+    <p class="muted">成本估算按 Gemini 3.5 Flash 官方 Token 单价基准计算，第三方渠道可能另有加价。来源：{h(cost.get("source") or GEMINI_PRICING_SOURCE)}</p>
+  </section>
+
+  <section>
+    <h2>规格与连续性判断</h2>
+    <div class="grid">
+      <div class="cell"><small>订单要求</small><pre>{json_block(parsed.get("expected_order_item"))}</pre></div>
+      <div class="cell"><small>实际实物</small><pre>{json_block(parsed.get("actual_received_item"))}</pre></div>
+      <div class="cell wide"><small>尺寸/SKU 结论</small><p>{h(size_sku.get("assessment"))}</p></div>
+      <div class="cell wide"><small>视频连续性与调包风险</small><p>{h(continuity.get("reason"))}</p><p class="muted">连续性分数：{h(continuity.get("continuity_score"))}；调包风险：{h(continuity.get("swap_risk_level"))}</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>模型采信的证据</h2>
+    <div class="evidence-grid">{evidence_cards(supporting, "模型未列出支持证据。")}</div>
+    <h2 style="margin-top:16px">模型列出的反证或风险</h2>
+    <div class="evidence-grid">{evidence_cards(challenging, "模型未列出明显反证。")}</div>
+  </section>
+
+  <section>
+    <h2>送入模型的帧</h2>
+    <div class="media">{frame_figures}</div>
+  </section>
+
+  <section>
+    <h2>送入模型的补充图片</h2>
+    <div class="media">{image_figures or '<p>无</p>'}</div>
+  </section>
+
+  <section>
+    <h2>报告详情</h2>
+    {detail("发送给模型的 SystemPrompt", report.get("system_prompt"))}
+    {detail("发送给模型的审核任务 Prompt", report.get("user_prompt"))}
+    {detail("输入证据包摘要", report.get("case"))}
+    {detail("模型原始返回全文", winner.get("raw_text"))}
+    {detail("模型返回 JSON 解析结果", parsed)}
+    {detail("报告侧人工评测标签", report.get("report_label"))}
+    {detail("报告侧评测结果", evaluation)}
+    {detail("请求统计与重试", {"winner": {k: v for k, v in winner.items() if k not in {"raw_text", "parsed"}}, "attempts": report["gemini"].get("attempts")}, False)}
+  </section>
+</main>
+</body>
+</html>"""
+
+
+def run(args: argparse.Namespace) -> Dict[str, Any]:
+    load_env()
+    video = Path(args.video).expanduser().resolve()
+    if not video.exists():
+        raise SystemExit(f"视频不存在：{video}")
+    if not gemini_channels():
+        raise SystemExit("未找到 Gemini 渠道 Key：需要 APIYI_API_KEY 或 BRouter_API_KEY")
+
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    run_dir = TMP_DIR / stamp
+    run_dir.mkdir(parents=True, exist_ok=True)
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+    case = load_case(video, args.supplemental_image_limit)
+    case = apply_frontdesk_context(case, args.scenario, args.context_json)
+    frame_sample = sample_video_frames(video, args.fps, args.max_frames, args.probe_seconds, args.frame_width, run_dir)
+    frames = frame_sample["frames"][: max(1, args.api_frame_limit)]
+    system_prompt = build_system_prompt(case["scenario"])
+    user_prompt = build_user_prompt(case, frame_sample, frames)
+    payload = build_payload(system_prompt, user_prompt, frames, case["supplemental_images"])
+    gemini = call_gemini(payload, args.request_timeout, args.soft_retries)
+    parsed = ((gemini.get("winner") or {}).get("parsed") or {})
+    report_label = load_report_label(case["case_id"])
+    report = {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "model": MODEL,
+        "case": {
+            "case_id": case["case_id"],
+            "scenario": case["scenario"],
+            "scenario_label": case["scenario_label"],
+            "video_file": case["video_file"],
+            "customer_claim": case["customer_claim"],
+            "order_context": case["order_context"],
+            "structured_business_context": case["structured_business_context"],
+            "evidence_assets": case["evidence_assets"],
+        },
+        "frame_sampling": {k: v for k, v in frame_sample.items() if k != "frames"},
+        "frames": frames,
+        "supplemental_images": case["supplemental_images"],
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "not_sent_to_model": ["sample_labels.json", "human_conclusion", "expected_predicted_label", "人工答案"],
+        "gemini": gemini,
+        "report_label": report_label,
+        "evaluation": evaluate(parsed, report_label),
+        "policy_decision": policy_decision(parsed),
+    }
+    json_path = REPORT_DIR / f"gemini35_single_audit_{stamp}.json"
+    html_path = REPORT_DIR / f"gemini35_single_audit_{stamp}.html"
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    html_path.write_text(render_html(report), encoding="utf-8")
+    return {"json_report": str(json_path), "html_report": str(html_path), "summary": report["evaluation"]}
+
+
+def main() -> int:
+    result = run(parse_args())
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

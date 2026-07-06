@@ -1,57 +1,26 @@
-# MITAKO 双系统交付与测试指南（索引）
+# MITAKO 客服系统交付文档索引
 
-> **V1 平台工程验收** · 2026-06 · 业务 SOP 执行见 [product/sop-coverage-gap.md](../product/sop-coverage-gap.md)
+本目录用于说明当前 POC 的启动、验收、部署和交付边界。当前交付范围为智能客服、人工客服工作台、运营后台、业务适配层和视觉审核工作台；旧版陪伴与角色扮演服务线已封存，不再纳入当前验收。
 
-## 两套产品
+## 文档清单
 
-| 系统 | 用户价值 | 前台 | 后台/运营 | 交付文档 |
-|------|----------|------|-----------|----------|
-| **A · 智能客服 + 人机协同** | SOP 对话、转人工、坐席协同 | `/` | `/desk` `/admin` | [system-a-cs-platform.md](./system-a-cs-platform.md) |
-| **B · Companion 陪伴** | 情绪价值、消费助理、独立运营 | `/companion` | `/companion-desk` | [system-b-companion.md](./system-b-companion.md) |
+| 文档 | 适合阅读对象 | 用途 |
+|---|---|---|
+| [system-a-cs-platform.md](./system-a-cs-platform.md) | 客服负责人、运营负责人 | 智能客服、转人工、坐席台与运营后台能力说明 |
+| [customer-integration-materials-checklist.md](./customer-integration-materials-checklist.md) | 甲方开发、客服负责人 | 真实联调前需要准备的接口、样例和规则 |
+| [acceptance-checklist-v1.md](./acceptance-checklist-v1.md) | 双方项目经理、验收负责人 | 现场验收与 UAT 清单 |
+| [deployment-guide.md](./deployment-guide.md) | 部署负责人、我方实施 | 本地验证环境启动方式 |
+| [testing-guide.md](./testing-guide.md) | 测试、客服负责人 | 回归测试和手工验收方式 |
+| [integration-lab.md](./integration-lab.md) | 双方开发、信息化负责人 | 联调前的接口契约演练方式 |
+| [openapi.yaml](./openapi.yaml) | 甲方 Java 开发、我方研发 | POC 接口契约草案 |
+| [java-client-sample.md](./java-client-sample.md) | 甲方 Java 开发、我方研发 | Spring Boot 接入样例 |
+| [poc-uat-checklist.md](./poc-uat-checklist.md) | 双方项目经理、验收负责人 | POC UAT 签收表 |
+| [capacity-planning.md](./capacity-planning.md) | 架构、运维 | 生产部署容量规划输入 |
+| [observability-runbook.md](./observability-runbook.md) | 运维、研发 | 7×24 可观测与排障 |
+| [data-model-compliance-checklist.md](./data-model-compliance-checklist.md) | 法务、研发、客服负责人 | 数据安全与模型合规清单 |
 
-## 从这里开始（根目录）
+## 当前边界
 
-| 文档 | 读者 |
-|------|------|
-| **[../开发上手.md](../开发上手.md)** | 研发必读 |
-| **[../测试指南.md](../测试指南.md)** | 测试必读 |
-| **[../打包说明.md](../打包说明.md)** | 维护方打包 |
+交付包用于验证客服 Agent、人工接手、后台运营、视觉审核工作台、服务记录和审计链路。订单、售后、仓库、财务、私域触达与视觉审核生产接口需要在真实联调阶段接入甲方测试环境。
 
-## 合作方必读（部署 / 对接 / 测试）
-
-| 文档 | 读者 | 内容 |
-|------|------|------|
-| [deployment-guide.md](./deployment-guide.md) | 我方运维 + 甲方 IT | 环境、构建、启动、生产 env |
-| [testing-guide.md](./testing-guide.md) | 双方 QA | **双系统测试脚本 + 手工 UAT 指南** |
-| [engineer-onboarding.md](./engineer-onboarding.md) | **我方研发** | 克隆 → 启动 → E2E → 联调 |
-| [integration-lab.md](./integration-lab.md) | 集成工程师 | **甲方模拟终端**自联调 |
-| [../api/rest-api-overview.md](../api/rest-api-overview.md) | 开发 | REST API 索引 |
-| [../integration/sso-oidc-guide.md](../integration/sso-oidc-guide.md) | 甲方 IdP | SSO 配合项 |
-| [../integration/chatwoot-guide.md](../integration/chatwoot-guide.md) | 甲方业务 | IM 全包交付与 UAT |
-| [acceptance-checklist-v1.md](./acceptance-checklist-v1.md) | 项目经理 | V1 签字验收清单 |
-
-## 测试脚本（Windows）
-
-| 脚本 | 说明 |
-|------|------|
-| `scripts/双系统测试-Windows.bat` | **主菜单** |
-| `scripts/双系统测试-手工UAT-Windows.bat` | 启动 + 五端 + 冒烟 |
-| `scripts/双系统测试-自动化-Windows.bat` | 全量 E2E |
-| `scripts/双系统测试-全链路-Windows.bat` | E2E + 联调实验室 |
-| `scripts/dual_system_smoke_test.py` | API 冒烟 |
-
-指南：[testing-guide.md](./testing-guide.md)
-
-## 甲方模拟终端（解耦）
-
-目录：`tools/partner_lab/` — **不 import** MITAKO 业务代码，仅 HTTP 契约。
-
-```
-启动甲方模拟终端-Windows.bat           → 仅 Mock :9101/:9102/:9103
-联调-MITAKO对接模拟终端-Windows.bat    → Mock + Live MITAKO + 自测（发版前必跑）
-scripts/seed_lab_tenant.py             → 写入 bpo-east 联调 OIDC
-```
-
-## 最近 E2E 报告
-
-`tests/reports/` — 全量见 [../testing/e2e-coverage.md](../testing/e2e-coverage.md)
+真实联调前，甲方需要提供接口契约、测试环境地址、脱敏样例、权限规则、人工复核标准和验收口径。双方确认范围后，再将脱敏样例能力替换为甲方测试环境能力。

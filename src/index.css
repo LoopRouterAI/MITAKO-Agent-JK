@@ -1,5 +1,9 @@
 @import './styles/tokens.css';
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -17,13 +21,73 @@ body {
   color: var(--mitako-ink);
   background-color: #ffffff;
   background-image:
-    radial-gradient(at 0% 0%, rgba(200, 255, 26, 0.12) 0, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(123, 97, 255, 0.07) 0, transparent 50%);
-  overflow: hidden;
+    linear-gradient(90deg, rgba(17, 20, 17, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(17, 20, 17, 0.035) 1px, transparent 1px);
+  background-size: 34px 34px;
+  overflow-x: hidden;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   touch-action: manipulation;
 }
 
+.mitako-ppt-scope {
+  color: var(--mitako-ink);
+}
+
+.mitako-emote {
+  display: inline-block;
+  width: 3.5rem;
+  height: 3.5rem;
+  margin: 0 0.25rem 0.15rem;
+  vertical-align: middle;
+  object-fit: cover;
+  object-position: top;
+  border: 2px solid var(--mitako-ink);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 3px 3px 0 rgba(17, 20, 17, 0.9);
+}
+
+.mitako-ppt-scope :is(.rounded-xl, .rounded-2xl, .rounded-3xl, .rounded-full) {
+  border-radius: 8px !important;
+}
+
+.mitako-ppt-scope :is(.backdrop-blur, .backdrop-blur-sm, .backdrop-blur-md, .backdrop-blur-\[2px\], .backdrop-blur-\[3px\]) {
+  backdrop-filter: blur(14px);
+}
+
+.mitako-ppt-scope :is(button, a, input, select, textarea) {
+  border-radius: 8px;
+}
+
+.mitako-ppt-scope :is([class*="rounded-full"]) {
+  border-radius: 8px !important;
+}
+
+.mitako-ppt-scope :is(input, select, textarea) {
+  border: 1px solid rgba(16, 19, 31, 0.18) !important;
+  background: #fff !important;
+  color: var(--mitako-ink) !important;
+}
+
+.mitako-ppt-scope .tool-panel,
+.mitako-ppt-scope .metric-card {
+  border: 1px solid rgba(16, 19, 31, 0.10);
+  box-shadow: var(--shadow-soft);
+}
+
 #main-content {
   scroll-margin-top: 1rem;
+}
+
+button, input, select, textarea {
+  letter-spacing: 0;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgba(155, 200, 74, 0.75);
+  outline-offset: 2px;
 }

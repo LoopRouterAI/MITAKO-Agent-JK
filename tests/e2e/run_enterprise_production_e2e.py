@@ -8,10 +8,11 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+sys.path.insert(0, os.path.dirname(__file__))
 
 import httpx
 
-from tests.e2e.e2e_lib import CaseResult, admin_auth_headers, discover_base, REPORT_DIR, render_report
+from e2e_lib import CaseResult, admin_auth_headers, discover_base, REPORT_DIR, render_report
 
 
 async def run_enterprise_suite() -> list[CaseResult]:
@@ -26,25 +27,39 @@ async def run_enterprise_suite() -> list[CaseResult]:
 
         st = await client.get(f"{base}/api/v1/auth/status")
         status = st.json() if st.status_code == 200 else {}
-        sso_demo = bool(status.get("sso_demo_enabled"))
+        sso_demo = bool(status.get("sso_local_enabled"))
 
         t0 = time.time()
         ar = await client.get(f"{base}/api/v1/auth/sso/bpo-east/authorize")
-        state = ar.json().get("state", "")
+        authorize = ar.json() if ar.status_code == 200 else {}
+        state = authorize.get("state", "")
         if sso_demo:
-            cb = await client.get(
-                f"{base}/api/v1/auth/sso/demo/complete",
-                params={"tenant_id": "bpo-east", "state": state},
+            authorize_ok = (
+                authorize.get("ok") is True
+                and bool(state)
+                and bool(authorize.get("authorize_url") or authorize.get("local_callback_url"))
             )
-            ok = cb.json().get("ok") and bool(cb.json().get("token"))
-            detail = cb.json().get("user", {}).get("tenant_id", "")
-        else:
+            cb = await client.get(
+                f"{base}/api/v1/auth/sso/local/complete",
+                params={"tenant_id": "bpo-east", "state": state},
+            ) if authorize_ok else None
+            body = cb.json() if cb is not None else {}
+            ok = authorize_ok and body.get("ok") and bool(body.get("token"))
+            detail = body.get("user", {}).get("tenant_id", "") if body else f"authorize_failed:{authorize.get('error')}"
+        elif authorize.get("ok") is False:
+            ok = authorize.get("error") == "oidc_not_configured"
+            detail = authorize.get("error", "authorize_failed")
+        elif authorize.get("ok") is True and state and authorize.get("authorize_url"):
             cb = await client.post(
                 f"{base}/api/v1/auth/sso/callback",
                 json={"tenant_id": "bpo-east", "code": "demo_ok", "state": state},
             )
-            ok = cb.json().get("error") in ("invalid_state", "demo_disabled", "oidc_not_configured", "token_exchange_failed")
-            detail = cb.json().get("error", "production_oidc_expected")
+            body = cb.json()
+            ok = body.get("error") in ("demo_disabled", "oidc_not_configured", "token_exchange_failed", "real_partner_api_blocked")
+            detail = body.get("error", "production_oidc_expected")
+        else:
+            ok = False
+            detail = f"bad_authorize_contract:{authorize}"
         results.append(CaseResult("ENT", "admin", "SSO-flow", ok, detail, int((time.time() - t0) * 1000)))
 
         sid = f"ent_cw_{int(time.time())}"

@@ -1,104 +1,45 @@
 # MITAKO Agent 更新日志
 
-本文件记录项目主要版本与近期改动。更细分的交付/安全变更见 [`docs/changelog/`](./docs/changelog/)。
+本文记录对外可说明的关键变更。真实交付、部署与验收以 `docs/delivery/`、`甲方沟通交付文档/`、`我方内部开发文档/` 为准。
 
----
+## 2026-07-06 项目整理与客服交互验收收口
 
-## [未发版] 2026-06-26 — 私人仓库初始化
+- 重写项目 README、更新日志、环境变量示例和 Git 忽略规则，修复根文档乱码问题。
+- 补齐用户端客服交互验收报告：`tests/reports/customer_chat_acceptance_20260706.html` 与 `.md`。
+- 用户端新增 6 类演示用户：延期 180 天、抽奖质疑、破损售后、正常在途、新用户、未成年人退款。
+- 订单筛选语义收口：“需优先处理”只展示风险/人工关注信号，“在途/待发”展示普通物流与待出库状态。
+- 商品工具列表扩充为 11 条，覆盖现货、预售、盲抽、规格、破损售后、未成年人退款等典型咨询入口。
+- 清空对话后的欢迎流程改为分阶段 Loading：接入智能客服、同步服务记录、展示推荐或新用户引导。
+- 验证通过：`npm run build`、`python -m py_compile business_api.py main.py`、`python scripts/dual_system_smoke_test.py`。
 
-### 仓库与同步
+## 2026-07-05 客服 Agent 与视觉审核交付路径收敛
 
-- 初始化 Git 仓库，目标远程：`https://github.com/jackdiy/MITAKO-Agent`
-- **纳入版本库**：`.env`、`data/*.db`、`viking_memory/`、`dist/`、文档与 Spec
-- **排除**：`venv/`、`node_modules/`、`.codegraph/`、SQLite 临时锁文件（`*.db-wal` / `*.db-shm`）
-- 业务 SQLite 均使用项目内相对路径 `data/`，拉取后无需改配置即可沿用会话与账号数据
+- 旧版 Companion、陪伴、文字冒险、角色扮演服务线从主系统入口、API、构建入口和回归范围中剥离。
+- 客服 Agent 保留 MBTI/服务人格，但定位调整为“专业、同理、有边界的服务型助手”。
+- 新增甲方与我方两套独立文档系统，分别面向甲方决策/客服/Java 开发与我方正式研发/测试/实施。
+- 视觉审核工作台继续作为三大优先场景 POC：开箱视频/发错货、商品有伤、未成年人资料审核。
+- 当前甲方真实后台、客户系统、订单、仓库、财务和 IM 接口仍按接口契约与联调适配层推进，不伪装为已真实对接。
 
-### 跨设备同步建议
+## 2026-07-04 视觉审核模型选型与报告重做
 
-1. **推送前**：停止 `一键启动-Windows.bat` 或占用 8000 端口的进程，避免 SQLite 写入冲突
-2. **拉取后**：`setup_venv.bat`（若未建 venv）→ `npm install` → 直接启动；`.env` 与 `data/` 已随仓库同步
-3. **冲突处理**：若 `data/*.db` 出现 merge 冲突，保留较新一方或在本机备份后选用一份完整库文件
+- 聚焦 Gemini 3.5 Flash 重新设计单样本审核报告，避免泄露人工标签给模型。
+- 将开箱视频、多视频、补充图片、用户诉求、订单 SKU、主数据要求合并为证据包。
+- 移除传统 YOLO 路线在当前三大审核场景中的主线地位，改为多模态理解模型输出结构化审核结论和证据链。
+- 增加模型选型对比思路：同一 Case 多次测试稳定性、耗时、Token、成本、结论、证据时间戳。
 
-### 数据文件说明（`data/`）
+## 2026-07-02 客户验证包安全与验收修订
 
-| 文件 | 用途 |
-|------|------|
-| `auth.db` | 用户/租户/SSO 相关认证数据 |
-| `admin.db` | 坐席档案、补偿审批等管理后台 |
-| `handoff.db` | 转人工会话、消息、转交审计 |
-| `companion.db` | Companion 陪伴会话、trace、冒险模式等 |
+- 客户验证包统一通过 `scripts/package_release.ps1` 生成，不建议手工压缩源码仓库。
+- 打包门禁检查本地配置、数据库、源码、测试产物、临时目录和客户不可见术语。
+- 视觉审核工作台关闭内部模型渠道、Prompt、Key、调试参数等客户不可见信息。
+- 主客服链路增加普通回复净化、订单/物流业务语义校验、严格鉴权下 WebSocket 会话存在性检查。
 
----
+## 2026-06 客服 Agent 验证版
 
-## 2026-06 — Companion 可观测重构（Spec 011）
+- 建立用户端客服、人工坐席台、运营后台、转人工、坐席接单、坐席回复、升级处理、补偿审批和服务记录链路。
+- 建立视觉审核工作台，支持本地视频上传、公开视频链接解析、抽帧策略配置和复核摘要输出。
+- 建立客户对接物料清单、测试指南、部署指南和验收清单。
 
-### 用户端 `/companion`
+## 本地数据说明
 
-- 粉色多巴胺配色 + **PhoneFrame** 手机竖屏体验，与系统 A 视觉语言对齐
-- 右侧 **AgentMonitor**：LangGraph 节点 trace、API 日志、情绪与安全 capsule
-- 修复 SSE 解析不稳定导致的「无回复」问题；无 API Key 时提供 fallback 回复
-
-### 后台 `/companion-desk`
-
-- 由误实现的「人工陪伴台」改为 **全局观测台**（只读 trace，不提供人工接入）
-- 支持按安全审核、情绪、长对话等维度筛选 `companion_turn_traces`
-
-### 编排
-
-- LangGraph 流水线：`safety_scan → emotion_analyze → generate_reply`
-- 可选 LangSmith：`LANGCHAIN_TRACING_V2` + `LANGCHAIN_API_KEY`
-
----
-
-## 2026-06 — V1 交付文档与联调实验室
-
-详见 [`docs/changelog/delivery-v1-2026-06.md`](./docs/changelog/delivery-v1-2026-06.md)
-
-- 新增 `docs/delivery/` 部署、测试、验收、integration-lab
-- `tools/partner_lab/` 甲方模拟终端（IdP / Chatwoot / 业务 API）
-- `scripts/run_all_e2e.bat` 全量 E2E；`scripts/seed_lab_tenant.py` 联调租户
-- E2E 全绿：full_pipeline 54/54、admin 17/17、companion 9/9 等
-
----
-
-## 2026-06 — 安全加固与企业生产（009/010）
-
-详见 [`docs/changelog/security-hardening-2026-06.md`](./docs/changelog/security-hardening-2026-06.md)
-
-### 鉴权（P0）
-
-- Desk / Companion 读接口 JWT 保护；WebSocket 需 `handoff_token` 或 desk JWT
-- Companion C 端 `companion_user` JWT；`/api/v1/handoff/reset` 仅 admin
-
-### 多租户 / SSO（P1）
-
-- `handoff_sessions.tenant_id` 与查询隔离；OIDC 真实 token 交换
-- `MITAKO_SSO_DEMO` 默认 **0**；生产走 IdP 对接
-
-### 其他（P2）
-
-- SLA 锁：配置 `REDIS_HOST` 时使用 Redis 分布式锁
-- `HANDOFF_BACKEND` 支持 `sqlite` / `hybrid`（Chatwoot）
-
----
-
-## 2026-06 — LLM 与客服 Agent
-
-- **默认模型**切换为 **DeepSeek V4 Flash**（SenseNova），客服场景 `DEEPSEEK_REASONING_EFFORT=none` 关闭思考模式以提速
-- `llm_models.py` 多供应商注册表：DeepSeek V4 Flash + Agnes 2.0 Flash 备用
-- `llm_rate_limit.py` 滑动窗口配额追踪（DeepSeek 500 次/5h 等）
-- `agent.py` 统一「虾饺」人设与沟通红线；`#高亮词#` 轻量多媒体语法
-
----
-
-## 更早里程碑（摘要）
-
-| 阶段 | 内容 |
-|------|------|
-| 005 | Companion 陪伴 Agent 平台（情绪、订单助理、冒险模式雏形） |
-| 007 | 人机协同转人工平台（desk、handoff、WebSocket） |
-| 008 | Admin 运营后台（坐席、审批、报表） |
-| 006 | UI/UX 重构、OpenUI 流式卡片 |
-| 003 | 流式 SSE 端到端对话 |
-
-完整 Spec 归档：`docs/archive/specs/`、`.specify/specs/`
+本地配置文件、数据库、运行时记忆、日志、测试报告、截图、视频样本和临时目录只用于开发与验证，不进入 GitHub 和客户验证包。提交前必须确认 `.env`、`data/`、`viking_memory/`、`logs/`、`tmp/` 未被暂存。

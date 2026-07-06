@@ -1,101 +1,30 @@
-# 甲方联调实验室（模拟终端）
+# 集成契约验证环境
 
-> 设计原则：**与 MITAKO 业务代码解耦** — 独立 HTTP 服务，仅通过 REST 契约对接。  
-> 用途：我方自联调 → 甲方对照契约实现真实 IdP / Chatwoot / 业务 API。
+本文说明真实联调前如何验证企业登录、会话同步和业务接口契约。该环境只用于字段、鉴权、错误码、幂等和回归流程确认，不连接客户生产系统。
 
-## 1. 架构
+## 设计原则
 
-```
-┌─────────────────┐     HTTP      ┌──────────────────┐
-│ MITAKO :8000    │ ◄───────────► │ Mock IdP :9101   │
-│ (我方产品)      │               │ (甲方 SSO 模拟)  │
-└────────┬────────┘               └──────────────────┘
-         │
-         ├──────────────────────► Mock Chatwoot :9102
-         │
-         └─ (后续) ─────────────► Mock 业务 API :9103
-```
+集成契约验证环境与 MITAKO 主业务流程分离，通过替代接口验证外部系统行为。这样可以在客户测试环境开放前，先确认字段、鉴权、错误码、幂等和回归流程。
 
-## 2. 启动模拟终端
+## 本地组件
 
-```bat
-tools\partner_lab\启动甲方模拟终端-Windows.bat
-```
+| 组件 | 默认端口 | 用途 |
+|---|---:|---|
+| 企业登录验证端 | `9101` | 验证企业身份登录回调与用户映射 |
+| 会话同步验证端 | `9102` | 验证转人工后的会话创建、消息同步与状态变更 |
+| 业务接口验证端 | `9103` | 验证订单、售后、仓库、财务等接口契约 |
+| MITAKO 主服务 | `8000` | 客服 Agent、坐席台与运营后台 |
 
-或分别启动：
+## 契约范围
 
-```bat
-python tools/partner_lab/mock_idp_server.py      REM :9101
-python tools/partner_lab/mock_chatwoot_server.py REM :9102
-python tools/partner_lab/mock_business_api.py    REM :9103
-```
+企业登录：登录入口、回调处理、用户角色映射。
 
-## 3. 配置 MITAKO 对接模拟器
+会话同步：会话创建、用户消息、坐席消息、接单、转交、关闭等状态变更。
 
-### 3.1 SSO（Mock IdP）
+业务接口：订单查询、售后处理、仓库核查、财务复核、多模态材料审核样例结构。
 
-```bat
-python scripts/seed_lab_tenant.py
-set MITAKO_SSO_DEMO=0
-python main.py
-```
+## 真实系统切换条件
 
-浏览器：http://127.0.0.1:8000/admin → 选租户 `bpo-east` → SSO 登录  
-Mock IdP 会 302 回 `/admin?sso=1&code=lab_oidc_code&state=...`
+客户需提供非生产环境地址、访问凭证、接口契约、脱敏样例和验收规则。联调通过后，再进入小流量试运行和人工复核验收。
 
-### 3.2 Chatwoot（Mock Live）
-
-```bat
-set CHATWOOT_MOCK=0
-set CHATWOOT_BASE_URL=http://127.0.0.1:9102
-set CHATWOOT_API_TOKEN=lab-token
-set HANDOFF_BACKEND=hybrid
-python main.py
-```
-
-发起转人工后查看：http://127.0.0.1:9102/events
-
-### 3.3 业务 API（契约演练）
-
-Mock 服务已提供：
-
-- `GET /api/v1/orders/{id}`
-- `POST /api/v1/refund/card`
-
-MITAKO 主站尚未硬绑定此 URL；甲方按同契约实现即可。联调脚本会先测 Mock 本身。
-
-## 4. 自联调一键验证
-
-**推荐：一条 BAT 完成 Mock + MITAKO 联调环境 + 自测**
-
-```bat
-tools\partner_lab\联调-MITAKO对接模拟终端-Windows.bat
-```
-
-等价于：启动三个 Mock → `seed_lab_tenant.py` → 释放 8000 → 以 `CHATWOOT_MOCK=0` / `CHATWOOT_BASE_URL=http://127.0.0.1:9102` 重启 MITAKO → 运行 `self_integration_test.py`。
-
-仅 MITAKO 已手动启动时：
-
-```bat
-python tools/partner_lab/self_integration_test.py
-```
-
-期望：`结果 N/N` 全 PASS（若 Chatwoot 仍为 mock 模式，Live 项会以 skip 计 PASS，**发版前必须用联调 BAT 验 Live**）。
-
-## 5. 甲方真实对接时
-
-| 模拟端 | 甲方替换为 | 文档 |
-|--------|------------|------|
-| :9101 IdP | 企业 OIDC | [sso-oidc-guide.md](../integration/sso-oidc-guide.md) |
-| :9102 Chatwoot | 我方部署的真实 Chatwoot | [chatwoot-guide.md](../integration/chatwoot-guide.md) |
-| :9103 业务 API | 虾淘订单/退款 OpenAPI | 待甲方提供后增补 `docs/api/business-api.md` |
-
-**契约不变**：HTTP 路径与 JSON 字段与模拟器一致即可无缝切换。
-
-## 6. 故障排查
-
-| 现象 | 处理 |
-|------|------|
-| SSO callback 失败 | 是否 `seed_lab_tenant.py` + Redis 可用 |
-| Chatwoot events 空 | 确认 `CHATWOOT_MOCK=0` 且 BASE 指向 :9102 |
-| 9101 连接拒绝 | 先启动 `启动甲方模拟终端-Windows.bat` |
+切换时保持 MITAKO 业务流程不变，仅替换外部地址、鉴权方式和字段适配层。

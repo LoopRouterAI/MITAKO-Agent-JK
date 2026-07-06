@@ -1,0 +1,2156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MITAKO 虾淘视觉审核工作台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #10131f;
+      --ink-2: #252a38;
+      --muted: #6f7688;
+      --line: #e8ecdf;
+      --paper: #fbfff1;
+      --card: #ffffff;
+      --lime: #b9f24a;
+      --green: #6fae16;
+      --lime-soft: #f4ffd9;
+      --paper-lime: #f7ffe6;
+      --gold: #ffd43d;
+      --rose: #ff75a8;
+      --orange: #ff8a1f;
+      --violet: #8b5cf6;
+      --cyan: #12d6c7;
+      --blue: #4e9cff;
+      --danger: #b83232;
+      --shadow: 0 20px 52px rgba(16, 19, 31, .10);
+      --radius: 8px;
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 92% 2%, rgba(200, 255, 26, .72) 0 120px, transparent 121px),
+        radial-gradient(circle at 8% 0%, rgba(200, 255, 26, .55) 0 92px, transparent 93px),
+        radial-gradient(circle at 78% 28%, rgba(255, 117, 168, .12), transparent 240px),
+        radial-gradient(circle at 12% 76%, rgba(18, 214, 199, .10), transparent 260px),
+        linear-gradient(180deg, #ffffff 0%, #fbfff4 48%, #fff 100%);
+      overflow-x: hidden;
+      -webkit-tap-highlight-color: rgba(200, 255, 26, .28);
+    }
+
+    button, input, select, textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+    }
+
+    button:active { transform: translateY(1px); }
+    button:disabled { cursor: wait; opacity: .62; transform: none; }
+
+    a { color: inherit; }
+
+    .shell {
+      width: min(1440px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 18px 0 44px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .mark {
+      width: 56px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--lime), var(--cyan));
+      box-shadow: 0 12px 28px rgba(139, 214, 0, .26);
+      font-weight: 950;
+      letter-spacing: 0;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .brand span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .hero {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 480px);
+      gap: 24px;
+      align-items: stretch;
+      overflow: hidden;
+      min-height: 260px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 84% 28%, rgba(200, 255, 26, .34), transparent 210px),
+        linear-gradient(135deg, rgba(255,255,255,.98), rgba(248,255,230,.92));
+      box-shadow: var(--shadow);
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: auto 0 0 0;
+      height: 10px;
+      background: linear-gradient(90deg, var(--lime), var(--gold), var(--rose), var(--violet), var(--cyan));
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 1;
+      padding: 38px 38px 44px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 16px;
+      padding: 7px 11px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--lime), #efffb2);
+      box-shadow: 0 10px 24px rgba(139, 214, 0, .18);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    h1 {
+      max-width: 780px;
+      margin: 0;
+      font-size: clamp(38px, 4.6vw, 72px);
+      line-height: .96;
+      letter-spacing: 0;
+      text-wrap: pretty;
+    }
+
+    h1 .accent {
+      color: var(--green);
+      white-space: nowrap;
+    }
+
+    .lead {
+      max-width: 780px;
+      margin: 18px 0 0;
+      color: var(--ink-2);
+      font-size: 16px;
+      line-height: 1.75;
+      text-wrap: pretty;
+    }
+
+    .proof-pills {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      max-width: 760px;
+      margin-top: 22px;
+    }
+
+    .proof-pill {
+      min-height: 62px;
+      padding: 12px 14px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, .88);
+      box-shadow: 0 12px 32px rgba(16, 19, 31, .08);
+    }
+
+    .proof-pill b {
+      display: block;
+      font-size: 18px;
+      line-height: 1.1;
+    }
+
+    .proof-pill span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .hero-art {
+      position: relative;
+      display: grid;
+      align-items: center;
+      min-height: 292px;
+      padding: 28px;
+      border-left: 1px solid rgba(16, 19, 31, .08);
+      background:
+        radial-gradient(circle at 80% 12%, rgba(255, 255, 255, .72) 0 46px, transparent 47px),
+        linear-gradient(145deg, var(--lime), #e9ff74 46%, #fff6b9);
+      overflow: hidden;
+    }
+
+    .hero-art::before {
+      content: "";
+      position: absolute;
+      inset: 20px 18px auto auto;
+      width: 124px;
+      height: 96px;
+      background-image: radial-gradient(var(--ink) 1px, transparent 1.5px);
+      background-size: 9px 9px;
+      opacity: .16;
+      transform: rotate(10deg);
+    }
+
+    .review-map {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 12px;
+    }
+
+    .review-screen {
+      display: grid;
+      grid-template-columns: 1fr 120px;
+      gap: 12px;
+      min-height: 136px;
+      padding: 14px;
+      border: 1px solid rgba(16, 19, 31, .10);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: 0 18px 42px rgba(16, 19, 31, .14);
+    }
+
+    .review-screen strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .review-screen span,
+    .review-node span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .scan-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+      align-content: start;
+    }
+
+    .scan-grid i {
+      display: block;
+      aspect-ratio: 1;
+      border: 1px solid var(--ink);
+      border-radius: 8px;
+      background: var(--lime-soft);
+    }
+
+    .scan-grid i:nth-child(2n) { background: #fff; }
+    .scan-grid i:nth-child(3n) { background: var(--lime); }
+
+    .review-lane {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .review-node {
+      min-height: 102px;
+      padding: 12px;
+      border: 1px solid rgba(16, 19, 31, .10);
+      border-radius: 20px;
+      background: #fff;
+      box-shadow: 0 14px 30px rgba(16, 19, 31, .10);
+    }
+
+    .review-node b {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      margin-bottom: 9px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--lime), var(--gold));
+      font-size: 12px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(340px, 450px) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 16px;
+      align-items: start;
+    }
+
+    .entry-hub {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .entry-card {
+      min-height: 174px;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 8px;
+      padding: 16px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: var(--radius);
+      background: linear-gradient(135deg, #f2ffd9, #fff 68%);
+      color: var(--ink);
+      text-align: left;
+      box-shadow: 0 16px 38px rgba(16, 19, 31, .10);
+    }
+
+    .entry-card:nth-child(2) { background: linear-gradient(135deg, #fff0c7, #fff 68%); }
+    .entry-card:nth-child(3) { background: linear-gradient(135deg, #ffe5ef, #fff 68%); }
+
+    .entry-card.active {
+      border-color: rgba(16, 19, 31, .18);
+      box-shadow: 0 18px 44px rgba(139, 214, 0, .22), 0 0 0 3px rgba(200, 255, 26, .34);
+      transform: translateY(-2px);
+    }
+
+    .entry-card:nth-child(2).active { box-shadow: 0 18px 44px rgba(255, 138, 31, .20), 0 0 0 3px rgba(255, 212, 61, .34); }
+    .entry-card:nth-child(3).active { box-shadow: 0 18px 44px rgba(255, 117, 168, .18), 0 0 0 3px rgba(255, 117, 168, .24); }
+
+    .entry-card small {
+      width: max-content;
+      padding: 4px 8px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 11px;
+      font-weight: 950;
+    }
+
+    .entry-card strong {
+      font-size: 22px;
+      line-height: 1.15;
+    }
+
+    .entry-card span {
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .entry-card b {
+      display: inline-flex;
+      width: max-content;
+      min-height: 30px;
+      align-items: center;
+      padding: 5px 9px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--lime), var(--gold));
+      font-size: 12px;
+    }
+
+    .entry-card:nth-child(2) b { background: linear-gradient(90deg, var(--gold), var(--orange)); }
+    .entry-card:nth-child(3) b { background: linear-gradient(90deg, #ffd5e5, var(--rose)); }
+
+    .panel {
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 24px;
+      background: #fff;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, rgba(240,255,215,.76), #fff);
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .panel-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .panel-body { padding: 18px; }
+
+    .mode-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .mode-tabs button {
+      min-height: 46px;
+      border: 1px solid rgba(16, 19, 31, .10);
+      border-radius: 999px;
+      background: #fff;
+      font-weight: 900;
+      color: var(--ink);
+    }
+
+    .mode-tabs button.active {
+      background: var(--lime);
+      box-shadow: 0 10px 24px rgba(139, 214, 0, .22);
+    }
+
+    label {
+      display: block;
+      margin: 13px 0 7px;
+      color: var(--ink-2);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid rgba(16, 19, 31, .14);
+      border-radius: 14px;
+      background: #fff;
+      color: var(--ink);
+      padding: 10px 11px;
+      outline: 2px solid transparent;
+      box-shadow: 0 8px 18px rgba(16, 19, 31, .06);
+      transition: transform .16s ease, box-shadow .16s ease;
+    }
+
+    select {
+      appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--ink) 50%),
+        linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) 19px,
+        calc(100% - 12px) 19px;
+      background-repeat: no-repeat;
+      background-size: 6px 6px, 6px 6px;
+      padding-right: 34px;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 92px;
+      line-height: 1.55;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 26px rgba(16, 19, 31, .12);
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    a:focus-visible {
+      outline: 3px solid rgba(200, 255, 26, .72);
+      outline-offset: 3px;
+    }
+
+    input[type="file"] {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    input[type="file"]:focus-visible + .upload-card,
+    input[type="file"]:focus-visible + label.upload-card {
+      outline: 3px solid rgba(185, 242, 74, .78);
+      outline-offset: 4px;
+    }
+
+    .field-box {
+      position: relative;
+      border-radius: var(--radius);
+    }
+
+    .upload-card {
+      display: grid;
+      grid-template-columns: 56px 1fr auto;
+      gap: 14px;
+      align-items: center;
+      min-height: 124px;
+      padding: 18px;
+      border: 1px dashed rgba(16, 19, 31, .24);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(135deg, rgba(200,255,26,.62), rgba(255,255,255,.98) 58%, rgba(18,214,199,.12)),
+        #fff;
+      box-shadow: 0 16px 36px rgba(16, 19, 31, .10);
+      cursor: pointer;
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+
+    .upload-card:hover,
+    .upload-card.dragging {
+      transform: translateY(-2px);
+      box-shadow: 0 18px 44px rgba(139, 214, 0, .24);
+      background:
+        linear-gradient(135deg, rgba(200,255,26,.78), rgba(255,255,255,.98) 58%, rgba(18,214,199,.18)),
+        #fff;
+    }
+
+    .upload-icon {
+      width: 56px;
+      height: 56px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 16px;
+      background: linear-gradient(135deg, #fff, var(--lime-soft));
+      font-size: 24px;
+      font-weight: 950;
+    }
+
+    .upload-title {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 950;
+      line-height: 1.2;
+    }
+
+    .upload-desc,
+    .file-state {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .file-state.strong {
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    .upload-action {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 12px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 999px;
+      background: #fff;
+      box-shadow: 0 8px 18px rgba(16, 19, 31, .08);
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .upload-mode .url-box,
+    .upload-mode .folder-box,
+    .url-mode .upload-box,
+    .url-mode .folder-box,
+    .folder-mode .upload-box,
+    .folder-mode .url-box { display: none; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .hint {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .source-note {
+      margin-top: 10px;
+      padding: 10px 11px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 16px;
+      background: #fff;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    details.advanced-settings {
+      margin-top: 12px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 12px 28px rgba(16, 19, 31, .08);
+      overflow: hidden;
+    }
+
+    .advanced-settings summary {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 11px 13px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 950;
+      list-style: none;
+      background: var(--paper-lime);
+    }
+
+    .advanced-settings summary::-webkit-details-marker { display: none; }
+
+    .advanced-settings summary::after {
+      content: "+";
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 999px;
+      background: #fff;
+      line-height: 1;
+      font-weight: 950;
+    }
+
+    .advanced-settings[open] summary::after { content: "-"; }
+
+    .advanced-body {
+      padding: 0 13px 13px;
+      border-top: 1px solid rgba(16, 19, 31, .08);
+    }
+
+    .task-context {
+      margin: 10px 0 16px;
+      padding: 14px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 22px;
+      background: linear-gradient(135deg, var(--paper-lime), #fff);
+      box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
+    }
+
+    .task-context-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .task-context strong {
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .task-badge {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      justify-content: center;
+      padding: 5px 9px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 12px;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .task-context p {
+      margin: 0;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .material-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 7px;
+      margin-top: 12px;
+    }
+
+    .material-item {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      min-height: 34px;
+      padding: 8px 9px;
+      border: 1px solid rgba(16, 19, 31, .10);
+      border-radius: 14px;
+      background: #fff;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .material-item b {
+      display: inline-grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 999px;
+      background: var(--lime);
+      color: var(--ink);
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .evidence-pack {
+      display: grid;
+      gap: 10px;
+      margin: 14px 0 4px;
+      padding: 14px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 22px;
+      background: linear-gradient(135deg, #fff, #fbfff0);
+      box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
+    }
+
+    .evidence-pack h3 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .evidence-pack p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .three-fields {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .console-panel.collapsed .panel-body {
+      display: none;
+    }
+
+    .console-toggle {
+      min-height: 36px;
+      padding: 7px 10px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 999px;
+      background: #fff;
+      box-shadow: 0 8px 18px rgba(16, 19, 31, .08);
+      font-size: 12px;
+      font-weight: 950;
+      white-space: nowrap;
+    }
+
+    .ghost {
+      width: auto;
+      min-height: 38px;
+      margin-top: 10px;
+      padding: 8px 12px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 999px;
+      background: #fff;
+      font-weight: 900;
+      box-shadow: 0 8px 18px rgba(16, 19, 31, .08);
+    }
+
+    .primary {
+      width: 100%;
+      min-height: 52px;
+      margin-top: 16px;
+      border: 1px solid rgba(16, 19, 31, .14);
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--lime), var(--gold), var(--orange));
+      color: var(--ink);
+      font-weight: 950;
+      box-shadow: 0 14px 30px rgba(255, 138, 31, .24), 0 4px 0 rgba(16, 19, 31, .86);
+    }
+
+    .primary:hover, .ghost:hover, .mode-tabs button:hover, .entry-card:hover {
+      transform: translateY(-1px);
+    }
+
+    .notice {
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 18px;
+      background: linear-gradient(90deg, var(--lime-soft), #fff);
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.65;
+      box-shadow: 0 12px 28px rgba(16, 19, 31, .07);
+    }
+
+    .sample-eval-card {
+      margin-top: 16px;
+      padding: 14px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 22px;
+      background: #fff;
+      box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
+    }
+
+    .sample-eval-card.hidden { display: none; }
+
+    .sample-eval-head h3 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.25;
+    }
+
+    .sample-eval-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .upload-card.sample-upload {
+      grid-template-columns: 44px 1fr auto;
+      min-height: 96px;
+      margin-top: 12px;
+      padding: 14px;
+    }
+
+    .sample-upload .upload-icon {
+      width: 44px;
+      height: 44px;
+      font-size: 18px;
+    }
+
+    .sample-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .sample-actions .ghost {
+      margin-top: 0;
+      min-height: 42px;
+    }
+
+    .sample-eval-log {
+      width: 100%;
+      max-height: 220px;
+      margin: 12px 0 0;
+      padding: 12px;
+      overflow: auto;
+      border: 1px solid rgba(16, 19, 31, .10);
+      border-radius: 16px;
+      background: #fbfff0;
+      color: var(--ink);
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .scenario-card {
+      min-height: 126px;
+      padding: 14px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 22px;
+      background: #fff;
+      box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
+    }
+
+    .scenario-card:nth-child(1) { background: linear-gradient(135deg, var(--lime), #fff); }
+    .scenario-card:nth-child(2) { background: linear-gradient(135deg, #fff0c7, #fff); }
+    .scenario-card:nth-child(3) { background: linear-gradient(135deg, #e8e0ff, #fff); }
+
+    .scenario-card .code {
+      display: inline-grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      margin-bottom: 12px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 14px;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .scenario-card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 17px;
+    }
+
+    .scenario-card span {
+      display: block;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .step {
+      min-height: 78px;
+      padding: 11px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 12px 28px rgba(16, 19, 31, .08);
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .metric {
+      min-height: 98px;
+      padding: 14px;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 22px;
+      background: #fff;
+      color: var(--ink);
+      box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
+    }
+
+    .metric:nth-child(1) {
+      background: linear-gradient(135deg, var(--lime), #fff7a6);
+      color: var(--ink);
+    }
+
+    .metric span {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 12px;
+      font-weight: 800;
+      opacity: .76;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 28px;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .report-link {
+      display: none;
+      margin-bottom: 12px;
+      padding: 13px 14px;
+      border: 1px solid rgba(16, 19, 31, .14);
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--lime), var(--gold));
+      box-shadow: 0 12px 28px rgba(139, 214, 0, .22), 0 3px 0 rgba(16, 19, 31, .86);
+      text-decoration: none;
+      font-weight: 950;
+    }
+
+    .report-list {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .report-list a {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 46px;
+      padding: 10px 12px;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 16px;
+      background: #fff;
+      text-decoration: none;
+      box-shadow: 0 10px 24px rgba(16, 19, 31, .07);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .report-list a span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .meta-card {
+      display: none;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid rgba(16, 19, 31, .10);
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 12px 28px rgba(16, 19, 31, .08);
+    }
+
+    .meta-card.ready { display: grid; grid-template-columns: 82px 1fr; gap: 12px; }
+
+    .meta-card img {
+      width: 82px;
+      height: 82px;
+      object-fit: cover;
+      border: 1px solid rgba(16, 19, 31, .12);
+      border-radius: 14px;
+      background: #f4f7f0;
+    }
+
+    .meta-card h3 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .meta-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .review-summary {
+      width: 100%;
+      min-height: 318px;
+      max-height: 520px;
+      margin: 0;
+      padding: 16px;
+      overflow: auto;
+      border: 1px solid rgba(16, 19, 31, .08);
+      border-radius: 22px;
+      background: #fff;
+      color: var(--ink);
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 14px;
+      line-height: 1.75;
+      box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
+    }
+
+    .review-summary::before {
+      content: "审核摘要";
+      display: inline-flex;
+      margin-bottom: 10px;
+      padding: 5px 9px;
+      border: 1px solid rgba(16, 19, 31, .10);
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--lime), #f2ff8f);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 950;
+    }
+
+    .footer-note {
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+      text-align: center;
+    }
+
+    @media (max-width: 1080px) {
+      .hero, .layout { grid-template-columns: 1fr; }
+      .entry-hub { grid-template-columns: 1fr; }
+      .hero-art {
+        min-height: 220px;
+        border-left: 0;
+        border-top: 1px solid rgba(16, 19, 31, .08);
+      }
+      .scenario-grid, .flow { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      .shell { width: min(100% - 20px, 1440px); padding-top: 12px; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .hero-copy, .panel-head, .panel-body { padding: 14px; }
+      .hero { display: none; min-height: 0; }
+      .hero-art { display: none; }
+      .proof-pills { grid-template-columns: 1fr; }
+      .lead { font-size: 14px; line-height: 1.6; }
+      .layout { gap: 12px; }
+      .upload-card, .review-screen, .review-lane { grid-template-columns: 1fr; }
+      .row, .result-grid, .three-fields { grid-template-columns: 1fr; }
+      .panel { box-shadow: 0 14px 34px rgba(16, 19, 31, .10); }
+      .mode-tabs { position: sticky; top: 8px; z-index: 6; background: #fff; padding-bottom: 8px; }
+      .task-context-head { align-items: flex-start; flex-direction: column; }
+      .upload-card { min-height: 164px; text-align: left; }
+      .upload-card.sample-upload { min-height: 126px; grid-template-columns: 1fr; }
+      .upload-action { width: 100%; min-height: 44px; }
+      .sample-actions { align-items: stretch; flex-direction: column; }
+      .primary { position: sticky; bottom: 10px; z-index: 7; min-height: 56px; }
+      .scenario-grid, .flow { display: none; }
+      .review-summary { min-height: 180px; max-height: 320px; }
+      h1 { font-size: clamp(30px, 10vw, 42px); }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar" aria-label="工作台顶部">
+      <div class="brand">
+        <div class="mark">虾淘</div>
+        <div>
+          <strong data-i18n="brandTitle">MITAKO 视觉审核工作台</strong>
+          <span data-i18n="brandSub">面向客服质检、证据整理和人工复核</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow" data-i18n="eyebrow">虾淘客服视觉质检驾驶舱</p>
+        <h1 data-i18n="heroTitle">把开箱、有伤、资料审核变成<span class="accent">可复核证据链</span></h1>
+        <p class="lead" data-i18n="heroLead">
+          客服上传本地视频，或粘贴公开视频分享文本；系统先解析与取证，再按配置输出复核摘要。这里不替业务系统做自动裁决，只给客服负责人和人工复核提供证据、风险和补件建议。
+        </p>
+        <div class="proof-pills" aria-label="核心能力">
+          <div class="proof-pill"><b>3 条入口</b><span>开箱、有伤、资料独立处理</span></div>
+          <div class="proof-pill"><b>证据回链</b><span>帧图、补图、视频时间点可复核</span></div>
+          <div class="proof-pill"><b>人工闭环</b><span>高置信抽检，低置信逐条复核</span></div>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="review-map">
+          <div class="review-screen">
+            <div>
+              <strong>三条视觉审核业务队列</strong>
+              <span>开箱连续性、商品有伤证据、资料完整性分别进入对应队列，再输出可复核线索。</span>
+            </div>
+            <div class="scan-grid">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </div>
+          <div class="review-lane">
+            <div class="review-node"><b>01</b><span>素材接入与前置处理</span></div>
+            <div class="review-node"><b>02</b><span>多轮特征提取与交叉检查</span></div>
+            <div class="review-node"><b>03</b><span>证据链摘要与人工复核</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <nav class="entry-hub" aria-label="三大独立审核入口">
+      <button class="entry-card active" type="button" data-scenario="video_unboxing" aria-pressed="true">
+        <small>入口 01 / 开箱与发错货</small>
+        <strong>开箱视频审核</strong>
+        <span>面向“箱子是否离镜、视频是否剪辑、商品是否发错、规格是否不一致”的客服队列。</span>
+        <b>严格取证</b>
+      </button>
+      <button class="entry-card" type="button" data-scenario="product_damage" aria-pressed="false">
+        <small>入口 02 / 商品有伤</small>
+        <strong>商品有伤审核</strong>
+        <span>面向“划痕、压痕、破损、污损、照片可信度、是否需要补拍”的售后审核队列。</span>
+        <b>样本可跑</b>
+      </button>
+      <button class="entry-card" type="button" data-scenario="minor_material" aria-pressed="false">
+        <small>入口 03 / 未成年人资料</small>
+        <strong>资料完整性审核</strong>
+        <span>面向监护关系、订单归属、承诺书、支付证明等材料完整性检查；始终人工终审。</span>
+        <b>隐私边界</b>
+      </button>
+    </nav>
+
+    <div class="layout">
+      <section id="formPanel" class="panel upload-mode">
+        <div class="panel-head">
+          <div>
+            <h2 data-i18n="submitTitle">提交审核任务</h2>
+            <p data-i18n="submitSub">按岗位队列进入，不把三类任务混成一个入口；客服只需要处理自己当前负责的材料。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+	          <div class="mode-tabs" role="tablist" aria-label="素材来源">
+	            <button type="button" id="uploadTab" class="active" role="tab" aria-selected="true" data-mode="upload" data-i18n="uploadTab">本地上传</button>
+	            <button type="button" id="urlTab" role="tab" aria-selected="false" data-mode="url" data-i18n="urlTab">视频 URL</button>
+	            <button type="button" id="folderTab" role="tab" aria-selected="false" data-mode="folder">工单文件夹</button>
+	          </div>
+
+          <form id="reviewForm">
+            <input type="hidden" name="source_type" id="sourceType" value="upload" />
+            <input type="hidden" name="scenario" id="scenarioInput" value="video_unboxing" />
+
+            <div class="task-context" id="taskContext" aria-live="polite">
+              <div class="task-context-head">
+                <strong id="taskTitle">开箱视频审核</strong>
+                <span class="task-badge" id="taskBadge">当前队列 01</span>
+              </div>
+              <p id="taskDesc">用于判断开箱过程是否连续、箱体或关键物品是否离开镜头，以及是否需要补拍。</p>
+              <div class="material-list" id="materialList"></div>
+            </div>
+
+            <section class="evidence-pack" aria-label="客服证据包">
+              <h3>客服证据包</h3>
+              <p>这些字段会随视频一起进入审核上下文；真实甲方系统未联调前，可由客服手工录入或由样例工单填充。</p>
+              <div class="three-fields">
+                <div>
+                  <label for="ticketId">工单号</label>
+                  <input id="ticketId" name="ticket_id" autocomplete="off" placeholder="例如：607760" />
+                </div>
+                <div>
+                  <label for="userId">用户 ID</label>
+                  <input id="userId" name="user_id" autocomplete="off" placeholder="用户后台 ID 或会员号" />
+                </div>
+                <div>
+                  <label for="orderNo">订单号</label>
+                  <input id="orderNo" name="order_no" autocomplete="off" placeholder="订单系统编号" />
+                </div>
+              </div>
+              <label for="customerClaim">用户申诉文本</label>
+              <textarea id="customerClaim" name="customer_claim" placeholder="粘贴用户原始投诉内容；可以包含情绪化表达，Agent 会提炼诉求，不会把原文当作结论。"></textarea>
+              <div class="row">
+                <div>
+                  <label for="orderItem">订单商品名</label>
+                  <input id="orderItem" name="order_item" autocomplete="off" placeholder="原始商品标题 / 角色 / 款式" />
+                </div>
+                <div>
+                  <label for="sku">SKU / 规格</label>
+                  <input id="sku" name="sku" autocomplete="off" placeholder="尺寸、款式、数量、随机/盲抽规则" />
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <label for="logisticsStatus">物流进度</label>
+                  <input id="logisticsStatus" name="logistics_status" autocomplete="off" placeholder="已签收、运输中、异常件等" />
+                </div>
+                <div>
+                  <label for="complaintStage">申诉进展</label>
+                  <input id="complaintStage" name="complaint_stage" autocomplete="off" placeholder="初次申诉 / 二次补件 / 人工复核中" />
+                </div>
+              </div>
+              <label for="productMasterData">商品/仓库主数据</label>
+              <textarea id="productMasterData" name="product_master_data" placeholder="粘贴商品主数据、仓库出库记录、尺寸口径、角色款式映射；没有则留空，报告会提示缺口。"></textarea>
+              <label for="conversationHistory">历史对话与人工备注</label>
+              <textarea id="conversationHistory" name="conversation_history" placeholder="粘贴多轮投诉进展、人工客服备注、已要求补件内容；用于判断是否重复补件、情绪风险和证据缺口。"></textarea>
+              <input type="hidden" name="warehouse_master_data" id="warehouseMasterData" value="" />
+              <input type="hidden" name="customer_tone" id="customerTone" value="" />
+            </section>
+
+            <div class="upload-box">
+              <label for="file" data-i18n="localVideo">本地视频</label>
+              <div class="field-box">
+                <input name="file" id="file" type="file" accept="video/*" />
+                <label class="upload-card" id="uploadCard" for="file">
+                  <span class="upload-icon">+</span>
+                  <span>
+                    <span class="upload-title">拖放或选择待审核视频</span>
+                    <span class="upload-desc">支持 mp4、mov、m4v、webm、mkv，最大 300MB；也可以把文件拖到这里。</span>
+                    <span class="file-state strong" id="fileState">尚未选择文件</span>
+                  </span>
+                  <span class="upload-action">选择文件</span>
+                </label>
+              </div>
+            </div>
+
+	            <div class="url-box">
+	              <label for="videoUrl" data-i18n="urlLabel">公开视频链接或分享口令</label>
+	              <textarea name="video_url" id="videoUrl" placeholder="支持 YouTube、B站、抖音/TikTok、小红书公开分享文本，以及 .mp4/.webm/.mov 视频直链；无法访问时请改为本地上传"></textarea>
+	              <button class="ghost" type="button" id="metadataBtn" data-i18n="metadataBtn">预览视频信息</button>
+              <div id="metaCard" class="meta-card" aria-live="polite"></div>
+              <div class="source-note" data-i18n="urlHint">
+	                优先支持 YouTube、B站、抖音/TikTok、小红书等公开可访问链接、平台分享文本和常见视频直链。实际解析会受平台风控、登录态、地区权限和公开视频状态影响；解析失败时请改为本地上传。
+	              </div>
+	            </div>
+
+	            <div class="folder-box">
+	              <label for="folderInput">工单素材文件夹</label>
+	              <div class="field-box">
+	                <input name="files" id="folderInput" type="file" webkitdirectory directory multiple />
+	                <label class="upload-card" id="folderCard" for="folderInput">
+	                  <span class="upload-icon">夹</span>
+	                  <span>
+	                    <span class="upload-title">选择一个工单素材文件夹</span>
+	                    <span class="upload-desc">自动扫描视频、图片、content.txt、manifest.json 等材料；适合客服把同一工单附件放在一个文件夹后手动审核。</span>
+	                    <span class="file-state strong" id="folderState">尚未选择文件夹</span>
+	                  </span>
+	                  <span class="upload-action">选择文件夹</span>
+	                </label>
+	              </div>
+	              <div class="source-note">后期打通订单、客服和素材接口后，这里会由系统自动组包；当前 POC 支持客服手动选择本地文件夹完成同样链路。</div>
+	            </div>
+
+            <label for="reviewModel">审核强度</label>
+            <select name="review_model" id="reviewModel">
+              <option value="standard">标准复核（默认）</option>
+              <option value="fast">快速初筛</option>
+              <option value="backup">补充复核</option>
+            </select>
+            <div class="hint">默认使用标准复核；爆单初筛可切快速初筛，疑难材料可切补充复核。</div>
+
+            <details class="advanced-settings">
+              <summary>高级取证设置</summary>
+              <div class="advanced-body">
+                <div class="row">
+                  <div>
+                    <label for="fps" data-i18n="fpsLabel">取证密度</label>
+                    <select name="fps" id="fps">
+                      <option value="1">常规取证</option>
+                      <option value="2">严格取证</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="probeSeconds" data-i18n="probeLabel">取证片段秒数</label>
+                    <input id="probeSeconds" name="probe_seconds" type="number" min="5" max="59" value="12" />
+                  </div>
+                </div>
+
+                <div class="row">
+                  <div>
+                    <label for="maxFrames" data-i18n="maxFramesLabel">最多证据帧</label>
+                    <input id="maxFrames" name="max_frames" type="number" min="1" max="24" value="6" />
+                  </div>
+                  <div>
+                    <label for="apiFrameLimit" data-i18n="apiFramesLabel">提交复核证据数</label>
+                    <input id="apiFrameLimit" name="api_frame_limit" type="number" min="1" max="12" value="4" />
+                  </div>
+                </div>
+                <div class="source-note">
+                  第三方多模态接口对大视频直传通常不稳定，尤其是超过 20MB 的素材。本工作台不会把整段大视频直接送审：本地上传会完整落盘到 300MB 上限后抽取前置片段证据帧；平台 URL 会尝试只下载前置片段；公开视频直链可能需要下载完整文件，超过上限会失败。当前支持 1 秒 1 帧或 1 秒 2 帧取证，最后只提交必要证据帧进入复核。
+                </div>
+              </div>
+            </details>
+
+            <button class="primary" id="submitBtn" data-i18n="submitBtn">开始生成复核摘要</button>
+          </form>
+          <div class="notice" data-i18n="notice">
+            本工具输出证据整理、风险提示和人工复核建议；不自动退款、拒赔、补发、定责，也不做未成年人资料终审。
+          </div>
+          <section class="sample-eval-card" aria-label="人工结论样本评测">
+            <div class="sample-eval-head">
+              <h3>人工结论样本评测</h3>
+              <p>导入已由人工确认的 CSV/JSON 样本表。没有辅助结论时只检查样本完备性；包含辅助结论时才统计命中情况。三类主场景每个正向/负向结论至少 50 条，才适合对外讨论准确率。</p>
+            </div>
+            <form id="sampleEvalForm">
+              <input name="file" id="sampleFile" type="file" accept=".csv,.json,text/csv,application/json" />
+              <label class="upload-card sample-upload" id="sampleUploadCard" for="sampleFile">
+                <span class="upload-icon">表</span>
+                <span>
+                  <span class="upload-title">拖放或选择样本表</span>
+                  <span class="upload-desc">字段建议包含：场景、人工结论、辅助结论、用户诉求、素材、商品信息、规格信息、人工原因。</span>
+                  <span class="file-state strong" id="sampleFileState">尚未选择样本表</span>
+                </span>
+                <span class="upload-action">选择样本表</span>
+              </label>
+	              <div class="sample-actions">
+	                <button class="ghost" type="submit" id="sampleEvalBtn">评测样本集</button>
+	                <button class="ghost" type="button" id="demoSampleBtn">运行当前队列样本</button>
+	                <button class="ghost" type="button" id="batchSampleBtn">运行三份样本报告</button>
+	                <span class="hint">不会触发业务处置，仅用于盲测准备。</span>
+	              </div>
+            </form>
+            <pre id="sampleEvalLog" class="sample-eval-log" aria-live="polite">等待导入人工确认样本。</pre>
+          </section>
+        </div>
+      </section>
+
+      <section class="panel console-panel" id="consolePanel">
+        <div class="panel-head">
+          <div>
+            <h2 data-i18n="resultTitle">审核链路与结果</h2>
+            <p data-i18n="resultSub">素材接入、取证、辅助识别、复核建议和摘要生成共用同一批证据。</p>
+          </div>
+          <button class="console-toggle" id="consoleToggle" type="button">收起控制台</button>
+        </div>
+        <div class="panel-body">
+          <div class="scenario-grid" aria-label="三类重点场景">
+            <div class="scenario-card">
+              <span class="code">01</span>
+              <strong data-i18n="case1Title">开箱视频</strong>
+              <span data-i18n="case1Text">重点看箱体连续性、关键物品是否离镜、剪辑风险和补拍建议。</span>
+            </div>
+            <div class="scenario-card">
+              <span class="code">02</span>
+              <strong data-i18n="case2Title">商品有伤</strong>
+              <span data-i18n="case2Text">整理损伤可见证据、疑似破损位置、清晰度不足和复核理由。</span>
+            </div>
+            <div class="scenario-card">
+              <span class="code">03</span>
+              <strong data-i18n="case3Title">资料审核</strong>
+              <span data-i18n="case3Text">辅助识别资料完整性与风险线索，保留人工终审边界。</span>
+            </div>
+          </div>
+
+          <div class="flow" aria-label="复核流程">
+            <div class="step"><b data-i18n="flow1">素材接入</b><span data-i18n="flow1Text">上传或 URL 解析</span></div>
+            <div class="step"><b data-i18n="flow2">抽帧取证</b><span data-i18n="flow2Text">常规/严格取证可配</span></div>
+            <div class="step"><b data-i18n="flow3">多轮特征</b><span data-i18n="flow3Text">画面、物体、资料线索拆解</span></div>
+            <div class="step"><b data-i18n="flow4">交叉复核</b><span data-i18n="flow4Text">一致性、风险点、置信度汇总</span></div>
+            <div class="step"><b data-i18n="flow5">人工复核</b><span data-i18n="flow5Text">摘要与复核建议</span></div>
+          </div>
+
+	          <div class="result-grid">
+	            <div class="metric"><span data-i18n="statusLabel">状态</span><b id="stage">待提交</b></div>
+	            <div class="metric"><span data-i18n="elapsedLabel">耗时</span><b id="elapsed">0s</b></div>
+	          </div>
+	          <a id="reportLink" class="report-link" href="#" target="_blank" rel="noreferrer" data-i18n="reportLink">查看复核摘要</a>
+	          <div id="reportList" class="report-list" aria-label="复核报告列表"></div>
+	          <div id="log" class="review-summary" role="status" aria-live="polite">请选择本地视频或公开视频 URL，然后开始审核。</div>
+        </div>
+      </section>
+    </div>
+
+    <p class="footer-note" data-i18n="footer">业务后台与客户系统按联调边界处理；本工作台只生成审核建议，不直接触发退款、补发、拒赔或定责。</p>
+  </main>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      try {
+        const messages = {
+          zhCN: {
+            running: '审核中',
+            done: '已完成',
+            failed: '失败',
+            error: '异常',
+            metadataLoading: '正在解析视频信息...',
+            metadataFailed: '视频信息解析失败',
+            metadataReady: '视频信息已解析',
+            reviewLoading: '正在接入素材、提取证据并生成复核摘要，请等待...',
+            initialLog: '请选择本地视频或公开视频 URL，然后开始审核。'
+          }
+        };
+
+        const formPanel = document.getElementById('formPanel');
+        const sourceType = document.getElementById('sourceType');
+	        const uploadTab = document.getElementById('uploadTab');
+	        const urlTab = document.getElementById('urlTab');
+	        const folderTab = document.getElementById('folderTab');
+	        const scenarioInput = document.getElementById('scenarioInput');
+        const entryCards = Array.from(document.querySelectorAll('.entry-card'));
+        const form = document.getElementById('reviewForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const consolePanel = document.getElementById('consolePanel');
+        const consoleToggle = document.getElementById('consoleToggle');
+        const metadataBtn = document.getElementById('metadataBtn');
+        const videoUrl = document.getElementById('videoUrl');
+	        const fileInput = document.getElementById('file');
+	        const fileState = document.getElementById('fileState');
+	        const uploadCard = document.getElementById('uploadCard');
+	        const folderInput = document.getElementById('folderInput');
+	        const folderState = document.getElementById('folderState');
+	        const folderCard = document.getElementById('folderCard');
+	        const sampleEvalForm = document.getElementById('sampleEvalForm');
+        const sampleFile = document.getElementById('sampleFile');
+        const sampleFileState = document.getElementById('sampleFileState');
+        const sampleUploadCard = document.getElementById('sampleUploadCard');
+	        const sampleEvalBtn = document.getElementById('sampleEvalBtn');
+	        const demoSampleBtn = document.getElementById('demoSampleBtn');
+	        const batchSampleBtn = document.getElementById('batchSampleBtn');
+        const sampleEvalCard = document.querySelector('.sample-eval-card');
+        const sampleEvalLog = document.getElementById('sampleEvalLog');
+        const metaCard = document.getElementById('metaCard');
+        const taskTitle = document.getElementById('taskTitle');
+        const taskBadge = document.getElementById('taskBadge');
+        const taskDesc = document.getElementById('taskDesc');
+        const materialList = document.getElementById('materialList');
+        const fpsSelect = document.getElementById('fps');
+        const probeSeconds = document.getElementById('probeSeconds');
+        const maxFrames = document.getElementById('maxFrames');
+        const apiFrameLimit = document.getElementById('apiFrameLimit');
+        const customerClaim = document.getElementById('customerClaim');
+        const orderItem = document.getElementById('orderItem');
+        const sku = document.getElementById('sku');
+        const logisticsStatus = document.getElementById('logisticsStatus');
+        const complaintStage = document.getElementById('complaintStage');
+        const productMasterData = document.getElementById('productMasterData');
+        const conversationHistory = document.getElementById('conversationHistory');
+        const log = document.getElementById('log');
+        const stage = document.getElementById('stage');
+	        const elapsed = document.getElementById('elapsed');
+	        const reportLink = document.getElementById('reportLink');
+	        const reportList = document.getElementById('reportList');
+        let timer = null;
+
+        const taskProfiles = {
+          video_unboxing: {
+            badge: '当前队列 01',
+            title: '开箱视频审核',
+            desc: '用于判断开箱过程是否连续、箱体或关键物品是否离开镜头，以及是否需要补拍。',
+            materials: ['一镜到底开箱视频', '外箱/面单/封条关键画面', '商品完整露出片段'],
+            fps: '2',
+            probe: '20',
+            maxFrames: '12',
+            apiFrames: '6',
+            submit: '开始审核开箱视频',
+            initialLog: '当前为开箱视频入口：请提交一镜到底开箱视频，严格取证会按 1 秒 2 帧抽取证据。',
+            claim: '例：用户称收到的角色/款式/尺寸与订单不一致，要求核实是否发错。',
+            product: '原始商品标题、角色、款式',
+            sku: '订单规格、尺寸、数量、随机/盲抽规则',
+            logistics: '签收时间、是否异常签收、是否退回',
+            stage: '初次申诉 / 已补开箱视频 / 人工复核中',
+            master: '粘贴 SKU 主数据、仓库出库记录、尺寸口径、盲抽规则。',
+            history: '粘贴用户此前对话、客服已要求补拍的内容、人工备注。',
+            sample: true,
+            sampleId: 'sample_001',
+            sampleLabel: '运行 sample_001 开箱审核'
+          },
+          product_damage: {
+            badge: '当前队列 02',
+            title: '商品有伤审核',
+            desc: '用于整理破损、划痕、变形、碎裂等可见证据，并提示是否需要补拍局部特写。',
+            materials: ['商品整体画面', '损伤部位近景', '包装与物流外观辅助证据'],
+            fps: '1',
+            probe: '12',
+            maxFrames: '8',
+            apiFrames: '4',
+            submit: '开始审核商品有伤',
+            initialLog: '当前为商品有伤入口：请提交商品整体和损伤近景视频，结果只给复核建议。',
+            claim: '例：用户称到手商品有划痕、压痕、破损、污损，要求客服核实。',
+            product: '商品标题、材质、易损部位',
+            sku: '规格、款式、数量、是否盲抽',
+            logistics: '运输状态、外箱是否异常、签收时间',
+            stage: '初次有伤反馈 / 已补局部特写 / 二次申诉',
+            master: '粘贴商品主数据、包装规则、仓库质检记录、易损点说明。',
+            history: '粘贴用户描述、客服追问、补拍要求和历史沟通冲突点。',
+            sample: true,
+            sampleId: 'sample_003',
+            sampleLabel: '运行 sample_003 商品有伤'
+          },
+          minor_material: {
+            badge: '当前队列 03',
+            title: '资料审核',
+            desc: '用于辅助检查材料完整性、脱敏状态和补件线索，最终结论必须由人工复核确认。',
+            materials: ['资料画面或录屏', '关系/订单证明材料', '已脱敏的关键页面'],
+            fps: '1',
+            probe: '10',
+            maxFrames: '6',
+            apiFrames: '4',
+            submit: '开始审核资料材料',
+            initialLog: '当前为资料审核入口：请提交已脱敏材料，系统只辅助整理风险和补件建议。',
+            claim: '例：监护人申请未成年人退款，提交身份证明、监护关系、承诺书和支付材料。',
+            product: '退款涉及订单商品或订单集合',
+            sku: '订单金额、已发货/未发货、是否定制或盲盒',
+            logistics: '是否已发货、是否签收、是否需要寄回',
+            stage: '初审 / 一审打回 / 等待二审 / 终审前补件',
+            master: '粘贴未成年人退款 SOP、材料清单、金额口径、订单状态规则。',
+            history: '粘贴监护人申诉、客服补件要求、答疑打回原因；注意脱敏。',
+            sample: true,
+            sampleId: 'sample_004',
+            sampleLabel: '运行 sample_004 资料审核'
+          }
+        };
+        const scenarioPaths = {
+          video_unboxing: '/video-unboxing',
+          product_damage: '/product-damage',
+          minor_material: '/minor-material'
+        };
+        const pathScenarios = Object.fromEntries(Object.entries(scenarioPaths).map(([key, value]) => [value, key]));
+
+	        function setMode(mode) {
+	          sourceType.value = mode;
+	          formPanel.classList.toggle('upload-mode', mode === 'upload');
+	          formPanel.classList.toggle('url-mode', mode === 'url');
+	          formPanel.classList.toggle('folder-mode', mode === 'folder');
+	          [uploadTab, urlTab, folderTab].forEach((tab) => {
+	            const active = tab.dataset.mode === mode;
+	            tab.classList.toggle('active', active);
+	            tab.setAttribute('aria-selected', String(active));
+	          });
+	        }
+
+        function writeLog(payload) {
+          log.textContent = String(payload == null ? '' : payload);
+        }
+
+        function renderMaterials(items) {
+          materialList.replaceChildren(...items.map((text, index) => {
+            const item = document.createElement('div');
+            const marker = document.createElement('b');
+            const label = document.createElement('span');
+            item.className = 'material-item';
+            marker.textContent = String(index + 1);
+            label.textContent = text;
+            item.append(marker, label);
+            return item;
+          }));
+        }
+
+        function applyScenario(scenario, shouldWriteLog = true) {
+          const profile = taskProfiles[scenario] || taskProfiles.video_unboxing;
+          scenarioInput.value = scenario;
+          entryCards.forEach((item) => {
+            const active = item.dataset.scenario === scenario;
+            item.classList.toggle('active', active);
+            item.setAttribute('aria-pressed', String(active));
+          });
+          taskTitle.textContent = profile.title;
+          taskBadge.textContent = profile.badge;
+          taskDesc.textContent = profile.desc;
+          renderMaterials(profile.materials);
+          fpsSelect.value = profile.fps;
+          probeSeconds.value = profile.probe;
+          maxFrames.value = profile.maxFrames;
+          apiFrameLimit.value = profile.apiFrames;
+          submitBtn.textContent = profile.submit;
+          customerClaim.placeholder = profile.claim;
+          orderItem.placeholder = profile.product;
+          sku.placeholder = profile.sku;
+          logisticsStatus.placeholder = profile.logistics;
+          complaintStage.placeholder = profile.stage;
+          productMasterData.placeholder = profile.master;
+          conversationHistory.placeholder = profile.history;
+          sampleEvalCard.classList.remove('hidden');
+          demoSampleBtn.textContent = profile.sampleLabel || '运行当前队列样本';
+          demoSampleBtn.disabled = !profile.sampleId;
+          if (shouldWriteLog) writeLog(profile.initialLog);
+        }
+
+	        function formatReviewSummary(data) {
+	          if (!data || !data.ok) {
+	            return '任务未完成，请检查素材或改为本地上传后重试。';
+	          }
+	          if (Array.isArray(data.reports)) {
+	            const summary = data.summary || {};
+	            const lines = [
+	              '三份样本报告已生成。',
+	              '成功：' + safeText(summary.success) + ' / 总数：' + safeText(summary.total),
+	            ];
+	            data.reports.forEach((item) => {
+	              lines.push(safeText(item.sample_id) + '：' + (item.ok ? '已生成' : '未完成') + (item.conclusion ? ' / ' + item.conclusion : ''));
+	            });
+	            return lines.join('\n');
+	          }
+	          const review = data.review || {};
+          if (review.agent_brief) {
+            const brief = review.agent_brief;
+            return [
+              '结论：' + safeText(brief.conclusion),
+              '置信度：' + safeText(brief.confidence) + ' / 系统参考：' + safeText(brief.system_yes_no),
+              '下一步：' + safeText(brief.next_step),
+              '取证：' + safeText(review.frame_strategy),
+              '报告：点击下方按钮查看完整 Agent 报告。'
+            ].join('\n\n');
+          }
+          const summary = review.summary || {};
+          const lines = [
+            '复核摘要已生成。',
+            '覆盖场景：' + (summary.cases || '-'),
+            '成功复核：' + (summary.successful_reviews || 0) + '/' + (summary.total_reviews || 0),
+            '抽帧策略：' + (review.frame_strategy || '按当前配置取证'),
+          ];
+          if (review.report && review.report.html_url) lines.push('可点击下方按钮查看复核摘要。');
+          return lines.join('\n');
+        }
+
+	        function safeText(value) {
+	          return String(value == null ? '-' : value);
+	        }
+
+	        function clearReports() {
+	          reportLink.style.display = 'none';
+	          reportList.replaceChildren();
+	        }
+
+	        function showReportLinks(reports) {
+	          const items = (reports || []).filter((item) => item && item.html_url);
+	          reportList.replaceChildren(...items.map((item, index) => {
+	            const link = document.createElement('a');
+	            const title = document.createElement('b');
+	            const meta = document.createElement('span');
+	            link.href = item.html_url;
+	            link.target = '_blank';
+	            link.rel = 'noreferrer';
+	            title.textContent = (item.sample_id ? item.sample_id + ' · ' : '') + '查看第 ' + (index + 1) + ' 份报告';
+	            meta.textContent = item.confidence ? '置信度 ' + item.confidence : '打开 HTML';
+	            link.append(title, meta);
+	            return link;
+	          }));
+	          if (items.length === 1) {
+	            reportLink.href = items[0].html_url;
+	            reportLink.style.display = 'block';
+	          }
+	        }
+
+        function setMetaCard(title, body) {
+          const icon = document.createElement('div');
+          const wrap = document.createElement('div');
+          const h3 = document.createElement('h3');
+          const p = document.createElement('p');
+          h3.textContent = title;
+          p.textContent = body;
+          wrap.append(h3, p);
+          metaCard.replaceChildren(icon, wrap);
+        }
+
+        function renderMetadataCard(data) {
+          const meta = data.preview || {};
+          const media = document.createElement('div');
+          if (meta.thumbnail_url) {
+            try {
+              const thumbUrl = new URL(meta.thumbnail_url, window.location.href);
+              if (thumbUrl.protocol === 'http:' || thumbUrl.protocol === 'https:') {
+                const img = document.createElement('img');
+                img.src = thumbUrl.href;
+                img.alt = '视频封面';
+                media.replaceChildren(img);
+              }
+            } catch (error) {
+              console.error(error);
+            }
+          }
+          const wrap = document.createElement('div');
+          const h3 = document.createElement('h3');
+          const platform = document.createElement('p');
+          const duration = document.createElement('p');
+          h3.textContent = safeText(meta.title);
+          platform.textContent = '平台：' + safeText(data.platform_label || data.platform) + ' / 作者：' + safeText(meta.author);
+          duration.textContent = '时长：' + safeText(meta.duration) + ' 秒';
+          wrap.append(h3, platform, duration);
+          metaCard.replaceChildren(media, wrap);
+        }
+
+	        uploadTab.addEventListener('click', () => setMode('upload'));
+	        urlTab.addEventListener('click', () => setMode('url'));
+	        folderTab.addEventListener('click', () => setMode('folder'));
+        entryCards.forEach((card) => {
+          card.addEventListener('click', () => {
+            const scenario = card.dataset.scenario || 'video_unboxing';
+            applyScenario(scenario);
+            const next = new URL(scenarioPaths[scenario] || '/', window.location.href);
+            window.history.replaceState({}, '', next);
+          });
+        });
+        const initialScenario = pathScenarios[window.location.pathname] || new URLSearchParams(window.location.search).get('scenario') || scenarioInput.value;
+        applyScenario(taskProfiles[initialScenario] ? initialScenario : 'video_unboxing', false);
+
+        consoleToggle.addEventListener('click', () => {
+          const collapsed = !consolePanel.classList.contains('collapsed');
+          consolePanel.classList.toggle('collapsed', collapsed);
+          consoleToggle.textContent = collapsed ? '展开控制台' : '收起控制台';
+        });
+
+	        function updateFileState() {
+	          const file = fileInput.files && fileInput.files[0];
+	          if (!file) {
+	            fileState.textContent = '尚未选择文件';
+            return;
+          }
+          const sizeMb = file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '大小未知';
+	          const sizeHint = file.size && file.size > 20 * 1024 * 1024 ? ' / 建议先截取关键片段或降低分辨率' : '';
+	          fileState.textContent = file.name + ' / ' + sizeMb + sizeHint;
+	        }
+
+	        function folderFiles() {
+	          return Array.from((folderInput && folderInput.files) || []);
+	        }
+
+	        function isFolderMaterial(file) {
+	          return /\.(mp4|mov|m4v|webm|mkv|jpg|jpeg|png|webp|txt|json)$/i.test(file.name || '');
+	        }
+
+	        function updateFolderState() {
+	          const files = folderFiles().filter(isFolderMaterial);
+	          folderCard.classList.remove('dragging');
+	          if (!files.length) {
+	            folderState.textContent = '尚未选择文件夹';
+	            return;
+	          }
+	          const videoCount = files.filter(isVideoFile).length;
+	          const imageCount = files.filter((file) => /\.(jpg|jpeg|png|webp)$/i.test(file.name || '')).length;
+	          const textCount = files.filter((file) => /\.(txt|json)$/i.test(file.name || '')).length;
+	          const sizeMb = (files.reduce((sum, file) => sum + (file.size || 0), 0) / 1024 / 1024).toFixed(2);
+	          folderState.textContent = '视频 ' + videoCount + ' 个 / 图片 ' + imageCount + ' 张 / 文本 ' + textCount + ' 份 / ' + sizeMb + ' MB';
+	        }
+
+        function updateSampleFileState() {
+          const file = sampleFile.files && sampleFile.files[0];
+          if (!file) {
+            sampleFileState.textContent = '尚未选择样本表';
+            return;
+          }
+          const sizeKb = file.size ? (file.size / 1024).toFixed(1) + ' KB' : '大小未知';
+          sampleFileState.textContent = file.name + ' / ' + sizeKb;
+        }
+
+        function isVideoFile(file) {
+          if (!file) return false;
+          if (file.type && file.type.startsWith('video/')) return true;
+          return /\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name || '');
+        }
+
+        function isSampleFile(file) {
+          if (!file) return false;
+          return /\.(csv|json)$/i.test(file.name || '');
+        }
+
+        function isPublicVideoInput(value) {
+          const text = String(value || '').trim();
+          if (!text) return false;
+          return /https?:\/\/[^\s]+/i.test(text);
+        }
+
+        function validateBeforeSubmit() {
+          if (sourceType.value === 'upload') {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) {
+              fileState.textContent = '请先选择或拖放待审核视频。';
+              uploadCard.classList.add('dragging');
+              writeLog('请先选择或拖放待审核视频。支持 mp4、mov、m4v、webm、mkv，最大 300MB。');
+              return false;
+            }
+            if (!isVideoFile(file)) {
+              fileState.textContent = '文件格式不符合视频审核要求。';
+              writeLog('请上传常见视频格式文件，或切换为公开视频链接。');
+              return false;
+            }
+	            if (file.size && file.size > 300 * 1024 * 1024) {
+	              fileState.textContent = '视频超过 300MB，请先压缩或截取关键片段。';
+	              writeLog('当前文件超过工作台上传上限，请先压缩、截取关键片段，或联系项目对接人处理。');
+	              return false;
+	            }
+	          } else if (sourceType.value === 'folder') {
+	            const files = folderFiles().filter(isFolderMaterial);
+	            const total = files.reduce((sum, file) => sum + (file.size || 0), 0);
+	            if (!files.length) {
+	              folderState.textContent = '请先选择一个工单素材文件夹。';
+	              folderCard.classList.add('dragging');
+	              writeLog('请先选择一个包含视频、图片和文本材料的工单文件夹。');
+	              return false;
+	            }
+	            if (!files.some(isVideoFile)) {
+	              folderState.textContent = '文件夹里没有可审核的视频。';
+	              writeLog('工单素材包至少需要一个 mp4、mov、m4v、webm 或 mkv 视频。');
+	              return false;
+	            }
+	            if (total > 800 * 1024 * 1024) {
+	              folderState.textContent = '文件夹超过 800MB，请拆分或截取关键片段。';
+	              writeLog('当前 POC 单次文件夹上限为 800MB，请拆分工单材料或先截取关键片段。');
+	              return false;
+	            }
+	          } else if (!isPublicVideoInput(videoUrl.value)) {
+            writeLog('请粘贴包含 http 或 https 的公开视频链接；私密链接、登录后可见链接建议改为本地上传。');
+            setMetaCard('链接待确认', '支持公开可访问的视频页面、平台分享文本或常见视频直链。若链接需要登录、地区受限或禁止读取，请改为本地上传待审核视频。');
+            metaCard.className = 'meta-card ready';
+            return false;
+          }
+          return true;
+        }
+
+        function formatPercent(value) {
+          return typeof value === 'number' ? (value * 100).toFixed(2) + '%' : '暂不计算';
+        }
+
+        function formatSampleEval(data) {
+          const summary = data.summary || {};
+          const lines = [
+            '样本评测完成。',
+            '样本总数：' + safeText(summary.total),
+            '三队列样本：' + safeText(summary.target_total),
+            '三队列可比对样本：' + safeText(summary.target_evaluable),
+            '三队列命中数量：' + safeText(summary.target_correct),
+            '三队列比对准确率：' + formatPercent(summary.target_accuracy),
+            summary.ready_for_accuracy ? '样本量已达到最小盲测门槛。' : '样本量尚未达到对外准确率门槛：' + safeText(summary.minimum_required),
+            '建议验收口径：' + safeText(summary.recommended_required)
+          ];
+          if (Number(summary.non_target_total || 0) > 0) {
+            lines.push('扩展或未知任务：' + summary.non_target_total + ' 条，不计入三队列验收准确率。');
+          }
+          const readiness = data.readiness || {};
+          Object.keys(readiness).forEach((key) => {
+            const item = readiness[key];
+            lines.push(item.name + '：正向 ' + item.positive + ' / 负向 ' + item.negative + ' / 最小门槛 ' + (item.minimum_ready ? '已满足' : '未满足'));
+          });
+          const missing = data.missing_fields || {};
+          const missingLines = Object.keys(missing).filter((key) => missing[key] > 0).map((key) => key + '缺失 ' + missing[key] + ' 条');
+          if (missingLines.length) lines.push('字段缺口：' + missingLines.join('；'));
+          const unmapped = data.unmapped_labels || {};
+          const unmappedLines = [];
+          Object.keys(unmapped).forEach((group) => {
+            const values = Object.keys(unmapped[group] || {});
+            if (values.length) unmappedLines.push(group + '存在未映射标签：' + values.slice(0, 6).join('、'));
+          });
+          if (unmappedLines.length) lines.push('标签缺口：' + unmappedLines.join('；') + '。未映射标签不参与准确率统计。');
+          const mismatches = data.mismatches || [];
+          if (mismatches.length) {
+            lines.push('需复盘样本：');
+            mismatches.slice(0, 5).forEach((item) => {
+              lines.push('第 ' + item.row + ' 行 / ' + item.task + ' / 人工：' + item.human_label + ' / 辅助：' + item.assistant_label);
+            });
+          }
+          return lines.join('\n');
+        }
+
+	        fileInput.addEventListener('change', updateFileState);
+	        folderInput.addEventListener('change', updateFolderState);
+	        sampleFile.addEventListener('change', updateSampleFileState);
+        ['dragenter', 'dragover'].forEach((name) => {
+          uploadCard.addEventListener(name, (event) => {
+            event.preventDefault();
+            uploadCard.classList.add('dragging');
+          });
+          sampleUploadCard.addEventListener(name, (event) => {
+            event.preventDefault();
+            sampleUploadCard.classList.add('dragging');
+          });
+        });
+        ['dragleave', 'drop'].forEach((name) => {
+          uploadCard.addEventListener(name, (event) => {
+            event.preventDefault();
+            uploadCard.classList.remove('dragging');
+          });
+          sampleUploadCard.addEventListener(name, (event) => {
+            event.preventDefault();
+            sampleUploadCard.classList.remove('dragging');
+          });
+        });
+        uploadCard.addEventListener('drop', (event) => {
+          const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+          if (!file) return;
+          if (!isVideoFile(file)) {
+            writeLog('请拖放视频文件，或改用公开视频链接。');
+            return;
+          }
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          fileInput.files = transfer.files;
+          updateFileState();
+        });
+        sampleUploadCard.addEventListener('drop', (event) => {
+          const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+          if (!file) return;
+          if (!isSampleFile(file)) {
+            sampleEvalLog.textContent = '请拖放 CSV 或 JSON 样本表。';
+            return;
+          }
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          sampleFile.files = transfer.files;
+          updateSampleFileState();
+        });
+
+        sampleEvalForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const file = sampleFile.files && sampleFile.files[0];
+          if (!file) {
+            sampleEvalLog.textContent = '请先选择或拖放人工确认样本表。';
+            sampleUploadCard.classList.add('dragging');
+            return;
+          }
+          if (!isSampleFile(file)) {
+            sampleEvalLog.textContent = '样本表仅支持 CSV 或 JSON。';
+            return;
+          }
+          try {
+            sampleEvalBtn.disabled = true;
+            sampleEvalLog.textContent = '正在评测样本完整性与人工结论比对...';
+            const response = await fetch('/api/evaluate-samples', { method: 'POST', body: new FormData(sampleEvalForm) });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+              sampleEvalLog.textContent = data.detail || '样本评测未完成，请检查表头和文件格式。';
+              return;
+            }
+            sampleEvalLog.textContent = formatSampleEval(data);
+          } catch (error) {
+            console.error(error);
+            sampleEvalLog.textContent = '样本评测暂时未能完成，请检查文件格式后重试。';
+          } finally {
+            sampleEvalBtn.disabled = false;
+          }
+        });
+
+        demoSampleBtn.addEventListener('click', async () => {
+          const started = Date.now();
+          const profile = taskProfiles[scenarioInput.value] || taskProfiles.video_unboxing;
+          if (!profile.sampleId) {
+            sampleEvalLog.textContent = '当前队列暂无甲方小量样本；可以用本地上传链路做样式和流程烟测，但不能作为业务效果验收。';
+            return;
+          }
+          try {
+	            demoSampleBtn.disabled = true;
+	            stage.textContent = messages.zhCN.running;
+	            clearReports();
+	            writeLog('正在运行 ' + profile.sampleId + '，生成当前队列的客服复核报告...');
+            timer = setInterval(() => {
+              elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
+            }, 500);
+            const response = await fetch('/api/review-sample', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sample_id: profile.sampleId, scenario: scenarioInput.value })
+            });
+            const data = await response.json();
+            writeLog(formatReviewSummary(data));
+	            stage.textContent = data.ok ? messages.zhCN.done : messages.zhCN.failed;
+	            const href = data.review && data.review.report && data.review.report.html_url;
+	            if (href) {
+	              showReportLinks([{ html_url: href, confidence: data.review.summary && data.review.summary.confidence }]);
+	            }
+          } catch (error) {
+            console.error(error);
+            stage.textContent = messages.zhCN.error;
+            writeLog('样本审核未完成，请检查后端审核服务后重试。');
+          } finally {
+            clearInterval(timer);
+            elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
+            demoSampleBtn.disabled = false;
+          }
+	        });
+
+	        batchSampleBtn.addEventListener('click', async () => {
+	          const started = Date.now();
+	          try {
+	            batchSampleBtn.disabled = true;
+	            demoSampleBtn.disabled = true;
+	            stage.textContent = messages.zhCN.running;
+	            clearReports();
+	            writeLog('正在生成三份甲方小量样本报告，请等待...');
+	            timer = setInterval(() => {
+	              elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
+	            }, 500);
+	            const response = await fetch('/api/review-samples-batch', {
+	              method: 'POST',
+	              headers: { 'Content-Type': 'application/json' },
+	              body: JSON.stringify({})
+	            });
+	            const data = await response.json();
+	            writeLog(formatReviewSummary(data));
+	            stage.textContent = data.ok ? messages.zhCN.done : messages.zhCN.failed;
+	            showReportLinks(data.reports || []);
+	          } catch (error) {
+	            console.error(error);
+	            stage.textContent = messages.zhCN.error;
+	            writeLog('三份样本报告未完成，请检查后端审核服务后重试。');
+	          } finally {
+	            clearInterval(timer);
+	            elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
+	            batchSampleBtn.disabled = false;
+	            demoSampleBtn.disabled = false;
+	          }
+	        });
+
+        metadataBtn.addEventListener('click', async () => {
+          const input = videoUrl.value.trim();
+          if (!input) {
+            writeLog('请先粘贴公开视频 URL 或分享文本。');
+            return;
+          }
+          try {
+            metadataBtn.disabled = true;
+            metaCard.className = 'meta-card ready';
+            setMetaCard('正在解析视频信息...', '请稍候。');
+            const response = await fetch('/api/url/metadata', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: input })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+              writeLog('视频信息解析失败，请改为本地上传或更换公开链接。');
+              setMetaCard('视频信息解析失败', '请改为本地上传或更换公开链接。');
+              return;
+            }
+            writeLog('视频信息已解析，可开始生成复核摘要。');
+            renderMetadataCard(data);
+          } catch (error) {
+            console.error(error);
+            writeLog('视频信息解析失败，请改为本地上传或更换公开链接。');
+            metaCard.className = 'meta-card ready';
+            setMetaCard('视频信息解析失败', '请改为本地上传或更换公开链接。');
+          } finally {
+            metadataBtn.disabled = false;
+          }
+        });
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (!validateBeforeSubmit()) return;
+          const started = Date.now();
+          try {
+	            submitBtn.disabled = true;
+	            stage.textContent = messages.zhCN.running;
+	            clearReports();
+	            writeLog(messages.zhCN.reviewLoading);
+            timer = setInterval(() => {
+              elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
+            }, 500);
+	            const reviewUrl = sourceType.value === 'folder' ? '/api/review-folder' : '/api/review';
+	            const response = await fetch(reviewUrl, { method: 'POST', body: new FormData(form) });
+            const data = await response.json();
+            writeLog(formatReviewSummary(data));
+            stage.textContent = data.ok ? messages.zhCN.done : messages.zhCN.failed;
+	            const href = data.review && data.review.report && data.review.report.html_url;
+	            if (href) {
+	              showReportLinks([{ html_url: href, confidence: data.review.summary && data.review.summary.confidence }]);
+	            }
+          } catch (error) {
+            console.error(error);
+            stage.textContent = messages.zhCN.error;
+            writeLog('审核暂时未能完成，请稍后重试或改为本地上传。');
+          } finally {
+            clearInterval(timer);
+            elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
+            submitBtn.disabled = false;
+          }
+        });
+      } catch (error) {
+        console.error('工作台初始化失败', error);
+      }
+    });
+  </script>
+</body>
+</html>

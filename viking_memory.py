@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 
+from runtime_paths import mock_data_file, viking_memory_dir
+
 try:
     import openviking  # noqa: F401
 
@@ -16,13 +18,13 @@ except ImportError:
 class MockOpenViking:
     """本地实现的虚拟文件系统 (viking://)，支持 L0/L1/L2 自动分层加载"""
 
-    def __init__(self, base_dir: str = "viking_memory"):
-        self.base_dir = base_dir
+    def __init__(self, base_dir: str | None = None):
+        self.base_dir = base_dir or str(viking_memory_dir())
         os.makedirs(self.base_dir, exist_ok=True)
         self._init_default_data()
 
     def _init_default_data(self) -> None:
-        mock_data_path = os.path.join(os.path.dirname(__file__), "mock_data.json")
+        mock_data_path = str(mock_data_file())
         if os.path.exists(mock_data_path):
             try:
                 with open(mock_data_path, "r", encoding="utf-8") as f:

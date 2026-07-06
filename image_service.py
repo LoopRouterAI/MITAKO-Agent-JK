@@ -5,7 +5,6 @@ from typing import Any, Dict, Optional
 import httpx
 
 from image_models import get_image_api_key, get_image_model_config
-from llm_models import mask_api_key
 from llm_rate_limit import get_rate_limiter
 
 
@@ -23,8 +22,7 @@ async def generate_image(
     cfg = get_image_model_config(model_id)
     api_key = get_image_api_key(model_id)
     if not _has_valid_key(api_key):
-        key_env = cfg.get("api_key_env", "SENSENOVA_API_KEY")
-        raise ValueError(f"未配置有效的 API Key，请在 .env 中设置 {key_env}")
+        raise ValueError("服务密钥未配置，请联系管理员处理。")
 
     rl = cfg["rate_limit"]
     limiter = get_rate_limiter()
@@ -72,16 +70,9 @@ async def generate_image(
         if not urls:
             raise RuntimeError("生图 API 未返回图片 URL")
 
-        updated_quota = limiter.get_quota(cfg["id"], rl["max_requests"], rl["window_seconds"])
-
         return {
-            "model": cfg["label"],
-            "model_id": cfg["id"],
             "urls": urls,
             "created": data.get("created"),
-            "api_key_masked": mask_api_key(api_key),
-            "request": payload,
-            "rate_limit": updated_quota,
         }
     except Exception:
         limiter.release_last(cfg["id"])
