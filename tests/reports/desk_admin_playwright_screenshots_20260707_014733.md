@@ -1,9 +1,9 @@
-# MITAKO /desk + /admin Playwright 演示级截图验收报告 20260707_013950
+# MITAKO /desk + /admin Playwright 演示级截图验收报告 20260707_014733
 
-- 服务地址：http://127.0.0.1:8010
-- 执行时间：2026-07-07 01:39:50
+- 服务地址：http://127.0.0.1:8011
+- 执行时间：2026-07-07 01:47:33
 - 结果：16/16 通过
-- HTML：D:\Jack\Jack-Code\CodeX_Project\MITAKO_Agent\tests\reports\desk_admin_playwright_screenshots_20260707_013950.html
+- HTML：D:\Jack\Jack-Code\CodeX_Project\MITAKO_Agent\tests\reports\desk_admin_playwright_screenshots_20260707_014733.html
 
 | 区域 | 用例 | 结果 | 说明 |
 | --- | --- | --- | --- |

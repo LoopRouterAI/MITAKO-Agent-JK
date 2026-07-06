@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Headphones, RefreshCw, Send, User, ClipboardList, CheckCircle2, ArrowUpCircle, AlertTriangle, Users, SmilePlus, Search } from 'lucide-react';
 import t from '../i18n/index.js';
 import RichTextContent from '../components/shared/RichTextContent.jsx';
-import { authFetch } from '../lib/authClient.js';
+import { authFetch, getAuthToken } from '../lib/authClient.js';
 import { attachHandoffTransport } from '../hooks/useHandoffSync.js';
 import { sanitizePublicText } from '../utils/publicText.js';
 
@@ -106,6 +106,7 @@ export default function HumanAgentDesk({ authUser = null }) {
       onMessages: () => pollDetail(),
       pollFn: pollDetail,
       pollIntervalMs: 4000,
+      authValue: getAuthToken(),
     });
     return () => {
       clearInterval(timer);
