@@ -63,6 +63,7 @@ python scripts/check_visual_workbench_smoke.py
 | `我方内部开发文档/客服Agent视觉审核系统设计指南.md` | 内部系统设计、模块边界与正式开发指南 |
 | `docs/delivery/openapi.yaml` | 面向 Java 技术栈的接口契约参考 |
 | `docs/delivery/deployment-guide.md` | 部署与上线说明 |
+| `docs/delivery/codex-continuation-handoff-2026-07-06.md` | 迁移到另一台设备和 Codex 接续开发的上下文 |
 | `tests/reports/customer_chat_acceptance_20260706.html` | 用户端客服交互最后一轮验收报告 |
 
 ## POC 边界
