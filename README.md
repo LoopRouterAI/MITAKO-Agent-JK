@@ -63,7 +63,7 @@ python scripts/check_visual_workbench_smoke.py
 | `我方内部开发文档/客服Agent视觉审核系统设计指南.md` | 内部系统设计、模块边界与正式开发指南 |
 | `docs/delivery/openapi.yaml` | 面向 Java 技术栈的接口契约参考 |
 | `docs/delivery/deployment-guide.md` | 部署与上线说明 |
-| `docs/delivery/codex-continuation-handoff-2026-07-06.md` | 迁移到另一台设备和 Codex 接续开发的上下文 |
+| `Codex接续开发交接说明.md` | 迁移到另一台设备和 Codex 接续开发的上下文 |
 | `tests/reports/customer_chat_acceptance_20260706.html` | 用户端客服交互最后一轮验收报告 |
 
 ## POC 边界
@@ -71,7 +71,7 @@ python scripts/check_visual_workbench_smoke.py
 - 当前真实甲方业务接口只做 Mock 和契约说明，不伪装为已接入生产系统。
 - 本地 `mock_data.json` 只用于演示订单、物流、售后、商品、地址等流程。
 - 生产联调前必须由甲方提供测试环境、接口契约、鉴权方式、脱敏样本、人工结论和上线审批。
-- `.env`、数据库、运行时记忆、日志、测试截图、视频样本和模型文件不得提交到 GitHub。
+- 当前为私人仓库，`.env` 可跟踪；数据库、运行时记忆、日志、测试截图、视频样本、模型文件和超大原始资料不得普通 Git 提交。
 
 ## 打包交付
 

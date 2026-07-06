@@ -8,7 +8,6 @@ __pycache__/
 *$py.class
 
 # 本地配置与密钥
-.env
 .env.*
 !.env.example
 
@@ -49,3 +48,4 @@ dist/memes/
 # 本地 PPT/PDF 素材目录按需保留
 PPT-*/
 *.pdf
+!docs/**/*.pdf

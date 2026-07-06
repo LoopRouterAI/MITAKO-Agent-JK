@@ -4,6 +4,7 @@
 
 | 文档 | 读者 |
 |---|---|
+| [../Codex接续开发交接说明.md](../Codex接续开发交接说明.md) | 迁移设备与 Codex 接续 |
 | [../README.md](../README.md) | 所有人 |
 | [delivery/deployment-guide.md](./delivery/deployment-guide.md) | 部署与实施 |
 | [delivery/testing-guide.md](./delivery/testing-guide.md) | 测试与验收 |
