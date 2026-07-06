@@ -1,1 +1,10 @@
 *.pdf binary
+.cursor/** export-ignore
+.codegraph/** export-ignore
+node_modules/** export-ignore
+venv/** export-ignore
+logs/** export-ignore
+tmp/** export-ignore
+release/** export-ignore
+docs.7z export-ignore
+*.zip export-ignore
