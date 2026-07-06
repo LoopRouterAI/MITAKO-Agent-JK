@@ -126,22 +126,22 @@ def get_welcome(user_id: str, weights: Optional[str] = None):
         order_line = f"我看到有一笔可能相关的订单：{_public_ref(recommended.get('order_id'))}（{item_name}）。如果要问这单，可以点下方卡片。"
         tags = recommended.get("tags") or []
         if "minor_refund" in tags:
-            reason = "该订单涉及未成年人退款材料审核，需要客服按材料清单谨慎处理"
+            reason = "这笔订单涉及材料审核，我可以先帮您整理需要准备的资料。"
         elif "damage_claim" in tags:
-            reason = "该订单有破损售后诉求，需要核对图片、开箱视频和签收节点"
+            reason = "这笔订单涉及破损售后，我可以先帮您核对图片、开箱视频和签收节点。"
         elif "lottery_rule_question" in tags:
-            reason = "用户曾咨询抽奖规则或中奖率，适合优先解释活动公示与复核入口"
+            reason = "如果您想核对抽选规则或结果，我可以帮您整理规则入口和复核信息。"
         elif recommended.get("delay_days", 0) > 30:
-            reason = f"该订单已延期约 {recommended.get('delay_days')} 天"
+            reason = "这笔订单等待时间比较久，我可以先帮您看现在卡在哪一步。"
         elif "had_consultation" in tags:
-            reason = "系统记录显示您曾咨询过这笔订单"
+            reason = "这笔订单之前咨询过，我可以接着帮您看最新处理进展。"
         elif "newly_shipped" in tags:
-            reason = "订单刚发货或刚清关，适合先核对当前物流节点"
+            reason = "这笔订单刚发货或刚清关，我可以帮您确认当前物流节点。"
         elif recommended.get("status") == "pending_shipment":
             if (recommended.get("delay_days") or 0) <= 3:
-                reason = "订单刚付款，仍在承诺出库期内，可先帮您确认仓库处理节奏"
+                reason = "这笔订单刚付款，我可以帮您确认仓库出库节奏。"
             else:
-                reason = "当前仍处于待出荷/待发状态，需要核对仓库或供应链节点"
+                reason = "这笔订单还在待出库状态，我可以帮您核对仓库或供应链节点。"
         else:
             reason = recommended.get("status_label") or "状态需要确认"
 

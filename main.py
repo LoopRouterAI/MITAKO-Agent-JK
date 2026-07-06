@@ -4,6 +4,7 @@ import re
 import json
 import asyncio
 import traceback
+from datetime import datetime
 from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,6 +81,8 @@ from auth import tenants as tenant_store
 from auth import sso as sso_service
 from ops_service import ops_snapshot
 from runtime_paths import app_root
+
+SUPER_ADMIN_ONLY = frozenset({Role.SUPER_ADMIN.value})
 
 app = FastAPI(title="MITAKO 客服 Agent 主站", description="提供客服前台、人工工作台与运营后台服务")
 APP_ROOT = app_root()
@@ -308,6 +311,8 @@ def _public_business_card(card: Dict[str, Any]) -> Dict[str, Any]:
         action_label = "售后处理单"
     elif action.get("type") == "ticket":
         action_label = "人工复核工单"
+    elif action.get("type") == "product_info":
+        action_label = "商品信息核对"
     else:
         action_label = "客服继续跟进"
     return {
@@ -321,6 +326,62 @@ def _public_business_card(card: Dict[str, Any]) -> Dict[str, Any]:
                 "reason": action.get("reason") or "已记录当前问题，客服会按服务流程继续核实处理。",
             },
         },
+    }
+
+
+def _format_public_date(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return raw[:10] if re.match(r"\d{4}-\d{2}-\d{2}", raw) else raw
+
+
+def _should_emit_order_progress(result: Dict[str, Any]) -> bool:
+    sop = result.get("sop_state") or {}
+    ticket_type = sop.get("ticket_type") or ""
+    if ticket_type in {"damage", "minor_refund", "refund", "account_binding", "product_consult"}:
+        return False
+    intent = str(result.get("intent") or "")
+    return ticket_type in {"logistics", "missing", "general"} or any(k in intent for k in ["订单", "物流", "发货", "催发货"])
+
+
+def _build_order_progress_payload(order: Dict[str, Any], logistics: Dict[str, Any]) -> Dict[str, Any]:
+    timeline = logistics.get("timeline") or []
+    created = _format_public_date(order.get("created_at"))
+    expected = _format_public_date(order.get("expected_shukka_date"))
+    status = order.get("status") or ""
+    steps = []
+    if created:
+        steps.append({"label": "下单", "status": "completed", "date": created})
+    if status in {"pending_shipment", "preorder"}:
+        steps.append({"label": "出库", "status": "current", "date": expected or order.get("status_label") or "待仓库处理"})
+    elif status in {"in_transit", "delivered", "after_sales_review", "refunded"}:
+        steps.append({"label": "出库", "status": "completed", "date": "已出库"})
+    for item in timeline[-3:]:
+        if not isinstance(item, dict):
+            continue
+        steps.append({
+            "label": "物流节点",
+            "status": "completed" if status in {"in_transit", "delivered"} else "current",
+            "date": f"{_format_public_date(item.get('time'))} {item.get('status') or ''}".strip(),
+        })
+    if not steps:
+        steps.append({"label": "当前状态", "status": "current", "date": order.get("status_label") or status or "待核对"})
+    latest = ""
+    if timeline and isinstance(timeline[-1], dict):
+        latest = timeline[-1].get("status") or ""
+    delay_reason = latest if order.get("delay_days", 0) > 0 else ""
+    return {
+        "order_id": order["order_id"],
+        "item_name": order["items"][0]["name"] if order.get("items") else "谷子周边",
+        "total_amount": order.get("total_amount"),
+        "progress_steps": steps[:5],
+        "delay_reason": delay_reason,
+        "status_label": order.get("status_label") or status,
     }
 
 
@@ -580,17 +641,17 @@ async def admin_queue_snapshot(user=require_roles(ADMIN_MUTATE_ROLES)):
 
 
 @app.get("/api/v1/admin/demo/status")
-async def admin_demo_status(user=require_roles(ADMIN_MUTATE_ROLES)):
+async def admin_demo_status(user=require_roles(SUPER_ADMIN_ONLY)):
     return demo_status(tenant_id=user.get("tenant_id"))
 
 
 @app.post("/api/v1/admin/demo/load")
-async def admin_demo_load(user=require_roles(ADMIN_MUTATE_ROLES)):
+async def admin_demo_load(user=require_roles(SUPER_ADMIN_ONLY)):
     return load_demo_data(tenant_id=user.get("tenant_id"))
 
 
 @app.post("/api/v1/admin/demo/clear")
-async def admin_demo_clear(user=require_roles(ADMIN_MUTATE_ROLES)):
+async def admin_demo_clear(user=require_roles(SUPER_ADMIN_ONLY)):
     return clear_demo_data(tenant_id=user.get("tenant_id"))
 
 
@@ -611,12 +672,38 @@ async def admin_transcript(session_id: str, user=require_roles(ADMIN_MUTATE_ROLE
 
 @app.get("/api/v1/admin/qc/observer")
 async def admin_observer_qc(flagged_only: bool = True, user=require_roles(ADMIN_MUTATE_ROLES)):
+    tenant_id = user.get("tenant_id") or "mitako"
+    audits = handoff_store_module.list_observer_audits(
+        flagged_only=flagged_only,
+        tenant_id=tenant_id,
+    )
+    business_events = []
+    for event_type in ("service_qc_sop_proposal", "service_transfer_blocked"):
+        business_events.extend(handoff_store_module.list_business_events(
+            event_type=event_type,
+            tenant_id=tenant_id,
+            limit=30,
+        ))
+    for ev in business_events:
+        result = ev.get("result") or {}
+        payload = ev.get("payload") or {}
+        findings = result.get("findings") or []
+        reason = result.get("reason") or payload.get("reason") or result.get("trigger") or ev.get("event_type")
+        audits.append({
+            "id": f"event-{ev.get('id')}",
+            "session_id": ev.get("session_id"),
+            "tenant_id": ev.get("tenant_id") or tenant_id,
+            "message_id": None,
+            "content": "；".join([str(reason)] + [str(x) for x in findings])[:600],
+            "flagged": True,
+            "policy_hits": [result.get("sop_branch") or result.get("trigger") or ev.get("event_type")],
+            "reviewer_status": "pending",
+            "created_at": ev.get("created_at") or 0,
+        })
+    audits.sort(key=lambda item: item.get("created_at") or 0, reverse=True)
     return {
         "ok": True,
-        "audits": handoff_store_module.list_observer_audits(
-            flagged_only=flagged_only,
-            tenant_id=user.get("tenant_id") or "mitako",
-        ),
+        "audits": audits[:50],
     }
 
 
@@ -1192,39 +1279,13 @@ async def chat_stream(req: ChatRequest, request: Request):
                     "data": json.dumps(_public_business_card(card), ensure_ascii=False)
                 }
 
-            if result.get("order_data") and result["order_data"].get("orders"):
+            if _should_emit_order_progress(result) and result.get("order_data") and result["order_data"].get("orders"):
                 order = result["order_data"]["orders"][0]
-                status = order.get("status")
-
-                # 带有受海关延误标记的二次元进度卡片
-                progress_steps = [
-                    {"label": "下单", "status": "completed", "date": "2024-06-01"},
-                    {"label": "出荷", "status": "completed" if status != "pending_shipment" else "delayed", "date": "原定9月 → 延至12月" if order.get("delay_days", 0) > 0 else "已出荷", "highlight": order.get("delay_days", 0) > 0},
-                    {"label": "清关", "status": "current" if status == "pending_shipment" else "pending", "date": "进行中" if status == "pending_shipment" else "待清关"},
-                    {"label": "入库", "status": "pending", "date": "待入库"},
-                    {"label": "派送", "status": "pending", "date": "待派送"}
-                ]
-
-                if status == "delivered":
-                    progress_steps = [
-                        {"label": "下单", "status": "completed", "date": "2025-05-20"},
-                        {"label": "出荷", "status": "completed", "date": "已出荷"},
-                        {"label": "清关", "status": "completed", "date": "已清关"},
-                        {"label": "入库", "status": "completed", "date": "已入库"},
-                        {"label": "派送", "status": "completed", "date": "已妥投"}
-                    ]
-
                 yield {
                     "event": "card",
                     "data": json.dumps({
                         "type": "order_progress",
-                        "data": {
-                            "order_id": order["order_id"],
-                            "item_name": order["items"][0]["name"] if order.get("items") else "谷子周边",
-                            "total_amount": order.get("total_amount"),
-                            "progress_steps": progress_steps,
-                            "delay_reason": "海关港口突击抽检查验，预计12月15日出荷完成" if order.get("delay_days", 0) > 0 else ""
-                        }
+                        "data": _build_order_progress_payload(order, result.get("logistics_data") or {})
                     }, ensure_ascii=False)
                 }
 

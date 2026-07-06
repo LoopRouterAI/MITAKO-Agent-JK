@@ -81,6 +81,11 @@ export default function QueueMonitor() {
     if (min < 60) return `${min} 分钟`;
     return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟`;
   };
+  const sessionMeta = (s) => {
+    if (s.status === 'connected') return `${statusLabel(s.status)} · 接待中 · 已等 ${fmtDuration(s.wait_seconds)}`;
+    if (s.status === 'transferring') return `${statusLabel(s.status)} · 等待目标客服确认 · 已等 ${fmtDuration(s.wait_seconds)}`;
+    return `${statusLabel(s.status)} · ${tierLabel(s.required_tier)} · 第 ${s.position || '-'} 位 · 已等 ${fmtDuration(s.wait_seconds)}`;
+  };
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
@@ -123,7 +128,7 @@ export default function QueueMonitor() {
           <div key={s.session_id} className={`${cardClass} flex flex-wrap items-center justify-between gap-2`}>
             <div>
               <p className="text-sm font-bold">{businessNo(s.session_id)}</p>
-              <p className="text-xs text-slate-500">{statusLabel(s.status)} · {tierLabel(s.required_tier)} · 第 {s.position || '-'} 位 · 已等 {fmtDuration(s.wait_seconds)}</p>
+              <p className="text-xs text-slate-500">{sessionMeta(s)}</p>
               <p className="mt-1 text-xs text-slate-600">{s.brief?.summary || s.summary || '暂无摘要，请打开服务记录查看。'}</p>
             </div>
             <button type="button" disabled={busyId === s.session_id} onClick={() => reassign(s.session_id)} className="min-h-[40px] text-xs font-bold px-3 py-2 rounded-[8px] bg-[var(--mitako-lime)] text-[var(--mitako-ink)] disabled:opacity-60">

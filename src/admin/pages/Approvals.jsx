@@ -30,7 +30,7 @@ export default function Approvals({ user = null }) {
       const r = await authFetch('/api/v1/admin/approvals?status=pending');
       const data = await r.json();
       if (data.ok) setRows(data.approvals || []);
-      else setError(data.message || data.error || '审批列表加载失败');
+      else setError(data.message || data.error || data.detail || '审批列表加载失败');
     } catch (e) {
       console.error(e);
       setError('审批列表加载失败，请稍后再试');
@@ -53,7 +53,7 @@ export default function Approvals({ user = null }) {
       });
       const data = await r.json();
       if (!data.ok) {
-        setError(data.message || data.error || '审批处理失败');
+        setError(data.message || data.error || data.detail || '审批处理失败');
         return;
       }
       setNotice(decision === 'approved' ? '已批准该补偿申请' : '已拒绝该补偿申请');
@@ -83,7 +83,7 @@ export default function Approvals({ user = null }) {
         setNotice('补偿申请已提交，等待主管审批');
         await load();
       } else {
-        setError(data.message || data.error || '补偿申请提交失败');
+        setError(data.message || data.error || data.detail || '补偿申请提交失败');
       }
     } catch (err) {
       console.error(err);

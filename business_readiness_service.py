@@ -19,6 +19,7 @@ def _last_user_text(state: Dict[str, Any]) -> str:
 def classify_sop_branch(text: str, intent: str = "") -> Dict[str, Any]:
     query = f"{intent} {text}"
     rules = [
+        ("product_consult", "商品/库存/预售咨询", ["售前商品咨询", "还没下单", "想买", "库存", "预售", "规格", "商品咨询"], ["answer_product_policy"], ["promise_delivery_date", "reserve_inventory"]),
         ("minor_refund", "未成年人退款", ["未成年", "孩子", "小孩", "家长", "监护人"], ["request_materials"], ["auto_refund", "auto_reject"]),
         ("account_binding", "账号换绑", ["换绑", "账号", "手机号", "改绑"], ["create_ticket"], ["auto_change_account"]),
         ("damage", "商品有伤", ["破损", "有伤", "划痕", "烂了", "瑕疵", "开箱"], ["create_after_sales_card"], ["auto_refund", "auto_reissue"]),
@@ -76,6 +77,8 @@ def get_multimodal_fixture(fixture_id: str) -> Dict[str, Any]:
 
 
 def _first_order(state: Dict[str, Any]) -> Dict[str, Any]:
+    if (state.get("order_data") or {}).get("order_lookup_failed"):
+        return {}
     orders = (state.get("order_data") or {}).get("orders") or []
     if orders:
         return orders[0]
@@ -161,6 +164,16 @@ def _review_design(sop_state: Dict[str, Any], fixtures: List[Dict[str, Any]], te
                 "拆分发货、清关、入仓、仓库排单、承运商轨迹等节点",
                 "给用户明确下一步核查动作，不承诺绝对到货或出荷日期",
                 "形成仓储/履约协同任务，接口联通前由人工执行",
+            ],
+        })
+        return base
+    if ticket_type == "product_consult":
+        base.update({
+            "scene": "商品/库存/预售咨询",
+            "optimized_checks": [
+                "确认用户是否已下单；未下单时只回答商品、库存、预售和售后规则",
+                "库存数量以下单页和甲方商品接口为准，不编造具体库存",
+                "不生成订单物流卡，不承诺确定出货日期",
             ],
         })
         return base
@@ -251,6 +264,13 @@ def build_sop_checklist(sop_state: Dict[str, Any], order: Dict[str, Any], fixtur
             "ready",
             "已生成履约协同任务，待业务接口联通后自动派发",
             "仓储协同",
+        ))
+    if ticket_type == "product_consult":
+        checklist.append(_checklist_item(
+            "商品信息核对",
+            "ready",
+            "按商品接口同步库存、预售说明、退换规则；未接入前仅展示演示商品信息",
+            "商品中心",
         ))
     checklist.append(_checklist_item(
         "下一步话术",
@@ -402,6 +422,12 @@ def run_business_flow(state: Dict[str, Any], fixtures: List[str] | None = None) 
             "task_type": "check_package" if ticket_type == "missing" else "expedite_shipment",
             "requires_human": False,
             "reason": "已生成履约协同任务，用于跨部门核查",
+        }
+    elif ticket_type == "product_consult":
+        action = {
+            "type": "product_info",
+            "requires_human": False,
+            "reason": "按商品信息、预售说明和售后规则回答，不生成订单物流处理单",
         }
     elif ticket_type in {"refund", "minor_refund", "account_binding"}:
         action = {

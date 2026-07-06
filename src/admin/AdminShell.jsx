@@ -15,15 +15,15 @@ import Reports from './pages/Reports.jsx';
 import OpsMonitor from './pages/OpsMonitor.jsx';
 
 const NAV = [
-  { id: 'dashboard', icon: LayoutDashboard, labelKey: 'admin.navDashboard' },
-  { id: 'agents', icon: Users, labelKey: 'admin.navAgents' },
-  { id: 'routing', icon: Route, labelKey: 'admin.navRouting' },
-  { id: 'queue', icon: ListOrdered, labelKey: 'admin.navQueue' },
-  { id: 'audit', icon: FileText, labelKey: 'admin.navAudit' },
-  { id: 'qc', icon: Shield, labelKey: 'admin.navQc' },
-  { id: 'approvals', icon: ClipboardCheck, labelKey: 'admin.navApprovals' },
-  { id: 'reports', icon: BarChart3, labelKey: 'admin.navReports' },
-  { id: 'ops', icon: Monitor, labelKey: 'admin.navOps' },
+  { id: 'dashboard', icon: LayoutDashboard, labelKey: 'admin.navDashboard', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
+  { id: 'agents', icon: Users, labelKey: 'admin.navAgents', roles: ['super_admin'] },
+  { id: 'routing', icon: Route, labelKey: 'admin.navRouting', roles: ['super_admin'] },
+  { id: 'queue', icon: ListOrdered, labelKey: 'admin.navQueue', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
+  { id: 'audit', icon: FileText, labelKey: 'admin.navAudit', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
+  { id: 'qc', icon: Shield, labelKey: 'admin.navQc', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
+  { id: 'approvals', icon: ClipboardCheck, labelKey: 'admin.navApprovals', roles: ['super_admin', 'supervisor'] },
+  { id: 'reports', icon: BarChart3, labelKey: 'admin.navReports', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
+  { id: 'ops', icon: Monitor, labelKey: 'admin.navOps', roles: ['super_admin'] },
 ];
 
 /** 008 管理员运营后台 Shell */
@@ -31,6 +31,9 @@ export default function AdminShell({ user, legacyRouting }) {
   const [tab, setTab] = useState('dashboard');
   const [demo, setDemo] = useState(null);
   const [demoBusy, setDemoBusy] = useState(false);
+  const role = user?.role || 'super_admin';
+  const isSuperAdmin = role === 'super_admin';
+  const visibleNav = NAV.filter(item => item.roles.includes(role));
 
   const loadDemoStatus = useCallback(async () => {
     try {
@@ -72,7 +75,7 @@ export default function AdminShell({ user, legacyRouting }) {
           <p className="text-base font-black mt-3">{t('admin.shellTitle')}</p>
           <p className="text-[11px] text-slate-500 mt-1">{user?.display_name || user?.username}</p>
         </div>
-        {NAV.map(({ id, icon: Icon, labelKey }) => (
+        {visibleNav.map(({ id, icon: Icon, labelKey }) => (
           <button
             key={id}
             type="button"
@@ -102,19 +105,23 @@ export default function AdminShell({ user, legacyRouting }) {
             <span className={`rounded-[8px] px-2 py-1 text-[11px] font-bold ${demo?.mode === 'demo' ? 'bg-[var(--mitako-lime-soft)] text-slate-900' : 'bg-slate-100 text-slate-600'}`}>
               {demo?.mode === 'demo' ? `演示数据 ${demo.session_count || 0} 条` : '空状态/待接入'}
             </span>
-            <button type="button" disabled={demoBusy} onClick={() => runDemoAction('load')} className="min-h-[36px] rounded-[8px] bg-[var(--mitako-lime)] px-3 text-xs font-bold text-slate-950 disabled:opacity-60">
-              加载演示数据
-            </button>
-            <button
-              type="button"
-              disabled={demoBusy}
-              onClick={() => {
-                if (window.confirm('确认清空演示数据？真实接口数据不会被删除。')) runDemoAction('clear');
-              }}
-              className="min-h-[36px] rounded-[8px] bg-white border border-slate-200 px-3 text-xs font-bold text-slate-700 disabled:opacity-60"
-            >
-              清空演示数据
-            </button>
+            {isSuperAdmin && (
+              <>
+                <button type="button" disabled={demoBusy} onClick={() => runDemoAction('load')} className="min-h-[36px] rounded-[8px] bg-[var(--mitako-lime)] px-3 text-xs font-bold text-slate-950 disabled:opacity-60">
+                  加载演示数据
+                </button>
+                <button
+                  type="button"
+                  disabled={demoBusy}
+                  onClick={() => {
+                    if (window.confirm('确认清空演示数据？真实接口数据不会被删除。')) runDemoAction('clear');
+                  }}
+                  className="min-h-[36px] rounded-[8px] bg-white border border-slate-200 px-3 text-xs font-bold text-slate-700 disabled:opacity-60"
+                >
+                  清空演示数据
+                </button>
+              </>
+            )}
           </div>
         </div>
         {tab === 'dashboard' && <Dashboard />}

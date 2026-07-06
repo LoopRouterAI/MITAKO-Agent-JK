@@ -27,9 +27,11 @@ from agent import (
     check_compensation_eligibility,
     query_logistics,
     query_order_system,
+    safety_review_agent,
     sanitize_customer_reply,
     search_knowledge_base,
 )
+from main import _should_emit_order_progress
 from business_readiness_service import classify_sop_branch, run_business_flow
 from auth.jwt_utils import create_token
 from auth.roles import Role
@@ -329,6 +331,112 @@ def test_order_and_logistics_200_semantic_failure_not_used():
     order, logistics = asyncio.run(run_case())
     assert order["order_data"] == {}, order
     assert logistics["logistics_data"] == {}, logistics
+
+
+def test_short_public_order_ref_focuses_correct_order():
+    async def run_case():
+        return await query_order_system(
+            {
+                "user_id": "usr_004",
+                "intent": "物流追踪/催发货",
+                "active_order_id": "",
+                "messages": [{"role": "user", "content": "我想咨询订单 #026403，现在进度怎么样"}],
+            },
+            {"configurable": {}},
+        )
+
+    result = asyncio.run(run_case())
+    orders = result["order_data"].get("orders") or []
+    assert orders and orders[0]["order_id"] == "ORD_2026_403", result
+    assert "名侦探柯南" in orders[0]["items"][0]["name"], result
+
+
+def test_compensation_only_checks_focused_order():
+    async def run_case():
+        return await check_compensation_eligibility(
+            {
+                "user_id": "usr_001",
+                "session_id": "session_focus_comp",
+                "intent": "物流追踪/催发货",
+                "user_memory": {"member_level": "gold"},
+                "order_data": {
+                    "orders": [
+                        {"order_id": "ORD_2026_011", "status": "in_transit", "is_compensable": False},
+                        {"order_id": "ORD_2024_001", "status": "pending_shipment", "is_compensable": True},
+                    ]
+                },
+            },
+            {"configurable": {}},
+        )
+
+    result = asyncio.run(run_case())
+    assert result["compensation_given"] == [], result
+    assert "should_transfer" not in result, result
+
+
+def test_explicit_human_request_triggers_handoff_rule():
+    async def run_case():
+        classified = await agent_module.classify_intent(
+            {"messages": [{"role": "user", "content": "我要人工客服，不想和机器人说了"}]},
+            {"configurable": {}},
+        )
+        transfer = await agent_module.check_transfer_rules(
+            {
+                "messages": [{"role": "user", "content": "我要人工客服，不想和机器人说了"}],
+                "intent": classified["intent"],
+                "emotion_level": classified["emotion_level"],
+            },
+            {"configurable": {}},
+        )
+        return classified, transfer
+
+    classified, transfer = asyncio.run(run_case())
+    assert classified["intent"] == "人工客服请求", classified
+    assert transfer["should_transfer"] is True, transfer
+    assert "人工客服" in transfer["transfer_reason"], transfer
+
+
+def test_lottery_reply_blocks_absolute_backing_and_unapproved_compensation():
+    result = asyncio.run(
+        safety_review_agent(
+            {
+                "messages": [{"role": "user", "content": "我20抽全是普款，你们是不是吞烫了？中奖率是不是后台改过？"}],
+                "intent": "盲盒相关/吞烫质疑",
+                "reply_draft": "概率是系统全随机锁定的，绝对没有人工干预。我帮你申请非酋关爱积分包，200平台积分和专属挂件稍后到账。",
+                "order_data": {},
+                "logistics_data": {},
+                "sop_results": [],
+            },
+            {"configurable": {}},
+        )
+    )
+    reply = result["reply_draft"]
+    assert "绝对" not in reply and "稍后到账" not in reply and "专属挂件" not in reply, reply
+    assert "公示" in reply and "复核" in reply, reply
+
+
+def test_minor_refund_material_question_answers_checklist_before_handoff():
+    result = asyncio.run(
+        safety_review_agent(
+            {
+                "messages": [{"role": "user", "content": "我是家长，申请未成年人退款需要提交什么材料？"}],
+                "intent": "退款退货/未成年人退款",
+                "reply_draft": "已为您转接客服继续处理。",
+                "order_data": {},
+                "logistics_data": {},
+                "sop_results": [],
+            },
+            {"configurable": {}},
+        )
+    )
+    reply = result["reply_draft"]
+    assert "监护人" in reply and "支付凭证" in reply and "人工终审" in reply, reply
+
+
+def test_product_consult_sop_does_not_emit_order_progress():
+    sop = classify_sop_branch("我还没下单，想问库存、预售和能不能退", "售前商品咨询")
+    assert sop["ticket_type"] == "product_consult", sop
+    assert _should_emit_order_progress({"sop_state": sop, "intent": "售前商品咨询"}) is False
 
 
 def test_customer_reply_sanitizer_blocks_internal_state_terms():
@@ -734,6 +842,9 @@ def test_business_flow_fixture_idempotency_and_audit():
     assert any(e["event_type"] == "service_after_sales_card" for e in audit), audit
     assert any(e["event_type"] == "service_qc_sop_proposal" for e in audit), audit
     assert any(e["event_type"] == "service_private_domain_task" for e in audit), audit
+    token = create_token(sub="admin", role=Role.SUPER_ADMIN.value, tenant_id="mitako")
+    qc = TestClient(app).get("/api/v1/admin/qc/observer?flagged_only=1", headers=_headers(token)).json()
+    assert any(item["session_id"] == "session_p1_business" for item in qc.get("audits", [])), qc
     assert first["sop_state"]["checklist"], first
     assert first["sop_state"]["planned_action"]["task_center"], first
     evidence = next(item for item in first["sop_state"]["checklist"] if item["label"] == "核验证据材料")
@@ -1080,6 +1191,12 @@ if __name__ == "__main__":
     test_local_sop_recall()
     test_compensation_200_semantic_failure_transfers_to_human()
     test_order_and_logistics_200_semantic_failure_not_used()
+    test_short_public_order_ref_focuses_correct_order()
+    test_compensation_only_checks_focused_order()
+    test_explicit_human_request_triggers_handoff_rule()
+    test_lottery_reply_blocks_absolute_backing_and_unapproved_compensation()
+    test_minor_refund_material_question_answers_checklist_before_handoff()
+    test_product_consult_sop_does_not_emit_order_progress()
     test_customer_reply_sanitizer_blocks_internal_state_terms()
     test_handoff_token_and_user_binding()
     test_public_tenant_list_redacts_sso_config()

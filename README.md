@@ -50,6 +50,8 @@ npm run accept:cs-agent
 python scripts/dual_system_smoke_test.py
 python scripts/check_admin_ui_smoke.py
 python scripts/check_visual_workbench_smoke.py
+python -m playwright install chromium
+python tests/e2e/run_desk_admin_screenshot_report.py
 ```
 
 ## 关键文档

@@ -113,20 +113,21 @@ export default function HumanAgentDesk({ authUser = null }) {
     };
   }, [activeId, loadDetail, loadSessions]);
 
-  const selectedAgent = useMemo(
-    () => agents.find(a => a.agent_id === selectedAgentId) || null,
-    [agents, selectedAgentId],
-  );
   const lockedAgentId = authUser?.agent_id || '';
+  const effectiveAgentId = lockedAgentId || selectedAgentId;
+  const selectedAgent = useMemo(
+    () => agents.find(a => a.agent_id === effectiveAgentId) || null,
+    [agents, effectiveAgentId],
+  );
 
   const acceptHandoff = async () => {
-    if (!activeId || !selectedAgentId) return;
+    if (!activeId || !effectiveAgentId || !acceptAllowed) return;
     setAccepting(true);
     try {
       const r = await authFetch(`/api/v1/desk/session/${encodeURIComponent(activeId)}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent_id: selectedAgentId }),
+        body: JSON.stringify({ agent_id: effectiveAgentId }),
       });
       const data = await r.json();
       if (!data.ok) {
@@ -176,7 +177,7 @@ export default function HumanAgentDesk({ authUser = null }) {
     if (!activeId || !transferTargetId) return;
     setTransferring(true);
     try {
-      const fromId = detail?.assigned_agent?.agent_id || selectedAgentId;
+      const fromId = detail?.assigned_agent?.agent_id || effectiveAgentId;
       const r = await authFetch(`/api/v1/desk/session/${encodeURIComponent(activeId)}/transfer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -201,7 +202,7 @@ export default function HumanAgentDesk({ authUser = null }) {
 
   const sendReply = async () => {
     if (!activeId || !reply.trim() || !detail?.can_chat || replying) return;
-    const agentId = detail?.assigned_agent?.agent_id || selectedAgentId;
+    const agentId = detail?.assigned_agent?.agent_id || effectiveAgentId;
     setReplying(true);
     try {
       const r = await authFetch(`/api/v1/desk/session/${encodeURIComponent(activeId)}/reply`, {
@@ -262,13 +263,26 @@ export default function HumanAgentDesk({ authUser = null }) {
   const needsSupervisor = detail?.required_tier === 'supervisor';
   const isTransferring = detail?.status === 'transferring';
   const isSupervisor = selectedAgent?.tier === 'supervisor';
+  const assignedGateAgent = detail?.pending_agent || detail?.assigned_agent || null;
+  const assignedGateId = assignedGateAgent?.agent_id || '';
+  const assignedGateName = assignedGateAgent?.name || '';
+  const agentMatchesAssignment = !assignedGateId || assignedGateId === effectiveAgentId;
+  const tierAllowed = !needsSupervisor || isSupervisor;
+  const acceptBlockedReason = (() => {
+    if (!canAccept) return '';
+    if (!effectiveAgentId) return '请先确认当前客服身份。';
+    if (!tierAllowed) return '该会话需要高级客服或专项客服接手，请切换到对应身份。';
+    if (!agentMatchesAssignment) return `该会话当前分配给${assignedGateName || assignedGateId}，当前身份不可接手；请切换身份或由主管转派。`;
+    return '';
+  })();
+  const acceptAllowed = Boolean(canAccept && !acceptBlockedReason);
   const colleagueOptions = useMemo(
     () => agents.filter((a) => {
-      if (a.agent_id === (detail?.assigned_agent?.agent_id || selectedAgentId)) return false;
+      if (a.agent_id === (detail?.assigned_agent?.agent_id || effectiveAgentId)) return false;
       if (detail?.required_tier === 'supervisor' && a.tier !== 'supervisor') return false;
       return true;
     }),
-    [agents, detail?.assigned_agent, detail?.required_tier, selectedAgentId],
+    [agents, detail?.assigned_agent, detail?.required_tier, effectiveAgentId],
   );
   const transferTarget = useMemo(
     () => agents.find(a => a.agent_id === transferTargetId) || null,
@@ -297,6 +311,7 @@ export default function HumanAgentDesk({ authUser = null }) {
     service_transfer_blocked: '人工接手留痕',
     service_after_sales_card: '售后处理单',
     service_warehouse_task: '仓库核查任务',
+    service_product_info: '商品信息核对',
     service_ticket: '人工复核工单',
     service_qc_sop_proposal: '质检建议',
     service_private_domain_task: '后续跟进任务',
@@ -338,6 +353,22 @@ export default function HumanAgentDesk({ authUser = null }) {
     if (status === 'transferring') return 'bg-white text-[var(--mitako-ink)] border-[var(--mitako-ink)]';
     return 'bg-white text-[var(--mitako-ink)] border-[var(--mitako-ink)]';
   };
+  const speakerLabel = (m) => {
+    if (m.role === 'user') return t('desk.roleUser');
+    if (m.role === 'assistant') return t('desk.roleAi');
+    if (m.role === 'human') {
+      const agent = agents.find(a => a.agent_id === m.agent_id);
+      return agent?.name || detail?.assigned_agent?.name || t('speakers.humanName');
+    }
+    if (m.role === 'observer') return t('agent.name');
+    return '系统';
+  };
+  const messageBubbleClass = (role) => {
+    if (role === 'user') return 'ml-auto bg-[var(--mitako-lime)] border-[var(--mitako-ink)] text-[var(--mitako-ink)]';
+    if (role === 'human') return 'ml-auto bg-white border-[var(--mitako-ink)] text-[var(--mitako-ink)]';
+    if (role === 'system') return 'mx-auto bg-slate-50 border-slate-200 text-slate-600';
+    return 'bg-white border-slate-200 text-[var(--mitako-ink)]';
+  };
 
   return (
     <div className="mitako-ppt-scope min-h-[100dvh] bg-white text-slate-800 flex flex-col overflow-hidden">
@@ -355,7 +386,7 @@ export default function HumanAgentDesk({ authUser = null }) {
           <label className="flex items-center gap-2 text-xs">
             <span className="text-slate-500 font-semibold">{t('desk.agentIdentity')}</span>
             <select
-              value={selectedAgentId}
+              value={effectiveAgentId}
               onChange={e => setSelectedAgentId(e.target.value)}
               disabled={Boolean(lockedAgentId)}
               className="rounded-[8px] border border-slate-200 px-2 py-1.5 text-xs bg-white min-w-[180px]"
@@ -445,20 +476,23 @@ export default function HumanAgentDesk({ authUser = null }) {
                 )}
               </div>
 
-              {canAccept && needsSupervisor && !isSupervisor && (
+              {canAccept && acceptBlockedReason && (
                 <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-800 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  {t('desk.supervisorOnlyHint')}
+                  {acceptBlockedReason}
                 </div>
               )}
 
-              {canAccept && (!needsSupervisor || isSupervisor) && (
+              {canAccept && (
                 <div className="mx-4 mt-3 rounded-[8px] border border-slate-200 bg-[var(--mitako-lime-soft)] p-3 text-xs text-[var(--mitako-ink)]">
                   <p className="font-bold">{t('desk.acceptHint')}</p>
+                  {assignedGateName && (
+                    <p className="mt-1 text-[11px] text-slate-600">当前分配：{assignedGateName}；当前身份：{selectedAgent?.name || '未选择'}</p>
+                  )}
                   <button
                     type="button"
                     data-testid="desk-accept-handoff"
-                    disabled={accepting}
+                    disabled={accepting || !acceptAllowed}
                     onClick={() => setAcceptConfirmOpen(true)}
                     className="mt-2 inline-flex min-h-[44px] items-center gap-1.5 rounded-[8px] bg-[var(--mitako-lime)] px-3 py-2 text-xs font-bold text-slate-950 disabled:opacity-50"
                   >
@@ -470,23 +504,11 @@ export default function HumanAgentDesk({ authUser = null }) {
 
               <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 console-scroll">
                 {loading && <p className="text-xs text-slate-400">{t('desk.loading')}</p>}
-                {(brief?.conversation_snippet || []).map((m, i) => (
-                  <div key={`snip-${i}`} className={`max-w-[85%] rounded-[8px] px-3 py-2 text-sm border border-slate-200 ${
-                    m.role === 'user' ? 'ml-auto bg-[var(--mitako-lime)] text-[var(--mitako-ink)]' : 'bg-white'
-                  }`}>
-                    <span className="text-[10px] opacity-70 block mb-0.5">
-                      {m.role === 'user' ? t('desk.roleUser') : t('desk.roleAi')} · {t('desk.turnLabel', 'zh-CN', { turn: m.turn || i + 1 })}
-                    </span>
-                    <RichTextContent text={sanitizePublicText(m.content)} />
-                  </div>
-                ))}
-                {(detail?.messages || []).map((m, i) => (
-                  <div key={`desk-${i}`} className={`max-w-[85%] rounded-[8px] px-3 py-2 text-sm border text-[var(--mitako-ink)] ${
-                    m.role === 'observer' ? 'bg-white border-[var(--mitako-ink)]' : 'bg-[var(--mitako-lime)] border-[var(--mitako-ink)]'
-                  }`}>
-                    <span className="text-[10px] font-bold block mb-0.5 text-[var(--mitako-ink)]">
-                      {m.role === 'observer' ? t('agent.name') : (detail?.assigned_agent?.name || t('speakers.humanName'))}
-                      {m.role === 'observer' ? ` · ${t('transfer.observerTitle').replace('已成功', '旁听')}` : ''}
+                {((detail?.messages || []).length ? detail.messages : (brief?.conversation_snippet || [])).map((m, i) => (
+                  <div key={`desk-${m.id || i}`} className={`max-w-[85%] rounded-[8px] px-3 py-2 text-sm border ${messageBubbleClass(m.role)}`}>
+                    <span className="text-[10px] font-bold opacity-70 block mb-0.5">
+                      {speakerLabel(m)}
+                      {m.turn ? ` · ${t('desk.turnLabel', 'zh-CN', { turn: m.turn || i + 1 })}` : ''}
                     </span>
                     <RichTextContent text={sanitizePublicText(m.content)} />
                   </div>
@@ -658,8 +680,13 @@ export default function HumanAgentDesk({ authUser = null }) {
                 <div>
                   <h3 className="text-base font-bold text-[var(--mitako-ink)]">确认接手当前会话</h3>
                   <p className="mt-1 text-sm leading-6 text-slate-600">
-                    请确认已阅读左侧队列摘要、中间服务记录和右侧移交简报。接手后需要负责回复用户、必要时转交同事或升级高级客服，并在处理完成后结案归档。
+                    请确认已阅读队列摘要、服务记录和右侧移交简报。接手后需要负责回复用户、必要时转交同事或升级高级客服，并在处理完成后结案归档。
                   </p>
+                  {acceptBlockedReason && (
+                    <p className="mt-2 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                      {acceptBlockedReason}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -675,7 +702,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                   type="button"
                   data-testid="desk-accept-confirm"
                   onClick={acceptHandoff}
-                  disabled={accepting}
+                  disabled={accepting || !acceptAllowed}
                   className="min-h-[44px] rounded-[8px] bg-[var(--mitako-lime)] px-4 text-sm font-bold text-[var(--mitako-ink)] shadow-[0_12px_28px_rgba(127,164,49,.22)] disabled:opacity-60"
                 >
                   {accepting ? '接手中…' : '确认接手'}

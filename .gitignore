@@ -32,6 +32,7 @@ tests/reports/*.html
 tests/reports/*.md
 !tests/reports/customer_chat_acceptance_*.md
 tests/reports/screenshots/*.png
+tests/reports/screenshots/**
 tests/reports/visual_review_ui_checks/
 poc/visual_review_poc/reports/
 poc/visual_review_poc/uploaded_videos/
@@ -42,6 +43,7 @@ dist/memes/
 
 # 打包与大模型文件
 *.zip
+*.7z
 *.pt
 !poc/**/README.md
 

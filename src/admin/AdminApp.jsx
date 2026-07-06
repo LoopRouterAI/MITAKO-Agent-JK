@@ -27,9 +27,7 @@ export default function AdminApp() {
       clearAuthSession();
       setUser(null);
     };
-    const onForbidden = () => setUser(null);
     window.addEventListener('mitako:auth:logout', onLogout);
-    window.addEventListener('mitako:auth:forbidden', onForbidden);
 
     const params = new URLSearchParams(window.location.search);
     if (params.get('sso') === '1' && params.get('code') && params.get('state')) {
@@ -67,7 +65,6 @@ export default function AdminApp() {
 
     return () => {
       window.removeEventListener('mitako:auth:logout', onLogout);
-      window.removeEventListener('mitako:auth:forbidden', onForbidden);
     };
   }, [refresh]);
 
