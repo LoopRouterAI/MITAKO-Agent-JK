@@ -202,9 +202,9 @@ def sample_video_frames(video: Path, fps: float, max_frames: int, probe_seconds:
     }
 
 
-def find_supplemental_images(video: Path, limit: int, resource_fields: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+def find_supplemental_images_in_dir(folder: Path, limit: int, resource_fields: Dict[str, List[str]]) -> List[Dict[str, Any]]:
     image_exts = {".jpg", ".jpeg", ".png", ".webp"}
-    images = [p for p in sorted(video.parent.iterdir()) if p.is_file() and p.suffix.lower() in image_exts]
+    images = [p for p in sorted(folder.iterdir()) if p.is_file() and p.suffix.lower() in image_exts]
     return [
         {
             "image_index": index + 1,
@@ -219,11 +219,15 @@ def find_supplemental_images(video: Path, limit: int, resource_fields: Dict[str,
     ]
 
 
-def load_case(video: Path, supplemental_limit: int) -> Dict[str, Any]:
-    claim = read_text(video.parent / "content.txt")
+def find_supplemental_images(video: Path, limit: int, resource_fields: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    return find_supplemental_images_in_dir(video.parent, limit, resource_fields)
+
+
+def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional[Path] = None) -> Dict[str, Any]:
+    claim = read_text(folder / "content.txt")
     manifest = {}
     try:
-        manifest = json.loads(read_text(video.parent / "manifest.json") or "{}")
+        manifest = json.loads(read_text(folder / "manifest.json") or "{}")
     except Exception:
         manifest = {}
     evidence_assets = [
@@ -238,17 +242,17 @@ def load_case(video: Path, supplemental_limit: int) -> Dict[str, Any]:
     resource_fields = {str(item.get("local_file")): item.get("fields") or [] for item in (manifest.get("resources") or []) if item.get("local_file")}
     scenario = infer_scenario(claim)
     structured_business_context = {
-        "order_items": read_json(video.parent / "order_items.json") or manifest.get("order_items") or [],
-        "product_master_data": read_json(video.parent / "product_master.json") or manifest.get("product_master_data") or {},
-        "warehouse_master_data": read_json(video.parent / "warehouse_master.json") or manifest.get("warehouse_master_data") or {},
-        "sku_master_data": read_json(video.parent / "sku_master.json") or manifest.get("sku_master_data") or {},
+        "order_items": read_json(folder / "order_items.json") or manifest.get("order_items") or [],
+        "product_master_data": read_json(folder / "product_master.json") or manifest.get("product_master_data") or {},
+        "warehouse_master_data": read_json(folder / "warehouse_master.json") or manifest.get("warehouse_master_data") or {},
+        "sku_master_data": read_json(folder / "sku_master.json") or manifest.get("sku_master_data") or {},
     }
     return {
-        "case_id": video.parent.name,
+        "case_id": folder.name,
         "scenario": scenario,
         "scenario_label": {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "未成年人资料审核"}.get(scenario, scenario),
-        "video_file": video.name,
-        "video_path": str(video),
+        "video_file": video.name if video else "",
+        "video_path": str(video) if video else "",
         "customer_claim": claim,
         "order_context": {
             "ticket_id": manifest.get("id"),
@@ -258,8 +262,12 @@ def load_case(video: Path, supplemental_limit: int) -> Dict[str, Any]:
         },
         "evidence_assets": evidence_assets,
         "structured_business_context": structured_business_context,
-        "supplemental_images": find_supplemental_images(video, supplemental_limit, resource_fields),
+        "supplemental_images": find_supplemental_images_in_dir(folder, supplemental_limit, resource_fields),
     }
+
+
+def load_case(video: Path, supplemental_limit: int) -> Dict[str, Any]:
+    return load_case_from_folder(video.parent, supplemental_limit, video)
 
 
 def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: str) -> Dict[str, Any]:

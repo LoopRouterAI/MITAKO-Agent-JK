@@ -195,8 +195,8 @@ def _save_folder_uploads(files: List[UploadFile]) -> Path:
             target.unlink(missing_ok=True)
     if not saved:
         raise HTTPException(status_code=400, detail="文件夹内没有可用视频、图片或文本材料")
-    if not any(path.suffix.lower() in ALLOWED_VIDEO_SUFFIXES for path in target_dir.iterdir() if path.is_file()):
-        raise HTTPException(status_code=400, detail="文件夹内没有可审核的视频")
+    if not any(path.suffix.lower() in ALLOWED_MEDIA_SUFFIXES for path in target_dir.iterdir() if path.is_file()):
+        raise HTTPException(status_code=400, detail="文件夹内没有可审核的视频或图片")
     return target_dir
 
 
@@ -413,6 +413,41 @@ def _public_result(ok: bool, review_label: str, report: Dict[str, Any]) -> Dict[
     }
 
 
+def _structured_review_ok(parsed: Dict[str, Any]) -> bool:
+    return bool(parsed.get("predicted_label")) and parsed.get("confidence") not in (None, "")
+
+
+def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[str, Any]:
+    status = str(result.get("status") or "")
+    if status == "success" and not structured_ok:
+        return {
+            "stage": "结构化解析",
+            "message": "模型已返回，但缺少 predicted_label 或 confidence 等关键结构化字段。",
+            "operator_hint": "请保留原始素材并重试；若连续出现，请由研发检查结构化输出协议。",
+        }
+    if status == "skipped":
+        return {
+            "stage": "模型配置",
+            "message": "审核模型凭证未配置，未发起视觉审核请求。",
+            "operator_hint": "请检查部署环境的视觉模型 Key 配置，当前工单先进入人工复核。",
+        }
+    status_code = result.get("status_code")
+    error_type = str(result.get("error_type") or "")
+    if status_code == 429:
+        message = "模型服务限流，本轮重试后仍未完成审核。"
+    elif error_type == "soft":
+        message = "模型服务超时、繁忙或网关临时失败，本轮重试后仍未完成审核。"
+    elif status_code:
+        message = f"模型服务返回 {status_code}，本轮未完成审核。"
+    else:
+        message = "模型请求未完成，可能是网络、网关或运行环境异常。"
+    return {
+        "stage": "模型调用",
+        "message": message,
+        "operator_hint": "这不是业务上的“证据不足”；请重试或转人工处理，并保留该失败样本给研发排查。",
+    }
+
+
 def _run_review(
     video: Path,
     scenario: str,
@@ -467,10 +502,12 @@ def _run_review(
 
 def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[str, Any], report_stem: str) -> Dict[str, Any]:
     parsed = result.get("parsed") or {}
-    ok = result.get("status") == "success"
+    structured_ok = _structured_review_ok(parsed)
+    ok = result.get("status") == "success" and structured_ok
     quality = score_result(result)
-    public_conclusion = _safe_agent_conclusion(parsed, case["scenario_label"])
-    public_next_step = _safe_agent_next_step((parsed.get("overall_audit") or {}).get("business_follow_up_suggestion") or parsed.get("next_step"))
+    failure = {} if ok else _public_failure_reason(result, structured_ok)
+    public_conclusion = _safe_agent_conclusion(parsed, case["scenario_label"]) if ok else f"审核未完成：{failure.get('message')}"
+    public_next_step = _safe_agent_next_step((parsed.get("overall_audit") or {}).get("business_follow_up_suggestion") or parsed.get("next_step")) if ok else failure.get("operator_hint", "请人工客服结合订单、售后规则和原始素材处理。")
     report_name = f"{report_stem}_{int(time.time())}_{len(ALLOWED_REPORTS) + 1}.html"
     agent_report = _public_agent_report_payload(
         case=case,
@@ -492,18 +529,32 @@ def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[
             "predicted_label": parsed.get("predicted_label"),
             "confidence": parsed.get("confidence"),
             "needs_human_review": True,
+            "review_status": "completed" if ok else "failed",
         },
         "conclusion": public_conclusion,
         "agent_report": agent_report,
     }
+    if failure:
+        data["diagnostics"] = {
+            "review_status": "failed",
+            "failure_stage": failure.get("stage"),
+            "failure_reason": failure.get("message"),
+            "operator_hint": failure.get("operator_hint"),
+            "frames_sent": len(case.get("frames") or []),
+            "supplemental_images_sent": len(case.get("supplemental_images") or []),
+            "videos_received": len(case.get("videos") or []),
+            "status_code": result.get("status_code"),
+            "error_type": result.get("error_type"),
+        }
+        agent_report["diagnostics"] = data["diagnostics"]
     data = _strip_private_report_fields(data)
     ALLOWED_REPORTS[report_name] = data
     PUBLIC_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
     (PUBLIC_SUMMARY_DIR / _report_data_name(report_name)).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {
+    response = {
         "review_label": data["review_label"],
         "summary": data["summary"],
-        "frame_strategy": f"{len(case.get('videos') or [])} 个视频合并为同一证据包，送审 {len(case.get('frames') or [])} 帧。",
+        "frame_strategy": f"{len(case.get('videos') or [])} 个视频合并为同一证据包，送审 {len(case.get('frames') or [])} 帧，补充图片 {len(case.get('supplemental_images') or [])} 张。",
         "report": {"html_url": "/reports/" + report_name},
         "agent_brief": {
             "conclusion": public_conclusion,
@@ -512,6 +563,9 @@ def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[
             "next_step": public_next_step,
         },
     }
+    if data.get("diagnostics"):
+        response["diagnostics"] = data["diagnostics"]
+    return response
 
 
 def _sample_base() -> Path:
@@ -552,7 +606,7 @@ def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> D
     result = call_model(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
     review = _agent_report_response(case, sample_dir, result, f"agent_{sample_id}")
     return {
-        "ok": result.get("status") == "success",
+        "ok": (review.get("summary") or {}).get("review_status") == "completed",
         "source_status": "sample_ready",
         "review": review,
     }
@@ -609,10 +663,11 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
     result = call_model(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
+    review = _agent_report_response(case, folder_dir, result, "agent_folder")
     return {
-        "ok": result.get("status") == "success",
+        "ok": (review.get("summary") or {}).get("review_status") == "completed",
         "source_status": "folder_ready",
-        "review": _agent_report_response(case, folder_dir, result, "agent_folder"),
+        "review": review,
     }
 
 

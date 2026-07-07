@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MITAKO 视觉审核工作台 0707 失败兜底修复验收</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink:#10131f;
+      --muted:#667085;
+      --line:#e7ebdf;
+      --lime:#c8ff1a;
+      --gold:#ffd43d;
+      --rose:#ff75a8;
+      --cyan:#12d6c7;
+      --card:#fff;
+      font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      color:var(--ink);
+      background:
+        radial-gradient(circle at 92% 0%, rgba(200,255,26,.65), transparent 210px),
+        radial-gradient(circle at 8% 12%, rgba(255,117,168,.16), transparent 260px),
+        linear-gradient(180deg,#fff,#fbfff4 58%,#fff);
+    }
+    .shell { width:min(1120px, calc(100vw - 32px)); margin:0 auto; padding:28px 0 56px; }
+    .hero, .panel, .metric {
+      border:1px solid rgba(16,19,31,.08);
+      border-radius:24px;
+      background:rgba(255,255,255,.94);
+      box-shadow:0 20px 52px rgba(16,19,31,.10);
+    }
+    .hero {
+      position:relative;
+      overflow:hidden;
+      padding:30px;
+      background:linear-gradient(135deg,#fff,#f4ffd4 78%);
+    }
+    .hero::after {
+      content:"";
+      position:absolute;
+      inset:auto 0 0 0;
+      height:10px;
+      background:linear-gradient(90deg,var(--lime),var(--gold),var(--rose),var(--cyan));
+    }
+    .badge {
+      display:inline-flex;
+      padding:7px 12px;
+      border-radius:999px;
+      background:linear-gradient(90deg,var(--lime),#efffb2);
+      font-weight:900;
+      font-size:12px;
+    }
+    h1 { margin:16px 0 0; font-size:clamp(34px,5vw,58px); line-height:1.04; letter-spacing:0; }
+    h2 { margin:0 0 12px; font-size:22px; }
+    p { line-height:1.75; }
+    .lead { max-width:880px; color:#242938; font-size:17px; }
+    .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-top:16px; }
+    .metric { min-height:112px; padding:16px; }
+    .metric small, .muted { color:var(--muted); }
+    .metric b { display:block; margin-top:8px; font-size:26px; line-height:1.15; overflow-wrap:anywhere; }
+    .panel { margin-top:16px; padding:22px; }
+    .ok { background:linear-gradient(135deg,#f1ffd7,#fff 74%); }
+    .warn { background:linear-gradient(135deg,#fff4de,#fff 74%); }
+    table { width:100%; border-collapse:collapse; overflow:hidden; border-radius:18px; }
+    th, td { padding:13px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:#f7fbeb; font-size:13px; }
+    code { padding:2px 6px; border-radius:8px; background:#f5f7ef; }
+    .links a { display:inline-flex; margin:6px 8px 0 0; padding:9px 12px; border-radius:999px; background:linear-gradient(90deg,var(--lime),var(--gold)); color:inherit; font-weight:900; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <span class="badge">0707 失败兜底修复验收</span>
+      <h1>视觉审核失败不再伪装成“证据不足”</h1>
+      <p class="lead">本轮针对甲方三份反馈中的视觉审核后台问题做收口：区分系统失败与业务判断，支持商品有伤图片-only 工单，并补充 payload、429 重试、HTML 报告和顶层状态一致性的防回退用例。</p>
+    </section>
+
+    <section class="metrics">
+      <article class="metric"><small>Smoke</small><b>通过</b></article>
+      <article class="metric"><small>真实模型样本</small><b>成功 1/1</b></article>
+      <article class="metric"><small>图片-only 回归</small><b>已覆盖</b></article>
+      <article class="metric"><small>429 失败诊断</small><b>已覆盖</b></article>
+    </section>
+
+    <section class="panel ok">
+      <h2>已修复</h2>
+      <table>
+        <thead><tr><th>反馈点</th><th>修复结果</th><th>验收口径</th></tr></thead>
+        <tbody>
+          <tr><td><code>successful_reviews=0</code> 仍显示“证据不足”</td><td>新增 <code>diagnostics</code>，失败时报告首屏显示“审核未完成”、失败阶段和客服动作。</td><td>模拟 429 时断言 JSON 与 HTML 都展示失败诊断。</td></tr>
+          <tr><td>结构化解析失败顶层 <code>ok</code> 错误</td><td>顶层 <code>ok</code> 改为跟 <code>summary.review_status</code> 一致。</td><td>模型 HTTP 成功但缺少关键字段时断言 <code>ok=false</code>。</td></tr>
+          <tr><td>商品有伤图片-only 无法提交</td><td>文件夹模式允许视频或图片至少存在其一；无视频但有图片时仍构建证据包。</td><td>通过 transport 层补测，确认图片进入多模态 payload。</td></tr>
+          <tr><td>报告缺少抽帧/送审状态</td><td>失败诊断包含送审视频数、帧数、补充图片数、失败阶段、状态码和错误类型。</td><td>前端日志与 HTML 报告都展示诊断。</td></tr>
+          <tr><td>429 限流重试不透明</td><td>软错误继续重试，并尊重 <code>Retry-After</code>；重试后失败明确显示模型限流。</td><td>模拟 429 返回“模型服务限流”。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel warn">
+      <h2>复测结果</h2>
+      <p><b>自动化：</b><code>venv/Scripts/python.exe -X utf8 scripts/check_visual_workbench_smoke.py</code> 通过，报告写入 <code>tests/reports/visual_workbench_smoke_20260707_212239.md</code>。</p>
+      <p><b>补测覆盖：</b><code>model_transport_contract</code> 证明纯图片证据包会进入模型 payload；<code>retry_after_is_honored</code> 证明 429 会按 <code>Retry-After</code> 退避；<code>workbench_api</code> 覆盖 429、结构化解析失败和 HTML 报告可见性。</p>
+      <p><b>真实模型：</b><code>sample_003 / 商品有伤 / 工单文件夹模式 / Gemini</code> 返回 <code>successful_reviews=1</code>、<code>predicted_label=positive</code>、置信度 <code>0.98</code>，生成 <code>/reports/agent_folder_1783410135_1.html</code>。</p>
+      <p><b>限制：</b>截图中的工单 <code>578088</code> 和视频 <code>001_7nj4sJ6R.mp4</code> 未在本机项目目录或全盘文件名搜索中找到，因此本轮不能对该原始工单做逐帧复现。拿到真实素材后应优先看新报告里的 <code>failure_stage</code>、<code>status_code</code>、<code>frames_sent</code> 和 <code>supplemental_images_sent</code>。</p>
+    </section>
+
+    <section class="panel links">
+      <h2>相关文件</h2>
+      <a href="visual_workbench_smoke_20260707_212239.md">Smoke 报告</a>
+      <a href="../../poc/visual_review_poc/workbench.html">视觉审核工作台</a>
+      <a href="../../docs/迭代维护笔记.md">迭代维护笔记</a>
+    </section>
+  </main>
+</body>
+</html>

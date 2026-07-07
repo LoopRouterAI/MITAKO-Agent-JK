@@ -37,6 +37,7 @@ from poc.visual_review_poc.local_video_triage_demo import (
     h,
     json_block,
     load_case,
+    load_case_from_folder,
     load_env,
     load_report_label,
     parse_model_json,
@@ -168,9 +169,9 @@ def prepare_media(items: List[Dict[str, Any]], media_dir: Path) -> List[Dict[str
 
 def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) -> Dict[str, Any]:
     videos = sorted(p for p in sample_dir.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES)
-    if not videos:
-        raise SystemExit(f"样本缺少视频：{sample_dir}")
-    case = load_case(videos[0], args.supplemental_image_limit)
+    case = load_case(videos[0], args.supplemental_image_limit) if videos else load_case_from_folder(sample_dir, args.supplemental_image_limit)
+    if not videos and not case.get("supplemental_images"):
+        raise SystemExit(f"样本缺少可审核的视频或图片：{sample_dir}")
     all_frames: List[Dict[str, Any]] = []
     video_summaries = []
     for video_index, video in enumerate(videos, start=1):
@@ -336,13 +337,34 @@ def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str,
             latency = round(time.time() - started, 2)
             if response.status_code < 400:
                 return {"ok": True, "status_code": response.status_code, "latency_seconds": latency, "data": response.json(), "attempt": attempt}
-            last = {"ok": False, "status_code": response.status_code, "latency_seconds": latency, "error": response.text[:1600], "error_type": classify_error(response.status_code, response.text), "attempt": attempt}
+            last = {"ok": False, "status_code": response.status_code, "latency_seconds": latency, "error": response.text[:1600], "error_type": classify_error(response.status_code, response.text), "attempt": attempt, "retry_after": response.headers.get("Retry-After")}
         except Exception as exc:
             last = {"ok": False, "status_code": None, "latency_seconds": round(time.time() - started, 2), "error": str(exc)[:1600], "error_type": classify_error(None, str(exc)), "attempt": attempt}
         if last["error_type"] != "soft" or attempt > retries:
             return last
-        time.sleep(min(2 ** (attempt - 1), 8) + random.uniform(0.1, 0.4))
+        retry_after = last.get("retry_after")
+        delay = min(float(retry_after), 30) if retry_after and str(retry_after).replace(".", "", 1).isdigit() else min(2 ** (attempt - 1), 8) + random.uniform(0.1, 0.4)
+        time.sleep(delay)
     return last
+
+
+def gemini_request_options(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    options: List[Dict[str, Any]] = []
+    apiyi_key = os.getenv("APIYI_API_KEY")
+    if apiyi_key:
+        base = os.getenv("APIYI_GEMINI_BASE_URL", "https://api.apiyi.com").rstrip("/")
+        options.append({
+            "endpoint": f"{base}/v1beta/models/{cfg['model']}:generateContent",
+            "headers": {"x-goog-api-key": apiyi_key, "Content-Type": "application/json"},
+        })
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if gemini_key:
+        base = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+        options.append({
+            "endpoint": f"{base}/v1beta/models/{cfg['model']}:generateContent",
+            "headers": {"x-goog-api-key": gemini_key, "Content-Type": "application/json"},
+        })
+    return options
 
 
 def extract_openai_text(data: Dict[str, Any]) -> str:
@@ -380,13 +402,19 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
     system_prompt = build_system_prompt(case["scenario"])
     user_prompt = build_selection_prompt(case)
     if cfg["provider"] == "gemini_native":
-        key = os.getenv("APIYI_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if not key:
+        options = gemini_request_options(cfg)
+        if not options:
             return {"status": "skipped", "error": "missing_api_key"}
-        endpoint = f"{os.getenv('APIYI_GEMINI_BASE_URL', 'https://api.apiyi.com').rstrip('/')}/v1beta/models/{cfg['model']}:generateContent"
-        response = post_with_retries(endpoint, {"x-goog-api-key": key, "Content-Type": "application/json"}, gemini_payload(system_prompt, user_prompt, case), timeout, retries)
+        payload = gemini_payload(system_prompt, user_prompt, case)
+        response: Dict[str, Any] = {}
+        failures: List[Dict[str, Any]] = []
+        for option in options:
+            response = post_with_retries(option["endpoint"], option["headers"], payload, timeout, retries)
+            if response.get("ok"):
+                break
+            failures.append({key: response.get(key) for key in ("status_code", "latency_seconds", "error_type", "attempt")})
         if not response.get("ok"):
-            return {"status": "failed", **response}
+            return {"status": "failed", **response, "attempts": failures}
         text = "\n".join(p.get("text", "") for p in (((response["data"].get("candidates") or [{}])[0].get("content") or {}).get("parts") or []) if isinstance(p, dict))
         usage = extract_usage(response["data"])
     else:

@@ -208,6 +208,8 @@ def render_public_report(data: Dict[str, Any]) -> str:
 def _render_agent_report(data: Dict[str, Any]) -> str:
     report = data.get("agent_report") or {}
     parsed = report.get("parsed") or {}
+    diagnostics = data.get("diagnostics") or report.get("diagnostics") or {}
+    failed = bool(diagnostics) or ((data.get("summary") or {}).get("review_status") == "failed")
     overall = parsed.get("overall_audit") or {}
     visual = parsed.get("visual_qc_conclusion") or {}
     video = parsed.get("video_audit_conclusion") or parsed.get("continuity_assessment") or {}
@@ -223,11 +225,26 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     if not core_reason:
         core_reason = parsed.get("visual_evidence_verdict") or visual.get("reason") or ""
     next_step = public_brief.get("next_step") or safe_agent_next_step(overall.get("business_follow_up_suggestion") or parsed.get("next_step"))
+    if failed:
+        conclusion = data.get("conclusion") or conclusion
+        core_reason = diagnostics.get("failure_reason") or "本轮审核没有完成，不能把该结果解释为业务证据不足。"
+        next_step = diagnostics.get("operator_hint") or next_step
+        confidence = "-"
     material_gaps = parsed.get("material_gaps") or []
     gap_text = "；".join(str(x) for x in material_gaps[:5]) if isinstance(material_gaps, list) and material_gaps else "当前证据可进入人工复核；如需最终处置，仍需核对订单、库存和售后规则。"
-    yes_no = _public_yes_no(parsed)
+    yes_no = "REVIEW" if failed else _public_yes_no(parsed)
     latency = runtime.get("latency_seconds") or "-"
     video_count = len(evidence_package.get("videos") or [])
+    diagnostic_panel = ""
+    if failed:
+        diagnostic_panel = (
+            '<section class="panel failure-panel">'
+            '<h2>本轮失败诊断</h2>'
+            f'<p><b>失败阶段：</b>{_h(diagnostics.get("failure_stage") or "-")}</p>'
+            f'<p><b>失败原因：</b>{_h(diagnostics.get("failure_reason") or core_reason)}</p>'
+            f'<p><b>客服动作：</b>{_h(next_step)}</p>'
+            "</section>"
+        )
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -256,18 +273,19 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     <p>{_h(next_step)}</p>
   </section>
 
-  <section class="metrics">
-	    <div class="metric hot"><small>视觉质检</small><b>{_h(_public_verdict(parsed, scenario_label))}</b></div>
+	  <section class="metrics">
+		    <div class="metric hot"><small>视觉质检</small><b>{_h("审核未完成" if failed else _public_verdict(parsed, scenario_label))}</b></div>
 	    <div class="metric"><small>连续性分数</small><b>{_h(video.get("continuity_score") or "-")}</b></div>
 	    <div class="metric"><small>调包风险</small><b>{_h(video.get("swap_risk_level") or "-")}</b></div>
 	    <div class="metric"><small>耗时</small><b>{_h(latency)}s</b></div>
 	    <div class="metric"><small>送审视频</small><b>{_h(video_count or "-")}</b></div>
 	    <div class="metric"><small>送审帧数</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
 	    <div class="metric"><small>补充图片</small><b>{_h(evidence_package.get("supplemental_images_sent") or "-")}</b></div>
-	    <div class="metric"><small>报告属性</small><b>人工复核参考</b></div>
-	  </section>
+		    <div class="metric"><small>报告属性</small><b>人工复核参考</b></div>
+		  </section>
+  {diagnostic_panel}
 
-	  <section class="panel">
+		  <section class="panel">
 	    <div class="section-head"><h2>模型采信的证据</h2><p>每张图都可以在本页放大查看；带时间点的帧可以直接预览原视频片段。</p></div>
     <div class="evidence-grid">{_evidence_items(parsed.get("adopted_evidence") or parsed.get("supporting_evidence"), media_gallery)}</div>
   </section>
@@ -450,8 +468,9 @@ p { line-height:1.75; }
   background:var(--card);
   box-shadow:var(--shadow);
 }
-.panel { margin-top:16px; padding:22px; }
-.next-step { background:linear-gradient(135deg,#f2ffd9,#fff 72%); }
+	.panel { margin-top:16px; padding:22px; }
+	.next-step { background:linear-gradient(135deg,#f2ffd9,#fff 72%); }
+	.failure-panel { background:linear-gradient(135deg,#fff2e7,#fff 74%); border-color:rgba(255,138,31,.35); }
 .metrics {
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(168px,1fr));

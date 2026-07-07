@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -64,9 +65,9 @@ def parse_stdout_json(stdout: str) -> dict:
 
 def test_workbench_api() -> None:
     from fastapi.testclient import TestClient
-    from poc.visual_review_poc.workbench_server import app
+    import poc.visual_review_poc.workbench_server as workbench_server
 
-    client = TestClient(app)
+    client = TestClient(workbench_server.app)
     health = client.get("/api/health")
     assert health.status_code == 200
     assert health.json().get("ok") is True
@@ -180,6 +181,199 @@ def test_workbench_api() -> None:
         files={"file": ("bad.json", b'{"samples":[1]}', "application/json")},
     )
     assert bad_json.status_code == 400
+
+    image_path = next((ROOT / "docs" / "三大审核场景的小量样本" / "sample_003").glob("*.jpg"))
+    original_call_model = workbench_server.call_model
+
+    def fake_success(cfg, case, timeout, retries):
+        assert not case.get("videos"), case
+        assert case.get("supplemental_images"), case
+        return {
+            "status": "success",
+            "latency_seconds": 0.1,
+            "usage": {},
+            "cost": {},
+            "parsed": {
+                "predicted_label": "positive",
+                "system_yes_no": "YES",
+                "confidence": 0.91,
+                "overall_audit": {
+                    "conclusion": "图片可见商品有伤",
+                    "confidence": 0.91,
+                    "core_reason": "商品局部瑕疵清晰可见。",
+                    "business_follow_up_suggestion": "提交人工复核。",
+                },
+                "visual_qc_conclusion": {"verdict": "positive", "confidence": 0.91, "core_reason": "瑕疵清晰。"},
+                "adopted_evidence": [{"source_type": "image", "image_index": 1, "file": image_path.name, "fact": "瑕疵可见", "confidence": 0.91}],
+            },
+        }
+
+    def fake_failed(cfg, case, timeout, retries):
+        return {"status": "failed", "status_code": 429, "error_type": "soft", "latency_seconds": 0.2}
+
+    def fake_unstructured(cfg, case, timeout, retries):
+        return {"status": "success", "latency_seconds": 0.1, "usage": {}, "cost": {}, "parsed": {"raw_text": "not json"}}
+
+    try:
+        workbench_server.call_model = fake_success
+        image_only = client.post(
+            "/api/review-folder",
+            data={"scenario": "product_damage", "customer_claim": "用户反馈商品有划痕"},
+            files=[
+                ("files", ("content.txt", "用户反馈商品有划痕".encode("utf-8"), "text/plain")),
+                ("files", (image_path.name, image_path.read_bytes(), "image/jpeg")),
+            ],
+        )
+        assert image_only.status_code == 200, image_only.text
+        image_data = image_only.json()
+        assert image_data["ok"] is True, image_data
+        assert image_data["review"]["summary"]["successful_reviews"] == 1, image_data
+        assert "补充图片 1 张" in image_data["review"]["frame_strategy"], image_data
+
+        workbench_server.call_model = fake_failed
+        failed = client.post(
+            "/api/review-folder",
+            data={"scenario": "product_damage", "customer_claim": "用户反馈商品有划痕"},
+            files=[
+                ("files", ("content.txt", "用户反馈商品有划痕".encode("utf-8"), "text/plain")),
+                ("files", (image_path.name, image_path.read_bytes(), "image/jpeg")),
+            ],
+        )
+        assert failed.status_code == 200, failed.text
+        failed_data = failed.json()
+        assert failed_data["ok"] is False, failed_data
+        assert failed_data["review"]["summary"]["successful_reviews"] == 0, failed_data
+        assert failed_data["review"]["diagnostics"]["failure_stage"] == "模型调用", failed_data
+        assert failed_data["review"]["diagnostics"]["failure_reason"] == "模型服务限流，本轮重试后仍未完成审核。", failed_data
+        assert failed_data["review"]["diagnostics"]["status_code"] == 429, failed_data
+        assert failed_data["review"]["diagnostics"]["error_type"] == "soft", failed_data
+        assert "审核未完成" in failed_data["review"]["agent_brief"]["conclusion"], failed_data
+        assert "证据不足" not in failed_data["review"]["agent_brief"]["conclusion"], failed_data
+        failed_html = client.get(failed_data["review"]["report"]["html_url"])
+        assert failed_html.status_code == 200, failed_html.text
+        for text in ("本轮失败诊断", "审核未完成", "模型服务限流"):
+            assert text in failed_html.text, text
+
+        workbench_server.call_model = fake_unstructured
+        unstructured = client.post(
+            "/api/review-folder",
+            data={"scenario": "product_damage", "customer_claim": "用户反馈商品有划痕"},
+            files=[
+                ("files", ("content.txt", "用户反馈商品有划痕".encode("utf-8"), "text/plain")),
+                ("files", (image_path.name, image_path.read_bytes(), "image/jpeg")),
+            ],
+        )
+        assert unstructured.status_code == 200, unstructured.text
+        unstructured_data = unstructured.json()
+        assert unstructured_data["ok"] is False, unstructured_data
+        assert unstructured_data["review"]["summary"]["review_status"] == "failed", unstructured_data
+        assert unstructured_data["review"]["diagnostics"]["failure_stage"] == "结构化解析", unstructured_data
+    finally:
+        workbench_server.call_model = original_call_model
+
+
+def test_model_transport_contract() -> None:
+    import poc.visual_review_poc.model_selection_e2e as model_selection
+
+    image_path = next((ROOT / "docs" / "三大审核场景的小量样本" / "sample_003").glob("*.jpg"))
+    case = {
+        "case_id": "image_only_contract",
+        "scenario": "product_damage",
+        "scenario_label": "商品有伤审核",
+        "customer_claim": "用户反馈商品有划痕",
+        "order_context": {},
+        "structured_business_context": {},
+        "evidence_assets": [],
+        "videos": [],
+        "frames": [],
+        "supplemental_images": [
+            {
+                "image_index": 1,
+                "file": image_path.name,
+                "api_path": str(image_path),
+                "api_mime_type": "image/jpeg",
+                "fields": [],
+            }
+        ],
+    }
+    original_post = model_selection.post_with_retries
+    original_key = os.environ.get("APIYI_API_KEY")
+    captured = {}
+
+    def fake_post(endpoint, headers, payload, timeout, retries):
+        captured["payload"] = payload
+        return {
+            "ok": True,
+            "status_code": 200,
+            "latency_seconds": 0.01,
+            "attempt": 1,
+            "data": {
+                "candidates": [{"content": {"parts": [{"text": json.dumps({"predicted_label": "positive", "system_yes_no": "YES", "confidence": 0.9}, ensure_ascii=False)}]}}],
+                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 15},
+            },
+        }
+
+    try:
+        os.environ["APIYI_API_KEY"] = "fake-key-for-contract-test"
+        model_selection.post_with_retries = fake_post
+        result = model_selection.call_model(model_selection.MODEL_CONFIGS["gemini35"], case, timeout=1, retries=0)
+        assert result["status"] == "success", result
+        parts = captured["payload"]["contents"][0]["parts"]
+        inline_items = [item for item in parts if "inline_data" in item]
+        assert len(inline_items) == 1, parts
+        assert inline_items[0]["inline_data"]["mime_type"] == "image/jpeg", inline_items
+        assert not any("视频1 帧" in str(item.get("text") or "") for item in parts if isinstance(item, dict)), parts
+    finally:
+        model_selection.post_with_retries = original_post
+        if original_key is None:
+            os.environ.pop("APIYI_API_KEY", None)
+        else:
+            os.environ["APIYI_API_KEY"] = original_key
+
+
+def test_retry_after_is_honored() -> None:
+    import poc.visual_review_poc.model_selection_e2e as model_selection
+
+    class FakeResponse:
+        def __init__(self, status_code: int, text: str = "", headers=None):
+            self.status_code = status_code
+            self.text = text
+            self.headers = headers or {}
+
+        def json(self):
+            return {"ok": True}
+
+    class FakeClient:
+        calls = 0
+
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, endpoint, headers, json):
+            FakeClient.calls += 1
+            if FakeClient.calls == 1:
+                return FakeResponse(429, "rate limit", {"Retry-After": "1"})
+            return FakeResponse(200)
+
+    original_client = model_selection.httpx.Client
+    original_sleep = model_selection.time.sleep
+    sleeps = []
+    try:
+        model_selection.httpx.Client = FakeClient
+        model_selection.time.sleep = lambda seconds: sleeps.append(seconds)
+        result = model_selection.post_with_retries("https://example.invalid", {}, {}, timeout=1, retries=1)
+        assert result["ok"] is True, result
+        assert result["attempt"] == 2, result
+        assert sleeps == [1.0], sleeps
+    finally:
+        model_selection.httpx.Client = original_client
+        model_selection.time.sleep = original_sleep
 
 
 def test_workbench_html() -> None:
@@ -388,6 +582,8 @@ def main() -> int:
     checks = []
     for name, fn in (
         ("workbench_api", test_workbench_api),
+        ("model_transport_contract", test_model_transport_contract),
+        ("retry_after_is_honored", test_retry_after_is_honored),
         ("workbench_html", test_workbench_html),
         ("url_guard", test_url_guard),
         ("review_prompt_policy", test_review_prompt_policy),

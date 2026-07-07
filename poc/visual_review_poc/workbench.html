@@ -1661,8 +1661,8 @@
         }
 
 	        function formatReviewSummary(data) {
-	          if (!data || !data.ok) {
-	            return '任务未完成，请检查素材或改为本地上传后重试。';
+	          if (!data) {
+	            return '任务未完成，请检查素材或稍后重试。';
 	          }
 	          if (Array.isArray(data.reports)) {
 	            const summary = data.summary || {};
@@ -1676,6 +1676,19 @@
 	            return lines.join('\n');
 	          }
 	          const review = data.review || {};
+          if (!data.ok && !(review.summary || review.agent_brief || review.diagnostics)) {
+            return safeText(data.message || data.detail || '任务未完成，请检查素材或稍后重试。');
+          }
+          if (review.diagnostics) {
+            const diagnostics = review.diagnostics;
+            return [
+              '审核未完成：' + safeText(diagnostics.failure_reason || '本轮没有拿到有效模型审核结果。'),
+              '失败阶段：' + safeText(diagnostics.failure_stage || '-'),
+              '取证状态：视频 ' + safeText(diagnostics.videos_received || 0) + ' 个 / 帧 ' + safeText(diagnostics.frames_sent || 0) + ' 张 / 补充图片 ' + safeText(diagnostics.supplemental_images_sent || 0) + ' 张',
+              '下一步：' + safeText(diagnostics.operator_hint || '请重试；用户等待时先转人工复核。'),
+              review.report && review.report.html_url ? '报告：点击下方按钮查看失败诊断和证据画廊。' : ''
+            ].filter(Boolean).join('\n\n');
+          }
           if (review.agent_brief) {
             const brief = review.agent_brief;
             return [
@@ -1833,6 +1846,12 @@
           return /\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name || '');
         }
 
+        function isImageFile(file) {
+          if (!file) return false;
+          if (file.type && file.type.startsWith('image/')) return true;
+          return /\.(jpg|jpeg|png|webp)$/i.test(file.name || '');
+        }
+
         function isSampleFile(file) {
           if (!file) return false;
           return /\.(csv|json)$/i.test(file.name || '');
@@ -1872,9 +1891,9 @@
 	              writeLog('请先选择一个包含视频、图片和文本材料的工单文件夹。');
 	              return false;
 	            }
-	            if (!files.some(isVideoFile)) {
-	              folderState.textContent = '文件夹里没有可审核的视频。';
-	              writeLog('工单素材包至少需要一个 mp4、mov、m4v、webm 或 mkv 视频。');
+	            if (!files.some(isVideoFile) && !files.some(isImageFile)) {
+	              folderState.textContent = '文件夹里没有可审核的视频或图片。';
+	              writeLog('工单素材包至少需要一个视频或图片；商品有伤可以先用纯图片提交，但报告会提示缺少开箱视频的风险。');
 	              return false;
 	            }
 	            if (total > 800 * 1024 * 1024) {
