@@ -3,7 +3,7 @@
 测试时间：2026-07-07
 测试入口：https://agent.deeptokenai.cn/visual
 样本来源：`/Volumes/馒头/0 Mitako二批样本/help_ticket_resources/help_ticket_resources`
-测试目标：从专门的视频/图片审核工作台上传真实用户售后素材，查看视觉 Agent 评估结果，并与人工客服处理结果比对。
+测试目标：从专门的视频/图片审核工作台上传真实用户售后素材，查看视觉 Agent 评估结果，并与VIP客服处理结果比对。
 
 ## 一、总体结论
 
@@ -37,7 +37,7 @@
   - 图片：jpg/png/webp 等
   - 文本：`content.txt`
   - 结构化信息：`manifest.json`
-  - 人工客服记录：`reply.json`
+  - VIP客服记录：`reply.json`
 
 说明：
 
@@ -93,7 +93,7 @@
     "conclusion": "证据不足，需要人工复核，置信度 None。",
     "confidence": null,
     "system_yes_no": null,
-    "next_step": "请人工客服结合订单、售后规则和原始素材处理。"
+    "next_step": "请VIP客服结合订单、售后规则和原始素材处理。"
   }
 }
 ```

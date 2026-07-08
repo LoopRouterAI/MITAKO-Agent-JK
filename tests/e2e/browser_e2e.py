@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Playwright 真实浏览器 E2E — 客户 / 客服 / 管理员三角色"""
 from __future__ import annotations
 
@@ -92,12 +92,12 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
         desk = ctx.new_page()
         admin = ctx.new_page()
 
-        # ── 客户：输入真实高风险售后诉求，触发后端硬路由转人工 ──
+        # ── 客户：输入真实高风险售后诉求，触发后端硬路由转VIP客服 ──
         t0 = time.time()
         try:
             customer.goto(f"{base}/", wait_until="domcontentloaded", timeout=30000)
             customer.wait_for_selector("#root", timeout=10000)
-            customer.locator('input[name="chat_message"]').fill("这个订单我要退款 980 元，请人工客服继续处理")
+            customer.locator('input[name="chat_message"]').fill("这个订单我要退款 980 元，请VIP客服继续处理")
             customer.locator('input[name="chat_message"]').press("Enter")
             customer.wait_for_function(
                 """() => {

@@ -21,7 +21,7 @@ export default function ObserverQC() {
     <div className="p-4 sm:p-6 space-y-4">
       <div>
         <h1 className="text-xl font-bold">{t('admin.navQc')}</h1>
-        <p className="mt-1 text-sm text-slate-500">复盘 AI 旁听和人工服务中的高风险表述，沉淀 SOP 调整样本。</p>
+        <p className="mt-1 text-sm text-slate-500">复盘 AI 旁听和VIP客服服务中的高风险表述，沉淀 SOP 调整样本。</p>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         {[

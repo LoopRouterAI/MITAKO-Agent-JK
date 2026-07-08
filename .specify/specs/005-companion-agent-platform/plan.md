@@ -1,4 +1,4 @@
-# Implementation Plan: Companion 专属 Agent 独立产品线
+﻿# Implementation Plan: Companion 专属 Agent 独立产品线
 
 **Feature**: `005-companion-agent-platform`  
 **Spec**: [spec.md](./spec.md)  
@@ -13,7 +13,7 @@
 | 用户可见 URL | Vite 入口 | FastAPI 路由 | 说明 |
 |-------------|-----------|--------------|------|
 | `http://127.0.0.1:8001/` | `index.html` | `GET /` | 客服 C 端 |
-| `http://127.0.0.1:8001/desk` | `desk.html` | `GET /desk` | 人工客服台 + **移交简报** |
+| `http://127.0.0.1:8001/desk` | `desk.html` | `GET /desk` | VIP客服台 + **移交简报** |
 | `http://127.0.0.1:8001/companion` | `companion.html` | `GET /companion` | Companion 专属 Agent |
 | `http://127.0.0.1:8001/companion-desk` | `companion-desk.html` | `GET /companion-desk` | Companion 运营台占位 |
 
@@ -26,7 +26,7 @@ flowchart TB
   subgraph client [前端 - 双 SPA]
     CS["/ index.html\nMITAKO 客服 Demo"]
     CP["/companion companion.html\n专属 Agent"]
-    DK["/desk desk.html\n人工客服台"]
+    DK["/desk desk.html\nVIP客服台"]
     CD["/companion-desk\nCompanion 人工台 规划"]
   end
 
@@ -142,7 +142,7 @@ MITAKO_Companion/             # 新建独立目录（推荐）
 - [ ] Companion 20+ 轮对话无空白气泡
 - [ ] 修改 Agent 名后刷新仍保留（SQLite）
 - [ ] 侮辱性名称被拒绝
-- [ ] `/desk` 仅显示客服转人工队列，不含 Companion 会话
+- [ ] `/desk` 仅显示客服转VIP客服队列，不含 Companion 会话
 
 ## Dependencies on Current Work (已完成)
 

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """管理员后台业务编排"""
 from __future__ import annotations
 
@@ -134,7 +134,7 @@ def demo_status(tenant_id: Optional[str] = None) -> Dict[str, Any]:
         "mode": "demo" if sessions else "empty",
         "loaded_at": loaded_at,
         "session_count": len(sessions),
-        "scope": ["坐席", "转人工队列", "服务记录", "报表指标"],
+        "scope": ["坐席", "转VIP客服队列", "服务记录", "报表指标"],
         "message": "当前展示演示数据，未连接甲方生产接口。" if sessions else "当前没有演示会话，可点击加载演示数据预览完整流程。",
     }
 
@@ -191,7 +191,7 @@ def load_demo_data(tenant_id: Optional[str] = None) -> Dict[str, Any]:
             "orders": sample["orders"],
             "conversation_snippet": [
                 {"role": "user", "turn": 1, "content": sample["summary"]},
-                {"role": "assistant", "turn": 2, "content": "我先帮您整理重点并转接人工客服继续处理。"},
+                {"role": "assistant", "turn": 2, "content": "我先帮您整理重点并转接VIP客服继续处理。"},
             ],
             "sop_state": {
                 "sop_branch": sample["intent"],

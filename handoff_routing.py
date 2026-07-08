@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""转人工路由规则：按租户隔离的外置 JSON 配置。"""
+﻿# -*- coding: utf-8 -*-
+"""转VIP客服路由规则：按租户隔离的外置 JSON 配置。"""
 from __future__ import annotations
 
 import json

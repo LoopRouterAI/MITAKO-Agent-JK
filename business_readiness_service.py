@@ -143,7 +143,7 @@ def _review_design(sop_state: Dict[str, Any], fixtures: List[Dict[str, Any]], te
             "optimized_checks": [
                 "核对开箱过程是否连续、箱体是否离开镜头、关键画面是否存在跳切" if is_video else "核对商品本体、包装外观、细节图和订单归属",
                 "输出初筛置信度和疑点，不直接承诺退款或补发",
-                "售后/人工客服复核材料后再执行真实业务动作",
+                "售后/VIP客服复核材料后再执行真实业务动作",
             ],
         })
         return base
@@ -153,7 +153,7 @@ def _review_design(sop_state: Dict[str, Any], fixtures: List[Dict[str, Any]], te
             "optimized_checks": [
                 "核对监护人身份、订单归属、付款关系和隐私材料完整性",
                 "只做材料完整性与风险初筛，不自动同意或拒绝退款",
-                "默认转人工/主管确认，避免误伤用户和平台规则",
+                "默认转VIP客服/主管确认，避免误伤用户和平台规则",
             ],
         })
         return base
@@ -189,7 +189,7 @@ def _review_design(sop_state: Dict[str, Any], fixtures: List[Dict[str, Any]], te
         return base
     base.update({
         "scene": sop_state.get("sop_branch") or "通用咨询",
-        "optimized_checks": ["按本地 SOP 回答并记录上下文，必要时转人工确认"],
+        "optimized_checks": ["按本地 SOP 回答并记录上下文，必要时转VIP客服确认"],
     })
     return base
 
@@ -253,10 +253,10 @@ def build_sop_checklist(sop_state: Dict[str, Any], order: Dict[str, Any], fixtur
         ))
     if ticket_type in {"refund", "minor_refund", "account_binding", "damage"}:
         checklist.append(_checklist_item(
-            "人工审批",
+            "VIP客服审批",
             "required",
             "现金退款、账号变更、补发换货需人工授权确认",
-            "人工客服",
+            "VIP客服",
         ))
     if ticket_type in {"missing", "logistics"}:
         checklist.append(_checklist_item(
@@ -276,7 +276,7 @@ def build_sop_checklist(sop_state: Dict[str, Any], order: Dict[str, Any], fixtur
         "下一步话术",
         "ready",
         "先同步已确认事实，再说明需人工/仓储确认的边界",
-        "人工客服",
+        "VIP客服",
     ))
     return checklist
 
@@ -296,7 +296,7 @@ def _task_center(action: Dict[str, Any], order_id: str, ticket_type: str) -> Dic
             "status": "ready_for_human_review",
             "owner_role": "售后/升级处理组",
             "sla_minutes": 120,
-            "next_step": "人工确认材料、金额和账号归属后再在业务系统操作",
+            "next_step": "VIP客服确认材料、金额和账号归属后再在业务系统操作",
         }
     return {}
 
@@ -336,7 +336,7 @@ def record_transfer_blocked(state: Dict[str, Any], reason: str = "") -> Dict[str
     sop_state = classify_sop_branch(text, state.get("intent") or "")
     sop_state.update({
         "state": "transferred_before_action",
-        "reason": reason or state.get("transfer_reason") or "高风险会话先转人工",
+        "reason": reason or state.get("transfer_reason") or "高风险会话先转VIP客服",
         "readiness": {"mode": "local_preview", "real_partner_integration": False},
         "checklist": build_sop_checklist(sop_state, {}, []),
     })

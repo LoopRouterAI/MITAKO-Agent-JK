@@ -57,7 +57,7 @@ export default function Reports() {
     closed: '已关闭',
   }[status] || sanitizePublicText(status));
   const eventLabel = (type) => ({
-    accept: '人工接单',
+    accept: 'VIP客服接单',
     escalate: '升级处理',
     transfer: '同事转交',
     colleague: '同事转交',
@@ -65,8 +65,8 @@ export default function Reports() {
   }[type] || sanitizePublicText(type));
   const metricCards = [
     [summary.total_sessions, '服务单总量'],
-    [summary.human_sessions, '人工介入量'],
-    [pct(summary.handoff_rate), '转人工率'],
+    [summary.human_sessions, 'VIP客服介入量'],
+    [pct(summary.handoff_rate), '转VIP客服率'],
     [pct(summary.close_rate), '结案率'],
     [summary.business_events, '业务动作记录'],
     [fmtDuration(summary.queue?.longest_wait_seconds), '当前最长等待'],
@@ -79,7 +79,7 @@ export default function Reports() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2"><BarChart3 className="w-5 h-5" />{t('admin.navReports')}</h1>
-          <p className="mt-1 text-sm text-slate-500">给客服 Leader 看的北极星指标：处理量、转人工、结案、等待和业务动作。</p>
+          <p className="mt-1 text-sm text-slate-500">给客服 Leader 看的北极星指标：处理量、VIP客服介入、结案、等待和业务动作。</p>
         </div>
         <div className="flex items-center gap-2">
           <select value={days} onChange={e => setDays(Number(e.target.value))} className={inputClass}>
@@ -106,8 +106,8 @@ export default function Reports() {
           <p className="text-sm text-slate-600">排队 {summary.queue?.queuing || 0} 人，转交中 {summary.queue?.transferring || 0} 人，平均等待 {fmtDuration(summary.queue?.avg_wait_seconds)}。</p>
         </div>
         <div className={cardClass}>
-          <h2 className="font-bold text-sm mb-2">人工效率</h2>
-          <p className="text-sm text-slate-600">近 {summary.period_days} 天人工介入 {summary.human_sessions || 0} 单，Agent 自动处理或未转人工 {summary.agent_sessions || 0} 单。</p>
+          <h2 className="font-bold text-sm mb-2">VIP客服效率</h2>
+          <p className="text-sm text-slate-600">近 {summary.period_days} 天VIP客服介入 {summary.human_sessions || 0} 单，Agent 自动处理或未转VIP客服 {summary.agent_sessions || 0} 单。</p>
         </div>
         <div className={cardClass}>
           <h2 className="font-bold text-sm mb-2">审批状态</h2>

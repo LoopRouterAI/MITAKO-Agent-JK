@@ -29,7 +29,7 @@ function storeCustomerAuth(userId, token) {
   }
 }
 
-/** 解析转人工系统消息的 i18n 文案。 */
+/** 解析转VIP客服系统消息的 i18n 文案。 */
 function resolveHandoffSystemText(m) {
   const meta = m.meta || {};
   if (meta.i18n_key) {
@@ -52,7 +52,7 @@ function toPublicHandoffBrief(brief) {
     : [];
   return {
     summary: sanitizeUserVisibleText(brief.summary || '已同步您的服务记录，客服会继续协助处理。'),
-    reason: '已为您转接客服继续处理。',
+    reason: '已为您转接VIP客服继续处理。',
     orders: Array.isArray(brief.orders) ? brief.orders.map(sanitizeUserVisibleText) : [],
     conversation_snippet: snippet,
   };
@@ -69,7 +69,7 @@ function toPublicLogStage(stage) {
   const value = String(stage || '').toLowerCase();
   if (value.includes('intent') || value.includes('analysis')) return '识别诉求';
   if (value.includes('order') || value.includes('query') || value.includes('retrieve')) return '核对服务信息';
-  if (value.includes('handoff') || value.includes('transfer')) return '联系人工客服';
+  if (value.includes('handoff') || value.includes('transfer')) return '联系VIP客服';
   if (value.includes('reply') || value.includes('generate') || value.includes('llm')) return '整理回复';
   return '服务处理';
 }
@@ -79,7 +79,7 @@ function toPublicNodeDesc(data = {}) {
   if (value.includes('memory') || value.includes('intent') || value.includes('analysis')) return '理解诉求与服务背景';
   if (value.includes('order') || value.includes('logistics') || value.includes('query') || value.includes('retrieve')) return '核对订单与服务信息';
   if (value.includes('sop') || value.includes('business') || value.includes('compensation') || value.includes('refund')) return '整理处理方案与服务边界';
-  if (value.includes('handoff') || value.includes('transfer')) return '联系人工客服继续处理';
+  if (value.includes('handoff') || value.includes('transfer')) return '联系VIP客服继续处理';
   if (value.includes('reply') || value.includes('generate') || value.includes('llm')) return '整理可回复内容';
   return '服务步骤处理中';
 }
@@ -286,6 +286,26 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     const headers = { ...(options.headers || {}), Authorization: `Bearer ${token}` };
     return { ...options, headers };
   }, [ensureCustomerAuth]);
+
+  const uploadAttachmentFiles = useCallback(async (files = []) => {
+    const uploaded = [];
+    for (const file of files) {
+      const form = new FormData();
+      form.append('user_id', currentUser);
+      form.append('session_id', `session_${currentUser}`);
+      form.append('file', file);
+      const authOptions = await customerFetchOptions({ method: 'POST', body: form });
+      const res = await fetch('/api/v1/chat/attachments', authOptions);
+      if (!res.ok) {
+        const err = new Error(`attachment upload failed: ${res.status}`);
+        err.status = res.status;
+        throw err;
+      }
+      const data = await res.json();
+      if (data?.attachment) uploaded.push(data.attachment);
+    }
+    return uploaded;
+  }, [currentUser, customerFetchOptions]);
 
   const ingestServerHandoffMessages = useCallback((messages) => {
     if (!messages?.length) return;
@@ -523,7 +543,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
         cardData: {
           step: 'intent',
           streamReply: false,
-          headline: '智能客服正在赶来',
+          headline: 'AI客服正在赶来',
           hintOverride: '正在接入小蛟，并为您同步安全会话与服务上下文。',
         },
       },
@@ -813,7 +833,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     lastEmotionRef.current = emotionVal;
     lastIntentRef.current = data.intent || '';
 
-    // 后端已判定强制转人工时不再弹确认卡，避免与排队卡重复。
+    // 后端已判定强制转VIP客服时不再弹确认卡，避免与排队卡重复。
     const hs = handoffStateRef.current;
     if (emotionVal >= 4 && hs === 'none' && !data.should_transfer) {
       setHandoffState('prompt');
@@ -956,7 +976,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       type: 'custom',
       content: {
         cardType: 'handoff_queue',
-        cardData: { position, ahead, eta, reason: '已为您转接客服继续处理。' },
+        cardData: { position, ahead, eta, reason: '已为您转接VIP客服继续处理。' },
       },
       position: 'left',
       user: buildLeftUserMeta(SPEAKER.AI),
@@ -1003,7 +1023,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     cleanupStreamUI();
 
     const brief = eventData.brief || null;
-    const reason = '已为您转接客服继续处理。';
+    const reason = '已为您转接VIP客服继续处理。';
     if (eventData[HANDOFF_AUTH_FIELD]) {
       serviceAuthRef.current = eventData[HANDOFF_AUTH_FIELD];
     }
@@ -1043,7 +1063,28 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
   }, [cleanupStreamUI, clearPresenceTimers, onTurnComplete, revealAssistantMessage, syncHistoryFromUI]);
 
   const handleSend = useCallback(async (val, sendOptions = {}) => {
-    if (!val.trim() || streamInFlightRef.current) return;
+    const attachmentFiles = Array.isArray(sendOptions.attachmentFiles) ? sendOptions.attachmentFiles : [];
+    const userText = val.trim() || (attachmentFiles.length ? '我上传了一张图片，想咨询这张图相关的问题。' : '');
+    if (!userText || streamInFlightRef.current) return;
+    let attachments = [];
+    try {
+      attachments = attachmentFiles.length ? await uploadAttachmentFiles(attachmentFiles) : [];
+    } catch (e) {
+      console.error('attachment upload failed:', e);
+      setChatMessages(prev => [...prev, {
+        _id: `upload_err_${Date.now()}`,
+        type: 'text',
+        content: { text: '图片没有上传成功，请确认格式为 JPG/PNG/WebP/GIF 且文件不超过 12MB 后再试。' },
+        position: 'left',
+        user: buildLeftUserMeta(SPEAKER.AI),
+      }]);
+      return;
+    }
+    const visibleText = userText;
+    const displayAttachments = attachments.map((item, index) => ({
+      ...item,
+      previewUrl: attachmentFiles[index] ? URL.createObjectURL(attachmentFiles[index]) : undefined,
+    }));
 
     // 已进入人工队列或已接入客服：消息优先进入人工链路，不再重启 AI 链路。
     if (handoffStateRef.current === 'queuing' || handoffStateRef.current === 'connected') {
@@ -1051,26 +1092,27 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       setChatMessages(prev => [...prev, {
         _id: `user_${Date.now()}`,
         type: 'text',
-        content: { text: sanitizeUserVisibleText(val) },
+        content: { text: sanitizeUserVisibleText(visibleText), attachments: displayAttachments },
         position: 'right',
       }]);
-      historyDataRef.current.push({ role: 'user', content: val });
+      historyDataRef.current.push({ role: 'user', content: userText });
       if (!serviceAuthRef.current) {
         setChatMessages(prev => [...prev, {
           _id: `handoff_pending_${Date.now()}`,
           type: 'text',
-          content: { text: '已收到您的补充信息。当前正在联系客服专员，请稍候。' },
+          content: { text: '已收到您的补充信息。当前正在联系VIP客服，请稍候。' },
           position: 'left',
           user: buildLeftUserMeta(SPEAKER.AI),
         }]);
         return;
       }
       try {
-        await fetch('/api/v1/handoff/user-message', {
+        const handoffMessageRes = await fetch('/api/v1/handoff/user-message', {
           method: 'POST',
           headers: handoffFetchOptions({ headers: { 'Content-Type': 'application/json' } }).headers,
-          body: JSON.stringify({ session_id: sessionId, content: val, user_id: currentUser }),
+          body: JSON.stringify({ session_id: sessionId, content: visibleText, user_id: currentUser, attachments }),
         });
+        if (!handoffMessageRes.ok) throw new Error(`handoff user-message failed: ${handoffMessageRes.status}`);
         await pollHandoffSync();
       } catch (e) {
         console.error('handoff user-message failed:', e);
@@ -1078,7 +1120,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       return;
     }
 
-    currentTurnUserValRef.current = val;
+    currentTurnUserValRef.current = userText;
     const turnId = activeTurnIdRef.current + 1;
     activeTurnIdRef.current = turnId;
     streamInFlightRef.current = true;
@@ -1099,7 +1141,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     setChatMessages(prev => [...prev, {
       _id: `user_${Date.now()}`,
       type: 'text',
-      content: { text: val },
+      content: { text: visibleText, attachments: displayAttachments },
       position: 'right',
     }]);
 
@@ -1143,11 +1185,12 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
         body: JSON.stringify({
           user_id: currentUser,
           session_id: `session_${currentUser}`,
-          content: val,
+          content: userText,
           history: historyDataRef.current,
           model_id: modelId,
           active_order_id: sendOptions.activeOrderId || activeOrderIdRef.current,
           stream_reply: streamReplyEnabledRef.current,
+          attachments,
         }),
       });
       const response = await fetch('/api/v1/chat', authOptions);
@@ -1203,7 +1246,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
           if (fallbackReply && !activeBotMsgTextRef.current.trim()) {
             activeBotMsgTextRef.current = sanitizeUserVisibleText(fallbackReply);
           }
-          finalizeStream(val, turnId);
+          finalizeStream(userText, turnId);
         }
       };
 
@@ -1263,12 +1306,12 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     } finally {
       if (turnId !== activeTurnIdRef.current) return;
       if (!streamFinalizedRef.current) {
-        finalizeStream(val, turnId);
+        finalizeStream(userText, turnId);
       }
       streamInFlightRef.current = false;
       abortControllerRef.current = null;
     }
-  }, [appendAssistantDelta, appendCustomCard, clearPresenceTimers, currentUser, customerFetchOptions, finalizeStream, handleApiLogging, handleHandoff, handleNodeTrace, handleUnifiedAnalysis, handoffFetchOptions, modelId, pollHandoffSync, syncHistoryFromUI]);
+  }, [appendAssistantDelta, appendCustomCard, clearPresenceTimers, currentUser, customerFetchOptions, finalizeStream, handleApiLogging, handleHandoff, handleNodeTrace, handleUnifiedAnalysis, handoffFetchOptions, modelId, pollHandoffSync, syncHistoryFromUI, uploadAttachmentFiles]);
 
   const confirmWelcomeOrder = useCallback((orderMeta) => {
     const orderId = orderMeta?.order_id;

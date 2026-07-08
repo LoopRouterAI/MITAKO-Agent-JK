@@ -1,4 +1,4 @@
-# Implementation Plan: 商业级客服 POC 专业化升级
+﻿# Implementation Plan: 商业级客服 POC 专业化升级
 
 **Branch**: `001-customer-poc-professional-upgrade` | **Date**: 2026-07-05 | **Spec**: [spec.md](./spec.md)
 
@@ -6,7 +6,7 @@
 
 ## Summary
 
-本轮目标是把现有客服 Agent POC 从“能展示能力”提升到“甲方客服负责人、人工客服、研发对接人都能理解价值和边界”的商业级演示系统。技术策略是保留现有 React + FastAPI + SQLite 架构，不引入重型新依赖；先修复安全与流程闭环，再统一前后台 UI 风格，最后补齐演示数据生命周期、移动端人工台和运营/运维 BI。
+本轮目标是把现有客服 Agent POC 从“能展示能力”提升到“甲方客服负责人、VIP客服、研发对接人都能理解价值和边界”的商业级演示系统。技术策略是保留现有 React + FastAPI + SQLite 架构，不引入重型新依赖；先修复安全与流程闭环，再统一前后台 UI 风格，最后补齐演示数据生命周期、移动端人工台和运营/运维 BI。
 
 本轮明确不做甲方真实业务接口改造，也不伪造已接入状态。订单、物流、仓库、清关、投诉、退款、视觉审核等外部业务能力通过 Mock 数据、接口契约和对接文档表达。
 
@@ -22,7 +22,7 @@
 
 **Target Platform**: Windows 11 本地演示优先，兼容 Ubuntu 研发部署
 
-**Project Type**: 前台客服 Web、人工客服工作台、运营后台、视觉审核 POC 的一体化 Web 应用
+**Project Type**: 前台客服 Web、VIP客服工作台、运营后台、视觉审核 POC 的一体化 Web 应用
 
 **Performance Goals**: POC 演示页面首屏可用；后台指标刷新不阻塞操作；移动端人工台主流程无横向溢出
 
@@ -83,7 +83,7 @@ src/
 ├── styles/tokens.css           # 设计 token
 ├── components/cards/           # OpenUI 业务卡片
 ├── components/chat/            # 用户端聊天与状态面板
-├── desk/HumanAgentDesk.jsx     # 人工客服工作台
+├── desk/HumanAgentDesk.jsx     # VIP客服工作台
 ├── admin/AdminShell.jsx        # 后台导航与布局
 └── admin/pages/                # 管理中心页面
 poc/visual_review_poc/
@@ -112,7 +112,7 @@ scripts/
 1. 修复 `/api/v1/handoff/reset` 未授权清空风险。
 2. 修复全局样式导致非交互卡片像按钮、移动端滚动被裁切的问题。
 3. 重构用户端只读业务卡片。
-4. 优化人工客服工作台：刷新反馈、接手确认、结案、转交/升级专用区、移动端分段体验。
+4. 优化VIP客服工作台：刷新反馈、接手确认、结案、转交/升级专用区、移动端分段体验。
 5. 优化后台首页、队列监控、报表、运维大盘的指标表达与错误反馈。
 6. 为视觉审核工作台补三大任务直达入口语义和更低理解成本的入口参数。
 

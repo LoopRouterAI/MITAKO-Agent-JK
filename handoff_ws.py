@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""转人工 WebSocket 推送 — 会话级订阅 + Redis 多实例广播"""
+﻿# -*- coding: utf-8 -*-
+"""转VIP客服 WebSocket 推送 — 会话级订阅 + Redis 多实例广播"""
 from __future__ import annotations
 
 import asyncio

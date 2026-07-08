@@ -1,4 +1,4 @@
-# Data Model: 商业级客服 POC 专业化升级
+﻿# Data Model: 商业级客服 POC 专业化升级
 
 ## 演示数据状态
 
@@ -20,7 +20,7 @@
 - `wait_seconds`: 当前等待秒数，后台动态计算
 - `assigned_agent`: 已接手客服
 - `pending_agent`: 待确认接管客服
-- `brief`: 转人工服务记录
+- `brief`: 转VIP客服服务记录
 - `close_reason`: 结案原因
 - `close_result`: 结案结果
 
@@ -61,7 +61,7 @@
 - `escalated`: 升级待处理数
 - `longest_wait_seconds`: 当前最长等待
 - `avg_wait_seconds`: 平均等待
-- `handoff_rate`: 转人工率
+- `handoff_rate`: 转VIP客服率
 - `agent_sessions`: Agent 处理量
 - `human_sessions`: 人工处理量
 - `visual_review_count`: 视觉审核量

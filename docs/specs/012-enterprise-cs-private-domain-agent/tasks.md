@@ -1,4 +1,4 @@
-# 012 任务与验收矩阵
+﻿# 012 任务与验收矩阵
 
 **日期**: 2026-06-29
 **边界**: 本期只做甲方业务 Mock Agent 演示版，不接入甲方真实后台、客户接口、企微、飞书、仓库、财务或商品库。
@@ -7,14 +7,14 @@
 
 | 任务 | 状态 | 验收方式 |
 |---|---|---|
-| P0 转人工短路 | 已完成 | 命中 `12315/起诉/改地址/高情绪` 后直接进入 `transfer_human`，不执行 `generate_reply`、`check_compensation` |
-| P0 转人工仍写业务审计 | 已完成 | `mock_transfer_blocked` 记录 Mock-only SOP 留痕 |
+| P0 转VIP客服短路 | 已完成 | 命中 `12315/起诉/改地址/高情绪` 后直接进入 `transfer_human`，不执行 `generate_reply`、`check_compensation` |
+| P0 转VIP客服仍写业务审计 | 已完成 | `mock_transfer_blocked` 记录 Mock-only SOP 留痕 |
 | 安全审核后再下发文本 | 已完成 | `call_llm` 不直接对客服主流程发 `text_chunk`，由 `send_reply` 在 `safety_review=pass` 后发送 |
 | block 不循环 | 已完成 | `safety_review=block` 路由到 `transfer_human` |
 | LLM 失败兜底 | 已完成 | LLM API key 缺失、超时或配额失败时标记 `should_transfer=True` |
 | handoff REST token | 已完成 | `status/connect/messages/user-message` 校验 `handoff_token` 的 session/user/tenant |
 | desk 坐席身份绑定 | 已完成 | `reply/accept/transfer` 使用登录 token 的 `agent_id`，请求体冒充返回 403 |
-| 重复转人工不降级 | 已完成 | 已接入会话重复 `/handoff/request` 返回现有状态，不覆盖 assigned agent |
+| 重复转VIP客服不降级 | 已完成 | 已接入会话重复 `/handoff/request` 返回现有状态，不覆盖 assigned agent |
 | admin 审计租户隔离 | 已完成 | admin audit events 和 transcript 按 `tenant_id` 过滤 |
 | 本地 SOP 来源召回 | 已完成 | `search_knowledge_base` 读取 `docs/_extracted_sop/*.txt`，上下文带 `本地SOP` 来源 |
 | 服务端权威 transcript | 已完成 | `/api/v1/chat` 写服务端消息表，handoff 简报优先用服务端历史 |

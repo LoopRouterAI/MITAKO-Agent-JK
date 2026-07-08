@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Gemini 3.5 Flash 单样本视觉审核。
 
 只做一件事：把一个本地视频抽帧 + 同目录补充图片 + 用户诉求交给 Gemini 3.5 Flash，
@@ -376,7 +376,7 @@ def build_user_prompt(case: Dict[str, Any], frame_sample: Dict[str, Any], frames
     return f"""请审核一个{scenario_label}售后材料包。
 
 审核目标：
-判断用户诉求是否被当前证据支持。你必须把用户申诉文本、订单信息、SKU/规格、物流进度、历史投诉、人工客服对话、视频帧和补充图片作为同一个证据包综合判断；同时说明证据链强弱、是否需要人工补件、哪些时间戳或图片支撑结论。
+判断用户诉求是否被当前证据支持。你必须把用户申诉文本、订单信息、SKU/规格、物流进度、历史投诉、VIP客服对话、视频帧和补充图片作为同一个证据包综合判断；同时说明证据链强弱、是否需要人工补件、哪些时间戳或图片支撑结论。
 
 用户诉求：
 {case.get("customer_claim") or "未提供"}
@@ -421,37 +421,36 @@ def build_user_prompt(case: Dict[str, Any], frame_sample: Dict[str, Any], frames
 - conclusion_argument: 包含 support、challenge、why_not_final_business_decision。
 - business_action_allowed: false。
 - human_required: true。
-- business_follow_up_reason: 说明为什么还需要人工客服做业务跟进；如果视觉证据已经很强，要明确“人工跟进不是因为证据不足，而是因为业务动作需要客服系统执行”。
-- next_step: 给人工客服的下一步业务跟进建议，不能直接退款、拒赔、补发或定责。高置信 positive 时不要写得像“还没判断出来”，应写“按高度支持用户诉求的证据进入人工售后处理，并补充核对订单/SKU/仓库/物流记录用于业务闭环”。
+- business_follow_up_reason: 说明为什么还需要VIP客服做业务跟进；如果视觉证据已经很强，要明确“人工跟进不是因为证据不足，而是因为业务动作需要客服系统执行”。
+- next_step: 给VIP客服的下一步业务跟进建议，不能直接退款、拒赔、补发或定责。高置信 positive 时不要写得像“还没判断出来”，应写“按高度支持用户诉求的证据进入人工售后处理，并补充核对订单/SKU/仓库/物流记录用于业务闭环”。
 - model_limitations: 本次判断的局限。
 """
 
 
 def gemini_channels() -> List[Dict[str, Any]]:
     channels: List[Dict[str, Any]] = []
-    apiyi_key = os.getenv("APIYI_API_KEY", "")
-    if apiyi_key:
-        base = os.getenv("APIYI_GEMINI_BASE_URL", "https://api.apiyi.com").rstrip("/")
+    gateway_key = os.getenv("VISION_REVIEW_API_KEY", "")
+    if gateway_key:
+        base = os.getenv("VISION_REVIEW_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
         channels.append(
             {
-                "channel": "API Yi Gemini 原生",
+                "channel": "视觉审核主通道",
                 "model": MODEL,
                 "endpoint": f"{base}/v1beta/models/{MODEL}:generateContent",
-                "headers": {"x-goog-api-key": apiyi_key, "Content-Type": "application/json"},
+                "headers": {"x-goog-api-key": gateway_key, "Content-Type": "application/json"},
                 "soft_retries": 3,
             }
         )
-    brouter_key = os.getenv("BRouter_API_KEY", "")
-    if brouter_key:
-        base = os.getenv("BROUTER_GEMINI_BASE_URL", "https://api.bananarouter.com").rstrip("/")
-        routed_model = f"gemini/{MODEL}"
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if gemini_key:
+        base = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
         channels.append(
             {
-                "channel": "BananaRouter Gemini 原生",
-                "model": routed_model,
-                "endpoint": f"{base}/v1beta/models/{routed_model}:generateContent",
-                "headers": {"Authorization": f"Bearer {brouter_key}", "Content-Type": "application/json"},
-                "soft_retries": 1,
+                "channel": "Gemini 官方通道",
+                "model": MODEL,
+                "endpoint": f"{base}/v1beta/models/{MODEL}:generateContent",
+                "headers": {"x-goog-api-key": gemini_key, "Content-Type": "application/json"},
+                "soft_retries": 3,
             }
         )
     return channels
@@ -547,7 +546,7 @@ def enforce_boundary(result: Dict[str, Any]) -> Dict[str, Any]:
     next_step = str(output.get("next_step") or "")
     risky = ("退款", "退货", "退换", "理赔", "补偿", "赔付", "拒赔", "拒绝", "补发", "同意")
     if any(word in next_step for word in risky):
-        output["next_step"] = "输出证据摘要并转人工复核，不直接退款、拒赔、补发或定责。"
+        output["next_step"] = "输出证据摘要并转VIP客服复核，不直接退款、拒赔、补发或定责。"
         output["boundary_enforced"] = True
     return output
 
@@ -663,7 +662,7 @@ def render_html(report: Dict[str, Any]) -> str:
         visual_verdict = f"视觉证据不支持用户诉求，置信度 {confidence}。"
     else:
         visual_verdict = f"视觉证据仍需复核，置信度 {confidence}。"
-    follow_up_reason = parsed.get("business_follow_up_reason") or "这里的人工跟进不是在否定视觉结论，而是因为退款、补发、拒赔、库存核对等业务动作必须由客服系统或人工坐席执行。"
+    follow_up_reason = parsed.get("business_follow_up_reason") or "这里的人工跟进不是在否定视觉结论，而是因为退款、补发、拒赔、库存核对等业务动作必须由客服系统或VIP客服坐席执行。"
 
     def evidence_cards(items: List[Dict[str, Any]], empty: str) -> str:
         if not items:
@@ -834,7 +833,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     if not video.exists():
         raise SystemExit(f"视频不存在：{video}")
     if not gemini_channels():
-        raise SystemExit("未找到 Gemini 渠道 Key：需要 APIYI_API_KEY 或 BRouter_API_KEY")
+        raise SystemExit("未找到 Gemini 渠道 Key：需要 VISION_REVIEW_API_KEY 或 GEMINI_API_KEY")
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
     run_dir = TMP_DIR / stamp

@@ -1,4 +1,4 @@
-# Feature Specification: Companion 专属 Agent 独立产品线
+﻿# Feature Specification: Companion 专属 Agent 独立产品线
 
 **Feature Branch**: `005-companion-agent-platform`
 
@@ -6,18 +6,18 @@
 
 **Status**: Draft
 
-**Input**: 在 MITAKO 客服 Demo 之外，启动完全独立的「高级付费用户专属 Agent」产品线：情绪价值、角色扮演（有底线）、盯进度/催进度、上新提醒、查价/到货预测、向平台提报商品需求；客服能力降为兼职场景。与现有客服 Demo **代码、对话记录、数据库完全隔离**，双地址并行访问；人工客服后台亦保持独立 Server 入口。
+**Input**: 在 MITAKO 客服 Demo 之外，启动完全独立的「高级付费用户专属 Agent」产品线：情绪价值、角色扮演（有底线）、盯进度/催进度、上新提醒、查价/到货预测、向平台提报商品需求；客服能力降为兼职场景。与现有客服 Demo **代码、对话记录、数据库完全隔离**，双地址并行访问；VIP客服后台亦保持独立 Server 入口。
 
 ## 产品定位对比
 
 | 维度 | 现有 MITAKO 客服 Demo (`/`) | 新 Companion 产品线 (`/companion` 规划) |
 |------|---------------------------|----------------------------------------|
-| 核心使命 | SOP 客服、查单、转人工 | 情绪陪伴 + 生活/消费助理 |
+| 核心使命 | SOP 客服、查单、转VIP客服 | 情绪陪伴 + 生活/消费助理 |
 | 用户关系 | 平台客服 ↔ 会员 | 专属 Agent ↔ 主人（可自定义称呼） |
 | 人格 | 固定「虾饺」客服人设 | 用户可命名、改性格/生日/称谓 |
 | 数据 | `session_{user}` + mock 订单 | 独立 DB / SQLite 实例 |
 | 人工协同 | `/desk` 客服工作台 | 独立 `/companion-desk`（未来） |
-| 合规边界 | 电商 SOP + 转人工 | 合法合规角色扮演；禁止违法/侮辱性命名 |
+| 合规边界 | 电商 SOP + 转VIP客服 | 合法合规角色扮演；禁止违法/侮辱性命名 |
 
 ## User Scenarios & Testing
 
@@ -86,7 +86,7 @@ Agent 兼职帮用户：绑定关注订单/商品，主动推送物流/延期/�
 | URL | 构建入口 | 用途 | 状态 |
 |-----|----------|------|------|
 | `/` | `index.html` | MITAKO 客服 Demo（虾饺） | ✅ 已上线 |
-| `/desk` | `desk.html` | AI→人工客服工作台（简报在此） | ✅ 已上线 |
+| `/desk` | `desk.html` | AI→VIP客服工作台（简报在此） | ✅ 已上线 |
 | `/companion` | `companion.html` | Companion 专属 Agent 移动端 | ✅ Phase A 脚手架 |
 | `/companion-desk` | `companion-desk.html` | Companion 运营/人工台 | 🔜 Phase D 占位 |
 

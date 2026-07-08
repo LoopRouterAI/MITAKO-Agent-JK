@@ -1,4 +1,4 @@
-# Contract: 人工客服工作台流程
+﻿# Contract: VIP客服工作台流程
 
 ## GET `/api/v1/desk/sessions`
 
@@ -34,7 +34,7 @@
 
 ## POST `/api/v1/handoff/reset`
 
-**行为**: 用户侧撤销/清空当前转人工会话，仅允许匹配 handoff token 的客户或有权限的后台/坐席调用。
+**行为**: 用户侧撤销/清空当前转VIP客服会话，仅允许匹配 handoff token 的客户或有权限的后台/坐席调用。
 
 ## 验收
 

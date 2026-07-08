@@ -3,7 +3,7 @@ import { Settings, Save, RefreshCw, Shield, Clock, Route } from 'lucide-react';
 import t from '../i18n/index.js';
 import { authFetch } from '../lib/authClient.js';
 
-/** 转人工路由管理 — /admin 路由子模块 */
+/** VIP客服路由管理 — /admin 路由子模块 */
 export default function HandoffAdmin({ embedded = false }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -88,7 +88,7 @@ export default function HandoffAdmin({ embedded = false }) {
             <Settings className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold">转人工路由管理</h1>
+            <h1 className="text-lg font-bold">VIP客服路由管理</h1>
             <p className="text-xs text-slate-500">客服路由策略 · 默认一线接单 · 规则可开关</p>
           </div>
         </div>

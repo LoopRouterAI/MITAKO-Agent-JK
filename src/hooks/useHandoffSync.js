@@ -1,5 +1,5 @@
 /**
- * 转人工同步 — WebSocket 优先，指数退避重连，轮询兜底
+ * 转VIP客服同步 — WebSocket 优先，指数退避重连，轮询兜底
  */
 export function attachHandoffTransport({
   sessionId,

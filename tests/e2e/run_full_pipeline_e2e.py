@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 MITAKO 全链路 E2E — 代码 / 通信 / 链路 × 客户 / 客服 / 管理员
 
@@ -238,7 +238,7 @@ async def run_customer_role(client: httpx.AsyncClient, base: str, results: list[
 
 
 # ---------------------------------------------------------------------------
-# 角色：人工客服
+# 角色：VIP客服
 # ---------------------------------------------------------------------------
 async def run_agent_role(client: httpx.AsyncClient, base: str, sid: str, customer_headers: dict, results: list[CaseResult]) -> None:
     t0 = time.time()
@@ -334,7 +334,7 @@ async def run_admin_role(client: httpx.AsyncClient, base: str, results: list[Cas
 
     t0 = time.time()
     page = await client.get(f"{base}/admin")
-    ok = page.status_code == 200 and ("admin-" in page.text or "HandoffAdmin" in page.text or "转人工" in page.text)
+    ok = page.status_code == 200 and ("admin-" in page.text or "HandoffAdmin" in page.text or "转VIP客服" in page.text)
     results.append(CaseResult("ROLE", "admin", "AD-admin-page-load", ok, f"len={len(page.text)}", int((time.time() - t0) * 1000)))
 
 

@@ -1,13 +1,13 @@
 # MITAKO Agent Code Wiki
 
-本页给研发快速定位当前客服系统、人工工作台、运营后台与视觉审核工作台的代码边界。旧版 Companion、陪伴、文字冒险与角色扮演代码已经封存在 `../archive/companion_roleplay_mode_20260705/`。
+本页给研发快速定位当前 AI客服系统、VIP客服工作台、运营后台与视觉审核工作台的代码边界。旧版 Companion、陪伴、文字冒险与角色扮演代码已经封存在 `../archive/companion_roleplay_mode_20260705/`。
 
 ## 产品入口
 
 | URL | 入口 | 说明 |
 |---|---|---|
-| `/` | `index.html` | 用户端智能客服 |
-| `/desk` | `desk.html` | 人工客服工作台 |
+| `/` | `index.html` | 用户端 AI客服 |
+| `/desk` | `desk.html` | VIP客服工作台 |
 | `/admin` | `admin.html` | 运营后台 |
 | `http://127.0.0.1:7861/` | `poc/visual_review_poc/workbench_server.py` | 三大视觉审核工作台 |
 
@@ -23,12 +23,12 @@
   -> 前端 MessageList + 业务卡片
 ```
 
-客服 Agent 保留 MBTI 服务人格，但定位是“专业、同理、有边界的服务型助手”。它可以安抚、解释、整理材料、建议转人工；不能提供陪伴、角色扮演、恋爱或无人最终裁决。
+客服 Agent 保留 MBTI 服务人格，但定位是“专业、同理、有边界的服务型助手”。它可以安抚、解释、整理材料、建议转VIP客服；不能提供陪伴、角色扮演、恋爱或无人最终裁决。
 
-## 转人工调用链
+## 转VIP客服调用链
 
 ```text
-用户确认转人工或 Agent 触发升级
+用户确认转VIP客服或 Agent 触发升级
   -> POST /api/v1/handoff/request
   -> handoff_service.build_handoff_brief
   -> handoff_store 写入 handoff.db

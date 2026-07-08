@@ -16,6 +16,7 @@ data/*.db
 data/*.db-*
 data/*.sqlite
 data/*.sqlite3
+data/chat_attachments/
 viking_memory/
 tmp/
 scratch/
@@ -42,6 +43,7 @@ docs/三大审核场景的小量样本/
 dist/memes/
 
 # 打包与大模型文件
+release/
 *.zip
 *.7z
 *.pt

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """最小 RAG 契约 POC：固定“检索-引用-回答”字段，后续替换为 WeKnora。"""
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def answer_with_citations(question: str, docs: Iterable[Dict[str, Any]]) -> Dict
     if not hits:
         return {
             "question": question,
-            "answer": "当前知识库没有找到可引用依据，建议转人工或主管确认。",
+            "answer": "当前知识库没有找到可引用依据，建议转VIP客服或主管确认。",
             "confidence": 0,
             "citations": [],
             "needs_human": True,
@@ -64,7 +64,7 @@ def answer_with_citations(question: str, docs: Iterable[Dict[str, Any]]) -> Dict
 def _compose_answer(doc: Dict[str, Any]) -> str:
     content = doc["content"]
     if "不得自动拒赔" in content:
-        return "不能直接拒赔。应先核对订单和材料，低置信度时转人工复核，不自动拒赔、补发或退款。"
+        return "不能直接拒赔。应先核对订单和材料，低置信度时转VIP客服复核，不自动拒赔、补发或退款。"
     if "不得自动退款" in content:
         return "不能自动退款。未成年人退款即使材料齐全，也必须人工审批。"
     if "不承诺具体发货日期" in content:

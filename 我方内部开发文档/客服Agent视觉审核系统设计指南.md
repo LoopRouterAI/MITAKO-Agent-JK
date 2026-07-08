@@ -1,4 +1,4 @@
-# 客服 Agent + 视觉审核系统设计指南
+﻿# 客服 Agent + 视觉审核系统设计指南
 
 版本：2026-07-05
 适用对象：我方产品、研发、测试、实施、项目负责人
@@ -8,8 +8,8 @@
 
 当前 POC 只保留客服业务系统：
 
-- 用户端智能客服：专业、同理、有边界，承接用户情绪并推进订单、物流、售后、材料补充和转人工。
-- 人工客服工作台：查看服务记录、接单、回复、转交、升级。
+- 用户端AI客服：专业、同理、有边界，承接用户情绪并推进订单、物流、售后、材料补充和转VIP客服。
+- VIP客服工作台：查看服务记录、接单、回复、转交、升级。
 - 运营后台：坐席管理、队列监控、服务记录、质检、审批、报表、运维。
 - 三大视觉审核工作台：开箱视频/发错货、商品有伤、未成年人资料审核。
 
@@ -19,9 +19,9 @@
 
 | 模块 | 路径 | 职责 |
 | --- | --- | --- |
-| 用户端客服 | `src/App.jsx`、`src/hooks/useChatSSE.js`、`src/components/chat/` | SSE 对话、业务卡片、转人工同步 |
+| 用户端客服 | `src/App.jsx`、`src/hooks/useChatSSE.js`、`src/components/chat/` | SSE 对话、业务卡片、转VIP客服同步 |
 | 客服 Agent | `agent.py`、`agent_llm.py` | 意图识别、SOP 检索、业务查询、回复生成、安全净化 |
-| 人工工作台 | `src/desk/`、`handoff_service.py`、`handoff_store.py` | 队列、接单、回复、转交、升级、审计 |
+| VIP客服工作台 | `src/desk/`、`handoff_service.py`、`handoff_store.py` | 队列、接单、回复、转交、升级、审计 |
 | 运营后台 | `src/admin/`、`admin_service.py`、`admin_store.py` | 坐席、队列、审批、报表、运维 |
 | 业务适配层 | `business_api.py`、`business_mock_service.py`、`business_readiness_service.py` | 验证环境业务接口、SOP 分支、准备度判断 |
 | 视觉审核工作台 | `poc/visual_review_poc/workbench_server.py`、`workbench.html`、`report_renderer.py` | 三类审核入口、材料处理、报告生成 |
@@ -36,7 +36,7 @@
   -> 创建 review_task
   -> 上传视频、图片、文本、订单、SKU、物流、历史投诉
   -> 视觉审核服务生成 structured_review_result
-  -> 人工客服工作台展示 report_url + evidence_summary
+  -> VIP客服工作台展示 report_url + evidence_summary
   -> 坐席确认 human_decision
   -> 客服 Agent 只消费 public_summary / next_action
   -> 用户端收到专业客服表达
@@ -58,7 +58,7 @@
 }
 ```
 
-### 3.3 人工工作台展示协议
+### 3.3 VIP客服工作台展示协议
 
 坐席端可以看到更完整的审核摘要：
 
@@ -223,7 +223,7 @@ python scripts/check_visual_workbench_smoke.py
 1. 将视觉审核工作台的三类入口稳定为正式组件，保留批量上传和文件夹扫描。
 2. 新增 `review_task` 数据模型与队列存储。
 3. 新增甲方 Java 对接适配层，先连测试环境。
-4. 将审核报告摘要写入人工客服工作台服务记录。
+4. 将审核报告摘要写入VIP客服工作台服务记录。
 5. 将人工结论回写给甲方工单系统。
 6. 收集甲方每类正负样本，跑模型稳定性、成本和一致性评测。
 7. 上线前完成权限、日志脱敏、材料保留周期和回滚演练。

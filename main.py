@@ -5,10 +5,12 @@ import json
 import asyncio
 import traceback
 from datetime import datetime
-from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
+from pathlib import Path
+from uuid import uuid4
+from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from sse_starlette.sse import EventSourceResponse
 
@@ -80,11 +82,11 @@ from auth.store import verify_user
 from auth import tenants as tenant_store
 from auth import sso as sso_service
 from ops_service import ops_snapshot
-from runtime_paths import app_root
+from runtime_paths import app_root, data_dir
 
 SUPER_ADMIN_ONLY = frozenset({Role.SUPER_ADMIN.value})
 
-app = FastAPI(title="MITAKO 客服 Agent 主站", description="提供客服前台、人工工作台与运营后台服务")
+app = FastAPI(title="MITAKO 客服 Agent 主站", description="提供客服前台、VIP客服工作台与运营后台服务")
 APP_ROOT = app_root()
 INTERNAL_BUSINESS_NODE = "".join(chr(c) for c in (109, 111, 99, 107, 95, 98, 117, 115, 105, 110, 101, 115, 115))
 INTERNAL_API_EVENT = "".join(chr(c) for c in (97, 112, 105, 95, 108, 111, 103))
@@ -125,6 +127,8 @@ from fastapi.staticfiles import StaticFiles
 
 TEMPLATES_DIR = str(APP_ROOT / "templates")
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
+CHAT_ATTACHMENTS_DIR = data_dir() / "chat_attachments"
+CHAT_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # 挂载编译出来的 assets 静态目录
 dist_assets = str(APP_ROOT / "dist" / "assets")
@@ -163,6 +167,14 @@ async def get_test_cases():
             return json.load(f)
     return []
 
+class ChatAttachment(BaseModel):
+    id: str
+    name: str
+    mime_type: str
+    size: int
+    url: str
+
+
 class ChatRequest(BaseModel):
     user_id: str
     session_id: str
@@ -173,6 +185,79 @@ class ChatRequest(BaseModel):
     active_order_id: Optional[str] = None
     stream_reply: bool = False
     fixtures: List[str] = []
+    attachments: List[ChatAttachment] = Field(default_factory=list)
+
+
+ALLOWED_CHAT_ATTACHMENT_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_CHAT_ATTACHMENT_BYTES = 12 * 1024 * 1024
+
+
+def _safe_attachment_name(name: str) -> str:
+    base = Path(name or "image").name
+    base = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", base).strip("._")
+    return base[:80] or "image"
+
+
+def _detect_image_mime(raw: bytes) -> str:
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"GIF87a") or raw.startswith(b"GIF89a"):
+        return "image/gif"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return ""
+
+
+def _attachment_meta_path(filename: str) -> Path:
+    return CHAT_ATTACHMENTS_DIR / f"{filename}.json"
+
+
+def _read_attachment_meta(filename: str) -> Dict[str, Any]:
+    if filename != Path(filename).name:
+        return {}
+    meta_path = _attachment_meta_path(filename)
+    if not meta_path.exists():
+        return {}
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _valid_chat_attachments(items: List[ChatAttachment], user_id: str, session_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+    valid: List[Dict[str, Any]] = []
+    for item in items or []:
+        if not item.url.startswith("/api/v1/chat/attachments/"):
+            continue
+        filename = Path(item.url.split("/api/v1/chat/attachments/", 1)[1]).name
+        meta = _read_attachment_meta(filename)
+        if not meta or meta.get("user_id") != user_id or meta.get("session_id") != session_id or meta.get("tenant_id") != tenant_id:
+            continue
+        mime_type = str(meta.get("mime_type") or "")
+        size = int(meta.get("size") or 0)
+        if mime_type not in ALLOWED_CHAT_ATTACHMENT_MIME or size <= 0 or size > MAX_CHAT_ATTACHMENT_BYTES:
+            continue
+        path = CHAT_ATTACHMENTS_DIR / filename
+        if not path.exists() or path.stat().st_size != size:
+            continue
+        valid.append({
+            "id": str(meta.get("id") or item.id),
+            "name": str(meta.get("name") or item.name),
+            "mime_type": mime_type,
+            "size": size,
+            "url": f"/api/v1/chat/attachments/{filename}",
+        })
+    return valid
+
+
+def _require_all_chat_attachments_valid(items: List[ChatAttachment], user_id: str, session_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+    valid = _valid_chat_attachments(items, user_id, session_id, tenant_id)
+    if items and len(valid) != len(items):
+        raise HTTPException(status_code=403, detail="invalid_attachment_scope")
+    return valid
 
 
 def _handoff_bearer(request: Request) -> str:
@@ -289,6 +374,88 @@ def _resolve_chat_user(request: Request, req: ChatRequest) -> Optional[Dict[str,
     )
 
 
+@app.post("/api/v1/chat/attachments")
+async def upload_chat_attachment(
+    request: Request,
+    user_id: str = Form(...),
+    session_id: str = Form(...),
+    file: UploadFile = File(...),
+):
+    existing_entry = handoff_store.get_session(session_id)
+    token_user = _resolve_customer_session_user(request, user_id=user_id, session_id=session_id, entry=existing_entry)
+    tenant_id = _request_tenant_id("", token_user, existing_entry)
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type not in ALLOWED_CHAT_ATTACHMENT_MIME:
+        raise HTTPException(status_code=415, detail="unsupported_attachment_type")
+    raw = await file.read(MAX_CHAT_ATTACHMENT_BYTES + 1)
+    if len(raw) > MAX_CHAT_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="attachment_too_large")
+    detected_type = _detect_image_mime(raw)
+    if detected_type != content_type:
+        raise HTTPException(status_code=415, detail="unsupported_attachment_type")
+    original_name = _safe_attachment_name(file.filename or "image")
+    ext = Path(original_name).suffix.lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}[content_type]
+    attachment_id = uuid4().hex
+    stored_name = f"{attachment_id}{ext}"
+    (CHAT_ATTACHMENTS_DIR / stored_name).write_bytes(raw)
+    meta = {
+        "id": attachment_id,
+        "user_id": user_id,
+        "session_id": session_id,
+        "tenant_id": tenant_id,
+        "name": original_name,
+        "mime_type": content_type,
+        "size": len(raw),
+        "filename": stored_name,
+    }
+    _attachment_meta_path(stored_name).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return {
+        "ok": True,
+        "attachment": {
+            "id": attachment_id,
+            "name": original_name,
+            "mime_type": content_type,
+            "size": len(raw),
+            "url": f"/api/v1/chat/attachments/{stored_name}",
+        },
+    }
+
+
+@app.get("/api/v1/chat/attachments/{filename}")
+async def get_chat_attachment(filename: str, request: Request):
+    filename = Path(filename).name
+    meta = _read_attachment_meta(filename)
+    if not meta:
+        raise HTTPException(status_code=404, detail="attachment_not_found")
+    existing_entry = handoff_store.get_session(meta.get("session_id") or "")
+    raw_token = extract_bearer_token(request)
+    token_user = decode_token(raw_token) if raw_token else None
+    if not token_user:
+        raise HTTPException(status_code=401, detail="customer_token_required")
+    role = token_user.get("role")
+    if role in DESK_ACCESS_ROLES:
+        if (token_user.get("tenant_id") or "mitako") != str(meta.get("tenant_id") or "mitako"):
+            raise HTTPException(status_code=403, detail="attachment_tenant_mismatch")
+    else:
+        token_user = _resolve_customer_session_user(
+            request,
+            user_id=meta.get("user_id") or "",
+            session_id=meta.get("session_id") or "",
+            entry=existing_entry,
+            token=raw_token or "",
+        )
+    token_tenant = str(token_user.get("tenant_id") or "mitako")
+    meta_tenant = str(meta.get("tenant_id") or "mitako")
+    if token_tenant != meta_tenant:
+        raise HTTPException(status_code=403, detail="attachment_tenant_mismatch")
+    path = CHAT_ATTACHMENTS_DIR / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="attachment_not_found")
+    return FileResponse(path, media_type=meta.get("mime_type") or "application/octet-stream", filename=meta.get("name") or filename)
+
+
 def _public_business_card(card: Dict[str, Any]) -> Dict[str, Any]:
     data = card.get("data") or {}
     sop = data.get("sop") or {}
@@ -310,7 +477,7 @@ def _public_business_card(card: Dict[str, Any]) -> Dict[str, Any]:
     elif action.get("type") == "after_sales_card":
         action_label = "售后处理单"
     elif action.get("type") == "ticket":
-        action_label = "人工复核工单"
+        action_label = "客服复核工单"
     elif action.get("type") == "product_info":
         action_label = "商品信息核对"
     else:
@@ -401,7 +568,7 @@ def _public_chat_progress(event: Dict[str, Any]) -> Dict[str, Any]:
         "generate_reply": ("reply", "正在整理回复"),
         "safety_review": ("reply", "正在确认回复内容"),
         "send_reply": ("reply", "正在发送回复"),
-        "transfer_human": ("handoff", "正在为您转接人工客服"),
+        "transfer_human": ("handoff", "正在为您转接VIP客服"),
         "update_memory": ("finish", "正在同步服务记录"),
         "log_trace": ("finish", "正在完成服务记录"),
     }
@@ -436,7 +603,7 @@ class HandoffRequest(BaseModel):
     user_id: str
     session_id: str
     history: List[Dict[str, str]] = []
-    reason: str = "用户主动申请人工客服"
+    reason: str = "用户主动申请VIP客服"
     last_user_message: str = ""
     intent: str = ""
     emotion_level: int = 2
@@ -793,7 +960,7 @@ async def post_generate_image(req: ImageGenerateRequest):
 
 @app.post("/api/v1/handoff/request")
 async def request_handoff(req: HandoffRequest, request: Request):
-    """用户确认转人工 — 生成简报并加入排队（演示队列）"""
+    """用户确认转VIP客服 — 生成简报并加入排队（演示队列）"""
     existing = get_queue_status(req.session_id)
     existing_user = (existing or {}).get("user_id") or ((existing or {}).get("brief") or {}).get("user_id") or ""
     if existing_user and req.user_id and existing_user != req.user_id:
@@ -812,7 +979,7 @@ async def request_handoff(req: HandoffRequest, request: Request):
             "ok": True,
             "brief": existing_payload["brief"],
             "queue": build_public_queue_meta(queue_meta),
-            "reason": "已为您转接人工客服继续处理。",
+            "reason": "已为您转接VIP客服继续处理。",
             "handoff_token": handoff_token,
         }
     token = _handoff_bearer(request)
@@ -856,7 +1023,7 @@ async def request_handoff(req: HandoffRequest, request: Request):
         "ok": True,
         "brief": build_public_handoff_brief(brief),
         "queue": build_public_queue_meta(queue_meta),
-        "reason": "已为您转接人工客服继续处理。",
+        "reason": "已为您转接VIP客服继续处理。",
         "handoff_token": handoff_token,
     }
 
@@ -948,6 +1115,7 @@ class HandoffUserMessageRequest(BaseModel):
     session_id: str
     content: str
     user_id: str = ""
+    attachments: List[ChatAttachment] = Field(default_factory=list)
 
 
 @app.on_event("startup")
@@ -1036,7 +1204,9 @@ async def handoff_user_message(req: HandoffUserMessageRequest, request: Request)
         return {"ok": False, "error": "session_not_found"}
     user = _require_handoff_user(request, req.session_id, entry)
     effective_user_id = (user or {}).get("sub") or req.user_id
-    return await post_user_message(req.session_id, req.content, effective_user_id)
+    tenant_id = _request_tenant_id("", user, entry)
+    attachments = _require_all_chat_attachments_valid(req.attachments, effective_user_id, req.session_id, tenant_id)
+    return await post_user_message(req.session_id, req.content, effective_user_id, attachments=attachments)
 
 
 @app.get("/api/v1/desk/agents")
@@ -1125,15 +1295,31 @@ async def chat_stream(req: ChatRequest, request: Request):
             existing_entry = None
         elif existing_entry.get("status") != "chatting":
             raise HTTPException(status_code=409, detail="handoff_active")
+    chat_attachments = _require_all_chat_attachments_valid(req.attachments, req.user_id, req.session_id, tenant_id)
+
     async def event_generator():
         queue = asyncio.Queue()
+        model_content = req.content
+        if chat_attachments:
+            attachment_lines = [
+                f"- {item.get('name')} ({item.get('mime_type')}, {item.get('size')} bytes, {item.get('url')})"
+                for item in chat_attachments
+            ]
+            model_content = req.content + "\n\n[用户已上传附件]\n" + "\n".join(attachment_lines)
         handoff_store.ensure_chat_session(req.session_id, req.user_id, tenant_id=tenant_id)
-        handoff_store.append_message(req.session_id, "user", req.content, meta={"kind": "ai_chat"})
+        handoff_store.append_message(
+            req.session_id,
+            "user",
+            req.content,
+            meta={"kind": "ai_chat", "attachments": chat_attachments},
+        )
         server_history = handoff_store.recent_chat_history(req.session_id, limit=20)
+        if chat_attachments and server_history and server_history[-1].get("role") == "user":
+            server_history[-1] = {**server_history[-1], "content": model_content}
 
         # 初始 State
         state = {
-            "messages": server_history or (req.history + [{"role": "user", "content": req.content}]),
+            "messages": server_history or (req.history + [{"role": "user", "content": model_content}]),
             "user_id": req.user_id,
             "session_id": req.session_id,
             "active_order_id": req.active_order_id or "",
@@ -1151,6 +1337,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             "compensation_given": [],
             "meme_tags": [],
             "fixtures": req.fixtures or [],
+            "attachments": chat_attachments,
             "sop_state": {},
             "business_events": [],
             "business_cards": [],
@@ -1166,6 +1353,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                         "model_id": req.model_id,
                         "stream_reply": req.stream_reply,
                         "fixtures": req.fixtures or [],
+                        "attachments": chat_attachments,
                     }
                 }
             )
@@ -1218,12 +1406,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                         "data": json.dumps({"brief": build_public_handoff_brief(event.get("brief", {}))}, ensure_ascii=False)
                     }
 
-                # 6. 常规思考追踪 / 转人工
+                # 6. 常规思考追踪 / 转VIP客服
                 elif event["type"] in ["node_start", "node_end", "action_transfer"]:
                     if event["type"] == "action_transfer":
                         event = {
                             **event,
-                            "reason": "已为您转接人工客服继续处理。",
+                            "reason": "已为您转接VIP客服继续处理。",
                             "brief": build_public_handoff_brief(event.get("brief", {})),
                             "queue": build_public_queue_meta(event.get("queue", {})),
                         }
@@ -1294,7 +1482,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             traceback.print_exc()
 
         if isinstance(result, dict) and (result.get("should_transfer") or result.get("safety_check_result") == "review"):
-            clean_reply = "这个问题我已经为您转接客服继续处理，请稍候。"
+            clean_reply = "这个问题我已经为您转接VIP客服继续处理，请稍候。"
         else:
             clean_reply = sanitize_customer_reply(reply_fallback)
         if not clean_reply.strip():

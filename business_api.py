@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """本地演示业务服务。
 
 这些接口只用于验证客服 Agent 的流程编排与处理建议，不连接也不写入客户真实业务系统。
@@ -252,7 +252,7 @@ class WarehouseTaskReq(BaseModel):
 @business_router.post("/api/v1/compensate")
 def post_compensate(req: CompensateReq):
     if req.amount > 22.0:
-        raise HTTPException(status_code=400, detail="超过自动建议额度，请转人工审批。")
+        raise HTTPException(status_code=400, detail="超过自动建议额度，请转VIP客服审批。")
     return {
         "success": False,
         "would_create": True,

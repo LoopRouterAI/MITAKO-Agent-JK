@@ -1,4 +1,4 @@
-# Mock 业务闭环改造计划
+﻿# Mock 业务闭环改造计划
 
 **日期**: 2026-06-29
 
@@ -8,12 +8,12 @@
 
 本轮目标收敛为“P1 核心 Mock 客服业务闭环”，不是生产接口上线版。已落地范围：
 
-- `agent.py`：P0 转人工命中后直接短路到 handoff，不再继续查单、补偿或调用 LLM；安全审核通过后才向用户发送 LLM 文本；`block` 不再回到生成节点循环；LLM 不可用时自动转人工。
+- `agent.py`：P0 转VIP客服命中后直接短路到 handoff，不再继续查单、补偿或调用 LLM；安全审核通过后才向用户发送 LLM 文本；`block` 不再回到生成节点循环；LLM 不可用时自动转VIP客服。
 - `agent.py`：SOP 召回开始读取 `docs/_extracted_sop/*.txt` 的本地文件来源，保留现有硬编码摘要作为兜底。
 - `main.py` / `handoff_service.py` / `src/hooks/useChatSSE.js`：handoff 用户侧 REST 轮询和发消息带 `handoff_token`，并校验会话、用户、租户绑定；desk 写接口从登录 token 派生坐席身份，禁止请求体冒充主管或其他坐席。
 - `mock_api.py`：补齐最小 Mock 契约端点：工单、售后卡片、仓库任务、财务退款状态、商品库、多模态 fixture。
 - `business_mock_service.py`：新增最小 SOP 状态机，覆盖申请退款、物流异常、商品有伤、漏发/发错、未成年人退款、账号换绑，并输出允许动作、禁止动作、人工确认边界。
-- `handoff_store.py` / `main.py`：普通 AI 对话写入服务端 transcript，转人工简报优先使用服务端消息；新增 `business_audit_events`，用 `order_id + event_type + idempotency_key` 做 Mock 写动作幂等审计。
+- `handoff_store.py` / `main.py`：普通 AI 对话写入服务端 transcript，转VIP客服简报优先使用服务端消息；新增 `business_audit_events`，用 `order_id + event_type + idempotency_key` 做 Mock 写动作幂等审计。
 - `agent.py`：在现有 LangGraph 中接入 `mock_business` 节点，多模态 fixture 可进入 SOP 分支和业务审计；高风险分支只生成 Mock 卡片/任务/人工建议。
 - `src/admin/pages/AuditLog.jsx`：admin 审计聚合 handoff 事件与 Mock 业务事件，session 回放可查看业务审计 JSON。
 - `tests/e2e/run_mock_business_guard_e2e.py`：守护验证覆盖 P0 短路、SOP 本地召回、handoff token、用户串会话、坐席冒充、SOP 分支矩阵、fixture、服务端 transcript、幂等审计。
@@ -43,7 +43,7 @@
 | Mock 业务接口 | 现有 Mock 主要是订单、物流、补偿 | 缺少工单、售后卡片、仓库、财务、商品库、企微、飞书 |
 | 服务端会话历史 | 依赖客户端 history | 多轮简报可缺失、重复或被篡改 |
 | 安全审查顺序 | 流式回复先展示，后审查 | 高风险话术可能已被用户看到 |
-| 转人工副作用 | P0 命中后仍继续查单、补偿、LLM | 高风险场景可能产生错误动作 |
+| 转VIP客服副作用 | P0 命中后仍继续查单、补偿、LLM | 高风险场景可能产生错误动作 |
 | desk 身份绑定 | 写接口信任请求体 agent_id | 可冒充主管或跨租户接单 |
 | handoff token | REST 用户消息/状态未校验 token | 可猜 session 读取或注入消息 |
 | 多端并发 | 无订单级锁/幂等 | 不能证明重复退款、补发、换货被拦截 |
@@ -60,10 +60,10 @@
 目标：先避免演示链路中的明显错误。
 
 - 安全审查前置或改为非流式最终审查后下发。
-- P0 转人工短路，不再继续补偿、写记忆和生成业务回复。
+- P0 转VIP客服短路，不再继续补偿、写记忆和生成业务回复。
 - desk 写接口绑定 token 内坐席身份和租户。
 - handoff REST 校验 handoff_token。
-- 增加 LLM 失败、block、配额耗尽兜底转人工。
+- 增加 LLM 失败、block、配额耗尽兜底转VIP客服。
 - 建立服务端会话历史表或最小 transcript store。
 
 验收：

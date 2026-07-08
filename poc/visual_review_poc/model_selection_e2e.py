@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """三大审核场景模型选型 E2E：同一证据包，多模型对比。"""
 from __future__ import annotations
 
@@ -263,7 +263,7 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 - business_action_allowed: false。
 - human_required: true。
 - business_follow_up_reason: 人工跟进原因。
-- next_step: 后续人工客服建议，不直接退款、拒赔、补发或定责。
+- next_step: 后续VIP客服建议，不直接退款、拒赔、补发或定责。
 - model_limitations: 局限。
 """
 
@@ -350,12 +350,12 @@ def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str,
 
 def gemini_request_options(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     options: List[Dict[str, Any]] = []
-    apiyi_key = os.getenv("APIYI_API_KEY")
-    if apiyi_key:
-        base = os.getenv("APIYI_GEMINI_BASE_URL", "https://api.apiyi.com").rstrip("/")
+    gateway_key = os.getenv("VISION_REVIEW_API_KEY")
+    if gateway_key:
+        base = os.getenv("VISION_REVIEW_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
         options.append({
             "endpoint": f"{base}/v1beta/models/{cfg['model']}:generateContent",
-            "headers": {"x-goog-api-key": apiyi_key, "Content-Type": "application/json"},
+            "headers": {"x-goog-api-key": gateway_key, "Content-Type": "application/json"},
         })
     gemini_key = os.getenv("GEMINI_API_KEY")
     if gemini_key:

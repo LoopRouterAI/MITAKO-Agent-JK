@@ -212,19 +212,15 @@ export default function ChatInput({
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [activeSheet, setActiveSheet] = useState(null);
+  const [pendingAttachments, setPendingAttachments] = useState([]);
   const photoInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
   const submit = () => {
-    if (!inputVal.trim() || isAwaitingStream) return;
-    onSend(inputVal);
+    if ((!inputVal.trim() && pendingAttachments.length === 0) || isAwaitingStream) return;
+    onSend(inputVal, { attachmentFiles: pendingAttachments });
     setInputVal('');
-    setToolsOpen(false);
-    setActiveSheet(null);
-  };
-
-  const insertText = (text) => {
-    setInputVal(inputVal.trim() ? `${inputVal} ${text}` : text);
+    setPendingAttachments([]);
     setToolsOpen(false);
     setActiveSheet(null);
   };
@@ -232,8 +228,11 @@ export default function ChatInput({
   const handleImagePick = (event, prefix) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    insertText(`${prefix}${file.name}，我想咨询这张图相关的问题：`);
+    setPendingAttachments([file]);
+    setInputVal(inputVal.trim() ? inputVal : `${prefix}我想咨询这张图相关的问题：`);
     event.target.value = '';
+    setToolsOpen(false);
+    setActiveSheet(null);
   };
 
   const sendProduct = (product) => {
@@ -303,6 +302,20 @@ export default function ChatInput({
       <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={e => handleImagePick(e, t('input.photoTemplate'))} />
       <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handleImagePick(e, t('input.cameraTemplate'))} />
 
+      {pendingAttachments.length > 0 && (
+        <div className="flex items-center justify-between gap-2 rounded-[8px] border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
+          <span className="min-w-0 truncate">{t('input.attachmentReady')}：{pendingAttachments[0].name}</span>
+          <button
+            type="button"
+            onClick={() => setPendingAttachments([])}
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] border border-slate-200 text-slate-500 hover:bg-slate-50"
+            aria-label={t('input.removeAttachment')}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       <div className="flex items-stretch gap-2 flex-nowrap min-w-0">
         <input
           type="text"
@@ -330,7 +343,7 @@ export default function ChatInput({
         >
           <Plus className={`w-5 h-5 transition-transform duration-200 ${toolsOpen ? 'rotate-45' : ''}`} aria-hidden="true" />
         </button>
-        {inputVal.trim() && (
+        {(inputVal.trim() || pendingAttachments.length > 0) && (
           <button
             type="button"
             onClick={submit}

@@ -34,7 +34,7 @@ export MITAKO_BUSINESS_DEMO_API_ENABLED=1
 
 echo "[4/6] 准备启动服务 ..."
 echo "[MITAKO] 用户客服端:     http://127.0.0.1:8000/"
-echo "[MITAKO] 人工客服工作台: http://127.0.0.1:8000/desk"
+echo "[MITAKO] VIP客服工作台: http://127.0.0.1:8000/desk"
 echo "[MITAKO] 运营后台:       http://127.0.0.1:8000/admin"
 echo "[MITAKO] 视觉审核工作台: http://127.0.0.1:7861/"
 echo "[MITAKO] 甲方交付文档:   http://127.0.0.1:8790/甲方沟通交付文档/index.html"

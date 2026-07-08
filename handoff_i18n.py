@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""转人工系统消息 i18n — 后端存 key+params，前端按 locale 渲染"""
+"""转VIP客服系统消息 i18n — 后端存 key+params，前端按 locale 渲染"""
 from __future__ import annotations
 
 from typing import Any, Dict, Tuple
@@ -7,7 +7,7 @@ from typing import Any, Dict, Tuple
 _TEMPLATES: Dict[str, Tuple[str, str]] = {
     "transfer": (
         "handoff.sysTransfer",
-        "已为您转接更合适的客服专员继续处理，请稍候。",
+        "已为您转接更合适的VIP客服继续处理，请稍候。",
     ),
     "escalate": (
         "handoff.sysEscalate",
@@ -15,7 +15,7 @@ _TEMPLATES: Dict[str, Tuple[str, str]] = {
     ),
     "sla_timeout": (
         "handoff.sysSlaTimeout",
-        "已为您转接下一位客服专员继续处理，请稍候。",
+        "已为您转接下一位VIP客服继续处理，请稍候。",
     ),
     "closed": (
         "handoff.sysClosed",

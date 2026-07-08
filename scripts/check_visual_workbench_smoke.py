@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import json
@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 
 FORBIDDEN_PUBLIC_TERMS = re.compile(
-    r"Gemini|GPT|Token|endpoint|API Yi|Banana|DeepSeek|Mock|外包|端点|成本",
+    r"Gemini|GPT|Token|endpoint|DeepSeek|Mock|外包|端点|成本|模型调用|模型服务限流|status_code|error_type",
     re.IGNORECASE,
 )
 FORBIDDEN_PUBLIC_KEYS = {
@@ -39,6 +39,11 @@ FORBIDDEN_PUBLIC_KEYS = {
     "thoughtSignature",
     "thought_signature",
     "thoughtsTokenCount",
+    "status_code",
+    "error_type",
+    "path",
+    "api_path",
+    "uri",
 }
 
 
@@ -48,6 +53,15 @@ def contains_forbidden_public_key(value) -> bool:
     if isinstance(value, list):
         return any(contains_forbidden_public_key(item) for item in value)
     return False
+
+
+def assert_public_payload_clean(value) -> None:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    assert not FORBIDDEN_PUBLIC_TERMS.search(text), text
+    assert "file:///" not in text.lower() and "file://" not in text.lower(), text
+    assert str(ROOT) not in text, text
+    if not isinstance(value, str):
+        assert not contains_forbidden_public_key(value), value
 
 
 def parse_stdout_json(stdout: str) -> dict:
@@ -81,6 +95,25 @@ def test_workbench_api() -> None:
         data={"source_type": "upload", "scenario": "all", "review_model": "standard"},
     )
     assert rejected.status_code == 400
+
+    single_failure = workbench_server._public_result(
+        False,
+        "商品有伤审核",
+        {"status": "review_timeout", "status_code": 429, "error_type": "soft"},
+    )
+    assert single_failure["summary"]["cases"] == 1, single_failure
+    assert single_failure["summary"]["total_reviews"] == 1, single_failure
+    assert single_failure["summary"]["successful_reviews"] == 0, single_failure
+    assert single_failure["diagnostics"]["failure_stage"] == "系统复核", single_failure
+    assert "status_code" not in single_failure["diagnostics"], single_failure
+    assert "error_type" not in single_failure["diagnostics"], single_failure
+    single_failure_html = client.get(single_failure["report"]["html_url"])
+    assert single_failure_html.status_code == 200, single_failure_html.text
+    assert "本轮失败诊断" in single_failure_html.text, single_failure_html.text
+    assert "审核未完成" in single_failure_html.text, single_failure_html.text
+    assert "系统复核服务繁忙" in single_failure_html.text, single_failure_html.text
+    assert_public_payload_clean(single_failure)
+    assert_public_payload_clean(single_failure_html.text)
 
     csv_text = "\n".join([
         "task,human_label,predicted_label,user_text,video,order_item,sku,human_reason",
@@ -243,16 +276,38 @@ def test_workbench_api() -> None:
         failed_data = failed.json()
         assert failed_data["ok"] is False, failed_data
         assert failed_data["review"]["summary"]["successful_reviews"] == 0, failed_data
-        assert failed_data["review"]["diagnostics"]["failure_stage"] == "模型调用", failed_data
-        assert failed_data["review"]["diagnostics"]["failure_reason"] == "模型服务限流，本轮重试后仍未完成审核。", failed_data
-        assert failed_data["review"]["diagnostics"]["status_code"] == 429, failed_data
-        assert failed_data["review"]["diagnostics"]["error_type"] == "soft", failed_data
+        assert failed_data["review"]["diagnostics"]["failure_stage"] == "系统复核", failed_data
+        assert failed_data["review"]["diagnostics"]["failure_reason"] == "系统复核服务繁忙，本轮重试后仍未完成审核。", failed_data
+        assert "status_code" not in failed_data["review"]["diagnostics"], failed_data
+        assert "error_type" not in failed_data["review"]["diagnostics"], failed_data
         assert "审核未完成" in failed_data["review"]["agent_brief"]["conclusion"], failed_data
         assert "证据不足" not in failed_data["review"]["agent_brief"]["conclusion"], failed_data
         failed_html = client.get(failed_data["review"]["report"]["html_url"])
         assert failed_html.status_code == 200, failed_html.text
-        for text in ("本轮失败诊断", "审核未完成", "模型服务限流"):
+        for text in ("本轮失败诊断", "审核未完成", "系统复核服务繁忙"):
             assert text in failed_html.text, text
+        assert_public_payload_clean(failed_data["review"])
+        assert_public_payload_clean(failed_html.text)
+
+        video_path = ROOT / "docs" / "三大审核场景的小量样本" / "sample_004" / "minor_material_review.mp4"
+        video_failed = client.post(
+            "/api/review-folder",
+            data={"scenario": "video_unboxing", "customer_claim": "用户反馈开箱视频疑似发错货"},
+            files=[
+                ("files", ("content.txt", "用户反馈开箱视频疑似发错货".encode("utf-8"), "text/plain")),
+                ("files", (video_path.name, video_path.read_bytes(), "video/mp4")),
+            ],
+        )
+        assert video_failed.status_code == 200, video_failed.text
+        video_failed_data = video_failed.json()
+        assert video_failed_data["ok"] is False, video_failed_data
+        assert video_failed_data["review"]["diagnostics"]["videos_received"] == 1, video_failed_data
+        video_failed_html = client.get(video_failed_data["review"]["report"]["html_url"])
+        assert video_failed_html.status_code == 200, video_failed_html.text
+        for text in ("本轮失败诊断", "审核未完成", "系统复核服务繁忙"):
+            assert text in video_failed_html.text, text
+        assert_public_payload_clean(video_failed_data["review"])
+        assert_public_payload_clean(video_failed_html.text)
 
         workbench_server.call_model = fake_unstructured
         unstructured = client.post(
@@ -267,7 +322,8 @@ def test_workbench_api() -> None:
         unstructured_data = unstructured.json()
         assert unstructured_data["ok"] is False, unstructured_data
         assert unstructured_data["review"]["summary"]["review_status"] == "failed", unstructured_data
-        assert unstructured_data["review"]["diagnostics"]["failure_stage"] == "结构化解析", unstructured_data
+        assert unstructured_data["review"]["diagnostics"]["failure_stage"] == "系统复核", unstructured_data
+        assert_public_payload_clean(unstructured_data["review"])
     finally:
         workbench_server.call_model = original_call_model
 
@@ -297,7 +353,7 @@ def test_model_transport_contract() -> None:
         ],
     }
     original_post = model_selection.post_with_retries
-    original_key = os.environ.get("APIYI_API_KEY")
+    original_key = os.environ.get("VISION_REVIEW_API_KEY")
     captured = {}
 
     def fake_post(endpoint, headers, payload, timeout, retries):
@@ -314,7 +370,7 @@ def test_model_transport_contract() -> None:
         }
 
     try:
-        os.environ["APIYI_API_KEY"] = "fake-key-for-contract-test"
+        os.environ["VISION_REVIEW_API_KEY"] = "fake-key-for-contract-test"
         model_selection.post_with_retries = fake_post
         result = model_selection.call_model(model_selection.MODEL_CONFIGS["gemini35"], case, timeout=1, retries=0)
         assert result["status"] == "success", result
@@ -326,9 +382,9 @@ def test_model_transport_contract() -> None:
     finally:
         model_selection.post_with_retries = original_post
         if original_key is None:
-            os.environ.pop("APIYI_API_KEY", None)
+            os.environ.pop("VISION_REVIEW_API_KEY", None)
         else:
-            os.environ["APIYI_API_KEY"] = original_key
+            os.environ["VISION_REVIEW_API_KEY"] = original_key
 
 
 def test_retry_after_is_honored() -> None:
@@ -487,7 +543,7 @@ def test_review_prompt_policy() -> None:
                     "decision": "manual_review",
                     "predicted_label": "negative",
                     "confidence": 0.8,
-                    "next_step": "输出证据摘要并转人工复核。",
+                    "next_step": "输出证据摘要并转VIP客服复核。",
                     "confidence_reason": "示例解析结果。",
                 },
             },
@@ -506,6 +562,9 @@ def test_review_prompt_policy() -> None:
 
 def test_public_report_redaction() -> Path:
     from poc.visual_review_poc.workbench_server import _agent_report_response, _public_result
+
+    public_dir = ROOT / "poc" / "visual_review_poc" / "reports" / "public_summaries"
+    before = {item.name for item in public_dir.glob("*.json")} if public_dir.exists() else set()
 
     result = _public_result(True, "高精度审核", {"summary": {"available": True, "hit": False}})
     report_name = result["report"]["html_url"].rsplit("/", 1)[-1]
@@ -548,8 +607,8 @@ def test_public_report_redaction() -> Path:
                 "video_audit_conclusion": {"continuity_score": 1, "continuity_reason": "静态录屏样本", "swap_risk_level": "low", "edit_or_cut_risk": "low"},
                 "adopted_evidence": [],
                 "frame_findings": [],
-                "business_follow_up_reason": "人工复核",
-                "next_step": "请人工客服补齐监护关系证明后复核。",
+                "business_follow_up_reason": "VIP客服复核",
+                "next_step": "请VIP客服补齐监护关系证明后复核。",
             },
         },
         "redaction_fixture",
@@ -559,8 +618,9 @@ def test_public_report_redaction() -> Path:
     agent_data = json.loads(agent_json.read_text(encoding="utf-8"))
     assert not contains_forbidden_public_key(agent_data), agent_data
 
-    public_dir = ROOT / "poc" / "visual_review_poc" / "reports" / "public_summaries"
     for item in public_dir.glob("*.json"):
+        if item.name in before:
+            continue
         payload = json.loads(item.read_text(encoding="utf-8"))
         assert not contains_forbidden_public_key(payload), item
     return html_path

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Playwright 演示级截图验收：/desk 与 /admin。
 
 该脚本不是探活冒烟：它会真实登录、加载演示数据、进入客服工作台、
@@ -190,7 +190,7 @@ def _seed_extra_handoff(client: httpx.Client, base: str, report_id: str) -> str:
         "session_id": sid,
         "history": [
             {"role": "user", "content": "这个订单拖太久了，我已经很生气，要找 12315 投诉。"},
-            {"role": "assistant", "content": "我先为您核对订单和物流节点，并转人工继续跟进。"},
+            {"role": "assistant", "content": "我先为您核对订单和物流节点，并转VIP客服继续跟进。"},
         ],
         "reason": "用户主动要求人工并提到 12315",
         "last_user_message": "再不给解释我就去 12315 投诉。",
@@ -200,7 +200,7 @@ def _seed_extra_handoff(client: httpx.Client, base: str, report_id: str) -> str:
     }
     r = client.post(f"{base}/api/v1/handoff/request", headers=_headers(token), json=body)
     if r.status_code != 200 or not r.json().get("ok"):
-        raise RuntimeError(f"12315 转人工种子失败：{r.text[:200]}")
+        raise RuntimeError(f"12315 转VIP客服种子失败：{r.text[:200]}")
     return sid
 
 

@@ -91,6 +91,11 @@ PRIVATE_REPORT_KEYS = {
     "system_prompt",
     "user_prompt",
     "prompt",
+    "status_code",
+    "error_type",
+    "path",
+    "api_path",
+    "uri",
 }
 ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/x-m4v"}
@@ -254,11 +259,13 @@ def _public_summary(raw_report: Dict[str, Any]) -> Dict[str, Any]:
             "report_evaluation": "命中" if summary.get("hit") else "未命中" if summary.get("available") else "未评测",
             "needs_human_review": True,
         }
+    ok = bool(raw_report.get("ok"))
     return {
-        "cases": summary.get("cases"),
-        "total_reviews": 0,
-        "successful_reviews": 0,
+        "cases": summary.get("cases") or 1,
+        "total_reviews": summary.get("total_reviews") or 1,
+        "successful_reviews": summary.get("successful_reviews") if summary.get("successful_reviews") is not None else (1 if ok else 0),
         "needs_human_review": True,
+        "review_status": "completed" if ok else "failed",
     }
 
 
@@ -330,10 +337,30 @@ def _media_url(path_value: Any) -> str:
 
 
 def _media_gallery(case: Dict[str, Any], sample_dir: Optional[Path] = None) -> Dict[str, Any]:
+    def public_media_item(item: Dict[str, Any], url: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        allowed = {
+            "video_index",
+            "global_frame_index",
+            "frame_index",
+            "image_index",
+            "timestamp",
+            "timestamp_seconds",
+            "file",
+            "video_file",
+            "width",
+            "height",
+            "bytes",
+        }
+        data = {key: item.get(key) for key in allowed if item.get(key) not in (None, "")}
+        data["url"] = url
+        if extra:
+            data.update({key: value for key, value in extra.items() if value not in (None, "")})
+        return data
+
     videos = []
     for item in case.get("videos") or []:
         video_path = (sample_dir / item.get("file")).resolve() if sample_dir and item.get("file") else None
-        videos.append({**item, "url": _media_url(video_path)})
+        videos.append(public_media_item(item, _media_url(video_path)))
     frames = []
     for item in case.get("frames") or []:
         frame_url = _media_url(item.get("api_path") or item.get("path"))
@@ -341,9 +368,9 @@ def _media_gallery(case: Dict[str, Any], sample_dir: Optional[Path] = None) -> D
         video_path = (sample_dir / video_file).resolve() if sample_dir and video_file else None
         video_url = _media_url(video_path)
         timestamp = float(item.get("timestamp_seconds") or 0)
-        frames.append({**item, "url": frame_url, "video_url": f"{video_url}#t={timestamp:.2f}" if video_url else ""})
+        frames.append(public_media_item(item, frame_url, {"video_url": f"{video_url}#t={timestamp:.2f}" if video_url else ""}))
     images = [
-        {**item, "url": _media_url(item.get("api_path") or item.get("path"))}
+        public_media_item(item, _media_url(item.get("api_path") or item.get("path")))
         for item in case.get("supplemental_images") or []
     ]
     return {"videos": videos, "frames": frames, "images": images}
@@ -391,7 +418,9 @@ def _report_data_name(report_name: str) -> str:
 
 
 def _public_result(ok: bool, review_label: str, report: Dict[str, Any]) -> Dict[str, Any]:
+    report = {**(report or {}), "ok": ok}
     summary = _public_summary(report)
+    failure = {} if ok else _public_failure_reason(report, False)
     report_name = f"summary_{int(time.time())}_{len(ALLOWED_REPORTS) + 1}.html"
     data = {
         "ok": ok,
@@ -399,18 +428,31 @@ def _public_result(ok: bool, review_label: str, report: Dict[str, Any]) -> Dict[
         "frame_strategy": "按当前抽帧配置生成证据",
         "summary": summary,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "conclusion": "建议人工复核后再做最终业务处置",
+        "conclusion": "建议VIP客服复核后再做最终业务处置" if ok else f"审核未完成：{failure.get('message')}",
     }
+    if failure:
+        data["diagnostics"] = {
+            "review_status": "failed",
+            "failure_stage": failure.get("stage"),
+            "failure_reason": failure.get("message"),
+            "operator_hint": failure.get("operator_hint"),
+            "frames_sent": 0,
+            "supplemental_images_sent": 0,
+            "videos_received": 1,
+        }
     ALLOWED_REPORTS[report_name] = data
     PUBLIC_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
     (PUBLIC_SUMMARY_DIR / _report_data_name(report_name)).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {
+    response = {
         "ok": ok,
         "review_label": review_label,
         "frame_strategy": "按当前抽帧配置生成证据",
         "summary": summary,
         "report": {"html_url": "/reports/" + report_name},
     }
+    if data.get("diagnostics"):
+        response["diagnostics"] = data["diagnostics"]
+    return response
 
 
 def _structured_review_ok(parsed: Dict[str, Any]) -> bool:
@@ -421,30 +463,30 @@ def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[
     status = str(result.get("status") or "")
     if status == "success" and not structured_ok:
         return {
-            "stage": "结构化解析",
-            "message": "模型已返回，但缺少 predicted_label 或 confidence 等关键结构化字段。",
-            "operator_hint": "请保留原始素材并重试；若连续出现，请由研发检查结构化输出协议。",
+            "stage": "系统复核",
+            "message": "系统复核暂未生成可用摘要，本轮不能作为业务判断依据。",
+            "operator_hint": "请保留原始素材并重试；若连续出现，请提交研发排查。",
         }
     if status == "skipped":
         return {
-            "stage": "模型配置",
-            "message": "审核模型凭证未配置，未发起视觉审核请求。",
-            "operator_hint": "请检查部署环境的视觉模型 Key 配置，当前工单先进入人工复核。",
+            "stage": "系统复核",
+            "message": "系统复核暂不可用，当前工单请先进入VIP客服复核。",
+            "operator_hint": "请检查部署环境配置；当前工单先进入VIP客服复核。",
         }
     status_code = result.get("status_code")
     error_type = str(result.get("error_type") or "")
     if status_code == 429:
-        message = "模型服务限流，本轮重试后仍未完成审核。"
+        message = "系统复核服务繁忙，本轮重试后仍未完成审核。"
     elif error_type == "soft":
-        message = "模型服务超时、繁忙或网关临时失败，本轮重试后仍未完成审核。"
+        message = "系统复核超时或服务临时不可用，本轮重试后仍未完成审核。"
     elif status_code:
-        message = f"模型服务返回 {status_code}，本轮未完成审核。"
+        message = "系统复核暂未完成，本轮不能作为业务判断依据。"
     else:
-        message = "模型请求未完成，可能是网络、网关或运行环境异常。"
+        message = "系统复核请求未完成，可能是网络、服务或运行环境异常。"
     return {
-        "stage": "模型调用",
+        "stage": "系统复核",
         "message": message,
-        "operator_hint": "这不是业务上的“证据不足”；请重试或转人工处理，并保留该失败样本给研发排查。",
+        "operator_hint": "这不是业务上的“证据不足”；请重试或转VIP客服处理，并保留该失败样本给研发排查。",
     }
 
 
@@ -497,7 +539,12 @@ def _run_review(
         return _public_result(False, profile["label"], {"summary": {}, "status": "review_timeout"})
     except OSError:
         return _public_result(False, profile["label"], {"summary": {}, "status": "review_subprocess_error"})
-    return _public_result(proc.returncode == 0, profile["label"], _latest_report_from_stdout(proc.stdout))
+    report = _latest_report_from_stdout(proc.stdout)
+    if proc.returncode != 0:
+        report.setdefault("status", "review_subprocess_failed")
+    elif not report:
+        report["status"] = "review_no_report"
+    return _public_result(proc.returncode == 0 and bool(report), profile["label"], report)
 
 
 def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[str, Any], report_stem: str) -> Dict[str, Any]:
@@ -507,7 +554,7 @@ def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[
     quality = score_result(result)
     failure = {} if ok else _public_failure_reason(result, structured_ok)
     public_conclusion = _safe_agent_conclusion(parsed, case["scenario_label"]) if ok else f"审核未完成：{failure.get('message')}"
-    public_next_step = _safe_agent_next_step((parsed.get("overall_audit") or {}).get("business_follow_up_suggestion") or parsed.get("next_step")) if ok else failure.get("operator_hint", "请人工客服结合订单、售后规则和原始素材处理。")
+    public_next_step = _safe_agent_next_step((parsed.get("overall_audit") or {}).get("business_follow_up_suggestion") or parsed.get("next_step")) if ok else failure.get("operator_hint", "请VIP客服结合订单、售后规则和原始素材处理。")
     report_name = f"{report_stem}_{int(time.time())}_{len(ALLOWED_REPORTS) + 1}.html"
     agent_report = _public_agent_report_payload(
         case=case,
@@ -543,8 +590,6 @@ def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[
             "frames_sent": len(case.get("frames") or []),
             "supplemental_images_sent": len(case.get("supplemental_images") or []),
             "videos_received": len(case.get("videos") or []),
-            "status_code": result.get("status_code"),
-            "error_type": result.get("error_type"),
         }
         agent_report["diagnostics"] = data["diagnostics"]
     data = _strip_private_report_fields(data)

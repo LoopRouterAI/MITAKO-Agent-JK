@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""转人工 SQLite 持久层 — 会话 / 消息 / 转交审计"""
+﻿# -*- coding: utf-8 -*-
+"""转VIP客服 SQLite 持久层 — 会话 / 消息 / 转交审计"""
 from __future__ import annotations
 
 import json

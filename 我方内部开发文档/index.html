@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -91,20 +91,20 @@
 <body>
   <main class="shell">
     <div class="topbar">
-      <div class="brand"><div class="mark">DEV</div><div><strong>MITAKO 内部设计指南</strong><span>客服 Agent + 视觉审核 + 人工工作台</span></div></div>
+      <div class="brand"><div class="mark">DEV</div><div><strong>MITAKO 内部设计指南</strong><span>客服 Agent + 视觉审核 + VIP客服工作台</span></div></div>
       <span class="pill">内部资料 · 不直接外发</span>
     </div>
 
     <section class="hero">
       <span class="eyebrow">系统目标</span>
       <h1>构建可观测、可调试、可扩展的 <span>专业客服 Agent 系统</span></h1>
-      <p class="lead">当前版本移除独立陪伴和角色扮演产品线，保留服务人格用于客服同理心。视觉审核工作台要与人工客服、Agent 客服和甲方 Java 后台形成完整任务闭环。</p>
+      <p class="lead">当前版本移除独立陪伴和角色扮演产品线，保留服务人格用于客服同理心。视觉审核工作台要与VIP客服、Agent 客服和甲方 Java 后台形成完整任务闭环。</p>
     </section>
 
     <section class="section">
       <h2>模块边界</h2>
       <div class="grid">
-        <div class="card"><span class="tag">用户端</span><h3>React + SSE</h3><p><code>src/App.jsx</code>、<code>useChatSSE.js</code> 负责对话、业务卡片和转人工同步。</p></div>
+        <div class="card"><span class="tag">用户端</span><h3>React + SSE</h3><p><code>src/App.jsx</code>、<code>useChatSSE.js</code> 负责对话、业务卡片和转VIP客服同步。</p></div>
         <div class="card"><span class="tag">Agent</span><h3>专业客服编排</h3><p><code>agent.py</code> 处理 SOP、订单、物流、售后、情绪承接和安全清洗。</p></div>
         <div class="card"><span class="tag">人工台</span><h3>接单与复核</h3><p><code>handoff_service.py</code>、<code>handoff_store.py</code> 承载接单、回复、转交、升级。</p></div>
         <div class="card"><span class="tag">视觉审核</span><h3>三入口工作台</h3><p><code>poc/visual_review_poc/</code> 承载材料处理、审核报告和工作台 UI。</p></div>

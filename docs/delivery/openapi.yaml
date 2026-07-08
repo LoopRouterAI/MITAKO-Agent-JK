@@ -45,7 +45,7 @@ paths:
           description: 缺少客户会话令牌
   /api/v1/handoff/request:
     post:
-      summary: 客户确认转人工
+      summary: 客户确认转VIP客服
       security:
         - bearerAuth: []
       requestBody:
@@ -56,10 +56,10 @@ paths:
               $ref: '#/components/schemas/HandoffRequest'
       responses:
         '200':
-          description: 返回人工转接简报、队列状态与 handoff_token
+          description: 返回VIP客服接入简报、队列状态与 handoff_token
   /api/v1/desk/sessions:
     get:
-      summary: 人工客服读取待处理队列
+      summary: VIP客服读取待处理队列
       security:
         - bearerAuth: []
       responses:
@@ -67,7 +67,7 @@ paths:
           description: 会话队列
   /api/v1/desk/session/{sessionId}/accept:
     post:
-      summary: 人工客服原子接单
+      summary: VIP客服原子接单
       security:
         - bearerAuth: []
       parameters:

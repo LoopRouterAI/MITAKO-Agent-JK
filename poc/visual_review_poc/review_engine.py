@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """视觉审核 POC 规则引擎：接真实模型时只替换 model_signals 来源。"""
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ def _review_product_damage(case: Dict[str, Any], signals: Dict[str, Any]) -> Dic
         signals,
         decision,
         issues,
-        "生成售后处理单，等待人工确认补发/换货" if decision == "pass" else "要求补拍或转人工复核",
+        "生成售后处理单，等待人工确认补发/换货" if decision == "pass" else "要求补拍或转VIP客服复核",
     )
     result["damage_type"] = signals.get("damage_type", "")
     result["damage_area"] = signals.get("damage_area", "")

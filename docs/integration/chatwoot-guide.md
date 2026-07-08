@@ -1,4 +1,4 @@
-# Chatwoot IM / 工单对接指南
+﻿# Chatwoot IM / 工单对接指南
 
 > **交付模式：我方（MITAKO 全包）部署与运维 Chatwoot** · 甲方无需自建 GitHub 项目  
 > 底层选型：[Chatwoot 开源版](https://github.com/chatwoot/chatwoot)（MIT License，可商用）
@@ -24,7 +24,7 @@
 
 1. 提供 **1 个测试 Inbox** 对应的业务场景（如「虾淘售后」渠道名）
 2. 指派 **2～3 名坐席账号** 用于 UAT（可在 Chatwoot 或 MITAKO `/desk` 验收）
-3. 确认 **消息同步方向**：用户转人工 → Chatwoot 可见；坐席在 MITAKO 回复 → Chatwoot outgoing
+3. 确认 **消息同步方向**：用户转VIP客服 → Chatwoot 可见；坐席在 MITAKO 回复 → Chatwoot outgoing
 4. 签署 **SLA 与数据归属**（会话日志存于我方部署实例，按合同约定导出）
 
 ## 3. 我方部署配置（内部文档，勿发给甲方填仓库）
@@ -44,14 +44,14 @@ CHATWOOT_INBOX_ID=1
 
 | 事件 | MITAKO | Chatwoot |
 |------|--------|----------|
-| 用户转人工 | `POST /handoff/request` | 创建 conversation |
+| 用户转VIP客服 | `POST /handoff/request` | 创建 conversation |
 | 用户/坐席消息 | append_message | incoming / outgoing |
 | SLA 超时转交 | 本地处理 | 可扩展 webhook |
 
 ## 5. 联调与验收清单
 
 1. 我方完成 Chatwoot 部署与 Token 配置
-2. 发起转人工 → Chatwoot 收件箱出现会话
+2. 发起转VIP客服 → Chatwoot 收件箱出现会话
 3. MITAKO `/desk` 回复 → Chatwoot 侧可见 outgoing
 4. 日志：`chatwoot_conversation_created` / `chatwoot_sync_failed`
 5. 甲方 UAT 签字（见项目验收文档）

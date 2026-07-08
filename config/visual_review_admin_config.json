@@ -1,12 +1,10 @@
 {
   "review_mode": "strict",
-  "provider_default": "apiyi_gemini_35_flash",
+  "provider_default": "gemini_35_flash",
   "provider_fallback_order": [
-    "brouter_gemini_35_flash",
-    "apiyi_gemini_35_flash",
-    "brouter_gemini_31_flash_lite",
-    "apiyi_gemini_31_flash_lite",
-    "apiyi_gpt_55_responses",
+    "gemini_35_flash",
+    "gemini_31_flash_lite",
+    "gpt_55_responses",
     "mtuo_gpt_55_responses"
   ],
   "frame_strategy": "provider_default",

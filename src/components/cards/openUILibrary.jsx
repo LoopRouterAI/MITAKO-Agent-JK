@@ -177,16 +177,16 @@ export const QueryStatusCard = defineComponent({
     const showTyping = step === 'reply' && !streamReply;
     const progressPct = step === 'done' ? 100 : Math.max(8, ((currentIdx + 1) / stepsList.length) * 100);
     const titleMap = {
-      intent: '正在召唤智能客服',
+      intent: '正在召唤AI客服',
       query: '正在同步订单与服务记录',
       compensate: '正在匹配处理方案',
       reply: '正在整理可回复内容',
       done: '已完成核实',
     };
     const statusHints = {
-      intent: '先理解您想问什么，再决定要查订单、物流、售后还是人工协助。',
+      intent: '先理解您想问什么，再决定要查订单、物流、售后还是VIP客服协助。',
       query: '正在同步订单、物流节点与服务上下文。',
-      compensate: '正在按客服 SOP 匹配可建议方案；退款、补发、拒赔仍需人工或甲方系统确认。',
+      compensate: '正在按客服 SOP 匹配可建议方案；退款、补发、拒赔仍需VIP客服或甲方系统确认。',
       reply: '正在把查询结果整理成用户能听懂的回复。',
       done: '本轮处理已结束。',
     };
@@ -331,7 +331,7 @@ export const HandoffPromptCard = defineComponent({
             <h4 className="text-sm font-black text-slate-950">{t('transfer.promptTitle')}</h4>
             <p className="text-pretty mt-1 text-[11px] leading-relaxed text-slate-600">{t('transfer.promptDesc')}</p>
             {emotionLevel >= 4 && (
-              <p className="mt-1.5 text-[10px] font-bold text-red-700">当前情绪较强，客服专员会更适合继续处理。</p>
+              <p className="mt-1.5 text-[10px] font-bold text-red-700">当前情绪较强，VIP客服会更适合继续处理。</p>
             )}
           </div>
         </div>
@@ -425,7 +425,7 @@ export const BusinessActionCard = defineComponent({
     const actionLabelMap = {
       after_sales_card: '售后处理卡',
       warehouse_task: '仓库核查任务',
-      ticket: '人工授权工单',
+      ticket: '客服授权工单',
       none: '继续核对',
       service_after_sales_card: '售后处理卡',
       service_warehouse_task: '仓库核查任务',

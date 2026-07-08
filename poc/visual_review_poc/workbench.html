@@ -1158,7 +1158,7 @@
         <div class="mark">虾淘</div>
         <div>
           <strong data-i18n="brandTitle">MITAKO 视觉审核工作台</strong>
-          <span data-i18n="brandSub">面向客服质检、证据整理和人工复核</span>
+          <span data-i18n="brandSub">面向客服质检、证据整理和VIP客服复核</span>
         </div>
       </div>
     </header>
@@ -1168,12 +1168,12 @@
         <p class="eyebrow" data-i18n="eyebrow">虾淘客服视觉质检驾驶舱</p>
         <h1 data-i18n="heroTitle">把开箱、有伤、资料审核变成<span class="accent">可复核证据链</span></h1>
         <p class="lead" data-i18n="heroLead">
-          客服上传本地视频，或粘贴公开视频分享文本；系统先解析与取证，再按配置输出复核摘要。这里不替业务系统做自动裁决，只给客服负责人和人工复核提供证据、风险和补件建议。
+          客服上传本地视频，或粘贴公开视频分享文本；系统先解析与取证，再按配置输出复核摘要。这里不替业务系统做自动裁决，只给客服负责人和VIP客服复核提供证据、风险和补件建议。
         </p>
         <div class="proof-pills" aria-label="核心能力">
           <div class="proof-pill"><b>3 条入口</b><span>开箱、有伤、资料独立处理</span></div>
           <div class="proof-pill"><b>证据回链</b><span>帧图、补图、视频时间点可复核</span></div>
-          <div class="proof-pill"><b>人工闭环</b><span>高置信抽检，低置信逐条复核</span></div>
+          <div class="proof-pill"><b>客服闭环</b><span>高置信抽检，低置信逐条复核</span></div>
         </div>
       </div>
       <div class="hero-art" aria-hidden="true">
@@ -1190,7 +1190,7 @@
           <div class="review-lane">
             <div class="review-node"><b>01</b><span>素材接入与前置处理</span></div>
             <div class="review-node"><b>02</b><span>多轮特征提取与交叉检查</span></div>
-            <div class="review-node"><b>03</b><span>证据链摘要与人工复核</span></div>
+            <div class="review-node"><b>03</b><span>证据链摘要与VIP客服复核</span></div>
           </div>
         </div>
       </div>
@@ -1212,7 +1212,7 @@
       <button class="entry-card" type="button" data-scenario="minor_material" aria-pressed="false">
         <small>入口 03 / 未成年人资料</small>
         <strong>资料完整性审核</strong>
-        <span>面向监护关系、订单归属、承诺书、支付证明等材料完整性检查；始终人工终审。</span>
+        <span>面向监护关系、订单归属、承诺书、支付证明等材料完整性检查；始终VIP客服终审。</span>
         <b>隐私边界</b>
       </button>
     </nav>
@@ -1281,13 +1281,13 @@
                 </div>
                 <div>
                   <label for="complaintStage">申诉进展</label>
-                  <input id="complaintStage" name="complaint_stage" autocomplete="off" placeholder="初次申诉 / 二次补件 / 人工复核中" />
+                  <input id="complaintStage" name="complaint_stage" autocomplete="off" placeholder="初次申诉 / 二次补件 / VIP客服复核中" />
                 </div>
               </div>
               <label for="productMasterData">商品/仓库主数据</label>
               <textarea id="productMasterData" name="product_master_data" placeholder="粘贴商品主数据、仓库出库记录、尺寸口径、角色款式映射；没有则留空，报告会提示缺口。"></textarea>
-              <label for="conversationHistory">历史对话与人工备注</label>
-              <textarea id="conversationHistory" name="conversation_history" placeholder="粘贴多轮投诉进展、人工客服备注、已要求补件内容；用于判断是否重复补件、情绪风险和证据缺口。"></textarea>
+              <label for="conversationHistory">历史对话与VIP客服备注</label>
+              <textarea id="conversationHistory" name="conversation_history" placeholder="粘贴多轮投诉进展、VIP客服备注、已要求补件内容；用于判断是否重复补件、情绪风险和证据缺口。"></textarea>
               <input type="hidden" name="warehouse_master_data" id="warehouseMasterData" value="" />
               <input type="hidden" name="customer_tone" id="customerTone" value="" />
             </section>
@@ -1379,7 +1379,7 @@
             <button class="primary" id="submitBtn" data-i18n="submitBtn">开始生成复核摘要</button>
           </form>
           <div class="notice" data-i18n="notice">
-            本工具输出证据整理、风险提示和人工复核建议；不自动退款、拒赔、补发、定责，也不做未成年人资料终审。
+            本工具输出证据整理、风险提示和VIP客服复核建议；不自动退款、拒赔、补发、定责，也不做未成年人资料终审。
           </div>
           <section class="sample-eval-card" aria-label="人工结论样本评测">
             <div class="sample-eval-head">
@@ -1432,7 +1432,7 @@
             <div class="scenario-card">
               <span class="code">03</span>
               <strong data-i18n="case3Title">资料审核</strong>
-              <span data-i18n="case3Text">辅助识别资料完整性与风险线索，保留人工终审边界。</span>
+              <span data-i18n="case3Text">辅助识别资料完整性与风险线索，保留VIP客服终审边界。</span>
             </div>
           </div>
 
@@ -1441,7 +1441,7 @@
             <div class="step"><b data-i18n="flow2">抽帧取证</b><span data-i18n="flow2Text">常规/严格取证可配</span></div>
             <div class="step"><b data-i18n="flow3">多轮特征</b><span data-i18n="flow3Text">画面、物体、资料线索拆解</span></div>
             <div class="step"><b data-i18n="flow4">交叉复核</b><span data-i18n="flow4Text">一致性、风险点、置信度汇总</span></div>
-            <div class="step"><b data-i18n="flow5">人工复核</b><span data-i18n="flow5Text">摘要与复核建议</span></div>
+            <div class="step"><b data-i18n="flow5">VIP客服复核</b><span data-i18n="flow5Text">摘要与复核建议</span></div>
           </div>
 
 	          <div class="result-grid">
@@ -1542,9 +1542,9 @@
             product: '原始商品标题、角色、款式',
             sku: '订单规格、尺寸、数量、随机/盲抽规则',
             logistics: '签收时间、是否异常签收、是否退回',
-            stage: '初次申诉 / 已补开箱视频 / 人工复核中',
+            stage: '初次申诉 / 已补开箱视频 / VIP客服复核中',
             master: '粘贴 SKU 主数据、仓库出库记录、尺寸口径、盲抽规则。',
-            history: '粘贴用户此前对话、客服已要求补拍的内容、人工备注。',
+            history: '粘贴用户此前对话、客服已要求补拍的内容、VIP客服备注。',
             sample: true,
             sampleId: 'sample_001',
             sampleLabel: '运行 sample_001 开箱审核'
@@ -1574,7 +1574,7 @@
           minor_material: {
             badge: '当前队列 03',
             title: '资料审核',
-            desc: '用于辅助检查材料完整性、脱敏状态和补件线索，最终结论必须由人工复核确认。',
+            desc: '用于辅助检查材料完整性、脱敏状态和补件线索，最终结论必须由VIP客服复核确认。',
             materials: ['资料画面或录屏', '关系/订单证明材料', '已脱敏的关键页面'],
             fps: '1',
             probe: '10',
@@ -1682,10 +1682,10 @@
           if (review.diagnostics) {
             const diagnostics = review.diagnostics;
             return [
-              '审核未完成：' + safeText(diagnostics.failure_reason || '本轮没有拿到有效模型审核结果。'),
+              '审核未完成：' + safeText(diagnostics.failure_reason || '本轮没有拿到有效系统复核结果。'),
               '失败阶段：' + safeText(diagnostics.failure_stage || '-'),
               '取证状态：视频 ' + safeText(diagnostics.videos_received || 0) + ' 个 / 帧 ' + safeText(diagnostics.frames_sent || 0) + ' 张 / 补充图片 ' + safeText(diagnostics.supplemental_images_sent || 0) + ' 张',
-              '下一步：' + safeText(diagnostics.operator_hint || '请重试；用户等待时先转人工复核。'),
+              '下一步：' + safeText(diagnostics.operator_hint || '请重试；用户等待时先转VIP客服复核。'),
               review.report && review.report.html_url ? '报告：点击下方按钮查看失败诊断和证据画廊。' : ''
             ].filter(Boolean).join('\n\n');
           }

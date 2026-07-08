@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """客服知识库/RAG POC 样本，后续可替换为 WeKnora 文档库。"""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ KNOWLEDGE_DOCS: List[Dict[str, Any]] = [
         "version": "2026-06-30",
         "approved": True,
         "source": "客服 SOP / 商品有伤",
-        "content": "商品有伤需先核对订单、商品图和用户上传材料。视频或图片低置信度时必须转人工复核。不得自动拒赔、自动补发或自动退款。",
+        "content": "商品有伤需先核对订单、商品图和用户上传材料。视频或图片低置信度时必须转VIP客服复核。不得自动拒赔、自动补发或自动退款。",
     },
     {
         "doc_id": "sop_minor_refund_v1",
@@ -49,7 +49,7 @@ EVAL_QUESTIONS: List[Dict[str, str]] = [
     {
         "question": "用户说商品有划痕，图片不清楚，可以直接拒赔吗？",
         "expected_doc": "sop_damage_v1",
-        "must_contain": "转人工复核",
+        "must_contain": "转VIP客服复核",
     },
     {
         "question": "未成年人退款材料齐全时能不能自动退款？",

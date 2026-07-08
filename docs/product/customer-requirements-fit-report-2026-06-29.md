@@ -1,4 +1,4 @@
-# 甲方需求满足度报告
+﻿# 甲方需求满足度报告
 
 **日期**: 2026-06-29
 **范围**: MITAKO 客服 Agent + 私域/仓储协同 Mock 准备态
@@ -10,8 +10,8 @@
 |---|---|---|---|
 | 客服能按 SOP 分流售后诉求 | 本地 SOP 状态机覆盖申请退款、物流异常、商品有伤、漏发/发错、未成年人退款、账号换绑 | `business_mock_service.py` | `test_sop_branch_matrix_minimal` |
 | 高风险动作不能自动执行 | `allowed_actions/blocked_actions` 明确禁止自动退款、自动补发、自动改绑；高风险只生成人工确认任务 | `business_mock_service.py`, `agent.py` | `test_business_flow_fixture_idempotency_and_audit` |
-| 直接投诉/12315/起诉要快速转人工 | P0 命中后短路到 `transfer_human`，不继续补偿或生成普通回复，同时写 `mock_transfer_blocked` 审计 | `agent.py`, `business_mock_service.py` | `test_p0_transfer_short_circuit` |
-| 人工客服接手时要看到上下文 | `/api/v1/chat` 写服务端 transcript，`/handoff/request` 优先使用服务端历史，防客户端伪造 history | `main.py`, `handoff_store.py` | `test_server_transcript_beats_spoofed_client_history_for_handoff` |
+| 直接投诉/12315/起诉要快速转VIP客服 | P0 命中后短路到 `transfer_human`，不继续补偿或生成普通回复，同时写 `mock_transfer_blocked` 审计 | `agent.py`, `business_mock_service.py` | `test_p0_transfer_short_circuit` |
+| VIP客服接手时要看到上下文 | `/api/v1/chat` 写服务端 transcript，`/handoff/request` 优先使用服务端历史，防客户端伪造 history | `main.py`, `handoff_store.py` | `test_server_transcript_beats_spoofed_client_history_for_handoff` |
 | 坐席台要看到 SOP 核验项 | 移交 brief 携带 `sop_state.checklist`；`/desk` 右侧展示风险条、SOP checklist、Mock 业务动作、首要下一步 | `handoff_service.py`, `src/desk/HumanAgentDesk.jsx` | `test_desk_detail_returns_business_readiness` + `npm run build` |
 | Mock 业务动作要可审计 | 新增 `business_audit_events`，记录 SOP 分支、多模态 fixture、Mock 售后卡、仓库任务、质检/SOP 提案、私域任务 | `handoff_store.py`, `business_mock_service.py` | `test_business_flow_fixture_idempotency_and_audit` |
 | 仓库/跨部门协同准备态 | 物流、漏发/发错场景输出 `warehouse_task` 和 `task_center`，包含责任角色、SLA、下一步 | `business_mock_service.py` | `test_desk_detail_returns_business_readiness` |
@@ -19,7 +19,7 @@
 | 私域运营准备态 | 业务流生成 `mock_private_domain_task`，明确企微/社群/App Push 为待甲方授权替换的触达点 | `business_mock_service.py` | `test_business_flow_fixture_idempotency_and_audit` |
 | 后台审计可读 | 审计页聚合 handoff + business events，并新增可读时间线，保留原始 JSON | `admin_service.py`, `src/admin/pages/AuditLog.jsx` | `test_admin_audit_returns_business_events` |
 | 多租户边界 | admin 审计和 transcript 按 `tenant_id` 过滤；跨租户 transcript 返回 `tenant_forbidden` | `admin_service.py`, `main.py` | `test_admin_audit_is_tenant_scoped` |
-| 重复转人工不降级 | 已接入/排队/转派/关闭会话重复 `/handoff/request` 返回现有队列，不覆盖 assigned agent | `handoff_service.py`, `main.py` | `test_repeated_handoff_request_does_not_downgrade_connected_session` |
+| 重复转VIP客服不降级 | 已接入/排队/转派/关闭会话重复 `/handoff/request` 返回现有队列，不覆盖 assigned agent | `handoff_service.py`, `main.py` | `test_repeated_handoff_request_does_not_downgrade_connected_session` |
 | 多 fixture 不误去重 | 幂等键加入 fixture seed，同会话同订单多个证据 fixture 可分别审计 | `business_mock_service.py` | `test_multiple_fixtures_are_not_deduped` |
 
 ## 2. 现在仍然不是“真实对接完成”的部分

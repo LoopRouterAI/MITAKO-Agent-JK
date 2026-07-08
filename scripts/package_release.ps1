@@ -103,10 +103,10 @@ END = _workflow_graph.END
         "'ARK_API_KEY'" = '"_".join(("BACKUP","REVIEW","KEY"))'
         '"ARK_API_BASE"' = '"_".join(("BACKUP","REVIEW","BASE"))'
         "'ARK_API_BASE'" = '"_".join(("BACKUP","REVIEW","BASE"))'
-        '"APIYI_API_KEY"' = '"_".join(("ROUTER","SERVICE","KEY"))'
-        "'APIYI_API_KEY'" = '"_".join(("ROUTER","SERVICE","KEY"))'
-        '"BROUTER_API_KEY"' = '"_".join(("ROUTER","ALT","KEY"))'
-        "'BROUTER_API_KEY'" = '"_".join(("ROUTER","ALT","KEY"))'
+        '"VISION_REVIEW_API_KEY"' = '"_".join(("ROUTER","SERVICE","KEY"))'
+        "'VISION_REVIEW_API_KEY'" = '"_".join(("ROUTER","SERVICE","KEY"))'
+        '"VISION_REVIEW_ALT_KEY"' = '"_".join(("ROUTER","ALT","KEY"))'
+        "'VISION_REVIEW_ALT_KEY'" = '"_".join(("ROUTER","ALT","KEY"))'
     }
     Get-ChildItem -LiteralPath $CompileStage -Recurse -Filter "*.py" | ForEach-Object {
         $text = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8
@@ -127,14 +127,14 @@ END = _workflow_graph.END
         $text = $text.Replace("Provider", "Route")
         $text = $text.Replace("channel", "route")
         $text = $text.Replace("Channel", "Route")
-        $text = $text.Replace("https://api.bananarouter.com", "https://vision-endpoint.local")
-        $text = $text.Replace("https://api.apiyi.com/v1", "https://review-endpoint.local/v1")
-        $text = $text.Replace("https://api.apiyi.com", "https://review-endpoint.local")
+        $text = $text.Replace("https://vision-endpoint.local", "https://vision-endpoint.local")
+        $text = $text.Replace("https://api.vision_route.com/v1", "https://review-endpoint.local/v1")
+        $text = $text.Replace("https://api.vision_route.com", "https://review-endpoint.local")
         $text = $text.Replace("https://ark.cn-beijing.volces.com/api/v3", "https://backup-review.local/api/v3")
-        $text = $text.Replace("BRouter", "ROUTING_ALT")
-        $text = $text.Replace("brouter", "routing_alt")
-        $text = $text.Replace("APIYI", "ROUTING_SERVICE")
-        $text = $text.Replace("apiyi", "routing_service")
+        $text = $text.Replace("VISION_ROUTE_ALT", "ROUTING_ALT")
+        $text = $text.Replace("vision_route_alt", "routing_alt")
+        $text = $text.Replace("VISION_ROUTE", "ROUTING_SERVICE")
+        $text = $text.Replace("vision_route", "routing_service")
         $text = $text.Replace("ARK", "BACKUP_REVIEW")
         $text = $text.Replace("ark", "backup_review")
         $text = $text.Replace("MITAKO_JWT_SECRET", "runtime secret")
@@ -175,10 +175,10 @@ END = _workflow_graph.END
         $text = $text.Replace("openai_responses", "compatible_responses")
         $text = $text.Replace("openai_chat", "compatible_chat")
         $text = $text.Replace("openai", "compatible_service")
-        $text = $text.Replace("BananaRouter", "routing service")
-        $text = $text.Replace("API Yi", "routing service")
-        $text = $text.Replace("APIYI", "ROUTING_SERVICE")
-        $text = $text.Replace("BROUTER", "ROUTING_ALT")
+        $text = $text.Replace("visual route service", "routing service")
+        $text = $text.Replace("visual route service", "routing service")
+        $text = $text.Replace("VISION_ROUTE", "ROUTING_SERVICE")
+        $text = $text.Replace("VISION_ROUTE_ALT", "ROUTING_ALT")
         $text = $text.Replace("base_url", "endpoint")
         $text = $text.Replace("api_key", "credential")
         $text = $text.Replace("API Key", "service credential")
@@ -205,9 +205,9 @@ import types
 import zipfile
 
 TERMS = [
-    "BananaRouter", "API Yi", "APIYI", "BROUTER",
-    "https://api.bananarouter.com", "https://api.apiyi.com", "https://ark.cn-beijing.volces.com/api/v3",
-    "BRouter", "brouter", "apiyi", "ARK", "ark.cn-beijing",
+    "visual route service", "visual route service", "VISION_ROUTE", "VISION_ROUTE_ALT",
+    "https://vision-endpoint.local", "https://api.vision_route.com", "https://ark.cn-beijing.volces.com/api/v3",
+    "VISION_ROUTE_ALT", "vision_route_alt", "vision_route", "ARK", "ark.cn-beijing",
     "Gemini", "GEMINI", "gemini",
     "GPT", "gpt-", "gpt_", "doubao", "DOUBAO",
     "OpenAI", "openai", "OPENAI_API", "openai_responses",
@@ -217,7 +217,7 @@ TERMS = [
     "WeKnora", "Chatwoot", "OpenViking", "LangGraph",
     "MITAKO_JWT_SECRET", "MITAKO_DEV_AUTH_BYPASS", "MITAKO_MOCK_DATA_FILE",
     "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "ARK_API_KEY",
-    "SENSENOVA_API_KEY", "APIYI_API_KEY", "BROUTER_API_KEY",
+    "SENSENOVA_API_KEY", "VISION_REVIEW_API_KEY", "VISION_REVIEW_ALT_KEY",
     "POC", "Demo", "DEMO", "Mock", "mock_", "provider_id", "show_provider", "base_url", "api_key", "fallback",
     "\u5185\u90e8\u7814\u53d1",
     "\u6a21\u578b\u6e20\u9053",
@@ -307,12 +307,12 @@ function Assert-ZipNoRuntimeLeak([string]$ZipFile) {
         "provider",
         "channel",
         "download_manifest",
-        "https://api.bananarouter.com",
-        "https://api.apiyi.com",
+        "https://vision-endpoint.local",
+        "https://api.vision_route.com",
         "https://ark.cn-beijing.volces.com/api/v3",
-        "BRouter",
-        "brouter",
-        "apiyi",
+        "VISION_ROUTE_ALT",
+        "vision_route_alt",
+        "vision_route",
         "ARK",
         "ark.cn-beijing",
         "langchain-openai",
@@ -322,8 +322,8 @@ function Assert-ZipNoRuntimeLeak([string]$ZipFile) {
         "SENSENOVA_API_KEY",
         "ARK_API_KEY",
         "CHATWOOT_API_TOKEN",
-        "APIYI_API_KEY",
-        "BRouter_API_KEY",
+        "VISION_REVIEW_API_KEY",
+        "VISION_REVIEW_ALT_KEY",
         "Chatwoot",
         "chatwoot",
         "OpenViking",
@@ -420,12 +420,12 @@ function Assert-NoCustomerLeak([string]$Path) {
     Assert-PycConstantsNoRuntimeLeak $runtimeZip
 
     $riskTerms = @(
-        "BananaRouter", "API Yi", "Chatwoot", "chatwoot", "LangGraph", "langgraph",
+        "visual route service", "visual route service", "Chatwoot", "chatwoot", "LangGraph", "langgraph",
         "OpenViking", "openviking", "viking_memory", "base_url",
         "api_key", "raw JSON", "Mock", "mock_", "provider_id", "show_provider", "POC", "Demo", "gemini", "Gemini", "doubao",
         "GPT", "OpenAI", "openai", "DeepSeek", "SenseNova", "Agnes", "WeKnora",
-        "https://api.bananarouter.com", "https://api.apiyi.com", "https://ark.cn-beijing.volces.com/api/v3",
-        "BRouter", "brouter", "apiyi", "ARK", "ark.cn-beijing",
+        "https://vision-endpoint.local", "https://api.vision_route.com", "https://ark.cn-beijing.volces.com/api/v3",
+        "VISION_ROUTE_ALT", "vision_route_alt", "vision_route", "ARK", "ark.cn-beijing",
         "langchain-openai",
         "mitako-local-demo-secret", "mitako-dev-change-me-in-production", "handoff_token",
         "download_manifest",

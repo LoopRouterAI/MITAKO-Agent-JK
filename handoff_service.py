@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""转人工排队与移交简报 — SQLite 持久化 + 可配置路由"""
+"""VIP客服排队与移交简报 — SQLite 持久化 + 可配置路由"""
 from __future__ import annotations
 
 import time
@@ -17,7 +17,7 @@ except ImportError:
 
 _DEMO_AGENTS: List[Dict[str, str]] = [
     {"agent_id": "CS-0816", "name": "岚星", "title": "普通客服", "tier": "standard", "team": "客服中心·普通客服组", "skills": ["物流", "安抚"]},
-    {"agent_id": "CS-0922", "name": "晓棠", "title": "客服专员", "tier": "standard", "team": "客服中心·售后组", "skills": ["盲盒", "换货"]},
+    {"agent_id": "CS-0922", "name": "晓棠", "title": "VIP客服", "tier": "standard", "team": "客服中心·售后组", "skills": ["盲盒", "换货"]},
     {"agent_id": "CS-1024", "name": "阿禾", "title": "高级客服/专项客服", "tier": "supervisor", "team": "客服中心·专项处理组", "skills": ["投诉", "退款授权"]},
     {"agent_id": "CS-1203", "name": "沐澄", "title": "VIP 服务专员", "tier": "supervisor", "team": "客服中心·VIP组", "skills": ["VIP", "舆情"]},
 ]
@@ -189,13 +189,13 @@ def _build_ai_dialogue_summary(messages: List[Dict[str, str]]) -> str:
     user_msgs = [m.get("content", "") for m in messages if m.get("role") == "user"]
     ai_msgs = [m.get("content", "") for m in messages if m.get("role") == "assistant"]
     if not ai_msgs:
-        return "AI 尚未形成有效回复，用户诉求待人工首响承接。"
+        return "AI 尚未形成有效回复，用户诉求待VIP客服首响承接。"
     points = [
         f"用户共 {len(user_msgs)} 轮发言，核心关注：{(user_msgs[-1][:100] if user_msgs else '—')}",
         f"AI 已回复 {len(ai_msgs)} 条，末条要点：{ai_msgs[-1][:120]}",
     ]
     if len(user_msgs) >= 3:
-        points.append("多轮来回后用户仍未满意，说明话术/方案力度不足，需人工升级处理。")
+        points.append("多轮来回后用户仍未满意，说明话术/方案力度不足，需VIP客服升级处理。")
     return " ".join(points)
 
 
@@ -257,8 +257,8 @@ def _build_professional_transfer_reason(
     if transfer_reason:
         parts.append(f"移交背景：{transfer_reason}")
     parts.append(
-        "为避免事态升级为正式投诉、监管举报或外诉曝光，已由 AI 虾饺发起人工接手；"
-        "请人工客服确认阅读简报后再接入会话。"
+        "为避免事态升级为正式投诉、监管举报或外诉曝光，已由 AI客服发起 VIP客服接手；"
+        "请VIP客服确认阅读简报后再接入会话。"
     )
     return "。".join(parts)
 
@@ -268,9 +268,9 @@ def build_handoff_brief(state: Dict[str, Any], reason: Optional[str] = None) -> 
     user_msgs = [m.get("content", "") for m in messages if m.get("role") == "user"]
     intent = state.get("intent") or "未识别"
     emotion = int(state.get("emotion_level") or 2)
-    transfer_reason = reason or state.get("transfer_reason") or "用户申请人工协助"
+    transfer_reason = reason or state.get("transfer_reason") or "用户申请VIP客服协助"
     if not user_msgs:
-        summary = transfer_reason or "客户主动申请人工协助，暂无有效对话摘录"
+        summary = transfer_reason or "客户主动申请VIP客服协助，暂无有效对话摘录"
     elif len(user_msgs) == 1:
         summary = user_msgs[0][:400]
     else:
@@ -335,7 +335,7 @@ def build_public_handoff_brief(brief: Optional[Dict[str, Any]]) -> Dict[str, Any
         })
     return {
         "summary": _sanitize_customer_text(src.get("summary") or "已同步您的服务记录，客服会继续协助处理。"),
-        "reason": "已为您转接人工客服继续处理。",
+        "reason": "已为您转接VIP客服继续处理。",
         "orders": [_sanitize_customer_text(o) for o in (src.get("orders") or [])],
         "conversation_snippet": snippet,
         "user_id": src.get("user_id"),
@@ -427,7 +427,7 @@ def build_public_queue_meta(queue: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 def build_human_welcome(agent: Dict[str, str], brief: Optional[Dict[str, Any]] = None) -> str:
     return (
-        f"您好，我是虾淘客服专员{agent.get('name', '')}，工号 {agent.get('agent_id', 'CS-0000')}。"
+        f"您好，我是MITAKO VIP客服{agent.get('name', '')}，工号 {agent.get('agent_id', 'CS-0000')}。"
         f"已了解您的问题，接下来由我继续协助处理，您可以直接说明最新诉求～"
     )
 
@@ -666,14 +666,20 @@ def escalate_to_supervisor(
     return {"ok": True, "status": "escalated", "required_tier": "supervisor"}
 
 
-async def post_user_message(session_id: str, content: str, user_id: str = "") -> Dict[str, Any]:
+async def post_user_message(
+    session_id: str,
+    content: str,
+    user_id: str = "",
+    attachments: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     entry = _get_entry(session_id)
     if not entry or entry.get("status") != "connected":
         return {"ok": False, "error": "not_connected"}
     session_user = entry.get("user_id") or (entry.get("brief") or {}).get("user_id") or ""
     if session_user and user_id and user_id != session_user:
         return {"ok": False, "error": "user_mismatch"}
-    added = [store.append_message(session_id, "user", content)]
+    meta = {"attachments": attachments or []} if attachments else None
+    added = [store.append_message(session_id, "user", content, meta=meta)]
     if entry.get("observer_mode") and is_observer_request(content):
         recent = store.get_messages_since(session_id, 0)[-12:]
         reply = await generate_observer_reply(content, entry.get("brief"), recent)
@@ -719,6 +725,19 @@ def build_public_message(msg: Dict[str, Any]) -> Dict[str, Any]:
     if msg.get("agent_id"):
         public["agent_id"] = msg.get("agent_id")
     public["content"] = _sanitize_customer_text(public.get("content"))
+    attachments = (msg.get("meta") or {}).get("attachments") if isinstance(msg.get("meta"), dict) else []
+    if isinstance(attachments, list) and attachments:
+        public["attachments"] = [
+            {
+                "id": _sanitize_customer_text(item.get("id")),
+                "name": _sanitize_customer_text(item.get("name")),
+                "mime_type": _sanitize_customer_text(item.get("mime_type")),
+                "size": int(item.get("size") or 0),
+                "url": _sanitize_customer_text(item.get("url")),
+            }
+            for item in attachments
+            if isinstance(item, dict) and str(item.get("url") or "").startswith("/api/v1/chat/attachments/")
+        ]
     return public
 
 

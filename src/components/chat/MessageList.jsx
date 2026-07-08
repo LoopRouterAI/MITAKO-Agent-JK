@@ -1,5 +1,5 @@
 import React from 'react';
-import { Headphones } from 'lucide-react';
+import { Headphones, Image as ImageIcon } from 'lucide-react';
 import RichTextContent from '../shared/RichTextContent.jsx';
 import { CARD_RENDERERS } from '../cards/openUILibrary.jsx';
 import t from '../../i18n/index.js';
@@ -7,6 +7,54 @@ import { StreamCursor } from './XiaoJiaoLoadingBubble.jsx';
 import { resolveSpeakerStyle, SPEAKER } from '../../constants/chatSpeakers.js';
 import { useMessageWindow } from '../../hooks/useMessageWindow.js';
 import { MITAKO_AGENT_AVATAR } from '../../constants/memeMap.js';
+
+function formatBytes(size = 0) {
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))}KB`;
+  return `${(size / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function AttachmentStrip({ attachments = [], align = 'left' }) {
+  const safeItems = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+  if (!safeItems.length) return null;
+  return (
+    <div className={`mt-2 grid gap-2 ${align === 'right' ? 'justify-items-end' : 'justify-items-start'}`}>
+      {safeItems.map((item, index) => (
+        <div
+          key={item.id || `${item.name || 'attachment'}-${index}`}
+          className={`flex max-w-[260px] items-center gap-2 rounded-[8px] border bg-white/85 p-2 text-left shadow-[0_8px_20px_rgba(16,19,31,0.08)] ${
+            align === 'right' ? 'border-lime-200' : 'border-slate-200'
+          }`}
+        >
+          {item.previewUrl ? (
+            <img
+              src={item.previewUrl}
+              alt={item.name || '用户上传图片'}
+              className="h-12 w-12 rounded-[7px] object-cover"
+              onLoad={() => {
+                try {
+                  URL.revokeObjectURL(item.previewUrl);
+                } catch (e) {
+                  console.error('attachment preview revoke failed:', e);
+                }
+              }}
+            />
+          ) : (
+            <div className="flex h-12 w-12 items-center justify-center rounded-[7px] bg-slate-100 text-slate-500">
+              <ImageIcon className="h-5 w-5" aria-hidden="true" />
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="truncate text-xs font-black text-slate-950">{item.name || '用户上传图片'}</p>
+            <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
+              已接收 · {item.mime_type || '图片'} {formatBytes(Number(item.size || 0))}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function BotBubble({ msg, isStreaming, showStreamCursor, cardCallbacks }) {
   if (msg.type === 'custom') {
@@ -24,6 +72,7 @@ function BotBubble({ msg, isStreaming, showStreamCursor, cardCallbacks }) {
     return <Card.component props={{ ...msg.content.cardData, ...extraProps }} />;
   }
   const text = msg.content.text || '';
+  const attachments = msg.content.attachments || [];
   const speaker = msg.user?.speaker === SPEAKER.HUMAN ? SPEAKER.HUMAN : SPEAKER.AI;
   const style = resolveSpeakerStyle(speaker);
 
@@ -33,6 +82,7 @@ function BotBubble({ msg, isStreaming, showStreamCursor, cardCallbacks }) {
         <RichTextContent text={text} />
         {isStreaming && showStreamCursor && <StreamCursor />}
       </div>
+      <AttachmentStrip attachments={attachments} />
     </div>
   );
 }
@@ -114,6 +164,7 @@ export default function MessageList({
             <div key={msg._id} className="flex justify-end animate-fade-up">
               <div className="max-w-[88%] px-4 py-3.5 rounded-[8px] bg-[var(--mitako-lime)] border border-slate-200 text-[var(--mitako-ink)] text-[15px] font-medium leading-relaxed shadow-[0_12px_28px_rgba(127,164,49,.16)] text-pretty">
                 <RichTextContent text={msg.content.text} variant="user" />
+                <AttachmentStrip attachments={msg.content.attachments || []} align="right" />
               </div>
             </div>
           );

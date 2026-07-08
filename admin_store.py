@@ -20,7 +20,7 @@ _db_ready = False
 
 _DEMO_AGENTS: List[Dict[str, Any]] = [
     {"agent_id": "CS-0816", "name": "岚星", "title": "普通客服", "tier": "standard", "team": "客服中心·普通客服组", "skills": ["物流", "安抚"], "enabled": True},
-    {"agent_id": "CS-0922", "name": "晓棠", "title": "客服专员", "tier": "standard", "team": "客服中心·售后组", "skills": ["盲盒", "换货"], "enabled": True},
+    {"agent_id": "CS-0922", "name": "晓棠", "title": "VIP客服", "tier": "standard", "team": "客服中心·售后组", "skills": ["盲盒", "换货"], "enabled": True},
     {"agent_id": "CS-1024", "name": "阿禾", "title": "高级客服/专项客服", "tier": "supervisor", "team": "客服中心·专项处理组", "skills": ["投诉", "退款授权"], "enabled": True},
     {"agent_id": "CS-1203", "name": "沐澄", "title": "VIP 服务专员", "tier": "supervisor", "team": "客服中心·VIP组", "skills": ["VIP", "舆情"], "enabled": True},
 ]

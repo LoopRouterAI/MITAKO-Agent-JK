@@ -28,13 +28,13 @@ def safe_agent_conclusion(parsed: Dict[str, Any], scenario_label: str) -> str:
         return f"视觉证据支持{clean_label}诉求，置信度 {confidence}。"
     if label == "negative":
         return f"视觉证据暂不支持用户诉求，置信度 {confidence}。"
-    return f"证据不足，需要人工复核，置信度 {confidence}。"
+    return f"证据不足，需要VIP客服复核，置信度 {confidence}。"
 
 
 def safe_agent_next_step(text: Any) -> str:
     if _has_business_action(text):
-        return "将视觉证据摘要提交人工客服复核；由客服系统结合订单、售后政策和库存记录决定后续业务动作。"
-    return str(text or "请人工客服结合订单、售后规则和原始素材处理。")
+        return "将视觉证据摘要提交VIP客服复核；由客服系统结合订单、售后政策和库存记录决定后续业务动作。"
+    return str(text or "请VIP客服结合订单、售后规则和原始素材处理。")
 
 
 def _safe_agent_reason(text: Any) -> str:
@@ -53,7 +53,7 @@ def _public_verdict(parsed: Dict[str, Any], scenario_label: str) -> str:
         return "支持" + scenario_label.replace("审核", "") + "诉求"
     if label == "negative":
         return "暂不支持用户诉求"
-    return "需要人工复核"
+    return "需要VIP客服复核"
 
 
 def _public_yes_no(parsed: Dict[str, Any]) -> str:
@@ -93,7 +93,7 @@ def _source_label(value: Any) -> str:
 
 def _evidence_items(items: Any, media_gallery: Optional[Dict[str, Any]] = None) -> str:
     if not isinstance(items, list) or not items:
-        return '<p class="muted">模型没有给出可采信证据，建议人工查看原始素材。</p>'
+        return '<p class="muted">审核Agent没有给出可采信证据，建议客服查看原始素材。</p>'
     media_gallery = media_gallery or {}
     frame_map: Dict[str, Dict[str, Any]] = {}
     for frame in media_gallery.get("frames") or []:
@@ -147,7 +147,7 @@ def _evidence_items(items: Any, media_gallery: Optional[Dict[str, Any]] = None) 
             f'<b>{_h(confidence if confidence not in (None, "") else "已采信")}</b>'
             "</article>"
         )
-    return "".join(cards) or '<p class="muted">模型没有给出可采信证据，建议人工查看原始素材。</p>'
+    return "".join(cards) or '<p class="muted">审核Agent没有给出可采信证据，建议客服查看原始素材。</p>'
 
 
 def _gallery_items(items: List[Dict[str, Any]], kind: str) -> str:
@@ -177,6 +177,17 @@ def render_public_report(data: Dict[str, Any]) -> str:
     if data.get("agent_report"):
         return _render_agent_report(data)
     summary = data.get("summary") or {}
+    diagnostics = data.get("diagnostics") or {}
+    diagnostic_panel = ""
+    if diagnostics:
+        diagnostic_panel = (
+            '<section class="panel failure-panel">'
+            '<h2>本轮失败诊断</h2>'
+            f'<p><b>失败阶段：</b>{_h(diagnostics.get("failure_stage") or "-")}</p>'
+            f'<p><b>失败原因：</b>{_h(diagnostics.get("failure_reason") or "-")}</p>'
+            f'<p><b>客服动作：</b>{_h(diagnostics.get("operator_hint") or "-")}</p>'
+            "</section>"
+        )
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -190,7 +201,7 @@ def render_public_report(data: Dict[str, Any]) -> str:
     <section class="hero simple">
       <span class="badge">视觉审核复核摘要</span>
       <h1>{_h(data.get("review_label") or "审核结果")}</h1>
-      <p class="lead">本页仅展示客服可复核的业务摘要和处理建议。最终处理结论仍需人工复核确认。</p>
+      <p class="lead">本页仅展示客服可复核的业务摘要和处理建议。最终处理结论仍需VIP客服复核确认。</p>
     </section>
     <section class="metrics">
       <div class="metric"><small>审核样本</small><b>{_h(summary.get("cases") or "-")}</b></div>
@@ -199,7 +210,8 @@ def render_public_report(data: Dict[str, Any]) -> str:
       <div class="metric"><small>生成时间</small><b>{_h(data.get("generated_at"))}</b></div>
 	    </section>
 	    <section class="panel conclusion-card"><h2>处理建议</h2><p>{_h(data.get("conclusion"))}</p></section>
-	  </main>
+	    {diagnostic_panel}
+		  </main>
 {_LIGHTBOX_HTML}
 </body>
 </html>"""
@@ -231,7 +243,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         next_step = diagnostics.get("operator_hint") or next_step
         confidence = "-"
     material_gaps = parsed.get("material_gaps") or []
-    gap_text = "；".join(str(x) for x in material_gaps[:5]) if isinstance(material_gaps, list) and material_gaps else "当前证据可进入人工复核；如需最终处置，仍需核对订单、库存和售后规则。"
+    gap_text = "；".join(str(x) for x in material_gaps[:5]) if isinstance(material_gaps, list) and material_gaps else "当前证据可进入VIP客服复核；如需最终处置，仍需核对订单、库存和售后规则。"
     yes_no = "REVIEW" if failed else _public_yes_no(parsed)
     latency = runtime.get("latency_seconds") or "-"
     video_count = len(evidence_package.get("videos") or [])
@@ -259,7 +271,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     <div>
       <span class="badge">{_h(scenario_label)} Agent 报告</span>
       <h1>{_h(conclusion)}</h1>
-      <p class="lead">{_h(core_reason or "模型已完成视觉证据整理，请结合下方证据链复核。")}</p>
+      <p class="lead">{_h(core_reason or "审核Agent已完成视觉证据整理，请结合下方证据链复核。")}</p>
     </div>
     <aside class="verdict-card">
       <small>系统参考</small>
@@ -269,7 +281,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
   </section>
 
   <section class="panel next-step">
-    <h2>给人工客服的下一步</h2>
+    <h2>给VIP客服的下一步</h2>
     <p>{_h(next_step)}</p>
   </section>
 
@@ -281,12 +293,12 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    <div class="metric"><small>送审视频</small><b>{_h(video_count or "-")}</b></div>
 	    <div class="metric"><small>送审帧数</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
 	    <div class="metric"><small>补充图片</small><b>{_h(evidence_package.get("supplemental_images_sent") or "-")}</b></div>
-		    <div class="metric"><small>报告属性</small><b>人工复核参考</b></div>
+		    <div class="metric"><small>报告属性</small><b>VIP客服复核参考</b></div>
 		  </section>
   {diagnostic_panel}
 
 		  <section class="panel">
-	    <div class="section-head"><h2>模型采信的证据</h2><p>每张图都可以在本页放大查看；带时间点的帧可以直接预览原视频片段。</p></div>
+    <div class="section-head"><h2>审核Agent采信的证据</h2><p>每张图都可以在本页放大查看；带时间点的帧可以直接预览原视频片段。</p></div>
     <div class="evidence-grid">{_evidence_items(parsed.get("adopted_evidence") or parsed.get("supporting_evidence"), media_gallery)}</div>
   </section>
 
@@ -297,12 +309,12 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
   </section>
 
   <section class="panel">
-    <h2>还需要人工知晓</h2>
+    <h2>客服需知</h2>
     <p>{_h(gap_text)}</p>
   </section>
 
   <section class="panel">
-    <div class="section-head"><h2>送审证据画廊</h2><p>用于快速复核模型看到的帧图和用户补充图片。</p></div>
+    <div class="section-head"><h2>送审证据画廊</h2><p>用于快速复核审核Agent看到的帧图和用户补充图片。</p></div>
     <h3>视频帧</h3>
     <div class="media-grid">{_gallery_items(media_gallery.get("frames") or [], "视频帧")}</div>
     <h3>补充图片</h3>

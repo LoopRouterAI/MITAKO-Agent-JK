@@ -1,4 +1,4 @@
-# Codex 接续开发交接说明
+﻿# Codex 接续开发交接说明
 
 日期：2026-07-06
 
@@ -25,7 +25,7 @@ python scripts/dual_system_smoke_test.py
 ## 仓库包含
 
 - `.env`：私人仓库内可用于跨设备接续开发；不要放入对外 ZIP。
-- 客服 Agent 用户端、人工客服工作台、运营后台源码。
+- 客服 Agent 用户端、VIP客服工作台、运营后台源码。
 - 三大视觉审核场景工作台与 POC 代码。
 - 面向 Java 技术栈的接口契约：`docs/delivery/openapi.yaml`。
 - Java/Spring Boot 对接样例：`docs/delivery/java-client-sample.md`。
@@ -51,7 +51,7 @@ python scripts/dual_system_smoke_test.py
 项目目标已经从陪伴/角色扮演收敛为商业 POC：
 
 - 专业、同理、有边界的客服 Agent。
-- 人工客服能接手、转交、升级、查询订单、物流、售后上下文。
+- VIP客服能接手、转交、升级、查询订单、物流、售后上下文。
 - 后台展示队列、服务记录、质检、补偿审批、运营报表和运维健康指标。
 - 三大视觉审核优先场景：开箱视频/发错货、商品有伤、未成年人资料审核。
 - 视觉审核以多模态理解模型为主，不再把 YOLO 作为主线。

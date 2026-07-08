@@ -1,4 +1,4 @@
-[
+﻿[
   {
     "case_id": "TC_001_DELAY_COMPENSATE",
     "title": "发货延迟与自动免邮券补偿流程",
@@ -86,7 +86,7 @@
         "expected_emotion_level": 4,
         "assert": {
           "should_trigger_action": "transfer_to_human",
-          "reason": "大额退款(>100元)禁止AI自动流转，必须转人工",
+          "reason": "大额退款(>100元)禁止AI自动流转，必须转VIP客服",
           "reply_contains": ["超出", "权限", "主管"]
         }
       }

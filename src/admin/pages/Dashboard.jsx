@@ -44,7 +44,7 @@ export default function Dashboard() {
     <div className="p-4 sm:p-6 space-y-6">
       <div>
         <h1 className="text-xl font-bold">{t('admin.navDashboard')}</h1>
-        <p className="mt-1 text-sm text-slate-500">先看排队压力、人工处理压力和时效风险，判断今天是否需要临时加人或调整审核策略。</p>
+        <p className="mt-1 text-sm text-slate-500">先看排队压力、VIP客服处理压力和时效风险，判断今天是否需要临时加人或调整审核策略。</p>
       </div>
       <div className="grid grid-cols-2 xl:grid-cols-6 gap-4">
         {cards.map(({ icon: Icon, label, value }, index) => (
@@ -59,7 +59,7 @@ export default function Dashboard() {
         <h2 className="text-sm font-black text-slate-950">当前处理建议</h2>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
           <p className="rounded-[8px] bg-slate-50 p-3 text-sm text-slate-700">排队超过 10 分钟时，建议主管临时打开高级客服接单或降低非紧急工单优先级。</p>
-          <p className="rounded-[8px] bg-slate-50 p-3 text-sm text-slate-700">商品有伤、开箱视频、未成年人资料审核应优先由视觉审核工作台生成证据，再由人工抽检。</p>
+          <p className="rounded-[8px] bg-slate-50 p-3 text-sm text-slate-700">商品有伤、开箱视频、未成年人资料审核应优先由视觉审核工作台生成证据，再由VIP客服抽检。</p>
           <p className="rounded-[8px] bg-slate-50 p-3 text-sm text-slate-700">SLA 提醒出现时，应先处理已接入但未首响的会话，避免用户重复投诉。</p>
         </div>
       </div>

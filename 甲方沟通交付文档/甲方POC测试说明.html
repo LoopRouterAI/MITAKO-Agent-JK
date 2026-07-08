@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -38,7 +38,7 @@
   <section class="hero">
     <span class="eyebrow">测试目标</span>
     <h1>按业务流程验证 <span>客服与三类视觉审核</span></h1>
-    <p class="lead">本 POC 验证客服 Agent、人工客服工作台、运营后台和三类视觉审核工作台的流程、人效和接口准备度；不测试生产订单写入、真实退款、真实补发、真实拒赔、仓库改状态或财务动作。</p>
+    <p class="lead">本 POC 验证客服 Agent、VIP客服工作台、运营后台和三类视觉审核工作台的流程、人效和接口准备度；不测试生产订单写入、真实退款、真实补发、真实拒赔、仓库改状态或财务动作。</p>
   </section>
 
   <section class="section">
@@ -46,8 +46,8 @@
     <table>
       <thead><tr><th>页面</th><th>地址</th><th>验证重点</th></tr></thead>
       <tbody>
-        <tr><td>用户客服端</td><td><code>http://127.0.0.1:8000/</code></td><td>AI 客服对话、情绪承接、转人工</td></tr>
-        <tr><td>人工客服工作台</td><td><code>http://127.0.0.1:8000/desk</code></td><td>接单、回复、查看服务摘要</td></tr>
+        <tr><td>用户客服端</td><td><code>http://127.0.0.1:8000/</code></td><td>AI 客服对话、情绪承接、转VIP客服</td></tr>
+        <tr><td>VIP客服工作台</td><td><code>http://127.0.0.1:8000/desk</code></td><td>接单、回复、查看服务摘要</td></tr>
         <tr><td>运营后台</td><td><code>http://127.0.0.1:8000/admin</code></td><td>队列、坐席、服务记录、配置</td></tr>
         <tr><td>视觉审核工作台</td><td><code>http://127.0.0.1:7861/</code></td><td>三类审核入口、材料上传、报告</td></tr>
       </tbody>
@@ -64,7 +64,7 @@
     <div class="grid">
       <article class="card"><span class="tag">A</span><h3>页面冒烟</h3><p>打开四个页面，确认无白屏、乱码、按钮错位；普通演示页不展示模型供应商、密钥、Token、内部 Prompt、调试日志。</p></article>
       <article class="card"><span class="tag">B</span><h3>客服主链路</h3><p>输入“我的订单清关太慢了，能不能帮我催一下？”确认客服能安抚、解释边界、提示下一步。</p></article>
-      <article class="card"><span class="tag">C</span><h3>转人工</h3><p>用户端输入“我要转人工”，坐席台接单并回复，用户端应看到人工客服回复。</p></article>
+      <article class="card"><span class="tag">C</span><h3>转VIP客服</h3><p>用户端输入“我要转VIP客服”，坐席台接单并回复，用户端应看到VIP客服回复。</p></article>
       <article class="card"><span class="tag">D</span><h3>开箱视频/发错货</h3><p>上传用户诉求、视频、SKU/规格、补充图片；报告应说明连续性、离镜/剪辑风险和规格匹配。</p></article>
       <article class="card"><span class="tag">E</span><h3>商品有伤</h3><p>上传破损图片、视频、包装图；报告应说明损伤位置、证据强弱、是否需要补拍。</p></article>
       <article class="card"><span class="tag">F</span><h3>未成年人资料</h3><p>上传脱敏资料、订单归属、付款记录；系统只给完整性/一致性建议，必须人工终审。</p></article>
@@ -76,9 +76,9 @@
     <table>
       <thead><tr><th>编号</th><th>标准</th></tr></thead>
       <tbody>
-        <tr><td>P1</td><td>用户客服端、人工客服工作台、运营后台、视觉审核工作台均可打开。</td></tr>
-        <tr><td>P2</td><td>客服 Agent 能处理物流慢、售后、退货等咨询，并能转人工。</td></tr>
-        <tr><td>P3</td><td>人工客服能接单、回复、查看用户诉求摘要。</td></tr>
+        <tr><td>P1</td><td>用户客服端、VIP客服工作台、运营后台、视觉审核工作台均可打开。</td></tr>
+        <tr><td>P2</td><td>客服 Agent 能处理物流慢、售后、退货等咨询，并能转VIP客服。</td></tr>
+        <tr><td>P3</td><td>VIP客服能接单、回复、查看用户诉求摘要。</td></tr>
         <tr><td>P4</td><td>三类视觉审核均能生成客服可读报告。</td></tr>
         <tr><td>P5</td><td>报告不做自动退款、自动拒赔、自动补发、未成年人资料自动终审。</td></tr>
         <tr><td>P6</td><td>甲方开发能根据接口文档列出待提供接口、字段和测试环境。</td></tr>

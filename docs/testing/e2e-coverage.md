@@ -1,4 +1,4 @@
-# E2E 测试覆盖与运行说明
+﻿# E2E 测试覆盖与运行说明
 
 ## 一键全量
 
@@ -26,7 +26,7 @@ venv\Scripts\playwright install chromium
 | `run_admin_operations_e2e.py` | Admin、审批、报表、队列 | `seed_auth` |
 | `run_enterprise_production_e2e.py` | SSO、外部协作、运维 | 服务 `:8000` |
 | `run_auth_strict_e2e.py` | 严格 401 与鉴权 | `MITAKO_AUTH_REQUIRED=1` |
-| `run_handoff_tenant_guard_e2e.py` | 租户隔离与转人工保护 | 严格鉴权 |
+| `run_handoff_tenant_guard_e2e.py` | 租户隔离与转VIP客服保护 | 严格鉴权 |
 | `scripts/check_visual_workbench_smoke.py` | 视觉审核工作台三类样例 | 工作台依赖可导入 |
 
 旧版 Companion 专项 E2E 已随服务线封存到 `archive/companion_roleplay_mode_20260705/`，不再作为当前回归范围。

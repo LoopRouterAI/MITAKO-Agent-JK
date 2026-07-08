@@ -1,4 +1,4 @@
-# Tasks: 商业级客服 POC 专业化升级
+﻿# Tasks: 商业级客服 POC 专业化升级
 
 **Input**: Design documents from `specs/001-customer-poc-professional-upgrade/`
 
@@ -37,7 +37,7 @@
 
 ## Phase 4: User Story 2 - 一线客服能高效接单、查询、转交和结案 (Priority: P1)
 
-**Goal**: 人工客服在桌面和移动端都能完成接手、回复、转交/升级、结案。
+**Goal**: VIP客服在桌面和移动端都能完成接手、回复、转交/升级、结案。
 
 **Independent Test**: 选择任意演示会话，2 次点击内进入接手/回复或转交/升级/结案路径。
 

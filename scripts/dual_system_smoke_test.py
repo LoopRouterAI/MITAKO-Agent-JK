@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 客服系统快速冒烟 — 验证用户端、坐席台、运营台核心 API（非 Playwright 全量 E2E）
 
@@ -72,7 +72,7 @@ def run(base: str) -> int:
         ok = code == 200 and (body.get("html_len", 0) > 100 or body.get("ok"))
         check(f"页面-{label}", ok, f"{path} -> {code}")
 
-    print("\n--- 智能客服 API ---")
+    print("\n--- AI客服 API ---")
     code, lr = _req(
         "POST",
         f"{base}/api/v1/auth/login",

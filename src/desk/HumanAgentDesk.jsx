@@ -1,12 +1,68 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Headphones, RefreshCw, Send, User, ClipboardList, CheckCircle2, ArrowUpCircle, AlertTriangle, Users, SmilePlus, Search } from 'lucide-react';
+import { Headphones, RefreshCw, Send, User, ClipboardList, CheckCircle2, ArrowUpCircle, AlertTriangle, Users, SmilePlus, Search, Image as ImageIcon } from 'lucide-react';
 import t from '../i18n/index.js';
 import RichTextContent from '../components/shared/RichTextContent.jsx';
 import { authFetch, getAuthToken } from '../lib/authClient.js';
 import { attachHandoffTransport } from '../hooks/useHandoffSync.js';
 import { sanitizePublicText } from '../utils/publicText.js';
 
-/** PC 端人工客服工作台 — 独立入口 /desk */
+function formatAttachmentSize(size = 0) {
+  const n = Number(size || 0);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function DeskAttachmentPreview({ attachment }) {
+  const [src, setSrc] = useState('');
+  useEffect(() => {
+    let alive = true;
+    let objectUrl = '';
+    const load = async () => {
+      if (!attachment?.url) return;
+      try {
+        const res = await authFetch(attachment.url);
+        if (!res.ok) return;
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (alive) setSrc(objectUrl);
+      } catch (e) {
+        console.error('desk attachment preview failed:', e);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment?.url]);
+
+  return (
+    <div className="mt-2 flex max-w-[280px] items-center gap-2 rounded-[8px] border border-slate-200 bg-white p-2 shadow-[0_8px_18px_rgba(16,19,31,0.06)]">
+      {src ? (
+        <img src={src} alt={attachment?.name || '用户上传图片'} className="h-14 w-14 rounded-[7px] object-cover" />
+      ) : (
+        <div className="flex h-14 w-14 items-center justify-center rounded-[7px] bg-slate-100 text-slate-500">
+          <ImageIcon className="h-5 w-5" aria-hidden="true" />
+        </div>
+      )}
+      <div className="min-w-0">
+        <p className="truncate text-xs font-black text-slate-950">{sanitizePublicText(attachment?.name || '用户上传图片')}</p>
+        <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
+          已接收 · {sanitizePublicText(attachment?.mime_type || '图片')} {formatAttachmentSize(attachment?.size)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DeskAttachmentList({ attachments = [] }) {
+  const items = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+  if (!items.length) return null;
+  return <div>{items.map((item, index) => <DeskAttachmentPreview key={item.id || `${item.name || 'attachment'}-${index}`} attachment={item} />)}</div>;
+}
+
+/** PC 端 VIP客服工作台 — 独立入口 /desk */
 export default function HumanAgentDesk({ authUser = null }) {
   const [sessions, setSessions] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -295,7 +351,7 @@ export default function HumanAgentDesk({ authUser = null }) {
     const base = [
       '我已经看到您的反馈了，会先帮您核对订单、物流和售后规则，再给您一个明确处理方向。',
       '为了避免误判，请您再补充一张清晰的商品整体图和问题部位近景，我会一起提交复核。',
-      '这类问题需要结合订单状态和仓库记录确认，我先为您记录并推进人工复核。',
+      '这类问题需要结合订单状态和仓库记录确认，我先为您记录并推进VIP客服复核。',
       '您现在的着急我能理解，我会按当前证据先处理能确认的部分，不能确认的部分会明确告诉您还差什么材料。',
     ];
     return [...actions, ...base].map(item => safeDeskText(item)).filter(Boolean).slice(0, 6);
@@ -309,11 +365,11 @@ export default function HumanAgentDesk({ authUser = null }) {
   };
   const businessEventLabel = (type) => ({
     sop_branch: '服务类型识别',
-    service_transfer_blocked: '人工接手留痕',
+    service_transfer_blocked: 'VIP客服接手留痕',
     service_after_sales_card: '售后处理单',
     service_warehouse_task: '仓库核查任务',
     service_product_info: '商品信息核对',
-    service_ticket: '人工复核工单',
+    service_ticket: '客服复核工单',
     service_qc_sop_proposal: '质检建议',
     service_private_domain_task: '后续跟进任务',
   }[type] || '业务处理记录');
@@ -512,6 +568,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                       {m.turn ? ` · ${t('desk.turnLabel', 'zh-CN', { turn: m.turn || i + 1 })}` : ''}
                     </span>
                     <RichTextContent text={sanitizePublicText(m.content)} />
+                    <DeskAttachmentList attachments={m.attachments || []} />
                   </div>
                 ))}
               </div>

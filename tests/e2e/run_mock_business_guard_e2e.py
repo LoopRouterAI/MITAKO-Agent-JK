@@ -31,7 +31,7 @@ from agent import (
     sanitize_customer_reply,
     search_knowledge_base,
 )
-from main import _should_emit_order_progress
+from main import ChatAttachment, _should_emit_order_progress, _valid_chat_attachments
 from business_readiness_service import classify_sop_branch, run_business_flow
 from auth.jwt_utils import create_token
 from auth.roles import Role
@@ -377,12 +377,12 @@ def test_compensation_only_checks_focused_order():
 def test_explicit_human_request_triggers_handoff_rule():
     async def run_case():
         classified = await agent_module.classify_intent(
-            {"messages": [{"role": "user", "content": "我要人工客服，不想和机器人说了"}]},
+            {"messages": [{"role": "user", "content": "我要VIP客服，不想和机器人说了"}]},
             {"configurable": {}},
         )
         transfer = await agent_module.check_transfer_rules(
             {
-                "messages": [{"role": "user", "content": "我要人工客服，不想和机器人说了"}],
+                "messages": [{"role": "user", "content": "我要VIP客服，不想和机器人说了"}],
                 "intent": classified["intent"],
                 "emotion_level": classified["emotion_level"],
             },
@@ -391,9 +391,9 @@ def test_explicit_human_request_triggers_handoff_rule():
         return classified, transfer
 
     classified, transfer = asyncio.run(run_case())
-    assert classified["intent"] == "人工客服请求", classified
+    assert classified["intent"] == "VIP客服请求", classified
     assert transfer["should_transfer"] is True, transfer
-    assert "人工客服" in transfer["transfer_reason"], transfer
+    assert "VIP客服" in transfer["transfer_reason"], transfer
 
 
 def test_lottery_reply_blocks_absolute_backing_and_unapproved_compensation():
@@ -430,7 +430,7 @@ def test_minor_refund_material_question_answers_checklist_before_handoff():
         )
     )
     reply = result["reply_draft"]
-    assert "监护人" in reply and "支付凭证" in reply and "人工终审" in reply, reply
+    assert "监护人" in reply and "支付凭证" in reply and "VIP客服终审" in reply, reply
 
 
 def test_product_consult_sop_does_not_emit_order_progress():
@@ -461,7 +461,7 @@ def test_handoff_token_and_user_binding():
             "user_id": "usr_guard_a",
             "session_id": "session_guard_token_req",
             "history": [],
-            "reason": "测试转人工",
+            "reason": "测试转VIP客服",
         },
     ).json()
     token = create["handoff_token"]
@@ -559,7 +559,7 @@ def test_strict_handoff_request_cannot_mint_token_from_session_ids_only():
         json={
             "user_id": "usr_guard_mint",
             "session_id": session_id,
-            "history": [{"role": "user", "content": "我要人工客服"}],
+            "history": [{"role": "user", "content": "我要VIP客服"}],
             "reason": "不能凭 session_id 签发",
         },
     )
@@ -571,7 +571,7 @@ def test_strict_handoff_request_cannot_mint_token_from_session_ids_only():
         json={
             "user_id": "usr_guard_mint",
             "session_id": session_id,
-            "history": [{"role": "user", "content": "我要人工客服"}],
+            "history": [{"role": "user", "content": "我要VIP客服"}],
             "reason": "跨租户不能签发",
         },
     )
@@ -642,7 +642,7 @@ def test_customer_handoff_public_payload_redacts_internal_brief():
     conn = client.post(f"/api/v1/handoff/connect?session_id={session_id}", headers=_headers(token)).json()
     assert conn["ok"] is True, conn
     _assert_customer_clean(conn)
-    assert "客服专员" in conn.get("welcome", ""), conn
+    assert "VIP客服" in conn.get("welcome", ""), conn
 
 
 def test_customer_handoff_messages_redact_internal_notes():
@@ -691,7 +691,198 @@ def test_customer_chat_sse_redacts_internal_progress_and_transfer_reason():
     _assert_customer_clean(visible_events)
     transfer_events = [e for e in events if e["event"] == "transfer"]
     assert transfer_events, raw
-    assert all((e["data"] or {}).get("reason") == "已为您转接人工客服继续处理。" for e in transfer_events), transfer_events
+    assert all((e["data"] or {}).get("reason") == "已为您转接VIP客服继续处理。" for e in transfer_events), transfer_events
+
+
+def test_customer_image_attachment_reaches_chat_backend_without_auto_handoff():
+    async def fake_call_llm(system_prompt, user_prompt, history, event_queue=None, **kwargs):
+        assert "用户已上传附件" in user_prompt, user_prompt
+        return '<analysis>{"intent":"换货补发/商品破损","emotion_level":2,"analysis":"用户上传图片咨询售后材料","should_transfer":false,"transfer_reason":""}</analysis>\n已收到您上传的图片。我先帮您整理商品有伤材料，建议继续补充商品整体图、问题部位近景、包装照片和完整开箱视频，方便后续售后核验。'
+
+    client = TestClient(app)
+    user_id = "usr_attach"
+    session_id = "session_usr_attach"
+    token = _customer_token(user_id)
+    uploaded = client.post(
+        "/api/v1/chat/attachments",
+        headers=_headers(token),
+        data={"user_id": user_id, "session_id": session_id},
+        files={"file": ("damage.png", b"\x89PNG\r\n\x1a\nfake-image", "image/png")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    attachment = uploaded.json()["attachment"]
+    assert attachment["url"].startswith("/api/v1/chat/attachments/"), attachment
+    disguised = client.post(
+        "/api/v1/chat/attachments",
+        headers=_headers(token),
+        data={"user_id": user_id, "session_id": session_id},
+        files={"file": ("fake.png", b"not-a-real-image", "image/png")},
+    )
+    assert disguised.status_code == 415, disguised.text
+
+    original_call_llm = agent_module.call_llm
+    agent_module.call_llm = fake_call_llm
+    try:
+        with client.stream(
+            "POST",
+            "/api/v1/chat",
+            headers=_headers(token),
+            json={
+                "user_id": user_id,
+                "session_id": session_id,
+                "content": "这张照片有划痕吗？",
+                "history": [],
+                "stream_reply": True,
+                "attachments": [attachment],
+            },
+        ) as res:
+            assert res.status_code == 200, res.text
+            raw = b"".join(res.iter_bytes()).decode("utf-8")
+    finally:
+        agent_module.call_llm = original_call_llm
+
+    events = _parse_sse_events(raw)
+    assert not [e for e in events if e["event"] == "transfer"], raw
+    assert "已收到您上传的图片" in raw, raw
+    stored = handoff_store.get_messages_since(session_id, 0)
+    user_messages = [m for m in stored if m["role"] == "user"]
+    assert user_messages, stored
+    assert user_messages[-1]["meta"]["attachments"][0]["name"] == "damage.png", user_messages[-1]
+
+
+def test_plain_damage_claim_is_material_collection_not_auto_handoff():
+    async def fake_call_llm(system_prompt, user_prompt, history, event_queue=None, **kwargs):
+        return '<analysis>{"intent":"换货补发/商品破损","emotion_level":2,"analysis":"普通商品有伤咨询","should_transfer":false,"transfer_reason":""}</analysis>\n商品有划痕我先帮您整理售后材料：请补充商品整体图、问题部位近景、包装照片和完整开箱视频，退款或补发需要VIP客服按材料最终确认。'
+
+    client = TestClient(app)
+    user_id = "usr_damage_material_first"
+    token = _customer_token(user_id)
+    original_call_llm = agent_module.call_llm
+    agent_module.call_llm = fake_call_llm
+    try:
+        with client.stream(
+            "POST",
+            "/api/v1/chat",
+            headers=_headers(token),
+            json={
+                "user_id": user_id,
+                "session_id": f"session_{user_id}",
+                "content": "商品有明显划痕破损，我想退款",
+                "history": [],
+                "stream_reply": True,
+            },
+        ) as res:
+            assert res.status_code == 200, res.text
+            raw = b"".join(res.iter_bytes()).decode("utf-8")
+    finally:
+        agent_module.call_llm = original_call_llm
+
+    events = _parse_sse_events(raw)
+    assert not [e for e in events if e["event"] == "transfer"], raw
+    assert "整理售后材料" in raw or "商品有划痕" in raw, raw
+
+
+def test_customer_attachment_is_bound_to_owner_session_and_tenant():
+    client = TestClient(app)
+    owner = "usr_attach_owner"
+    owner_session = "session_usr_attach_owner"
+    owner_token = _customer_token(owner)
+    uploaded = client.post(
+        "/api/v1/chat/attachments",
+        headers=_headers(owner_token),
+        data={"user_id": owner, "session_id": owner_session},
+        files={"file": ("private-damage.png", b"\x89PNG\r\n\x1a\nprivate-image", "image/png")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    attachment = uploaded.json()["attachment"]
+
+    owner_get = client.get(attachment["url"], headers=_headers(owner_token))
+    assert owner_get.status_code == 200, owner_get.text
+    desk_token = create_token(sub="desk0816", role=Role.DESK_AGENT.value, agent_id="CS-0816", tenant_id="mitako")
+    desk_get = client.get(attachment["url"], headers=_headers(desk_token))
+    assert desk_get.status_code == 200, desk_get.text
+    other_tenant_desk = create_token(sub="desk_other", role=Role.DESK_AGENT.value, agent_id="CS-0816", tenant_id="tenant_b")
+    other_tenant_desk_get = client.get(attachment["url"], headers=_headers(other_tenant_desk))
+    assert other_tenant_desk_get.status_code == 403, other_tenant_desk_get.text
+    intruder_get = client.get(attachment["url"], headers=_headers(_customer_token("usr_attach_intruder")))
+    assert intruder_get.status_code == 403, intruder_get.text
+    tenant_get = client.get(attachment["url"], headers=_headers(_customer_token(owner, "tenant_b")))
+    assert tenant_get.status_code == 403, tenant_get.text
+    tampered_attachment = {
+        **attachment,
+        "name": "fake-client-name.png",
+        "mime_type": "image/jpeg",
+        "size": 1,
+    }
+    owner_valid = _valid_chat_attachments([ChatAttachment(**tampered_attachment)], owner, owner_session, "mitako")
+    assert owner_valid and owner_valid[0]["name"] == "private-damage.png", owner_valid
+    assert owner_valid[0]["mime_type"] == "image/png", owner_valid
+    assert owner_valid[0]["size"] != 1, owner_valid
+
+    intruder_chat = client.post(
+        "/api/v1/chat",
+        headers=_headers(_customer_token("usr_attach_intruder")),
+        json={
+            "user_id": "usr_attach_intruder",
+            "session_id": "session_usr_attach_intruder",
+            "content": "帮我看看这张图有没有问题",
+            "history": [],
+            "stream_reply": True,
+            "attachments": [attachment],
+        },
+    )
+    assert intruder_chat.status_code == 403, intruder_chat.text
+
+    cross_tenant_valid = _valid_chat_attachments(
+        [ChatAttachment(**attachment)],
+        owner,
+        "session_usr_attach_owner_tenant_b",
+        "tenant_b",
+    )
+    assert cross_tenant_valid == [], cross_tenant_valid
+
+
+def test_handoff_user_message_preserves_attachment_meta_without_filename_text():
+    client = TestClient(app)
+    user_id = "usr_attach_handoff"
+    session_id = "session_usr_attach_handoff"
+    token = _customer_token(user_id)
+    uploaded = client.post(
+        "/api/v1/chat/attachments",
+        headers=_headers(token),
+        data={"user_id": user_id, "session_id": session_id},
+        files={"file": ("handoff-damage.png", b"\x89PNG\r\n\x1a\nhandoff-image", "image/png")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    attachment = uploaded.json()["attachment"]
+    enqueue_handoff(session_id, {"user_id": user_id, "summary": "用户补充图片", "tenant_id": "mitako"}, tenant_id="mitako")
+    accepted = accept_handoff(session_id, "CS-0816")
+    assert accepted["ok"] is True, accepted
+    handoff_token = _handoff_token(user_id, session_id)
+    posted = client.post(
+        "/api/v1/handoff/user-message",
+        headers=_headers(handoff_token),
+        json={
+            "session_id": session_id,
+            "user_id": user_id,
+            "content": "我补充了一张图片，请VIP客服一起看。",
+            "attachments": [attachment],
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    data = posted.json()
+    assert data["ok"] is True, data
+    user_message = [m for m in data["messages"] if m["role"] == "user"][-1]
+    assert "handoff-damage.png" not in user_message["content"], user_message
+    assert user_message["meta"]["attachments"][0]["name"] == "handoff-damage.png", user_message
+    desk_token = create_token(sub="desk0816", role=Role.DESK_AGENT.value, agent_id="CS-0816", tenant_id="mitako")
+    detail = client.get(f"/api/v1/desk/session/{session_id}", headers=_headers(desk_token))
+    assert detail.status_code == 200, detail.text
+    desk_payload = detail.json()
+    assert desk_payload["ok"] is True, desk_payload
+    desk_user_message = [m for m in desk_payload["messages"] if m["role"] == "user"][-1]
+    assert desk_user_message["attachments"][0]["name"] == "handoff-damage.png", desk_user_message
+    assert "meta" not in desk_user_message, desk_user_message
 
 
 def test_customer_chat_sse_public_observability_events_are_sanitized():
@@ -873,7 +1064,7 @@ def test_hyper_human_agent_evaluation_matrix():
             "scene": "退货退款",
             "fixtures": [],
             "needs_human": True,
-            "required_labels": {"人工审批", "下一步话术"},
+            "required_labels": {"VIP客服审批", "下一步话术"},
         },
         {
             "name": "damage_photo",
@@ -884,7 +1075,7 @@ def test_hyper_human_agent_evaluation_matrix():
             "scene": "商品有伤",
             "fixtures": ["damage_photo_clear"],
             "needs_human": False,
-            "required_labels": {"核验证据材料", "人工审批"},
+            "required_labels": {"核验证据材料", "VIP客服审批"},
         },
         {
             "name": "video_review",
@@ -895,7 +1086,7 @@ def test_hyper_human_agent_evaluation_matrix():
             "scene": "视频审核",
             "fixtures": ["unboxing_video_suspected_cut"],
             "needs_human": False,
-            "required_labels": {"核验证据材料", "核验视频连续性", "人工审批"},
+            "required_labels": {"核验证据材料", "核验视频连续性", "VIP客服审批"},
         },
         {
             "name": "minor_refund",
@@ -906,7 +1097,7 @@ def test_hyper_human_agent_evaluation_matrix():
             "scene": "未成年人资料审核",
             "fixtures": ["minor_refund_material"],
             "needs_human": True,
-            "required_labels": {"核验证据材料", "人工审批"},
+            "required_labels": {"核验证据材料", "VIP客服审批"},
         },
     ]
 
@@ -972,7 +1163,8 @@ def test_business_readiness_node_is_observable_and_debuggable():
     sop = result["sop_state"]
     assert sop["review_design"]["scene"] == "视频审核", sop
     assert "review:视频审核" in sop["evaluation_tags"], sop
-    assert result["should_transfer"] is True, result
+    assert result.get("should_transfer") is not True, result
+    assert (sop.get("planned_action") or {}).get("requires_human") is True, sop
     assert any(e.get("type") == "node_start" and e.get("node") == "business_readiness" for e in events), events
     assert any(e.get("type") == "node_end" and "SOP分支=" in e.get("desc", "") for e in events), events
     assert result["business_cards"][0]["data"]["sop"]["checklist"], result
@@ -1009,7 +1201,7 @@ def test_desk_detail_returns_business_readiness():
         "session_p1_desk_business",
         {
             "user_id": "usr_001",
-            "summary": "物流异常转人工",
+            "summary": "物流异常转VIP客服",
             "tenant_id": "mitako",
             "sop_state": flow["sop_state"],
             "business_cards": flow["business_cards"],
@@ -1034,8 +1226,8 @@ def test_repeated_handoff_request_does_not_downgrade_connected_session():
         json={
             "user_id": "usr_guard_nd",
             "session_id": session_id,
-            "history": [{"role": "user", "content": "需要人工客服"}],
-            "reason": "首次申请人工客服",
+            "history": [{"role": "user", "content": "需要VIP客服"}],
+            "reason": "首次申请VIP客服",
         },
     ).json()
     assert created["ok"] is True, created
@@ -1048,7 +1240,7 @@ def test_repeated_handoff_request_does_not_downgrade_connected_session():
         json={
             "user_id": "usr_guard_nd",
             "session_id": session_id,
-            "history": [{"role": "user", "content": "再次申请人工客服"}],
+            "history": [{"role": "user", "content": "再次申请VIP客服"}],
             "reason": "重复申请",
         },
     )
@@ -1208,6 +1400,9 @@ if __name__ == "__main__":
     test_customer_handoff_public_payload_redacts_internal_brief()
     test_customer_handoff_messages_redact_internal_notes()
     test_customer_chat_sse_redacts_internal_progress_and_transfer_reason()
+    test_customer_image_attachment_reaches_chat_backend_without_auto_handoff()
+    test_customer_attachment_is_bound_to_owner_session_and_tenant()
+    test_handoff_user_message_preserves_attachment_meta_without_filename_text()
     test_customer_chat_sse_public_observability_events_are_sanitized()
     test_desk_agent_cannot_impersonate_supervisor()
     test_sop_branch_matrix_minimal()

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """本地业务演示闭环：SOP 状态机、fixture 接入、幂等审计。"""
 from __future__ import annotations
 
@@ -153,7 +153,7 @@ def build_sop_checklist(sop_state: Dict[str, Any], order: Dict[str, Any], fixtur
             "人工审批",
             "required",
             "现金退款、账号变更、补发换货需人工授权确认",
-            "人工客服",
+            "VIP客服",
         ))
     if ticket_type in {"missing", "logistics"}:
         checklist.append(_checklist_item(
@@ -166,7 +166,7 @@ def build_sop_checklist(sop_state: Dict[str, Any], order: Dict[str, Any], fixtur
         "下一步话术",
         "ready",
         "先同步已确认事实，再说明需人工/仓储确认的边界",
-        "人工客服",
+        "VIP客服",
     ))
     return checklist
 
@@ -226,7 +226,7 @@ def record_transfer_blocked(state: Dict[str, Any], reason: str = "") -> Dict[str
     sop_state = classify_sop_branch(text, state.get("intent") or "")
     sop_state.update({
         "state": "transferred_before_action",
-        "reason": reason or state.get("transfer_reason") or "高风险会话先转人工",
+        "reason": reason or state.get("transfer_reason") or "高风险会话先转VIP客服",
         "readiness": {"mode": "mock_only", "real_partner_integration": False},
         "checklist": build_sop_checklist(sop_state, {}, []),
     })

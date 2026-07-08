@@ -26,17 +26,17 @@ export default function AuditLog() {
   const eventLabel = (type) => ({
     sop_branch: '服务类型识别',
     material_review: '材料校验',
-    service_transfer_blocked: '人工接手留痕',
+    service_transfer_blocked: 'VIP客服接手留痕',
     service_after_sales_card: '售后处理单',
     service_warehouse_task: '仓库核查任务',
-    service_ticket: '人工复核工单',
+    service_ticket: '客服复核工单',
     service_qc_sop_proposal: '质检建议',
     service_private_domain_task: '后续跟进任务',
-    accept: '人工接单',
+    accept: 'VIP客服接单',
     escalate: '升级处理',
     transfer: '同事转交',
     user: '用户消息',
-    assistant: '智能客服回复',
+    assistant: 'AI客服回复',
     observer: '服务记录',
   }[publicEventType(type)] || '业务记录');
 

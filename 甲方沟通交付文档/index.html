@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -107,7 +107,7 @@
       <div class="hero-copy">
         <span class="eyebrow">对接目标</span>
         <h1>把客服工作台、人工复核与 <span>三类视觉审核</span> 打通</h1>
-        <p class="lead">当前 POC 聚焦“客服主链路 + 开箱视频审核 + 商品有伤审核 + 未成年人资料审核”。系统给人工客服提供证据摘要、置信度、缺失材料和复核建议，不直接替甲方执行退款、补发、拒赔、仓库或财务动作。</p>
+        <p class="lead">当前 POC 聚焦“客服主链路 + 开箱视频审核 + 商品有伤审核 + 未成年人资料审核”。系统给VIP客服提供证据摘要、置信度、缺失材料和复核建议，不直接替甲方执行退款、补发、拒赔、仓库或财务动作。</p>
       </div>
       <aside class="hero-panel">
         <div class="metric">
@@ -121,7 +121,7 @@
     <section class="section">
       <h2>POC 怎么测试</h2>
       <div class="grid">
-        <article class="card"><span class="tag">现场验收</span><h3>按业务顺序测试</h3><p>先做页面冒烟，再测客服主链路、转人工、三类视觉审核，最后由 Java 开发核对接口契约。</p></article>
+        <article class="card"><span class="tag">现场验收</span><h3>按业务顺序测试</h3><p>先做页面冒烟，再测客服主链路、转VIP客服、三类视觉审核，最后由 Java 开发核对接口契约。</p></article>
         <article class="card"><span class="tag">测试说明</span><h3>甲方 POC 测试说明</h3><p>查看启动方式、测试话术、通过标准和甲方需补充材料：<a href="./甲方POC测试说明.html">打开 HTML</a> / <a href="./甲方POC测试说明.md">打开 MD</a></p></article>
         <article class="card"><span class="tag">边界</span><h3>只验证流程与人效</h3><p>本轮不测试生产退款、补发、拒赔、仓库改状态或财务动作；真实联调前先确认测试环境和回滚方案。</p></article>
       </div>
@@ -166,7 +166,7 @@
     <section class="section">
       <h2>联调与验收附件</h2>
       <div class="grid">
-        <article class="card"><span class="tag">接口契约</span><h3>OpenAPI 契约草案</h3><p>用于甲方 Java 团队评估鉴权、聊天、转人工和视觉审核文件夹证据包接口。</p><div class="doc-actions"><a href="../docs/delivery/openapi.yaml">打开 YAML</a></div></article>
+        <article class="card"><span class="tag">接口契约</span><h3>OpenAPI 契约草案</h3><p>用于甲方 Java 团队评估鉴权、聊天、转VIP客服和视觉审核文件夹证据包接口。</p><div class="doc-actions"><a href="../docs/delivery/openapi.yaml">打开 YAML</a></div></article>
         <article class="card"><span class="tag">Java 接入</span><h3>Spring Boot 调用样例</h3><p>包含客户会话令牌、SSE 对话、重试和幂等注意事项。</p><div class="doc-actions"><a href="../docs/delivery/java-client-sample.md">打开 MD</a></div></article>
         <article class="card"><span class="tag">UAT</span><h3>POC UAT 验收表</h3><p>用于双方现场逐项签收，不把 Mock 接口误认为生产接入。</p><div class="doc-actions"><a href="../docs/delivery/poc-uat-checklist.md">打开 MD</a></div></article>
         <article class="card"><span class="tag">安全合规</span><h3>数据安全与模型合规清单</h3><p>覆盖未成年人资料、公开报告脱敏、模型调用和业务接口边界。</p><div class="doc-actions"><a href="../docs/delivery/data-model-compliance-checklist.md">打开 MD</a></div></article>
@@ -262,7 +262,7 @@ client.post()
       </div>
     </section>
 
-    <p class="footer">当前文档为对接与验收指南。实际生产写入动作以甲方业务系统、人工坐席和双方上线审批为准。</p>
+    <p class="footer">当前文档为对接与验收指南。实际生产写入动作以甲方业务系统、VIP客服坐席和双方上线审批为准。</p>
   </main>
   <div class="toast" id="toast">已复制 MD</div>
   <script>

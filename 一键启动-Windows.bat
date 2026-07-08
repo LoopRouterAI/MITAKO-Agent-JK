@@ -75,16 +75,15 @@ echo [7/7] 打开浏览器 ...
 start http://127.0.0.1:8000/
 start http://127.0.0.1:7861/
 start http://127.0.0.1:8790/甲方沟通交付文档/index.html
-start http://127.0.0.1:8790/我方内部开发文档/index.html
 
 echo.
 echo 当前入口:
-echo   用户客服端:       http://127.0.0.1:8000/
-echo   人工客服工作台:   http://127.0.0.1:8000/desk
+echo   用户AI客服端:     http://127.0.0.1:8000/
+echo   VIP客服工作台:    http://127.0.0.1:8000/desk
 echo   运营后台:         http://127.0.0.1:8000/admin
 echo   视觉审核工作台:   http://127.0.0.1:7861/
 echo   甲方交付文档:     http://127.0.0.1:8790/甲方沟通交付文档/index.html
-echo   我方开发文档:     http://127.0.0.1:8790/我方内部开发文档/index.html
+echo   我方开发文档:     仅研发交接时手动访问，不在甲方演示中自动打开。
 echo   最新验收报告:     http://127.0.0.1:8790/tests/reports/poc_quality_fix_acceptance_20260705_202300.html
 echo.
 echo 回归脚本: scripts\run_all_e2e.bat

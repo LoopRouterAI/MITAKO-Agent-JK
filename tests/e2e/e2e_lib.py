@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """E2E 共享工具：结果模型、端口发现、专业 HTML 报告"""
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ async def admin_auth_headers(client: httpx.AsyncClient, base: str) -> Dict[str, 
 
 
 async def _probe_handoff_server(client: httpx.AsyncClient, url: str) -> bool:
-    """确认端口上的服务可正常处理转人工（排除旧进程 / 半崩溃实例）"""
+    """确认端口上的服务可正常处理转VIP客服（排除旧进程 / 半崩溃实例）"""
     try:
         r = await client.get(f"{url}/api/v1/auth/status", timeout=2.0)
         if r.status_code != 200 or not r.json().get("ok"):
@@ -156,7 +156,7 @@ def render_report(results: List[CaseResult], base: str, started: str, report_id:
     failed = [r for r in results if not r.ok]
     report_id = report_id or datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    role_labels = {"system": "系统", "customer": "客户", "agent": "人工客服", "admin": "管理员"}
+    role_labels = {"system": "系统", "customer": "客户", "agent": "VIP客服", "admin": "管理员"}
 
     def row_html(r: CaseResult) -> str:
         badge = "PASS" if r.ok else "FAIL"

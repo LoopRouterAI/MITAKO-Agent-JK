@@ -17,13 +17,13 @@ Base URL：`http://<host>:8000`
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
-| POST | `/api/v1/chat` | 可选客户 token | SSE 智能客服对话 |
-| POST | `/api/v1/handoff/request` | 可选客户 token | 转人工，返回 `handoff_token` |
+| POST | `/api/v1/chat` | 可选客户 token | SSE AI客服对话 |
+| POST | `/api/v1/handoff/request` | 可选客户 token | 转VIP客服，返回 `handoff_token` |
 | GET | `/api/v1/handoff/status/{session_id}` | `handoff_token` | 查询排队、接入和关闭状态 |
-| GET | `/api/v1/handoff/messages/{session_id}` | `handoff_token` | 查询人工消息增量 |
+| GET | `/api/v1/handoff/messages/{session_id}` | `handoff_token` | 查询VIP客服消息增量 |
 | WS | `/api/v1/handoff/ws/{session_id}` | `handoff_token` 或坐席 JWT | 实时同步 |
 
-## 人工客服工作台
+## VIP客服工作台
 
 | 方法 | 路径 | 角色 |
 |---|---|---|
