@@ -8,13 +8,13 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from sse_starlette.sse import EventSourceResponse
 
-from agent import agent_app, sanitize_customer_reply
+from agent import agent_app, classify_intent, sanitize_customer_reply
 from llm_models import DEFAULT_PUBLIC_MODEL_ID, list_models_public
 from image_models import list_image_models_public
 from image_service import generate_image
@@ -83,6 +83,8 @@ from auth import tenants as tenant_store
 from auth import sso as sso_service
 from ops_service import ops_snapshot
 from runtime_paths import app_root, data_dir
+from private_domain.router import router as private_domain_router
+from private_domain import store as private_domain_store
 
 SUPER_ADMIN_ONLY = frozenset({Role.SUPER_ADMIN.value})
 
@@ -103,6 +105,8 @@ def _business_demo_enabled() -> bool:
 
 if _business_demo_enabled():
     app.include_router(business_router)
+
+app.include_router(private_domain_router)
 
 
 def _cors_origins() -> List[str]:
@@ -173,6 +177,10 @@ class ChatAttachment(BaseModel):
     mime_type: str
     size: int
     url: str
+    kind: str = "chat_attachment"
+    review_task_id: Optional[str] = None
+    status: Optional[str] = None
+    scenario: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -230,6 +238,26 @@ def _read_attachment_meta(filename: str) -> Dict[str, Any]:
 def _valid_chat_attachments(items: List[ChatAttachment], user_id: str, session_id: str, tenant_id: str) -> List[Dict[str, Any]]:
     valid: List[Dict[str, Any]] = []
     for item in items or []:
+        if item.kind == "review_task" or item.url.startswith("/api/v1/private-domain/review-tasks/"):
+            task_id = item.review_task_id or Path(item.url.rsplit("/", 1)[-1]).name
+            task = private_domain_store.get_review_task(task_id)
+            if not task or task.get("user_id") != user_id or task.get("session_id") != session_id or task.get("tenant_id") != tenant_id:
+                continue
+            valid.append({
+                "id": task["task_id"],
+                "kind": "review_task",
+                "review_task_id": task["task_id"],
+                "name": task["file_name"],
+                "mime_type": task["mime_type"],
+                "size": int(task["size"] or 0),
+                "url": f"/api/v1/private-domain/review-tasks/{task['task_id']}",
+                "status": task["status"],
+                "scenario": task["scenario"],
+                "boundary": task.get("boundary") or "",
+                "review_result": task.get("result") or {},
+                "reviewed_at": task.get("reviewed_at") or 0,
+            })
+            continue
         if not item.url.startswith("/api/v1/chat/attachments/"):
             continue
         filename = Path(item.url.split("/api/v1/chat/attachments/", 1)[1]).name
@@ -258,6 +286,65 @@ def _require_all_chat_attachments_valid(items: List[ChatAttachment], user_id: st
     if items and len(valid) != len(items):
         raise HTTPException(status_code=403, detail="invalid_attachment_scope")
     return valid
+
+
+def _chat_attachment_context_line(item: Dict[str, Any]) -> str:
+    base = f"- {item.get('name')} ({item.get('mime_type')}, {item.get('size')} bytes, {item.get('url')})"
+    if item.get("kind") != "review_task":
+        return base
+    result = item.get("review_result") if isinstance(item.get("review_result"), dict) else {}
+    review = result.get("review") if isinstance(result.get("review"), dict) else {}
+    summary = review.get("summary") if isinstance(review.get("summary"), dict) else result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    brief = review.get("agent_brief") if isinstance(review.get("agent_brief"), dict) else result.get("agent_brief") if isinstance(result.get("agent_brief"), dict) else {}
+    report = review.get("report") if isinstance(review.get("report"), dict) else result.get("report") if isinstance(result.get("report"), dict) else {}
+    parts = [
+        f"审核任务={item.get('review_task_id') or item.get('id')}",
+        f"状态={item.get('status')}",
+        f"场景={item.get('scenario')}",
+    ]
+    if review.get("review_label"):
+        parts.append(f"队列={review.get('review_label')}")
+    if brief.get("conclusion"):
+        parts.append(f"初筛结论={brief.get('conclusion')}")
+    if brief.get("next_step"):
+        parts.append(f"建议动作={brief.get('next_step')}")
+    if summary.get("needs_human_review") is not None:
+        parts.append(f"需人工复核={'是' if summary.get('needs_human_review') else '否'}")
+    if isinstance(summary.get("confidence"), (int, float)):
+        parts.append(f"置信度={summary.get('confidence')}")
+    if report.get("html_url"):
+        parts.append(f"报告={report.get('html_url')}")
+    if item.get("boundary"):
+        parts.append(f"边界={item.get('boundary')}")
+    return f"{base}；" + "；".join(parts)
+
+
+async def _handoff_user_message_analysis(entry: Dict[str, Any], content: str, user_id: str, session_id: str) -> Dict[str, Any]:
+    brief = entry.get("brief") or {}
+    messages: List[Dict[str, str]] = []
+    for item in (brief.get("conversation_snippet") or [])[-6:]:
+        role = item.get("role")
+        if role in {"user", "assistant"} and item.get("content"):
+            messages.append({"role": role, "content": str(item.get("content") or "")})
+    messages.append({"role": "user", "content": str(content or "")})
+    try:
+        result = await classify_intent(
+            {
+                "messages": messages,
+                "user_id": user_id,
+                "session_id": session_id,
+                "intent": "",
+                "emotion_level": 2,
+            },
+            {"configurable": {}},
+        )
+    except Exception:
+        return {"intent": "人工服务补充", "emotion_level": 2, "should_transfer": False}
+    return {
+        "intent": result.get("intent") or "人工服务补充",
+        "emotion_level": max(1, min(6, int(result.get("emotion_level") or 2))),
+        "should_transfer": False,
+    }
 
 
 def _handoff_bearer(request: Request) -> str:
@@ -926,6 +1013,39 @@ async def metrics(user=require_roles(ADMIN_MUTATE_ROLES)):
     }
 
 
+@app.get("/metrics/prometheus", response_class=PlainTextResponse)
+async def metrics_prometheus(user=require_roles(ADMIN_MUTATE_ROLES)):
+    snap = await ops_snapshot(tenant_id=user.get("tenant_id"))
+
+    def metric(name: str, value: Any) -> str:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = 0.0
+        return f"{name} {number:g}"
+
+    lines = [
+        "# HELP mitako_uptime_seconds Service uptime in seconds.",
+        "# TYPE mitako_uptime_seconds gauge",
+        metric("mitako_uptime_seconds", snap.get("uptime_seconds")),
+        "# HELP mitako_ops_status Service health status label.",
+        "# TYPE mitako_ops_status gauge",
+        f'mitako_ops_status{{status="{snap.get("status") or "unknown"}"}} 1',
+        metric("mitako_handoff_queuing", snap.get("handoff_queuing")),
+        metric("mitako_handoff_connected", snap.get("handoff_connected")),
+        metric("mitako_handoff_escalated", snap.get("handoff_escalated")),
+        metric("mitako_sla_alerts", snap.get("sla_alerts")),
+        metric("mitako_ws_connections", snap.get("ws_connections")),
+    ]
+    visual = snap.get("visual_review") or {}
+    lines.append(metric("mitako_visual_review_total", visual.get("total_reviews")))
+    if visual.get("success_rate") is not None:
+        lines.append(metric("mitako_visual_review_success_rate", visual.get("success_rate")))
+    report_safety = snap.get("public_report_safety") or {}
+    lines.append(metric("mitako_public_report_unsafe_files", report_safety.get("unsafe_files")))
+    return "\n".join(lines) + "\n"
+
+
 @app.get("/api/v1/models")
 async def get_models():
     """返回客户可见回复方式；真实模型配置仅在服务端映射。"""
@@ -1206,7 +1326,11 @@ async def handoff_user_message(req: HandoffUserMessageRequest, request: Request)
     effective_user_id = (user or {}).get("sub") or req.user_id
     tenant_id = _request_tenant_id("", user, entry)
     attachments = _require_all_chat_attachments_valid(req.attachments, effective_user_id, req.session_id, tenant_id)
-    return await post_user_message(req.session_id, req.content, effective_user_id, attachments=attachments)
+    analysis = await _handoff_user_message_analysis(entry, req.content, effective_user_id, req.session_id)
+    result = await post_user_message(req.session_id, req.content, effective_user_id, attachments=attachments)
+    if isinstance(result, dict):
+        result["analysis"] = analysis
+    return result
 
 
 @app.get("/api/v1/desk/agents")
@@ -1302,7 +1426,7 @@ async def chat_stream(req: ChatRequest, request: Request):
         model_content = req.content
         if chat_attachments:
             attachment_lines = [
-                f"- {item.get('name')} ({item.get('mime_type')}, {item.get('size')} bytes, {item.get('url')})"
+                _chat_attachment_context_line(item)
                 for item in chat_attachments
             ]
             model_content = req.content + "\n\n[用户已上传附件]\n" + "\n".join(attachment_lines)

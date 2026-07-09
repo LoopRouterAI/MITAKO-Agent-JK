@@ -212,7 +212,24 @@ def _latest_report_from_stdout(stdout: str) -> Dict[str, Any]:
             continue
         try:
             data, _ = decoder.raw_decode(stdout[idx:])
-            return {k: data.get(k) for k in ("json_report", "html_report", "summary") if k in data}
+            report = {k: data.get(k) for k in ("json_report", "html_report", "summary") if k in data}
+            json_report = report.get("json_report")
+            if json_report:
+                path = Path(str(json_report)).resolve()
+                report_root = (ROOT / "poc" / "visual_review_poc" / "reports").resolve()
+                if path.exists() and (path == report_root or report_root in path.parents):
+                    try:
+                        full_report = json.loads(path.read_text(encoding="utf-8"))
+                        report.update({
+                            "status": (full_report.get("gemini") or {}).get("status"),
+                            "gemini": full_report.get("gemini") or {},
+                            "frame_sampling": full_report.get("frame_sampling") or {},
+                            "frames": full_report.get("frames") or [],
+                            "supplemental_images": full_report.get("supplemental_images") or [],
+                        })
+                    except Exception as exc:
+                        report["diagnostics"] = {"json_report_read_error": str(exc)[:180]}
+            return report
         except Exception:
             continue
     return {}
@@ -421,6 +438,8 @@ def _public_result(ok: bool, review_label: str, report: Dict[str, Any]) -> Dict[
     report = {**(report or {}), "ok": ok}
     summary = _public_summary(report)
     failure = {} if ok else _public_failure_reason(report, False)
+    public_next_step = "VIP客服结合订单、库存、售后规则和原始素材确认，不自动退款、补发、拒赔或定责。"
+    public_conclusion = "建议VIP客服复核后再做最终业务处置" if ok else f"审核未完成：{failure.get('message')}"
     report_name = f"summary_{int(time.time())}_{len(ALLOWED_REPORTS) + 1}.html"
     data = {
         "ok": ok,
@@ -428,9 +447,29 @@ def _public_result(ok: bool, review_label: str, report: Dict[str, Any]) -> Dict[
         "frame_strategy": "按当前抽帧配置生成证据",
         "summary": summary,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "conclusion": "建议VIP客服复核后再做最终业务处置" if ok else f"审核未完成：{failure.get('message')}",
+        "conclusion": public_conclusion,
+        "agent_brief": {
+            "conclusion": public_conclusion,
+            "confidence": summary.get("confidence"),
+            "system_yes_no": summary.get("system_yes_no"),
+            "next_step": public_next_step if ok else failure.get("operator_hint", public_next_step),
+        },
     }
     if failure:
+        gemini = report.get("gemini") if isinstance(report.get("gemini"), dict) else {}
+        attempts = gemini.get("attempts") if isinstance(gemini.get("attempts"), list) else []
+        public_attempts = [
+            {
+                "channel": item.get("channel"),
+                "status_code": item.get("status_code"),
+                "error_type": item.get("error_type"),
+                "error": str(item.get("error") or "")[:500],
+                "latency_seconds": item.get("latency_seconds"),
+                "attempt": item.get("attempt"),
+            }
+            for item in attempts[-3:]
+        ]
+        raw_diag = report.get("diagnostics") if isinstance(report.get("diagnostics"), dict) else {}
         data["diagnostics"] = {
             "review_status": "failed",
             "failure_stage": failure.get("stage"),
@@ -439,6 +478,11 @@ def _public_result(ok: bool, review_label: str, report: Dict[str, Any]) -> Dict[
             "frames_sent": 0,
             "supplemental_images_sent": 0,
             "videos_received": 1,
+            "model_status": gemini.get("status"),
+            "model_attempts": public_attempts,
+            "subprocess": raw_diag.get("subprocess"),
+            "json_report_read_error": raw_diag.get("json_report_read_error"),
+            "subprocess_error": raw_diag.get("subprocess_error"),
         }
     ALLOWED_REPORTS[report_name] = data
     PUBLIC_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
@@ -449,6 +493,7 @@ def _public_result(ok: bool, review_label: str, report: Dict[str, Any]) -> Dict[
         "frame_strategy": "按当前抽帧配置生成证据",
         "summary": summary,
         "report": {"html_url": "/reports/" + report_name},
+        "agent_brief": data["agent_brief"],
     }
     if data.get("diagnostics"):
         response["diagnostics"] = data["diagnostics"]
@@ -461,6 +506,13 @@ def _structured_review_ok(parsed: Dict[str, Any]) -> bool:
 
 def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[str, Any]:
     status = str(result.get("status") or "")
+    diagnostics_text = json.dumps(result.get("diagnostics") or {}, ensure_ascii=False)
+    if "未找到 Gemini 渠道 Key" in diagnostics_text:
+        return {
+            "stage": "配置检查",
+            "message": "视觉审核服务缺少可用 Gemini 渠道 Key，未发起模型审核。",
+            "operator_hint": "请在服务环境配置 VISION_REVIEW_API_KEY、GEMINI_API_KEY、GOOGLE_API_KEY、APIYI_API_KEY 或 BROUTER_API_KEY 后重启视觉审核服务。",
+        }
     if status == "success" and not structured_ok:
         return {
             "stage": "系统复核",
@@ -473,8 +525,11 @@ def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[
             "message": "系统复核暂不可用，当前工单请先进入VIP客服复核。",
             "operator_hint": "请检查部署环境配置；当前工单先进入VIP客服复核。",
         }
-    status_code = result.get("status_code")
-    error_type = str(result.get("error_type") or "")
+    gemini = result.get("gemini") if isinstance(result.get("gemini"), dict) else {}
+    attempts = gemini.get("attempts") if isinstance(gemini.get("attempts"), list) else []
+    last_attempt = attempts[-1] if attempts else {}
+    status_code = result.get("status_code") or last_attempt.get("status_code")
+    error_type = str(result.get("error_type") or last_attempt.get("error_type") or "")
     if status_code == 429:
         message = "系统复核服务繁忙，本轮重试后仍未完成审核。"
     elif error_type == "soft":
@@ -488,6 +543,15 @@ def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[
         "message": message,
         "operator_hint": "这不是业务上的“证据不足”；请重试或转VIP客服处理，并保留该失败样本给研发排查。",
     }
+
+
+def _review_report_ok(report: Dict[str, Any]) -> bool:
+    if not report:
+        return False
+    gemini = report.get("gemini") if isinstance(report.get("gemini"), dict) else {}
+    if gemini:
+        return gemini.get("status") == "success"
+    return str(report.get("status") or "") not in {"review_subprocess_failed", "review_no_report", "review_timeout", "review_subprocess_error", "failed"}
 
 
 def _run_review(
@@ -537,14 +601,23 @@ def _run_review(
         )
     except subprocess.TimeoutExpired:
         return _public_result(False, profile["label"], {"summary": {}, "status": "review_timeout"})
-    except OSError:
-        return _public_result(False, profile["label"], {"summary": {}, "status": "review_subprocess_error"})
+    except OSError as exc:
+        return _public_result(False, profile["label"], {"summary": {}, "status": "review_subprocess_error", "diagnostics": {"subprocess_error": str(exc)[:240]}})
     report = _latest_report_from_stdout(proc.stdout)
+    subprocess_diag = {
+        "return_code": proc.returncode,
+        "stdout_tail": (proc.stdout or "")[-1200:],
+        "stderr_tail": (proc.stderr or "")[-1200:],
+    }
     if proc.returncode != 0:
         report.setdefault("status", "review_subprocess_failed")
+        report["diagnostics"] = {**(report.get("diagnostics") or {}), "subprocess": subprocess_diag}
     elif not report:
         report["status"] = "review_no_report"
-    return _public_result(proc.returncode == 0 and bool(report), profile["label"], report)
+        report["diagnostics"] = {"subprocess": subprocess_diag}
+    elif (report.get("gemini") or {}).get("status") == "failed":
+        report["diagnostics"] = {**(report.get("diagnostics") or {}), "subprocess": subprocess_diag}
+    return _public_result(proc.returncode == 0 and _review_report_ok(report), profile["label"], report)
 
 
 def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[str, Any], report_stem: str) -> Dict[str, Any]:
@@ -1183,7 +1256,10 @@ def review(
         "customer_tone": customer_tone,
     }
     result = _run_review(video, scenario, fps, max_frames, api_frame_limit, probe_seconds, review_model, evidence_context)
-    return JSONResponse({"ok": result["ok"], "source_status": source_status, "review": result})
+    response = {"ok": result["ok"], "source_status": source_status, "review": result}
+    if result.get("diagnostics"):
+        response["diagnostics"] = result["diagnostics"]
+    return JSONResponse(response)
 
 
 def main() -> int:

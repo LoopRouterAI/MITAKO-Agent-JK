@@ -184,6 +184,7 @@ export default function App() {
   const handleDemoUserChange = (userId) => {
     if (userId === currentUser) return;
     setOrderPickerOpen(false);
+    selectOrder(null);
     setCurrentUser(userId);
   };
 

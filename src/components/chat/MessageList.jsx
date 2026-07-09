@@ -14,44 +14,81 @@ function formatBytes(size = 0) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`;
 }
 
+function reviewStatusLabel(status) {
+  if (status === 'REVIEW_COMPLETED') return '视觉审核完成';
+  if (status === 'REVIEW_FAILED') return '视觉审核未完成';
+  if (status === 'MATERIAL_READY') return '材料已接收';
+  return status || '已接收';
+}
+
+function reviewResultLine(item) {
+  if (item?.kind !== 'review_task') return '';
+  const review = item.review_result?.review || {};
+  const summary = review.summary || {};
+  const brief = review.agent_brief || {};
+  const bits = [reviewStatusLabel(item.status)];
+  if (brief.conclusion) bits.push(brief.conclusion);
+  else if (summary.needs_human_review) bits.push('需人工复核');
+  if (review.report?.html_url) bits.push('报告已生成');
+  return bits.filter(Boolean).join(' · ');
+}
+
 function AttachmentStrip({ attachments = [], align = 'left' }) {
   const safeItems = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
   if (!safeItems.length) return null;
   return (
     <div className={`mt-2 grid gap-2 ${align === 'right' ? 'justify-items-end' : 'justify-items-start'}`}>
-      {safeItems.map((item, index) => (
-        <div
-          key={item.id || `${item.name || 'attachment'}-${index}`}
-          className={`flex max-w-[260px] items-center gap-2 rounded-[8px] border bg-white/85 p-2 text-left shadow-[0_8px_20px_rgba(16,19,31,0.08)] ${
-            align === 'right' ? 'border-lime-200' : 'border-slate-200'
-          }`}
-        >
-          {item.previewUrl ? (
-            <img
-              src={item.previewUrl}
-              alt={item.name || '用户上传图片'}
-              className="h-12 w-12 rounded-[7px] object-cover"
-              onLoad={() => {
-                try {
-                  URL.revokeObjectURL(item.previewUrl);
-                } catch (e) {
-                  console.error('attachment preview revoke failed:', e);
-                }
-              }}
-            />
-          ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-[7px] bg-slate-100 text-slate-500">
-              <ImageIcon className="h-5 w-5" aria-hidden="true" />
+      {safeItems.map((item, index) => {
+        const reviewLine = reviewResultLine(item);
+        const isVideo = String(item.mime_type || '').startsWith('video/');
+        return (
+          <div
+            key={item.id || `${item.name || 'attachment'}-${index}`}
+            className={`flex max-w-[300px] items-center gap-2 rounded-[8px] border bg-white/85 p-2 text-left shadow-[0_8px_20px_rgba(16,19,31,0.08)] ${
+              align === 'right' ? 'border-lime-200' : 'border-slate-200'
+            }`}
+          >
+            {item.previewUrl && isVideo ? (
+              <video
+                src={item.previewUrl}
+                className="h-12 w-12 rounded-[7px] object-cover"
+                muted
+                playsInline
+                onLoadedData={() => {
+                  try {
+                    URL.revokeObjectURL(item.previewUrl);
+                  } catch (e) {
+                    console.error('attachment preview revoke failed:', e);
+                  }
+                }}
+              />
+            ) : item.previewUrl ? (
+              <img
+                src={item.previewUrl}
+                alt={item.name || '用户上传图片'}
+                className="h-12 w-12 rounded-[7px] object-cover"
+                onLoad={() => {
+                  try {
+                    URL.revokeObjectURL(item.previewUrl);
+                  } catch (e) {
+                    console.error('attachment preview revoke failed:', e);
+                  }
+                }}
+              />
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded-[7px] bg-slate-100 text-slate-500">
+                <ImageIcon className="h-5 w-5" aria-hidden="true" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-xs font-black text-slate-950">{item.name || '用户上传图片'}</p>
+              <p className="mt-0.5 line-clamp-2 text-[10px] font-semibold text-slate-500">
+                {reviewLine || `已接收 · ${item.mime_type || '图片'} ${formatBytes(Number(item.size || 0))}`}
+              </p>
             </div>
-          )}
-          <div className="min-w-0">
-            <p className="truncate text-xs font-black text-slate-950">{item.name || '用户上传图片'}</p>
-            <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
-              已接收 · {item.mime_type || '图片'} {formatBytes(Number(item.size || 0))}
-            </p>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -360,6 +360,7 @@ export const HandoffQueueCard = defineComponent({
   component: ({ props }) => {
     const { position, ahead, eta, reason, status } = props;
     const connected = status === 'connected';
+    const hasAhead = Number(ahead || 0) > 0;
     return (
       <div className={`${shell} p-4`}>
         <div className="flex items-center gap-3">
@@ -370,8 +371,8 @@ export const HandoffQueueCard = defineComponent({
             </h4>
             {!connected ? (
               <>
-                <p className="text-pretty mt-0.5 text-[10px] leading-relaxed text-slate-600">{t('transfer.queueBusy')}</p>
-                <p className="mt-0.5 text-pretty text-[10px] text-slate-600">{t('transfer.queueDesc', 'zh-CN', { ahead, eta })}</p>
+                <p className="text-pretty mt-0.5 text-[10px] leading-relaxed text-slate-600">{hasAhead ? t('transfer.queueBusy') : t('transfer.queueAssigning')}</p>
+                <p className="mt-0.5 text-pretty text-[10px] text-slate-600">{hasAhead ? t('transfer.queueDesc', 'zh-CN', { ahead, eta }) : t('transfer.queueDescZero', 'zh-CN', { eta })}</p>
                 <p className="mt-1 font-mono text-[10px] text-slate-500">{t('transfer.queuePosition', 'zh-CN', { position })}</p>
               </>
             ) : (

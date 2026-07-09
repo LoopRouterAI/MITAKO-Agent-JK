@@ -426,9 +426,15 @@ def build_public_queue_meta(queue: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def build_human_welcome(agent: Dict[str, str], brief: Optional[Dict[str, Any]] = None) -> str:
+    safe_brief = brief or {}
+    summary = _sanitize_customer_text(safe_brief.get("summary") or "").strip()
+    order = _sanitize_customer_text((safe_brief.get("orders") or [""])[0]).strip()
+    known = summary[:80] if summary else "刚才的服务记录"
+    if order:
+        known = f"{known}；关联订单 {order[:80]}"
     return (
         f"您好，我是MITAKO VIP客服{agent.get('name', '')}，工号 {agent.get('agent_id', 'CS-0000')}。"
-        f"已了解您的问题，接下来由我继续协助处理，您可以直接说明最新诉求～"
+        f"我已看到{known}，会继续帮您核对进度和处理边界。若现在有新补充，也可以直接发我。"
     )
 
 

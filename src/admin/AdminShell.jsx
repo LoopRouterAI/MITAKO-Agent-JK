@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, Route, ListOrdered, FileText, Shield, LogOut, ClipboardCheck, BarChart3, Monitor,
+  Network,
 } from 'lucide-react';
 import t from '../i18n/index.js';
 import { authFetch, clearAuthSession } from '../lib/authClient.js';
@@ -13,6 +14,7 @@ import ObserverQC from './pages/ObserverQC.jsx';
 import Approvals from './pages/Approvals.jsx';
 import Reports from './pages/Reports.jsx';
 import OpsMonitor from './pages/OpsMonitor.jsx';
+import PrivateDomainAgent from './pages/PrivateDomainAgent.jsx';
 
 const NAV = [
   { id: 'dashboard', icon: LayoutDashboard, labelKey: 'admin.navDashboard', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
@@ -23,6 +25,7 @@ const NAV = [
   { id: 'qc', icon: Shield, labelKey: 'admin.navQc', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'approvals', icon: ClipboardCheck, labelKey: 'admin.navApprovals', roles: ['super_admin', 'supervisor'] },
   { id: 'reports', icon: BarChart3, labelKey: 'admin.navReports', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
+  { id: 'privateDomain', icon: Network, labelKey: 'admin.navPrivateDomain', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'ops', icon: Monitor, labelKey: 'admin.navOps', roles: ['super_admin'] },
 ];
 
@@ -69,7 +72,7 @@ export default function AdminShell({ user, legacyRouting }) {
 
   return (
     <div className="min-h-[100dvh] flex flex-col md:flex-row text-slate-800 bg-[#fbfff4]">
-      <aside className="md:w-60 border-b md:border-b-0 md:border-r border-slate-200 bg-white/95 backdrop-blur p-4 flex md:flex-col gap-1 overflow-x-auto">
+      <aside className="md:w-60 border-b md:border-b-0 md:border-r border-slate-200 bg-white/95 backdrop-blur p-4 flex flex-wrap md:flex-col md:flex-nowrap gap-1">
         <div className="hidden md:block mb-4 px-2">
           <p className="inline-flex px-2 py-1 rounded-full bg-[var(--mitako-lime-soft)] border border-slate-200 text-xs font-black text-[var(--mitako-ink)] uppercase tracking-wider">{t('admin.badge')}</p>
           <p className="text-base font-black mt-3">{t('admin.shellTitle')}</p>
@@ -132,6 +135,7 @@ export default function AdminShell({ user, legacyRouting }) {
         {tab === 'qc' && <ObserverQC />}
         {tab === 'approvals' && <Approvals user={user} />}
         {tab === 'reports' && <Reports />}
+        {tab === 'privateDomain' && <PrivateDomainAgent />}
         {tab === 'ops' && <OpsMonitor />}
       </main>
     </div>

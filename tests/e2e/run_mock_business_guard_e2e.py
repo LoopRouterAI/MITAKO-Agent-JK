@@ -232,7 +232,7 @@ def test_local_sop_recall():
     assert "商品有伤" in joined or "售后订单" in joined, joined
 
 
-def test_compensation_200_semantic_failure_transfers_to_human():
+def test_compensation_200_semantic_failure_records_approval_without_forced_handoff():
     class FakeResponse:
         status_code = 200
 
@@ -277,9 +277,12 @@ def test_compensation_200_semantic_failure_transfers_to_human():
             agent_module.httpx.AsyncClient = original_client
 
     result = asyncio.run(run_case())
-    assert result["compensation_given"] == [], result
-    assert result["should_transfer"] is True, result
-    assert "拒绝" in result["transfer_reason"] or "未返回成功" in result["transfer_reason"], result
+    assert result.get("should_transfer") is not True, result
+    assert result["compensation_given"], result
+    proposal = result["compensation_given"][0]
+    assert proposal["status"] == "approval_required", result
+    assert proposal["requires_human_review"] is True, result
+    assert "拒绝" in proposal["msg"], result
 
 
 def test_order_and_logistics_200_semantic_failure_not_used():
@@ -1381,7 +1384,7 @@ def test_concurrent_accept_allows_single_winner():
 if __name__ == "__main__":
     test_p0_transfer_short_circuit()
     test_local_sop_recall()
-    test_compensation_200_semantic_failure_transfers_to_human()
+    test_compensation_200_semantic_failure_records_approval_without_forced_handoff()
     test_order_and_logistics_200_semantic_failure_not_used()
     test_short_public_order_ref_focuses_correct_order()
     test_compensation_only_checks_focused_order()

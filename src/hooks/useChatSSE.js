@@ -199,6 +199,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
   const currentTurnUserValRef = useRef('');
   const lastIntentRef = useRef('');
   const lastEmotionRef = useRef(2);
+  const emotionHoldUntilRef = useRef(0);
   const chatMessagesRef = useRef([]);
   const abortControllerRef = useRef(null);
   const activeTurnIdRef = useRef(0);
@@ -293,9 +294,12 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       const form = new FormData();
       form.append('user_id', currentUser);
       form.append('session_id', `session_${currentUser}`);
+      form.append('source', 'customer_chat');
+      form.append('async_review', 'true');
       form.append('file', file);
       const authOptions = await customerFetchOptions({ method: 'POST', body: form });
-      const res = await fetch('/api/v1/chat/attachments', authOptions);
+      const isReviewMaterial = file.type?.startsWith('image/') || file.type?.startsWith('video/');
+      const res = await fetch(isReviewMaterial ? '/api/v1/private-domain/review-tasks' : '/api/v1/chat/attachments', authOptions);
       if (!res.ok) {
         const err = new Error(`attachment upload failed: ${res.status}`);
         err.status = res.status;
@@ -479,6 +483,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     handoffMsgSinceRef.current = 0;
     handoffSyncedIdsRef.current = new Set();
     activeQueueIdRef.current = null;
+    emotionHoldUntilRef.current = 0;
     setVikingCapsule('记忆: 未装载');
     setVikingStyle('text-slate-500 bg-slate-100 border-slate-200/60');
     setIntentCapsule('意图: 等待中');
@@ -803,7 +808,14 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     setIntentStyle('text-indigo-500 bg-indigo-500/10 border-indigo-500/20');
     setMonitorIntent(data.intent);
 
-    const emotionVal = data.emotion_level;
+    const now = Date.now();
+    let emotionVal = Number(data.emotion_level || 2);
+    const prevEmotion = Number(lastEmotionRef.current || 2);
+    if (emotionVal >= 4) {
+      emotionHoldUntilRef.current = now + 45_000;
+    } else if (prevEmotion >= 4 && emotionVal < 4 && now < emotionHoldUntilRef.current) {
+      emotionVal = prevEmotion;
+    }
     let pillClass = 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20';
     let text = `情绪: L${emotionVal} (平稳)`;
     let mColor = 'bg-emerald-500';
@@ -967,9 +979,9 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
 
     const queueId = `handoff_queue_${Date.now()}`;
     activeQueueIdRef.current = queueId;
-    const position = queueMeta?.position ?? 2;
-    const ahead = queueMeta?.ahead ?? 1;
-    const eta = queueMeta?.eta ?? queueMeta?.eta_minutes ?? 2;
+    const position = queueMeta?.position ?? 1;
+    const ahead = queueMeta?.ahead ?? Math.max(0, position - 1);
+    const eta = queueMeta?.eta ?? queueMeta?.eta_minutes ?? 1;
 
     setChatMessages(prev => [...prev, {
       _id: queueId,
@@ -1064,7 +1076,8 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
 
   const handleSend = useCallback(async (val, sendOptions = {}) => {
     const attachmentFiles = Array.isArray(sendOptions.attachmentFiles) ? sendOptions.attachmentFiles : [];
-    const userText = val.trim() || (attachmentFiles.length ? '我上传了一张图片，想咨询这张图相关的问题。' : '');
+    const hasVideo = attachmentFiles.some(file => file.type?.startsWith('video/'));
+    const userText = val.trim() || (attachmentFiles.length ? (hasVideo ? '我上传了一段视频，请帮我创建审核任务并转客服确认。' : '我上传了一张照片，请帮我创建审核任务并转客服确认。') : '');
     if (!userText || streamInFlightRef.current) return;
     let attachments = [];
     try {
@@ -1074,7 +1087,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       setChatMessages(prev => [...prev, {
         _id: `upload_err_${Date.now()}`,
         type: 'text',
-        content: { text: '图片没有上传成功，请确认格式为 JPG/PNG/WebP/GIF 且文件不超过 12MB 后再试。' },
+        content: { text: '材料没有上传成功，请确认格式为常见图片或视频，且视频不超过 300MB 后再试。' },
         position: 'left',
         user: buildLeftUserMeta(SPEAKER.AI),
       }]);
@@ -1113,6 +1126,10 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
           body: JSON.stringify({ session_id: sessionId, content: visibleText, user_id: currentUser, attachments }),
         });
         if (!handoffMessageRes.ok) throw new Error(`handoff user-message failed: ${handoffMessageRes.status}`);
+        const handoffMessageData = await handoffMessageRes.json().catch(() => null);
+        if (handoffMessageData?.analysis) {
+          handleUnifiedAnalysis(handoffMessageData.analysis);
+        }
         await pollHandoffSync();
       } catch (e) {
         console.error('handoff user-message failed:', e);

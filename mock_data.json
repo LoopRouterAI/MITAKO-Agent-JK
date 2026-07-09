@@ -447,6 +447,98 @@
       "is_compensable": false,
       "tags": ["refund_history"],
       "thumb_gradient": "from-slate-200 to-slate-300"
+    },
+    "ORD_2026_603": {
+      "order_id": "ORD_2026_603",
+      "user_id": "usr_006",
+      "status": "minor_material_submitted",
+      "status_label": "资料已齐，等待一审",
+      "order_type": "purchase",
+      "created_at": "2026-07-01T10:00:00Z",
+      "items": [
+        {
+          "item_id": "itm_minor_stage_submitted",
+          "name": "排球少年 随机亚克力挂件 10 抽",
+          "quantity": 1,
+          "price": 220.0,
+          "thumb_emoji": "挂件"
+        }
+      ],
+      "total_amount": 220.0,
+      "expected_shukka_date": "2026-07-05",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": ["minor_refund", "minor_material_complete", "review_pending"],
+      "thumb_gradient": "from-pink-200 to-rose-300"
+    },
+    "ORD_2026_604": {
+      "order_id": "ORD_2026_604",
+      "user_id": "usr_006",
+      "status": "minor_ai_passed",
+      "status_label": "AI初筛通过，转人工退款确认",
+      "order_type": "purchase",
+      "created_at": "2026-07-02T11:20:00Z",
+      "items": [
+        {
+          "item_id": "itm_minor_stage_passed",
+          "name": "蓝色监狱 角色徽章抽选 8 抽",
+          "quantity": 1,
+          "price": 176.0,
+          "thumb_emoji": "徽章"
+        }
+      ],
+      "total_amount": 176.0,
+      "expected_shukka_date": "2026-07-06",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": ["minor_refund", "ai_review_passed", "human_refund_pending"],
+      "thumb_gradient": "from-emerald-200 to-teal-300"
+    },
+    "ORD_2026_605": {
+      "order_id": "ORD_2026_605",
+      "user_id": "usr_006",
+      "status": "minor_low_confidence",
+      "status_label": "AI低置信，转人工复查",
+      "order_type": "purchase",
+      "created_at": "2026-07-03T12:40:00Z",
+      "items": [
+        {
+          "item_id": "itm_minor_stage_low_confidence",
+          "name": "名侦探柯南 随机色纸 12 抽",
+          "quantity": 1,
+          "price": 288.0,
+          "thumb_emoji": "色纸"
+        }
+      ],
+      "total_amount": 288.0,
+      "expected_shukka_date": "2026-07-08",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": ["minor_refund", "low_confidence_review", "manual_recheck"],
+      "thumb_gradient": "from-amber-200 to-orange-300"
+    },
+    "ORD_2026_606": {
+      "order_id": "ORD_2026_606",
+      "user_id": "usr_006",
+      "status": "minor_review_rejected",
+      "status_label": "资料审核未通过，可补充复核",
+      "order_type": "purchase",
+      "created_at": "2026-07-04T13:15:00Z",
+      "items": [
+        {
+          "item_id": "itm_minor_stage_rejected",
+          "name": "原神 角色流麻随机 6 抽",
+          "quantity": 1,
+          "price": 168.0,
+          "thumb_emoji": "流麻"
+        }
+      ],
+      "total_amount": 168.0,
+      "expected_shukka_date": "2026-07-09",
+      "delay_days": 0,
+      "is_compensable": false,
+      "tags": ["minor_refund", "review_rejected", "needs_material_retry"],
+      "thumb_gradient": "from-slate-200 to-zinc-300"
     }
   },
   "logistics": {
@@ -561,6 +653,46 @@
         {"time": "2026-06-25T21:18:00Z", "status": "订单已支付"},
         {"time": "2026-06-30T09:00:00Z", "status": "家长发起未成年人退款诉求"},
         {"time": "2026-07-01T16:30:00Z", "status": "待补充监护关系、支付凭证与承诺材料"}
+      ]
+    },
+    "ORD_2026_603": {
+      "order_id": "ORD_2026_603",
+      "carrier": "售后审核",
+      "tracking_number": "AS_MINOR_2606603",
+      "status": "minor_material_submitted",
+      "timeline": [
+        {"time": "2026-07-01T10:00:00Z", "status": "监护资料、支付凭证和承诺书已提交"},
+        {"time": "2026-07-01T18:00:00Z", "status": "材料完整性初筛通过，等待客服一审"}
+      ]
+    },
+    "ORD_2026_604": {
+      "order_id": "ORD_2026_604",
+      "carrier": "售后审核",
+      "tracking_number": "AS_MINOR_2606604",
+      "status": "minor_ai_passed",
+      "timeline": [
+        {"time": "2026-07-02T11:20:00Z", "status": "材料完整性和订单归属初筛通过"},
+        {"time": "2026-07-02T18:30:00Z", "status": "已转人工确认退款边界和账户注销影响"}
+      ]
+    },
+    "ORD_2026_605": {
+      "order_id": "ORD_2026_605",
+      "carrier": "售后审核",
+      "tracking_number": "AS_MINOR_2606605",
+      "status": "minor_low_confidence",
+      "timeline": [
+        {"time": "2026-07-03T12:40:00Z", "status": "材料存在关系链疑点"},
+        {"time": "2026-07-03T19:10:00Z", "status": "低置信初筛，已转人工复查户口本/出生证明关系"}
+      ]
+    },
+    "ORD_2026_606": {
+      "order_id": "ORD_2026_606",
+      "carrier": "售后审核",
+      "tracking_number": "AS_MINOR_2606606",
+      "status": "minor_review_rejected",
+      "timeline": [
+        {"time": "2026-07-04T13:15:00Z", "status": "初审发现发票备注信息与绑定手机号不一致"},
+        {"time": "2026-07-04T20:00:00Z", "status": "审核未通过，用户可补充实名归属证明后申请复核"}
       ]
     }
   },

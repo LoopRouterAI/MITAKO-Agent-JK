@@ -7,7 +7,23 @@ import re
 from typing import Any, Dict, List, Optional
 
 
-BUSINESS_ACTION_WORDS = ("退款", "退货退款", "退货", "补发", "拒赔", "赔付", "补偿", "予以支持", "直接处理")
+BUSINESS_ACTION_WORDS = (
+    "退款",
+    "退货退款",
+    "退货",
+    "补发",
+    "拒赔",
+    "赔付",
+    "补偿",
+    "予以支持",
+    "直接处理",
+    "拒绝",
+    "驳回",
+    "通过审核",
+    "审核通过",
+    "同意",
+    "定责",
+)
 
 
 def _h(value: Any) -> str:

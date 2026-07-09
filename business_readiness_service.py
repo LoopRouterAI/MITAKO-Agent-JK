@@ -24,6 +24,7 @@ def classify_sop_branch(text: str, intent: str = "") -> Dict[str, Any]:
         ("account_binding", "账号换绑", ["换绑", "账号", "手机号", "改绑"], ["create_ticket"], ["auto_change_account"]),
         ("damage", "商品有伤", ["破损", "有伤", "划痕", "烂了", "瑕疵", "开箱"], ["create_after_sales_card"], ["auto_refund", "auto_reissue"]),
         ("missing", "漏发/发错货", ["漏发", "少发", "缺件", "发错", "错货"], ["create_after_sales_card", "create_warehouse_task"], ["auto_reissue"]),
+        ("notification_preference", "通知渠道与服务建议", ["电话提醒", "电话通知", "打电话", "来电", "电话联系", "手机提醒", "短信提醒"], ["record_service_preference", "create_qc_sop_proposal"], ["promise_phone_call"]),
         ("logistics", "物流异常", ["物流", "没收到", "快递", "丢件", "拒签", "催发货", "出荷", "清关", "通关", "仓库", "库房", "入仓", "发货慢", "物流慢"], ["create_warehouse_task"], ["promise_delivery_date"]),
         ("refund", "申请退款", ["退款", "退钱", "全额", "退货退款", "退货", "不好", "不想要"], ["create_refund_card"], ["auto_cash_refund"]),
     ]
@@ -167,6 +168,16 @@ def _review_design(sop_state: Dict[str, Any], fixtures: List[Dict[str, Any]], te
             ],
         })
         return base
+    if ticket_type == "notification_preference":
+        base.update({
+            "scene": "通知渠道与服务建议",
+            "optimized_checks": [
+                "确认用户希望在物流、出库或审核更新时被主动提醒",
+                "仅承诺当前可用的站内信/订单消息，电话或短信需授权和渠道能力确认",
+                "将代表性诉求沉淀为客服主管/产品复盘建议",
+            ],
+        })
+        return base
     if ticket_type == "product_consult":
         base.update({
             "scene": "商品/库存/预售咨询",
@@ -265,6 +276,13 @@ def build_sop_checklist(sop_state: Dict[str, Any], order: Dict[str, Any], fixtur
             "已生成履约协同任务，待业务接口联通后自动派发",
             "仓储协同",
         ))
+    if ticket_type == "notification_preference":
+        checklist.append(_checklist_item(
+            "服务建议记录",
+            "ready",
+            "已记录用户希望物流更新后被电话/短信提醒；真实触达需确认授权和渠道能力",
+            "客服主管",
+        ))
     if ticket_type == "product_consult":
         checklist.append(_checklist_item(
             "商品信息核对",
@@ -297,6 +315,14 @@ def _task_center(action: Dict[str, Any], order_id: str, ticket_type: str) -> Dic
             "owner_role": "售后/升级处理组",
             "sla_minutes": 120,
             "next_step": "VIP客服确认材料、金额和账号归属后再在业务系统操作",
+        }
+    if action.get("type") == "service_feedback":
+        return {
+            "task_id": f"QC-TASK-{_stable_key(order_id, ticket_type, action.get('type', ''))[:8]}",
+            "status": "ready_for_review",
+            "owner_role": "客服主管/产品复盘",
+            "sla_minutes": 1440,
+            "next_step": "主管复核是否开放电话/短信提醒能力；未联通前只作为服务建议记录",
         }
     return {}
 
@@ -428,6 +454,12 @@ def run_business_flow(state: Dict[str, Any], fixtures: List[str] | None = None) 
             "type": "product_info",
             "requires_human": False,
             "reason": "按商品信息、预售说明和售后规则回答，不生成订单物流处理单",
+        }
+    elif ticket_type == "notification_preference":
+        action = {
+            "type": "service_feedback",
+            "requires_human": False,
+            "reason": "已记录通知渠道偏好和服务建议，电话/短信触达需客服主管确认能力与授权",
         }
     elif ticket_type in {"refund", "minor_refund", "account_binding"}:
         action = {

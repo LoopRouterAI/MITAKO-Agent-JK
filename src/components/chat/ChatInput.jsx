@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Send, Headphones, Plus, Package, Image, Camera, MapPin, ShoppingBag, X } from 'lucide-react';
+import { Send, Headphones, Plus, Package, Image, Camera, MapPin, ShoppingBag, Video, X } from 'lucide-react';
 import t from '../../i18n/index.js';
 
 const DEMO_PRODUCTS = [
@@ -215,6 +215,7 @@ export default function ChatInput({
   const [pendingAttachments, setPendingAttachments] = useState([]);
   const photoInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const videoInputRef = useRef(null);
 
   const submit = () => {
     if ((!inputVal.trim() && pendingAttachments.length === 0) || isAwaitingStream) return;
@@ -225,11 +226,11 @@ export default function ChatInput({
     setActiveSheet(null);
   };
 
-  const handleImagePick = (event, prefix) => {
+  const handleFilePick = (event, prefix) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setPendingAttachments([file]);
-    setInputVal(inputVal.trim() ? inputVal : `${prefix}我想咨询这张图相关的问题：`);
+    setInputVal(inputVal.trim() ? inputVal : `${prefix}${t('input.materialTemplateSuffix')}`);
     event.target.value = '';
     setToolsOpen(false);
     setActiveSheet(null);
@@ -299,12 +300,13 @@ export default function ChatInput({
         </div>
       )}
 
-      <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={e => handleImagePick(e, t('input.photoTemplate'))} />
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handleImagePick(e, t('input.cameraTemplate'))} />
+      <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={e => handleFilePick(e, t('input.photoTemplate'))} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handleFilePick(e, t('input.cameraTemplate'))} />
+      <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={e => handleFilePick(e, t('input.videoTemplate'))} />
 
       {pendingAttachments.length > 0 && (
         <div className="flex items-center justify-between gap-2 rounded-[8px] border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
-          <span className="min-w-0 truncate">{t('input.attachmentReady')}：{pendingAttachments[0].name}</span>
+          <span className="min-w-0 truncate">{t(pendingAttachments[0]?.type?.startsWith('video/') ? 'input.videoReady' : 'input.attachmentReady')}：{pendingAttachments[0].name}</span>
           <button
             type="button"
             onClick={() => setPendingAttachments([])}
@@ -366,7 +368,7 @@ export default function ChatInput({
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
-            <div className={`grid ${hasOrder ? 'grid-cols-5' : 'grid-cols-4'} gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-[0_10px_24px_rgba(127,164,49,.12)]`}>
+            <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-[0_10px_24px_rgba(127,164,49,.12)] sm:grid-cols-6">
           <button type="button" data-testid="chat-tool-browse" onClick={openProducts} className={`${toolButtonClass} bg-[var(--mitako-lime-soft)]`}>
             <ShoppingBag className="h-4 w-4" aria-hidden="true" />
             {t('input.toolBrowse')}
@@ -384,6 +386,10 @@ export default function ChatInput({
           <button type="button" data-testid="chat-tool-camera" onClick={() => cameraInputRef.current?.click()} className={toolButtonClass}>
             <Camera className="h-4 w-4" aria-hidden="true" />
             {t('input.toolCamera')}
+          </button>
+          <button type="button" data-testid="chat-tool-video" onClick={() => videoInputRef.current?.click()} className={toolButtonClass}>
+            <Video className="h-4 w-4" aria-hidden="true" />
+            {t('input.toolVideo')}
           </button>
           <button type="button" data-testid="chat-tool-address" onClick={openAddresses} className={toolButtonClass}>
             <MapPin className="h-4 w-4" aria-hidden="true" />

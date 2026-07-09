@@ -13,8 +13,30 @@ function formatAttachmentSize(size = 0) {
   return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
+function reviewStatusLabel(status) {
+  if (status === 'REVIEW_COMPLETED') return '视觉审核完成';
+  if (status === 'REVIEW_FAILED') return '视觉审核未完成';
+  if (status === 'MATERIAL_READY') return '材料已接收';
+  return status || '已接收';
+}
+
+function reviewResultLine(attachment) {
+  if (attachment?.kind !== 'review_task') return '';
+  const review = attachment.review_result?.review || {};
+  const summary = review.summary || {};
+  const brief = review.agent_brief || {};
+  const parts = [reviewStatusLabel(attachment.status)];
+  if (brief.conclusion) parts.push(brief.conclusion);
+  else if (summary.needs_human_review) parts.push('需人工复核');
+  if (brief.next_step) parts.push(brief.next_step);
+  if (review.report?.html_url) parts.push('报告已生成');
+  return parts.filter(Boolean).join(' · ');
+}
+
 function DeskAttachmentPreview({ attachment }) {
   const [src, setSrc] = useState('');
+  const reviewLine = reviewResultLine(attachment);
+  const isVideo = String(attachment?.mime_type || '').startsWith('video/');
   useEffect(() => {
     let alive = true;
     let objectUrl = '';
@@ -39,7 +61,9 @@ function DeskAttachmentPreview({ attachment }) {
 
   return (
     <div className="mt-2 flex max-w-[280px] items-center gap-2 rounded-[8px] border border-slate-200 bg-white p-2 shadow-[0_8px_18px_rgba(16,19,31,0.06)]">
-      {src ? (
+      {src && isVideo ? (
+        <video src={src} className="h-14 w-14 rounded-[7px] object-cover" muted playsInline />
+      ) : src ? (
         <img src={src} alt={attachment?.name || '用户上传图片'} className="h-14 w-14 rounded-[7px] object-cover" />
       ) : (
         <div className="flex h-14 w-14 items-center justify-center rounded-[7px] bg-slate-100 text-slate-500">
@@ -48,8 +72,8 @@ function DeskAttachmentPreview({ attachment }) {
       )}
       <div className="min-w-0">
         <p className="truncate text-xs font-black text-slate-950">{sanitizePublicText(attachment?.name || '用户上传图片')}</p>
-        <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
-          已接收 · {sanitizePublicText(attachment?.mime_type || '图片')} {formatAttachmentSize(attachment?.size)}
+        <p className="mt-0.5 line-clamp-2 text-[10px] font-semibold text-slate-500">
+          {sanitizePublicText(reviewLine || `已接收 · ${attachment?.mime_type || '图片'} ${formatAttachmentSize(attachment?.size)}`)}
         </p>
       </div>
     </div>

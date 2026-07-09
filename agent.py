@@ -250,6 +250,11 @@ def _extract_explicit_order_ref(text: str) -> str:
     return ""
 
 
+def _recent_user_context(messages: List[Dict[str, str]], limit: int = 6) -> str:
+    texts = [m.get("content", "") for m in messages[-limit:] if m.get("role") == "user"]
+    return "\n".join(texts)
+
+
 def _order_matches_ref(order: Dict[str, Any], ref: str) -> bool:
     target = _compact_order_ref(ref)
     if not target:
@@ -323,6 +328,13 @@ PUBLIC_REPLY_BLOCKED_TERMS = [
     _runtime_word("channel"),
     _runtime_word("base", "_", "url"),
     _runtime_word("handoff", "_", "token"),
+    _runtime_chars(0x6700, 0x65b0, 0x8282, 0x70b9),
+    _runtime_chars(0x5904, 0x7406, 0x8282, 0x70b9),
+    _runtime_chars(0x7cfb, 0x7edf, 0x63d0, 0x793a),
+    _runtime_chars(0x7b56, 0x7565, 0x8bf4, 0x660e),
+    _runtime_chars(0x4efb, 0x52a1, 0x6307, 0x4ee4),
+    _runtime_chars(0x9700, 0x89e3, 0x91ca, 0x89c4, 0x5219),
+    _runtime_chars(0x4fdd, 0x7559, 0x4eba, 0x5de5, 0x590d, 0x6838, 0x5165, 0x53e3),
     _runtime_chars(0x5916, 0x5305),
     _runtime_chars(0x5185, 0x90e8),
     _runtime_chars(0x539f, 0x59cb, 0x65e5, 0x5fd7),
@@ -366,7 +378,7 @@ def _build_grounded_service_reply(state: AgentState) -> str:
     latest = timeline[-1].get("status") if timeline and isinstance(timeline[-1], dict) else ""
 
     if status_label and latest:
-        return f"让你等到这么焦虑，真的抱歉。我已核到{item_name or '这笔订单'}当前是#{status_label}#，最新节点：#{latest}#。我会继续按物流/仓储核查推进，有新进展第一时间同步。"
+        return f"让你等到这么焦虑，真的抱歉。我已核到{item_name or '这笔订单'}当前是#{status_label}#，物流最新进展是#{latest}#。我会继续按物流/仓储核查推进，有新进展第一时间同步。"
     if status_label:
         return f"让你等到这么焦虑，真的抱歉。我已先核到{item_name or '这笔订单'}当前是#{status_label}#。我会继续跟进发货、清关和仓储节点，有新进展第一时间同步。"
     return "让你等到这么焦虑，真的抱歉。我已经记录当前情况，会继续按订单、物流和仓储节点帮你核实，有新进展第一时间同步。"
@@ -385,6 +397,29 @@ def _build_minor_refund_material_reply() -> str:
 
 def _build_damage_material_reply() -> str:
     return "商品有伤我先帮您整理证据：商品整体图、问题部位近景、外包装照片、完整开箱视频和订单信息。退款、补发或拒赔需要售后客服按材料复核后确认。"
+
+
+def _is_notification_channel_request(text: str) -> bool:
+    raw = str(text or "")
+    return any(k in raw for k in ["电话提醒", "电话通知", "打电话", "来电", "电话联系", "手机提醒", "短信提醒"]) or (
+        "提醒" in raw and any(k in raw for k in ["物流", "发货", "出库", "更新", "电话", "短信", "站内信"])
+    )
+
+
+def _build_notification_channel_reply(state: AgentState) -> str:
+    order_data = state.get("order_data") or {}
+    orders = order_data.get("orders") or []
+    order = orders[0] if orders else {}
+    item_name = ""
+    if order.get("items"):
+        item_name = order["items"][0].get("name") or ""
+    target = item_name or "这笔订单"
+    status_label = order.get("status_label") or order.get("status") or ""
+    status_part = f"我已把{target}当前#{status_label}#一起记录。" if status_label else f"我已把{target}的提醒诉求记录下来。"
+    return (
+        f"{status_part}电话提醒目前需要客服确认授权和可用渠道；我会先按站内信/订单消息同步进展，"
+        "并把“希望物流更新后电话联系”作为服务建议提交复核。"
+    )
 
 
 def _reply_conflicts_with_order_facts(reply: str, state: AgentState) -> bool:
@@ -493,40 +528,45 @@ async def classify_intent(state: AgentState, config: RunnableConfig) -> Dict[str
         await queue.put({"type": "node_start", "node": "intent_classify", "desc": "基于轻量规则的初步意图分析中..."})
 
     last_user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    recent_user_text = _recent_user_context(state.get("messages") or [])
+    short_negative_turn = len(last_user_msg.strip()) <= 18 or any(k in last_user_msg for k in ["md", "MD", "废话", "脑子", "敷衍", "垃圾"])
+    context_msg = f"{recent_user_text}\n{last_user_msg}" if short_negative_turn else last_user_msg
 
     intent = "闲聊互动"
     emotion_level = 2
 
     if any(k in last_user_msg for k in ["我要人工", "人工客服", "真人客服", "VIP客服", "不想和机器人", "转人工", "转VIP客服", "找人工"]):
         intent = "VIP客服请求"
+    elif _is_notification_channel_request(last_user_msg):
+        intent = "通知渠道/服务建议"
     elif "引用订单" in last_user_msg or re.search(r"ORD_\d{4}_\d+", last_user_msg) or _extract_explicit_order_ref(last_user_msg):
         intent = "物流追踪/催发货"
     # 规则快速匹配
     elif (
-        any(k in last_user_msg for k in ["还没下单", "库存", "预售", "规格", "想买"])
-        or ("商品" in last_user_msg and any(k in last_user_msg for k in ["咨询", "问一下", "能不能退"]))
-    ) and not any(k in last_user_msg for k in ["订单", "物流", "发货", "清关", "破损", "划痕", "有伤", "瑕疵"]):
+        any(k in context_msg for k in ["还没下单", "库存", "预售", "规格", "想买"])
+        or ("商品" in context_msg and any(k in context_msg for k in ["咨询", "问一下", "能不能退"]))
+    ) and not any(k in context_msg for k in ["订单", "物流", "发货", "清关", "破损", "划痕", "有伤", "瑕疵"]):
         intent = "售前商品咨询"
-    elif any(k in last_user_msg for k in ["未成年", "孩子", "小孩", "家长", "监护人"]):
+    elif any(k in context_msg for k in ["未成年", "孩子", "小孩", "家长", "监护人"]):
         intent = "退款退货/未成年人退款"
-    elif any(k in last_user_msg for k in ["起诉", "黑猫", "12315", "曝光"]):
+    elif any(k in context_msg for k in ["起诉", "黑猫", "12315", "曝光"]):
         intent = "投诉升级"
-    elif any(k in last_user_msg for k in ["盲盒", "普款", "改概率", "吞烫", "中奖率"]):
+    elif any(k in context_msg for k in ["盲盒", "普款", "改概率", "吞烫", "中奖率", "抽赏"]):
         intent = "盲盒相关/吞烫质疑"
-    elif any(k in last_user_msg for k in ["破损", "烂了", "划痕", "有伤", "瑕疵", "开箱视频", "照片", "视频审核", "剪辑", "离开镜头"]):
+    elif any(k in context_msg for k in ["破损", "烂了", "划痕", "有伤", "瑕疵", "开箱视频", "照片", "视频审核", "剪辑", "离开镜头"]):
         intent = "换货补发/商品破损"
-    elif any(k in last_user_msg for k in ["出荷", "发货", "跑路", "没收到", "物流", "清关", "通关", "仓库", "库房", "入仓", "慢"]):
+    elif any(k in context_msg for k in ["出荷", "发货", "跑路", "没收到", "物流", "清关", "通关", "仓库", "库房", "入仓", "慢"]):
         intent = "物流追踪/催发货"
-    elif any(k in last_user_msg for k in ["补偿", "赔偿", "免邮"]):
+    elif any(k in context_msg for k in ["补偿", "赔偿", "免邮"]):
         intent = "退款退货/补偿"
-    elif any(k in last_user_msg for k in ["退款", "退钱", "全额", "退货", "不好", "不想要"]):
+    elif any(k in context_msg for k in ["退款", "退钱", "全额", "退货", "不好", "不想要"]):
         intent = "退款退货/申请退款"
-    elif any(k in last_user_msg for k in ["置换区", "重复", "交换"]):
+    elif any(k in context_msg for k in ["置换区", "重复", "交换"]):
         intent = "盲盒相关/置换区咨询"
 
-    if any(k in last_user_msg for k in ["垃圾", "跑路", "无语", "恶心", "气人", "太慢", "一直拖", "等疯了", "毛线", "生气", "串单", "串了", "完全不对", "离谱", "再这样", "别敷衍"]):
+    if any(k in context_msg for k in ["垃圾", "跑路", "无语", "恶心", "气人", "太慢", "一直拖", "等疯了", "毛线", "生气", "串单", "串了", "完全不对", "离谱", "再这样", "别敷衍", "废话", "脑子有病", "有病"]):
         emotion_level = 4
-    if any(k in last_user_msg for k in ["12315", "起诉", "黑猫", "曝光", "报警"]):
+    if any(k in context_msg for k in ["12315", "起诉", "黑猫", "曝光", "报警"]):
         emotion_level = 5
 
     emotion_level = max(1, min(6, emotion_level))
@@ -637,7 +677,7 @@ async def query_order_system(state: AgentState, config: RunnableConfig) -> Dict[
             active_order_id = match.group(0)
     focus_ref = active_order_id or explicit_order_ref
 
-    should_query = any(k in intent for k in ["订单", "物流", "发货", "预售", "退款", "换货", "未成年人", "破损"]) or "引用订单" in last_user_msg or bool(focus_ref)
+    should_query = any(k in intent for k in ["订单", "物流", "发货", "预售", "退款", "换货", "未成年人", "破损", "通知", "提醒"]) or "引用订单" in last_user_msg or bool(focus_ref)
     if not should_query:
         return {"order_data": {}}
 
@@ -785,6 +825,8 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
         sop_results.append("【盲盒吞烫质疑应对】：先承接用户失落和质疑；禁止说“绝对随机/绝对无人工干预”等绝对化背书，禁止承诺积分包、挂件或补偿到账。只能说明以活动公示规则和可复核记录为准，可协助提交客服复核。")
     elif "破损" in intent:
         sop_results.append("【退换货破损SOP】：引导用户拍照上传包装破损图及商品细节划痕，核实材料后进入补发、换货或退款的VIP客服确认流程。")
+    elif "通知渠道" in intent or "服务建议" in intent:
+        sop_results.append("【通知渠道诉求SOP】：先确认用户希望被主动提醒的节点；当前可先记录站内信/订单消息触达，电话或短信提醒需客服确认授权、渠道能力和隐私合规后再执行；将代表性诉求沉淀为主管复核建议。")
 
     if not sop_results:
         sop_results.append("【日常问答指南】：谷子圈黑话术语，例如吧唧（徽章）、出荷（出厂发货）。")
@@ -894,9 +936,11 @@ async def check_compensation_eligibility(state: AgentState, config: RunnableConf
                             "order_id": compensable_order["order_id"],
                             "amount": 100.0,
                             "type": "virtual_pack",
+                            "status": "submitted",
+                            "requires_human_review": False,
                             "msg": res_data.get(
                                 "message",
-                                f"已按{tier_label}会员权益向系统提交积分与优先发货特权申请，正在加急审核挂载中！"
+                                f"已按{tier_label}会员权益提交关怀建议。"
                             )
                         }
                         compensation_given.append(comp_info)
@@ -905,21 +949,28 @@ async def check_compensation_eligibility(state: AgentState, config: RunnableConf
                         profile["behavior_patterns"]["compensations"] = history_compensations
                         viking_db.write_json(profile_uri, profile)
                     else:
-                        business_failure_reason = res_data.get("message") or res_data.get("detail") or "补偿申请接口未返回成功，需VIP客服确认后再处理"
+                        proposal_msg = res_data.get("message") or res_data.get("detail") or "补偿申请需客服确认后再生效"
+                        compensation_given.append({
+                            "order_id": compensable_order["order_id"],
+                            "amount": 100.0,
+                            "type": "virtual_pack",
+                            "status": "approval_required",
+                            "requires_human_review": True,
+                            "msg": proposal_msg,
+                        })
             except Exception as e:
                 print(f"[Business API] 发放补偿出错: {e}")
-                business_failure_reason = "补偿申请接口暂不可用，需VIP客服确认后再处理"
+                business_failure_reason = "补偿建议接口暂不可用，已保留订单进度核查，不因此中断AI服务"
 
             if business_failure_reason:
                 if queue:
                     await queue.put({
                         "type": "node_end",
                         "node": "check_compensation",
-                        "desc": "补偿申请需VIP客服复核确认。",
+                        "desc": "补偿建议暂未提交成功，不影响继续同步订单进度。",
                     })
                 return {
                     "compensation_given": [],
-                    "should_transfer": True,
                     "transfer_reason": business_failure_reason,
                 }
 
@@ -927,7 +978,7 @@ async def check_compensation_eligibility(state: AgentState, config: RunnableConf
                 await queue.put({
                     "type": "node_end",
                     "node": "check_compensation",
-                    "desc": "已成功与库房确认，可以为您挂载第一发货顺位特权，并向系统成功提交 500 积分赔付申请！"
+                    "desc": "已形成补偿/关怀建议，需客服或业务系统确认后才会生效。"
                 })
         else:
             if queue:
@@ -985,7 +1036,7 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
 业务详情数据：
 - 用户订单: {json.dumps(order_data, ensure_ascii=False)}
 - 实时物流状态: {json.dumps(logistics_data, ensure_ascii=False)}
-- 本轮已自动发放的补偿: {json.dumps(compensation_given, ensure_ascii=False)}
+- 本轮补偿/关怀建议: {json.dumps(compensation_given, ensure_ascii=False)}
 - 是否满足转VIP客服条件: {"是" if should_transfer else "否"}
 - 转VIP客服原因说明: {transfer_reason}
 - 用户本轮真实上传附件: {json.dumps(attachments, ensure_ascii=False)}
@@ -1019,7 +1070,10 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
         updates["intent"] = str(analysis.get("intent"))
     if analysis.get("emotion_level"):
         try:
-            updates["emotion_level"] = max(1, min(6, int(analysis.get("emotion_level"))))
+            parsed_level = max(1, min(6, int(analysis.get("emotion_level"))))
+            if emotion_level >= 4 and parsed_level < 4:
+                parsed_level = emotion_level
+            updates["emotion_level"] = parsed_level
         except Exception:
             pass
     if queue and (analysis.get("intent") or analysis.get("emotion_level") or analysis.get("should_transfer")):
@@ -1065,10 +1119,14 @@ async def safety_review_agent(state: AgentState, config: RunnableConfig) -> Dict
         reply = re.sub(date_pattern, r"小蛟会密切跟进，有确切消息第一时间通知你~", reply)
         modified = True
 
-    privacy_pattern = r"(其他用户|别人的订单|内部|confidential)"
-    if re.search(privacy_pattern, reply, re.IGNORECASE) or _customer_reply_has_internal_text(_strip_reply_analysis(reply)):
+    privacy_pattern = r"(其他用户|别人的订单|confidential)"
+    if re.search(privacy_pattern, reply, re.IGNORECASE):
         reply = "非常抱歉，为了保障信息安全，小蛟无法透露这些处理细节或他人订单数据哦。"
         safety_check_result = "block"
+        modified = True
+    elif _customer_reply_has_internal_text(_strip_reply_analysis(reply)):
+        reply = _build_grounded_service_reply(state)
+        safety_check_result = "pass"
         modified = True
 
     liability_pattern = r"(平台的责任|我们的错|公司的问题|违法|违约)"
@@ -1095,6 +1153,12 @@ async def safety_review_agent(state: AgentState, config: RunnableConfig) -> Dict
         clean = sanitize_customer_reply(reply)
         if not any(k in clean for k in ["整体图", "近景", "开箱视频"]):
             reply = _build_damage_material_reply()
+            modified = True
+
+    if "通知渠道" in intent or _is_notification_channel_request(last_user_msg):
+        clean = sanitize_customer_reply(reply)
+        if not all(k in clean for k in ["电话", "记录"]) or not any(k in clean for k in ["站内信", "订单消息", "客服确认"]):
+            reply = _build_notification_channel_reply(state)
             modified = True
 
     if _reply_conflicts_with_order_facts(reply, state):
@@ -1190,7 +1254,7 @@ async def update_user_memory(state: AgentState, config: RunnableConfig) -> Dict[
         })
         history.append({
             "role": "assistant",
-            "content": state["reply_draft"],
+            "content": sanitize_customer_reply(state["reply_draft"]),
             "memes": state["meme_tags"]
         })
         profile["chat_history"] = history[-20:]

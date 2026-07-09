@@ -427,9 +427,17 @@ def build_user_prompt(case: Dict[str, Any], frame_sample: Dict[str, Any], frames
 """
 
 
+def _first_env(names: Iterable[str]) -> str:
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
 def gemini_channels() -> List[Dict[str, Any]]:
     channels: List[Dict[str, Any]] = []
-    gateway_key = os.getenv("VISION_REVIEW_API_KEY", "")
+    gateway_key = _first_env(("VISION_REVIEW_API_KEY", "APIYI_API_KEY", "BROUTER_API_KEY", "BRouter_API_KEY"))
     if gateway_key:
         base = os.getenv("VISION_REVIEW_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
         channels.append(
@@ -441,7 +449,7 @@ def gemini_channels() -> List[Dict[str, Any]]:
                 "soft_retries": 3,
             }
         )
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    gemini_key = _first_env(("GEMINI_API_KEY", "GOOGLE_API_KEY"))
     if gemini_key:
         base = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
         channels.append(
@@ -833,7 +841,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     if not video.exists():
         raise SystemExit(f"视频不存在：{video}")
     if not gemini_channels():
-        raise SystemExit("未找到 Gemini 渠道 Key：需要 VISION_REVIEW_API_KEY 或 GEMINI_API_KEY")
+        raise SystemExit("未找到 Gemini 渠道 Key：需要 VISION_REVIEW_API_KEY、GEMINI_API_KEY、GOOGLE_API_KEY、APIYI_API_KEY 或 BROUTER_API_KEY")
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
     run_dir = TMP_DIR / stamp
