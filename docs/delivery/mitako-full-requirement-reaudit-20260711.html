@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MITAKO 全量需求复验报告 · 2026-07-11</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172026;
+      --muted: #637078;
+      --line: #dce3e7;
+      --soft: #f4f7f8;
+      --paper: #ffffff;
+      --pass: #13795b;
+      --pass-bg: #e9f7f1;
+      --partial: #a15c00;
+      --partial-bg: #fff4df;
+      --external: #245ea8;
+      --external-bg: #eaf2ff;
+      --pending: #a63b36;
+      --pending-bg: #fff0ee;
+      --accent: #cbef45;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: #edf1f2;
+      color: var(--ink);
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+      font-size: 15px;
+      line-height: 1.65;
+      letter-spacing: 0;
+    }
+    a { color: #145da0; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    button { font: inherit; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 54px;
+      padding: 8px max(20px, calc((100vw - 1240px) / 2));
+      color: #fff;
+      background: #172026;
+      border-bottom: 3px solid var(--accent);
+    }
+    .topbar strong { font-size: 14px; }
+    .topbar nav { display: flex; gap: 14px; flex-wrap: wrap; }
+    .topbar a { color: #dce7eb; font-size: 12px; text-decoration: none; }
+    main {
+      width: min(1240px, calc(100% - 32px));
+      margin: 24px auto 56px;
+      background: var(--paper);
+      border: 1px solid #d5dde1;
+      box-shadow: 0 12px 32px rgba(22, 36, 44, .08);
+    }
+    header {
+      padding: 34px 38px 30px;
+      background: #f8faf8;
+      border-bottom: 1px solid var(--line);
+    }
+    .eyebrow { margin: 0 0 8px; color: #4e5e64; font-size: 12px; font-weight: 800; }
+    h1 { margin: 0; max-width: 880px; font-size: 34px; line-height: 1.25; letter-spacing: 0; }
+    .subtitle { max-width: 900px; margin: 14px 0 0; color: var(--muted); font-size: 16px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 20px; color: #536168; font-size: 12px; }
+    section { padding: 30px 38px; border-bottom: 1px solid var(--line); }
+    section:last-child { border-bottom: 0; }
+    h2 { margin: 0 0 16px; font-size: 22px; line-height: 1.3; }
+    h3 { margin: 24px 0 10px; font-size: 17px; }
+    p { margin: 8px 0; }
+    .verdict {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 22px;
+      align-items: center;
+      padding: 20px;
+      background: #172026;
+      color: #fff;
+      border-left: 6px solid var(--accent);
+    }
+    .verdict-mark { font-size: 30px; font-weight: 900; line-height: 1.15; }
+    .verdict p { color: #dce5e8; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      margin-top: 18px;
+      background: var(--line);
+      border: 1px solid var(--line);
+    }
+    .stat { min-height: 100px; padding: 18px; background: #fff; }
+    .stat strong { display: block; font-size: 28px; line-height: 1; }
+    .stat span { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .stat.pass strong { color: var(--pass); }
+    .stat.partial strong { color: var(--partial); }
+    .stat.external strong { color: var(--external); }
+    .stat.pending strong { color: var(--pending); }
+    .callout { padding: 14px 16px; background: var(--soft); border-left: 4px solid #708088; }
+    .callout.warn { background: var(--partial-bg); border-color: var(--partial); }
+    .callout.danger { background: var(--pending-bg); border-color: var(--pending); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 18px; }
+    .chip, .filter {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 5px 10px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .pass { color: var(--pass); background: var(--pass-bg); }
+    .partial { color: var(--partial); background: var(--partial-bg); }
+    .external { color: var(--external); background: var(--external-bg); }
+    .pending { color: var(--pending); background: var(--pending-bg); }
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .filter { cursor: pointer; color: #334148; background: #fff; border-color: var(--line); }
+    .filter[aria-pressed="true"] { color: #172026; background: var(--accent); border-color: #a9ca2f; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); }
+    table { width: 100%; border-collapse: collapse; min-width: 860px; }
+    th, td { padding: 11px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { position: sticky; top: 53px; z-index: 2; color: #44535a; background: #eef3f4; font-size: 12px; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: #fbfcfc; }
+    td:nth-child(1) { width: 52px; color: #718087; }
+    td:nth-child(2) { width: 200px; font-weight: 800; }
+    td:nth-child(3) { width: 120px; }
+    td:nth-child(5) { width: 230px; color: #56656c; font-size: 13px; }
+    .test-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .test-row { padding: 14px 16px; border: 1px solid var(--line); background: #fff; }
+    .test-row strong { display: block; }
+    .test-row small { color: var(--muted); }
+    .fix-list, .next-list { margin: 0; padding-left: 22px; }
+    .fix-list li, .next-list li { margin: 8px 0; }
+    code { padding: 2px 5px; background: #edf1f2; border-radius: 4px; font-family: Consolas, monospace; font-size: 12px; }
+    pre { overflow-x: auto; margin: 12px 0 0; padding: 16px; color: #dce7eb; background: #172026; border-radius: 6px; }
+    pre code { padding: 0; color: inherit; background: transparent; }
+    footer { padding: 20px 38px; color: #6d7b82; background: #f6f8f8; font-size: 12px; border-top: 1px solid var(--line); }
+    [hidden] { display: none !important; }
+    @media (max-width: 760px) {
+      .topbar { position: static; align-items: flex-start; padding: 10px 16px; }
+      .topbar nav { display: none; }
+      main { width: 100%; margin: 0; border: 0; }
+      header, section, footer { padding: 24px 18px; }
+      h1 { font-size: 27px; }
+      .verdict { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .test-grid { grid-template-columns: 1fr; }
+    }
+    @media print {
+      body { background: #fff; }
+      .topbar, .filters { display: none; }
+      main { width: 100%; margin: 0; border: 0; box-shadow: none; }
+      th { position: static; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <strong>MITAKO · 全量需求复验</strong>
+    <nav aria-label="报告目录">
+      <a href="#conclusion">结论</a><a href="#evidence">证据</a><a href="#matrix">矩阵</a><a href="#gaps">缺口</a><a href="#acceptance">验收方式</a>
+    </nav>
+  </div>
+
+  <main>
+    <header>
+      <p class="eyebrow">甲方需求、客服 SOP、Spec Kit POC 边界、当前代码与发布包联合复验</p>
+      <h1>MITAKO 客服、视觉审核与虾淘私域 Agent 全量需求复验报告</h1>
+      <p class="subtitle">本报告区分“本地 POC/API 已实现”“局部能力”“需甲方外部系统联调”“需真实数据验收”。接口契约、演示数据和方案文档不计作真实生产接入。</p>
+      <div class="meta">
+        <span>复验日期：2026-07-11</span>
+        <span>代码基线：<code>2bfb7a4</code></span>
+        <span>主服务：<code>127.0.0.1:8015</code></span>
+        <span>视觉服务：<code>127.0.0.1:7861</code></span>
+      </div>
+    </header>
+
+    <section id="conclusion">
+      <h2>一、最终结论</h2>
+      <div class="verdict">
+        <div class="verdict-mark">POC/API<br>可验收</div>
+        <div>
+          <strong>不能宣称“全部生产需求已经彻底完成”。</strong>
+          <p>当前版本已经达到可演示、可自动化调用、可由 Codex/OpenAPI 客户端测试、可生成审核报告的本地 POC/API 交付标准。生产全量上线仍缺真实企微、飞书、商品/订单/库存、CRM/CDP、对象存储转码接入，以及 120GB 盲测准确率验收。</p>
+        </div>
+      </div>
+      <div class="stats" aria-label="需求状态统计">
+        <div class="stat pass"><strong>24</strong><span>POC/API 已完成并有测试证据</span></div>
+        <div class="stat partial"><strong>9</strong><span>局部实现或仅覆盖 P0</span></div>
+        <div class="stat external"><strong>5</strong><span>等待甲方外部系统与权限联调</span></div>
+        <div class="stat pending"><strong>2</strong><span>等待真实样本与 120GB 数据验收</span></div>
+      </div>
+      <div class="callout warn" style="margin-top:18px">
+        <strong>“彻底完成”的判定：</strong> 本地代码可以完成的安全、接口、演示、异步任务、报告、测试与打包问题已完成；依赖甲方账号、回调、生产数据和外部系统的事项必须在联调环境签字，不能由本项目单方面宣布完成。
+      </div>
+    </section>
+
+    <section id="evidence">
+      <h2>二、本轮重新执行的证据</h2>
+      <div class="test-grid">
+        <div class="test-row"><strong>OpenAPI / 私有化服务：13/13</strong><small>68 条路径；鉴权、采样规划、批次、指标、私域事件均通过。</small></div>
+        <div class="test-row"><strong>四类 SOP 对齐：4/4</strong><small>商品有伤、发错货、漏发货、未成年人退款独立规则及人工边界通过。</small></div>
+        <div class="test-row"><strong>客服 Agent 回归：10/10</strong><small>上下文情绪、L4/L5、公开回复清洗、人工期分析、视觉失败回写均通过。</small></div>
+        <div class="test-row"><strong>私域 Agent E2E：4/4</strong><small>兴趣/许愿、商品候选、高风险禁推转客服、后台与契约通过。</small></div>
+        <div class="test-row"><strong>大媒体预处理：10/10</strong><small>完整时轴、尾帧、2fps 精确采样、模型分段、大图 JPEG 压缩通过。</small></div>
+        <div class="test-row"><strong>标签隔离：3/3</strong><small>安全 metadata 可用；ground truth 与标签附件均被拒绝进入模型输入。</small></div>
+        <div class="test-row"><strong>1 万群规模：4/4</strong><small>10,000/10,000 群完成评估与候选持久化；本机约 0.12 秒。</small></div>
+        <div class="test-row"><strong>页面级浏览器验收：16/16</strong><small>/desk、移动端、/admin、角色权限、队列、报表和运维页面通过。</small></div>
+        <div class="test-row"><strong>视觉工作台 smoke：通过</strong><small>上传、文件夹审核、失败报告、公开字段清洗、Prompt 与报告目录检查通过。</small></div>
+        <div class="test-row"><strong>生产前端构建：通过</strong><small>Vite 1,922 模块完成构建，用户端、人工台和后台产物生成。</small></div>
+      </div>
+
+      <h3>真实模型批次</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>任务</th><th>案件</th><th>状态</th><th>证据</th><th>成本</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>发错货 · <code>RJ-595FA83F46C14956</code></td><td><span class="chip pass">SUCCEEDED</span></td><td>5 文件，11 帧，完整源 manifest，多视频均进入报告，置信度 0.95。</td><td>27,074 tokens；$0.082513</td></tr>
+            <tr><td>2</td><td>未成年人材料 · <code>RJ-1501DC4C998E44A6</code></td><td><span class="chip pass">SUCCEEDED</span></td><td>7 文件，五类材料 SOP，始终要求 VIP 客服与人工终审，置信度 0.95。</td><td>15,652 tokens；$0.060206</td></tr>
+            <tr><td>3</td><td>严格 1fps 批次</td><td><span class="chip pass">2/2</span></td><td>38 帧发错货案件拆为 2 个模型分段；批次分页不影响全量汇总。</td><td>86,897 tokens；$0.233567</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>本轮发现并修复</h3>
+      <ol class="fix-list">
+        <li>将错发货、漏发货从共用开箱规则拆为独立 SOP；补齐绿色自封袋、拆单、纸类叠放、光栅、隐藏款、<code>_1</code> 异常单等规则。</li>
+        <li>补齐商品有伤的一镜到底、未拆封/面单、轻中重伤、用户暴力拆件与快递暴力运输边界。</li>
+        <li>补齐未成年人退款的五类材料、主副卡、10 周岁以下、人工一审/二审/终审规则。</li>
+        <li>修复视觉 smoke 仍挂接旧 <code>call_model</code> 的问题，改为当前分段审核入口。</li>
+        <li>公开失败报告不再展示模型名称、Key 名、内部渠道或“提交研发”等内部措辞。</li>
+        <li>将 16 份带模型名称的历史技术报告迁出公开报告目录，内容保留在内部临时归档。</li>
+      </ol>
+    </section>
+
+    <section id="matrix">
+      <h2>三、全量需求逐项矩阵</h2>
+      <div class="filters" aria-label="状态筛选">
+        <button class="filter" data-filter="all" aria-pressed="true">全部 40</button>
+        <button class="filter" data-filter="pass" aria-pressed="false">POC 已完成 24</button>
+        <button class="filter" data-filter="partial" aria-pressed="false">局部实现 9</button>
+        <button class="filter" data-filter="external" aria-pressed="false">外部联调 5</button>
+        <button class="filter" data-filter="pending" aria-pressed="false">数据验收 2</button>
+      </div>
+      <div class="table-wrap">
+        <table id="matrix-table">
+          <thead><tr><th>#</th><th>需求</th><th>状态</th><th>当前实现与核验结论</th><th>剩余条件</th></tr></thead>
+          <tbody>
+            <tr data-status="pass"><td>1</td><td>标准审核 API</td><td><span class="chip pass">POC 已完成</span></td><td>FastAPI/OpenAPI、Bearer 鉴权、幂等键、强类型 metadata。</td><td>甲方集成账号初始化。</td></tr>
+            <tr data-status="pass"><td>2</td><td>完整案件字段与多素材</td><td><span class="chip pass">POC 已完成</span></td><td>多图、多视频、文本/JSON、订单、商品、仓库、物流、对话、SOP、原始 source_record。</td><td>按甲方最终 JSON 样例做字段映射。</td></tr>
+            <tr data-status="pass"><td>3</td><td>异步任务与重试</td><td><span class="chip pass">POC 已完成</span></td><td>QUEUED/RUNNING/SUCCEEDED/FAILED/RETRYING，服务重启恢复和原 job 重试。</td><td>生产队列替换本地线程池。</td></tr>
+            <tr data-status="pass"><td>4</td><td>批量审核</td><td><span class="chip pass">POC 已完成</span></td><td>案件并发提交、batch_id 全量聚合、明细分页、独立失败与重试。</td><td>联调甲方批次调度器。</td></tr>
+            <tr data-status="pass"><td>5</td><td>可配置抽帧</td><td><span class="chip pass">POC 已完成</span></td><td>adaptive、1fps strict、2fps forensic、0.1-2fps custom；全时轴精确均匀采样。</td><td>后台策略由甲方业务配置。</td></tr>
+            <tr data-status="pass"><td>6</td><td>大图压缩</td><td><span class="chip pass">POC 已完成</span></td><td>大图片压缩为最大边 1280 的 JPEG 后进入模型。</td><td>根据素材质量调优阈值。</td></tr>
+            <tr data-status="partial"><td>7</td><td>543MB/超长视频转码</td><td><span class="chip partial">局部实现</span></td><td>本地可处理单文件 650MB 并抽帧；采样计划会建议对象存储转码代理。</td><td>尚未接七牛云/OSS/COS 的上传、转码、回调和签名 URL。</td></tr>
+            <tr data-status="pass"><td>8</td><td>密集帧分段并发</td><td><span class="chip pass">POC 已完成</span></td><td>每 24 帧一个分段，默认 2 个并发 worker，证据、置信度和成本聚合。</td><td>用生产限流配额校准并发。</td></tr>
+            <tr data-status="pass"><td>9</td><td>HTML 审核报告</td><td><span class="chip pass">POC 已完成</span></td><td>结论、置信度、证据链、缺失材料、人工建议、Token、估算成本和媒体回看。</td><td>嵌入甲方工单页面。</td></tr>
+            <tr data-status="pass"><td>10</td><td>可观测与可调试</td><td><span class="chip pass">POC 已完成</span></td><td>JSON/Prometheus 指标、任务诊断、耗时、Token、成本、队列和失败重试。</td><td>生产接 Grafana/Langfuse/告警渠道。</td></tr>
+            <tr data-status="pass"><td>11</td><td>盲测标签隔离</td><td><span class="chip pass">POC 已完成</span></td><td>入口拒绝 ground truth、人工结论和 sample_labels.json；标签只在模型返回后离线评测。</td><td>甲方评测集也必须执行相同隔离。</td></tr>
+            <tr data-status="pass"><td>12</td><td>商品有伤 SOP</td><td><span class="chip pass">POC 已完成</span></td><td>开箱连续性、面单、伤情分级、图像真实性、用户/快递责任线索及人工边界已固化。</td><td>用更多伤情和反光材质样本校准。</td></tr>
+            <tr data-status="pass"><td>13</td><td>发错货 SOP</td><td><span class="chip pass">POC 已完成</span></td><td>订单与实物 SKU/角色/款式比对，绿色自封袋、光栅、隐藏款与无视频降级证据。</td><td>接商品主数据与库存。</td></tr>
+            <tr data-status="pending"><td>14</td><td>漏发货准确率</td><td><span class="chip pending">数据验收</span></td><td>API、SOP、拆单/纸类/面单/_1 异常规则已实现。</td><td>当前样本目录无真实漏发货案例，不能声明准确率。</td></tr>
+            <tr data-status="partial"><td>15</td><td>未成年人退款审核</td><td><span class="chip partial">局部实现</span></td><td>五类材料、人号钱关系、主副卡、10 岁以下、人工三审边界已实现并有真实模型样本。</td><td>单样本不足以证明真实性识别和欺诈检出率。</td></tr>
+            <tr data-status="pending"><td>16</td><td>120GB 盲测迭代</td><td><span class="chip pending">数据验收</span></td><td>批量 API、报告、标签隔离和成本统计已具备。</td><td>需甲方 120GB 素材、脱敏标签、训练/验证/测试切分和正式指标。</td></tr>
+            <tr data-status="pass"><td>17</td><td>照片/拍摄/视频上传</td><td><span class="chip pass">POC 已完成</span></td><td>用户 Token、用户与会话隔离、图片/视频校验、同步或异步审核任务。</td><td>接甲方对象存储时改为引用上传。</td></tr>
+            <tr data-status="pass"><td>18</td><td>视觉结果回写客服任务</td><td><span class="chip pass">POC 已完成</span></td><td>完成态和失败态均写回审核任务，并进入客服上下文和人工复核建议。</td><td>对接甲方工单字段。</td></tr>
+            <tr data-status="pass"><td>19</td><td>人工服务期间实时分析</td><td><span class="chip pass">POC 已完成</span></td><td>人工队列/接入后用户消息继续更新意图和情绪。</td><td>甲方前端消费 analysis 字段。</td></tr>
+            <tr data-status="pass"><td>20</td><td>Response Guard</td><td><span class="chip pass">POC 已完成</span></td><td>清洗内部节点、Prompt、模型渠道、Key、调试信息；禁止自动定责和补偿承诺。</td><td>结合甲方法务词库复核。</td></tr>
+            <tr data-status="pass"><td>21</td><td>人工客服工作台演示</td><td><span class="chip pass">POC 已完成</span></td><td>接手、回复、转交、升级、结案、移动端和角色权限页面级 E2E 通过。</td><td>如甲方不用我方前端，只验 API。</td></tr>
+            <tr data-status="pass"><td>22</td><td>纯 API 私有化部署</td><td><span class="chip pass">POC 已完成</span></td><td>不依赖我方客服前端即可调用审核、任务、指标和私域事件服务。</td><td>补生产 TLS、SSO、网关与容量配置。</td></tr>
+            <tr data-status="pass"><td>23</td><td>企微群消息入站契约</td><td><span class="chip pass">POC 已完成</span></td><td>group_id、用户、消息、时间和来源字段可进入分层、风险和客服任务流程。</td><td>真实企微权限见第 27 项。</td></tr>
+            <tr data-status="pass"><td>24</td><td>舆情监控与禁推</td><td><span class="chip pass">POC 已完成</span></td><td>不发货、退款、吞烫、霸王条款、投诉等规则快筛；L2+ 禁推并转 1 对 1 客服。</td><td>生产需上下文窗口、多人数共振和人工标注优化。</td></tr>
+            <tr data-status="pass"><td>25</td><td>1 万群本地处理</td><td><span class="chip pass">POC 已完成</span></td><td>10,000 群商品事件评估、批量持久化和风险群拦截通过。</td><td>不等同于企微网络吞吐或消息峰值压测。</td></tr>
+            <tr data-status="pass"><td>26</td><td>商品事件候选</td><td><span class="chip pass">POC 已完成</span></td><td>新品/补货/抽赏/库存/稀有度/App Deep Link/小程序路径字段，按 IP 和风险生成待审候选。</td><td>真实发送仍需审批与外部接口。</td></tr>
+            <tr data-status="external"><td>27</td><td>真实企业微信</td><td><span class="chip external">外部联调</span></td><td>契约和本地入站处理就绪。</td><td>需会话存档、群消息读取/发送、外部联系人和群发权限。</td></tr>
+            <tr data-status="external"><td>28</td><td>商品/抽赏/订单/库存</td><td><span class="chip external">外部联调</span></td><td>事件 Schema 和候选策略就绪。</td><td>需甲方商品库、库存时效、履约风险、点击和订单回传。</td></tr>
+            <tr data-status="partial"><td>29</td><td>可控谷子词典 RAG</td><td><span class="chip partial">局部实现</span></td><td>当前为受控术语表和固定低风险回答，不是向量检索 RAG。</td><td>需知识发布、版本、来源、召回、引用、拒答和运营审核后台。</td></tr>
+            <tr data-status="partial"><td>30</td><td>长期/群/用户记忆</td><td><span class="chip partial">局部实现</span></td><td>群标签、最后消息指标和客服会话记忆可落库。</td><td>私域专用长期记忆、衰减、删除、同意管理和外部记忆 SDK 接入未完成。</td></tr>
+            <tr data-status="partial"><td>31</td><td>用户生命周期/价值/风险分层</td><td><span class="chip partial">局部实现</span></td><td>群级 IP、许愿、风险和健康度 P0 已有。</td><td>用户级生命周期、价值、交易和 OneID 依赖甲方行为/订单数据。</td></tr>
+            <tr data-status="partial"><td>32</td><td>IP 话题/许愿池/晒谷/蹲守</td><td><span class="chip partial">局部实现</span></td><td>消息可提取 IP 与许愿信号，商品事件可匹配群。</td><td>独立许愿池、内容编排、蹲守提醒、晒谷活动和效果归因未完整产品化。</td></tr>
+            <tr data-status="partial"><td>33</td><td>频控、分时机与 A/B</td><td><span class="chip partial">局部实现</span></td><td>风险群禁推和冷却时间已实现。</td><td>疲劳度累计、发送日历、时机模型、实验分桶和指标显著性未完成。</td></tr>
+            <tr data-status="partial"><td>34</td><td>私域运营工作台</td><td><span class="chip partial">局部实现</span></td><td>P0 页面展示群、事件、候选、客服任务、审核任务和接口状态，并支持演示数据。</td><td>原规划中的词典、许愿池、监控中心、复盘中心和策略配置仍需深化。</td></tr>
+            <tr data-status="external"><td>35</td><td>飞书任务/审批/群协同</td><td><span class="chip external">外部联调</span></td><td>字段契约和边界说明已提供。</td><td>需飞书 App 凭证、Bot/任务/审批/多维表格权限与回调。</td></tr>
+            <tr data-status="external"><td>36</td><td>CRM/CDP/OneID</td><td><span class="chip external">外部联调</span></td><td>预留 user_id、external_user_id、订单和事件字段。</td><td>需甲方身份映射、用户授权、数据字典和删除机制。</td></tr>
+            <tr data-status="partial"><td>37</td><td>模型与向量库选型</td><td><span class="chip partial">局部实现</span></td><td>运行时支持主备视觉服务和成本统计，规划文档给出候选文本服务与向量库建议。</td><td>私域 RAG 与记忆的正式技术选型、压测和迁移方案未落地。</td></tr>
+            <tr data-status="pass"><td>38</td><td>风控与合规边界</td><td><span class="chip pass">POC 已完成</span></td><td>不自动退款/补发/换货/拒绝/定责；敏感材料人工终审；公开页面不暴露内部参数。</td><td>甲方法务与隐私负责人最终签字。</td></tr>
+            <tr data-status="pass"><td>39</td><td>GitHub 与 ZIP 交付</td><td><span class="chip pass">POC 已完成</span></td><td>源码已推送；ZIP 包安全门禁、独立解压导入、63 条路由注册通过。</td><td>真实 Key 必须通过安全渠道单独配置。</td></tr>
+            <tr data-status="external"><td>40</td><td>生产级基础设施</td><td><span class="chip external">外部联调</span></td><td>本地 SQLite、线程池和 FastAPI 足够 POC。</td><td>1 万群生产需 PostgreSQL、Redis/MQ、对象存储、分布式 worker、备份和容灾。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="gaps">
+      <h2>四、尚未完成且不能包装成完成的事项</h2>
+      <div class="callout danger">
+        <strong>生产签字阻塞项：</strong> 真实企微收发、商品/订单/库存/CRM 回传、飞书协同、对象存储转码、漏发货真实样本、120GB 盲测指标和生产基础设施。
+      </div>
+      <h3>私域 Agent 的真实现状</h3>
+      <p>当前私域 Agent 是可运行的群级 P0：接收群消息和商品事件，更新群标签与风险，生成待审核触达候选，高风险时禁推并创建客服任务。它不是完整的 0708 生产规划全量实现。</p>
+      <ul class="next-list">
+        <li><strong>已能演示：</strong> 群消息 -> 兴趣/许愿/风险 -> 群画像；商品事件 -> 1 万群匹配 -> 待审候选；高风险 -> 禁推 -> 客服任务。</li>
+        <li><strong>尚未产品化：</strong> 向量 RAG、知识发布审核、完整许愿池、晒谷活动、用户生命周期、群疲劳累计、分时机调度、A/B、长期记忆和复盘归因。</li>
+        <li><strong>尚未真实打通：</strong> 企微群、App/小程序事件流、订单库存、CRM/CDP、飞书和真实客服系统回写。</li>
+      </ul>
+      <h3>达到“全部完成”还需四个验收包</h3>
+      <ol class="next-list">
+        <li><strong>外部联调包：</strong> 甲方提供 sandbox、字段样例、鉴权、回调和权限；逐接口完成双向验收。</li>
+        <li><strong>120GB 质量包：</strong> 正负/困难样本盲分，按四场景输出召回率、精确率、人工节省率、成本和失败类型。</li>
+        <li><strong>私域二期包：</strong> 可控 RAG、长期记忆、用户分层、频控日历、A/B 与运营复盘产品化。</li>
+        <li><strong>生产基础设施包：</strong> PostgreSQL/Redis/MQ/对象存储、分布式 worker、监控告警、备份恢复和压测报告。</li>
+      </ol>
+    </section>
+
+    <section id="acceptance">
+      <h2>五、复现与验收入口</h2>
+      <div class="chips">
+        <span class="chip pass">主后台 http://127.0.0.1:8015/admin</span>
+        <span class="chip pass">人工台 http://127.0.0.1:8015/desk</span>
+        <span class="chip pass">视觉工作台 http://127.0.0.1:7861</span>
+      </div>
+      <pre><code>venv\Scripts\python.exe scripts\check_private_deployment_api.py
+venv\Scripts\python.exe scripts\check_review_sop_alignment.py
+venv\Scripts\python.exe scripts\check_review_media_preprocessing.py
+venv\Scripts\python.exe scripts\check_review_input_isolation.py
+venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_002,sample_004
+venv\Scripts\python.exe scripts\check_customer_agent_0709_regression.py
+venv\Scripts\python.exe scripts\check_private_domain_agent_e2e.py
+venv\Scripts\python.exe scripts\check_private_domain_10k_scale.py
+venv\Scripts\python.exe scripts\check_visual_workbench_smoke.py
+npm run build</code></pre>
+      <p><strong>发布包：</strong> <code>D:\Jack\Jack-Code\CodeX_Project\MITAKO_Agent-customer-preview-20260711.zip</code></p>
+      <p><strong>密钥规则：</strong> GitHub 和 ZIP 只包含完整的环境变量名称与空值模板，不包含真实 Key。真实凭证必须通过甲方认可的安全渠道注入部署环境。</p>
+    </section>
+
+    <footer>
+      结论基于 2026-07-11 本机代码、甲方 0708 私域 Agent 文档、客服 SOP、三大审核样本、Spec Kit POC 边界和实际自动化执行结果。后续外部联调或 120GB 盲测完成后，应生成新的生产验收版报告，不应覆盖本报告的 POC 结论。
+    </footer>
+  </main>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const buttons = document.querySelectorAll('.filter');
+      const rows = document.querySelectorAll('#matrix-table tbody tr');
+      buttons.forEach(button => button.addEventListener('click', () => {
+        const filter = button.dataset.filter;
+        buttons.forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+        rows.forEach(row => { row.hidden = filter !== 'all' && row.dataset.status !== filter; });
+      }));
+    });
+  </script>
+</body>
+</html>
