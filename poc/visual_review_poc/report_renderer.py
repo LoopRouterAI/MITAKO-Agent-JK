@@ -312,6 +312,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    <div class="metric"><small>补充图片</small><b>{_h(evidence_package.get("supplemental_images_sent") or "-")}</b></div>
 	    <div class="metric"><small>估算 Token</small><b>{_h(inference.get("total_tokens") or "-")}</b></div>
 	    <div class="metric"><small>估算成本</small><b>{_h((f"${inference.get('estimated_usd')}" if inference.get("estimated_usd") not in (None, "") else "-"))}</b></div>
+	    <div class="metric"><small>模型分段</small><b>{_h(inference.get("segment_count") or 1)}</b></div>
 		    <div class="metric"><small>报告属性</small><b>VIP客服复核参考</b></div>
 		  </section>
   {diagnostic_panel}

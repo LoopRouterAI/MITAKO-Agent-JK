@@ -71,7 +71,9 @@ def main() -> int:
         "/api/v1/private-domain/review-tasks",
         "/api/v1/private-domain/review-tasks/{task_id}",
         "/api/v1/review/contracts",
+        "/api/v1/review/batches/{batch_id}",
         "/api/v1/review/metadata/validate",
+        "/api/v1/review/sampling-plan",
         "/api/v1/review/jobs",
         "/api/v1/review/jobs/{job_id}",
         "/api/v1/review/jobs/{job_id}/report",
@@ -83,7 +85,7 @@ def main() -> int:
 
     t0 = time.time()
     schemas = openapi.get("components", {}).get("schemas", {})
-    required_schemas = ("GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata", "ReviewJobResponse")
+    required_schemas = ("GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata", "ReviewSamplingPolicy", "ReviewSamplingPlanRequest", "ReviewSamplingPlanResponse", "ReviewJobResponse", "ReviewBatchResponse")
     typed = all(name in schemas for name in required_schemas)
     _case(results, "OPENAPI-typed-schemas", typed, f"schemas={','.join(name for name in schemas if name in required_schemas)}", t0)
 
@@ -108,13 +110,40 @@ def main() -> int:
     code, review_contract = _request("GET", f"{base}/api/v1/review/contracts", token=admin_token)
     supported = (review_contract.get("contract") or {}).get("supported_scenarios") or []
     media_processing = (review_contract.get("contract") or {}).get("media_processing") or {}
+    sampling_presets = (review_contract.get("contract") or {}).get("sampling_presets") or {}
     _case(
         results,
         "REVIEW-contract",
         code == 200
         and set(supported) >= {"product_damage", "wrong_item", "missing_item", "minor_refund"}
-        and bool(media_processing.get("model_input")),
-        f"scenarios={supported} media_processing={bool(media_processing)}",
+        and bool(media_processing.get("model_input"))
+        and set(sampling_presets) >= {"adaptive", "strict", "forensic", "custom"},
+        f"scenarios={supported} media_processing={bool(media_processing)} sampling={sorted(sampling_presets)}",
+        t0,
+    )
+
+    t0 = time.time()
+    code, sampling = _request(
+        "POST",
+        f"{base}/api/v1/review/sampling-plan",
+        token=admin_token,
+        json_body={
+            "duration_seconds": 452.5,
+            "source_bytes": 543351335,
+            "video_count": 1,
+            "sampling_policy": {"preset": "strict", "frames_per_model_call": 24},
+        },
+    )
+    sampling_plan = sampling.get("plan") or {}
+    _case(
+        results,
+        "REVIEW-sampling-plan",
+        code == 200
+        and sampling_plan.get("fps") == 1.0
+        and sampling_plan.get("estimated_frames_per_video", 0) >= 453
+        and sampling_plan.get("estimated_model_segments") == 19
+        and sampling_plan.get("transcode_recommended") is True,
+        f"plan={sampling_plan}",
         t0,
     )
 

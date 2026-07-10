@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import mimetypes
 import os
 import re
@@ -21,6 +22,7 @@ from fastapi import UploadFile
 
 from runtime_paths import data_dir
 from poc.visual_review_poc.report_renderer import render_public_report
+from poc.visual_review_poc.local_video_triage_demo import adaptive_frame_budget
 
 from . import store
 from .schemas import ReviewCaseMetadata
@@ -265,6 +267,57 @@ def _public_media_urls(value: Any) -> Any:
     return value
 
 
+def _sampling_fields(metadata: Dict[str, Any]) -> Dict[str, str]:
+    policy = metadata.get("sampling_policy") or {}
+    preset = str(policy.get("preset") or "adaptive")
+    if preset == "strict":
+        mode, fps, max_frames = "dense", 1.0, min(int(policy.get("max_frames_per_video") or 1200), 1200)
+    elif preset == "forensic":
+        mode, fps, max_frames = "dense", 2.0, min(int(policy.get("max_frames_per_video") or 1800), 1800)
+    elif preset == "custom":
+        mode = "dense"
+        fps = max(0.1, min(float(policy.get("fps") or 1.0), 2.0))
+        max_frames = max(1, min(int(policy.get("max_frames_per_video") or 1200), 1800))
+    else:
+        mode, fps, max_frames = "adaptive", 1.0, int(os.getenv("REVIEW_ADAPTIVE_MAX_FRAMES", "24") or 24)
+    frames_per_call = max(1, min(int(policy.get("frames_per_model_call") or 24), 24))
+    return {
+        "sampling_mode": mode,
+        "fps": str(fps),
+        "max_frames": str(max_frames),
+        "api_frame_limit": str(frames_per_call),
+    }
+
+
+def sampling_plan(duration_seconds: float, source_bytes: int, video_count: int, policy: Dict[str, Any]) -> Dict[str, Any]:
+    fields = _sampling_fields({"sampling_policy": policy})
+    mode = fields["sampling_mode"]
+    fps = float(fields["fps"])
+    max_frames = int(fields["max_frames"])
+    frames_per_call = int(fields["api_frame_limit"])
+    frames_per_video = (
+        min(max_frames, int(math.ceil(duration_seconds * fps)) + 1)
+        if mode == "dense"
+        else adaptive_frame_budget(duration_seconds, source_bytes, max_frames)
+    )
+    total_frames = frames_per_video * video_count
+    segments = max(1, math.ceil(total_frames / frames_per_call))
+    chunk_workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4))
+    return {
+        "preset": policy.get("preset") or "adaptive",
+        "sampling_mode": mode,
+        "fps": fps,
+        "estimated_frames_per_video": frames_per_video,
+        "estimated_total_frames": total_frames,
+        "frames_per_model_call": frames_per_call,
+        "estimated_model_segments": segments,
+        "estimated_parallel_waves": math.ceil(segments / chunk_workers),
+        "chunk_workers": chunk_workers,
+        "transcode_recommended": source_bytes >= 500 * 1024 * 1024 or duration_seconds >= 600,
+        "large_media_route": "object_storage_transcode_proxy" if source_bytes >= 500 * 1024 * 1024 or duration_seconds >= 600 else "direct_upload_and_frame_sampling",
+    }
+
+
 def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
     metadata = job.get("metadata") or {}
     return {
@@ -283,10 +336,9 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         "conversation_history": json.dumps(metadata.get("conversation_history") or [], ensure_ascii=False),
         "customer_tone": str(metadata.get("customer_tone") or ""),
         "sop_context": json.dumps(metadata.get("sop_context") or {}, ensure_ascii=False),
+        "source_case": json.dumps(metadata.get("source_record") or {}, ensure_ascii=False),
         "asset_manifest": json.dumps(job.get("assets") or [], ensure_ascii=False),
-        "fps": os.getenv("REVIEW_DEFAULT_FPS", "1.0"),
-        "max_frames": os.getenv("REVIEW_MAX_FRAMES_PER_VIDEO", "6"),
-        "api_frame_limit": os.getenv("REVIEW_API_FRAME_LIMIT", "12"),
+        **_sampling_fields(metadata),
         "probe_seconds": os.getenv("REVIEW_PROBE_SECONDS", "12"),
     }
 
@@ -383,12 +435,38 @@ def metrics(tenant_id: str = "") -> Dict[str, Any]:
     return {**store.snapshot(tenant_id), "workers": MAX_WORKERS}
 
 
+def batch_status(tenant_id: str, batch_id: str, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+    jobs = store.list_batch(tenant_id, batch_id, limit=limit, offset=offset)
+    aggregate = store.batch_snapshot(tenant_id, batch_id)
+    counts = {str(item.get("status") or "UNKNOWN"): int(item.get("count") or 0) for item in aggregate}
+    total_tokens = sum(int(item.get("total_tokens") or 0) for item in aggregate)
+    estimated_usd = sum(float(item.get("estimated_usd") or 0) for item in aggregate)
+    total = sum(counts.values())
+    terminal = counts.get("SUCCEEDED", 0) + counts.get("FAILED", 0)
+    return {
+        "batch_id": batch_id,
+        "summary": {
+            "total": total,
+            "terminal": terminal,
+            "complete": total > 0 and terminal == total,
+            "statuses": counts,
+            "inference_total_tokens": total_tokens,
+            "inference_estimated_usd": round(estimated_usd, 6),
+            "returned": len(jobs),
+            "offset": offset,
+        },
+        "jobs": jobs,
+    }
+
+
 def contract() -> Dict[str, Any]:
     return {
         "version": "v1",
         "submission": "每个案件独立提交；批量任务由调用方并发提交，案件之间独立重试和查询。",
         "endpoint": "POST /api/v1/review/jobs",
         "metadata_validation_endpoint": "POST /api/v1/review/metadata/validate",
+        "sampling_plan_endpoint": "POST /api/v1/review/sampling-plan",
+        "batch_status_endpoint": "GET /api/v1/review/batches/{batch_id}",
         "html_report_endpoint": "GET /api/v1/review/jobs/{job_id}/report",
         "content_type": "multipart/form-data",
         "auth": "Bearer 集成账号 Token",
@@ -398,7 +476,7 @@ def contract() -> Dict[str, Any]:
         "business_fields": [
             "ticket_id", "user_id", "order_no", "customer_claim", "order_items",
             "product_master_data", "warehouse_master_data", "logistics",
-            "conversation_history", "sop_context", "asset_fields",
+            "conversation_history", "sop_context", "asset_fields", "batch_id", "source_record",
         ],
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",
@@ -407,6 +485,12 @@ def contract() -> Dict[str, Any]:
             "single_asset_limit_mb": _limit_bytes("REVIEW_MAX_ASSET_MB", 650) // (1024 * 1024),
             "case_limit_mb": _limit_bytes("REVIEW_MAX_CASE_MB", 750) // (1024 * 1024),
             "large_batch": "120GB 级生产批次应由对象存储直传、云转码/故事板服务和案件引用适配层承接；当前未伪装为已接入。",
+        },
+        "sampling_presets": {
+            "adaptive": "按时长和文件大小抽取 6-24 帧，适合低成本粗筛。",
+            "strict": "固定 1 fps，最多 1200 帧，每 24 帧一个并行模型分段。",
+            "forensic": "固定 2 fps，最多 1800 帧，每 24 帧一个并行模型分段。",
+            "custom": "甲方配置 0.1-2 fps、单视频帧上限和每次调用帧数。",
         },
         "statuses": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "RETRYING"],
         "result_fields": ["predicted_label", "confidence", "agent_report", "agent_brief", "diagnostics", "boundary"],

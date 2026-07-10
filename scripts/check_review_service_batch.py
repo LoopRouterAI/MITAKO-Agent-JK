@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples", default=os.getenv("E2E_REVIEW_SAMPLES", "sample_002,sample_004"))
     parser.add_argument("--timeout", type=int, default=int(os.getenv("E2E_REVIEW_TIMEOUT_SECONDS", "1200")))
     parser.add_argument("--run-id", default="")
+    parser.add_argument("--sampling-preset", choices=["adaptive", "strict", "forensic"], default="adaptive")
     return parser.parse_args()
 
 
@@ -51,7 +52,7 @@ def read_json(path: Path, default: Any) -> Any:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
-def metadata_for(sample_id: str) -> Dict[str, Any]:
+def metadata_for(sample_id: str, batch_id: str = "", sampling_preset: str = "adaptive") -> Dict[str, Any]:
     sample_dir = SAMPLE_ROOT / sample_id
     manifest = read_json(sample_dir / "manifest.json", {})
     resources = manifest.get("resources") or []
@@ -64,6 +65,7 @@ def metadata_for(sample_id: str) -> Dict[str, Any]:
         "client_case_id": str(manifest.get("id") or sample_id),
         "scenario": SCENARIOS[sample_id],
         "source": "customer_sample_batch_e2e",
+        "batch_id": batch_id,
         "priority": "high",
         "ticket_id": str(manifest.get("id") or sample_id),
         "order_no": str(manifest.get("order_no") or ""),
@@ -81,6 +83,13 @@ def metadata_for(sample_id: str) -> Dict[str, Any]:
             }.get(SCENARIOS[sample_id], "")
         },
         "asset_fields": asset_fields,
+        "source_record": manifest,
+        "sampling_policy": {
+            "preset": sampling_preset,
+            "fps": 2.0 if sampling_preset == "forensic" else 1.0,
+            "max_frames_per_video": 1800 if sampling_preset == "forensic" else 1200,
+            "frames_per_model_call": 24,
+        },
     }
 
 
@@ -111,8 +120,8 @@ def login(client: httpx.Client, base_url: str) -> str:
     return token
 
 
-def submit(base_url: str, token: str, sample_id: str, timeout: int, run_id: str) -> Dict[str, Any]:
-    metadata = metadata_for(sample_id)
+def submit(base_url: str, token: str, sample_id: str, timeout: int, run_id: str, batch_id: str, sampling_preset: str) -> Dict[str, Any]:
+    metadata = metadata_for(sample_id, batch_id, sampling_preset)
     paths = files_for(sample_id)
     with ExitStack() as stack:
         files = [
@@ -131,7 +140,7 @@ def submit(base_url: str, token: str, sample_id: str, timeout: int, run_id: str)
                 f"{base_url}/api/v1/review/jobs",
                 headers={
                     "Authorization": f"Bearer {token}",
-                    "Idempotency-Key": f"sample-review-{sample_id}-{metadata['client_case_id']}{('-' + run_id) if run_id else ''}",
+                    "Idempotency-Key": f"sample-review-{sample_id}-{metadata['client_case_id']}-{sampling_preset}{('-' + run_id) if run_id else ''}",
                 },
                 data={"metadata": json.dumps(metadata, ensure_ascii=False)},
                 files=files,
@@ -167,6 +176,7 @@ def main() -> int:
     args = parse_args()
     base_url = args.base_url.rstrip("/")
     sample_ids = [item.strip() for item in args.samples.split(",") if item.strip()]
+    batch_id = f"sample-review-batch-{args.sampling_preset}-{args.run_id or int(time.time())}"
     unknown = [item for item in sample_ids if item not in SCENARIOS]
     if unknown:
         raise SystemExit(f"未知样本：{unknown}")
@@ -188,7 +198,7 @@ def main() -> int:
     submitted: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=min(4, len(sample_ids))) as pool:
         futures = {
-            pool.submit(submit, base_url, token, sample_id, args.timeout, args.run_id): sample_id
+            pool.submit(submit, base_url, token, sample_id, args.timeout, args.run_id, batch_id, args.sampling_preset): sample_id
             for sample_id in sample_ids
         }
         for future in as_completed(futures):
@@ -202,7 +212,13 @@ def main() -> int:
         report = review.get("agent_report") or {}
         inference = report.get("inference_estimate") or {}
         videos = (report.get("evidence_package") or {}).get("videos") or []
-        timeline_ok = all(item.get("sampling_strategy") == "full_timeline_uniform" for item in videos)
+        gallery_frames = (report.get("media_gallery") or {}).get("frames") or []
+        all_videos_represented = not videos or {
+            int(item.get("video_index")) for item in videos if item.get("video_index") is not None
+        }.issubset({int(item.get("video_index")) for item in gallery_frames if item.get("video_index") is not None})
+        expected_strategy = "full_timeline_adaptive" if args.sampling_preset == "adaptive" else "full_timeline_dense"
+        timeline_ok = all(item.get("sampling_strategy") == expected_strategy for item in videos)
+        source_fields_ok = (job.get("metadata") or {}).get("source_record") == read_json(SAMPLE_ROOT / item["sample_id"] / "manifest.json", {})
         report_url = (review.get("report") or {}).get("html_url") or ""
         with httpx.Client(timeout=30) as client:
             html_response = client.get(base_url + report_url, headers={"Authorization": f"Bearer {token}"}) if report_url else None
@@ -219,6 +235,8 @@ def main() -> int:
             and timeline_ok
             and html_ok
             and safe_result
+            and source_fields_ok
+            and all_videos_represented
         )
         results.append(
             {
@@ -231,15 +249,42 @@ def main() -> int:
                 "full_timeline_sampling": timeline_ok,
                 "html_report": html_ok,
                 "public_result_safe": safe_result,
+                "source_manifest_preserved": source_fields_ok,
+                "all_videos_represented": all_videos_represented,
                 "diagnostics": job.get("diagnostics") or {},
             }
         )
 
+    with httpx.Client(timeout=30) as client:
+        batch_response = client.get(
+            f"{base_url}/api/v1/review/batches/{batch_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        paged_response = client.get(
+            f"{base_url}/api/v1/review/batches/{batch_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"limit": 1, "offset": 1 if len(sample_ids) > 1 else 0},
+        )
+    batch_summary = (batch_response.json().get("summary") or {}) if batch_response.status_code == 200 else {}
+    paged_body = paged_response.json() if paged_response.status_code == 200 else {}
+    paged_summary = paged_body.get("summary") or {}
+    batch_ok = (
+        batch_response.status_code == 200
+        and paged_response.status_code == 200
+        and batch_summary.get("total") == len(sample_ids)
+        and batch_summary.get("complete") is True
+        and paged_summary.get("total") == len(sample_ids)
+        and paged_summary.get("returned") == 1
+        and len(paged_body.get("jobs") or []) == 1
+    )
     report = {
-        "ok": all(item["ok"] for item in results),
+        "ok": all(item["ok"] for item in results) and batch_ok,
         "base_url": base_url,
+        "batch_id": batch_id,
+        "batch_summary": batch_summary,
         "samples": sample_ids,
         "run_id": args.run_id,
+        "sampling_preset": args.sampling_preset,
         "results": sorted(results, key=lambda item: item["sample_id"]),
         "note": "当前资料没有真实漏发货样本；missing_item 已验证 OpenAPI 契约与 SOP 规则覆盖，准确率需甲方补样本后验收。",
     }

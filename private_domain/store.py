@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from runtime_paths import data_dir
 
@@ -14,11 +15,19 @@ from runtime_paths import data_dir
 DB_PATH = data_dir() / "private_domain.db"
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _json(data: Any) -> str:
@@ -249,6 +258,21 @@ def add_campaign_candidate(event_id: str, group_id: str, match_score: int, decis
         conn.execute(
             "INSERT INTO private_campaign_candidates(event_id, group_id, match_score, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (event_id, group_id, int(match_score), decision, reason, time.time()),
+        )
+
+
+def add_campaign_candidates(event_id: str, candidates: List[Dict[str, Any]]) -> None:
+    if not candidates:
+        return
+    init_db()
+    created_at = time.time()
+    with _connect() as conn:
+        conn.executemany(
+            "INSERT INTO private_campaign_candidates(event_id, group_id, match_score, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (event_id, item["group_id"], int(item["match_score"]), item["decision"], item["reason"], created_at)
+                for item in candidates
+            ],
         )
 
 

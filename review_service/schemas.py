@@ -2,12 +2,31 @@
 """审核服务的 OpenAPI 数据契约。"""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 ReviewScenario = Literal["product_damage", "wrong_item", "missing_item", "minor_refund"]
+
+
+class ReviewSamplingPolicy(BaseModel):
+    preset: Literal["adaptive", "strict", "forensic", "custom"] = "adaptive"
+    fps: float = Field(default=1.0, ge=0.1, le=2.0)
+    max_frames_per_video: Optional[int] = Field(default=None, ge=1, le=1800)
+    frames_per_model_call: int = Field(default=24, ge=1, le=24)
+
+
+class ReviewSamplingPlanRequest(BaseModel):
+    duration_seconds: float = Field(gt=0, le=86400)
+    source_bytes: int = Field(ge=0)
+    video_count: int = Field(default=1, ge=1, le=40)
+    sampling_policy: ReviewSamplingPolicy = Field(default_factory=ReviewSamplingPolicy)
+
+
+class ReviewSamplingPlanResponse(BaseModel):
+    ok: bool = True
+    plan: Dict[str, Any]
 
 
 class ReviewCaseMetadata(BaseModel):
@@ -16,6 +35,7 @@ class ReviewCaseMetadata(BaseModel):
     client_case_id: str = Field(min_length=1, max_length=128)
     scenario: ReviewScenario
     source: str = "customer_service_system"
+    batch_id: str = Field(default="", max_length=160)
     priority: Literal["low", "normal", "high"] = "normal"
     idempotency_key: str = Field(default="", max_length=160)
     ticket_id: str = ""
@@ -31,6 +51,8 @@ class ReviewCaseMetadata(BaseModel):
     conversation_history: List[Dict[str, Any]] = Field(default_factory=list)
     sop_context: Dict[str, Any] = Field(default_factory=dict)
     asset_fields: Dict[str, List[str]] = Field(default_factory=dict)
+    source_record: Dict[str, Any] = Field(default_factory=dict)
+    sampling_policy: ReviewSamplingPolicy = Field(default_factory=ReviewSamplingPolicy)
 
 
 class ReviewAsset(BaseModel):
@@ -69,6 +91,13 @@ class ReviewJobResponse(BaseModel):
 
 class ReviewJobListResponse(BaseModel):
     ok: bool = True
+    jobs: List[ReviewJob]
+
+
+class ReviewBatchResponse(BaseModel):
+    ok: bool = True
+    batch_id: str
+    summary: Dict[str, Any]
     jobs: List[ReviewJob]
 
 

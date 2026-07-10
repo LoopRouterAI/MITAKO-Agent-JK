@@ -10,6 +10,7 @@ import argparse
 import base64
 import html
 import json
+import math
 import mimetypes
 import os
 import random
@@ -151,20 +152,50 @@ def resize_frame(frame: Any, width: int) -> Any:
     return cv2.resize(frame, (width, int(height * ratio)), interpolation=cv2.INTER_AREA)
 
 
-def sample_video_frames(video: Path, fps: float, max_frames: int, probe_seconds: float, frame_width: int, run_dir: Path) -> Dict[str, Any]:
+def adaptive_frame_budget(duration_seconds: float, source_bytes: int, limit: int) -> int:
+    if duration_seconds >= 600:
+        recommended = 24
+    elif duration_seconds >= 180 or source_bytes >= 500 * 1024 * 1024:
+        recommended = 18
+    elif duration_seconds >= 60:
+        recommended = 10
+    else:
+        recommended = 6
+    return max(1, min(limit, recommended))
+
+
+def sample_video_frames(
+    video: Path,
+    fps: float,
+    max_frames: int,
+    probe_seconds: float,
+    frame_width: int,
+    run_dir: Path,
+    sampling_mode: str = "adaptive",
+) -> Dict[str, Any]:
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         raise SystemExit(f"视频无法读取：{video}")
     native_fps = cap.get(cv2.CAP_PROP_FPS) or 25
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     duration = total_frames / native_fps if native_fps else 0
+    source_bytes = video.stat().st_size
     scan_frames = total_frames
-    step = max(int(round(native_fps / max(fps, 0.1))), 1)
-    candidates = list(range(0, max(scan_frames, 1), step))
-    if total_frames > 1 and (not candidates or candidates[-1] != total_frames - 1):
-        candidates.append(total_frames - 1)
-    if len(candidates) > max_frames:
-        positions = [round(i * (len(candidates) - 1) / max(max_frames - 1, 1)) for i in range(max_frames)]
+    requested_count = max(1, int(math.ceil(duration * max(fps, 0.1))) + 1)
+    candidate_count = min(requested_count, max(scan_frames, 1))
+    candidates = sorted(
+        {
+            round(i * max(total_frames - 1, 0) / max(candidate_count - 1, 1))
+            for i in range(candidate_count)
+        }
+    )
+    frame_budget = (
+        max(1, min(max_frames, len(candidates)))
+        if sampling_mode == "dense"
+        else adaptive_frame_budget(duration, source_bytes, max_frames)
+    )
+    if len(candidates) > frame_budget:
+        positions = [round(i * (len(candidates) - 1) / max(frame_budget - 1, 1)) for i in range(frame_budget)]
         candidates = [candidates[pos] for pos in positions]
 
     frame_dir = run_dir / "frames"
@@ -193,12 +224,14 @@ def sample_video_frames(video: Path, fps: float, max_frames: int, probe_seconds:
     if not frames:
         raise SystemExit("没有抽到可用帧")
     return {
-        "source_bytes": video.stat().st_size,
+        "source_bytes": source_bytes,
         "native_fps": round(native_fps, 2),
         "duration_seconds": round(duration, 2),
         "fps_requested": fps,
         "probe_seconds": probe_seconds,
-        "sampling_strategy": "full_timeline_uniform",
+        "sampling_strategy": f"full_timeline_{sampling_mode}",
+        "sampling_mode": sampling_mode,
+        "frame_budget": frame_budget,
         "timeline_coverage_ratio": round(
             min(1.0, (frames[-1]["timestamp_seconds"] - frames[0]["timestamp_seconds"]) / duration),
             4,
@@ -210,7 +243,7 @@ def sample_video_frames(video: Path, fps: float, max_frames: int, probe_seconds:
         },
         "large_media_recommendation": (
             "object_storage_transcode_proxy"
-            if video.stat().st_size >= 500 * 1024 * 1024 or duration >= 600
+            if source_bytes >= 500 * 1024 * 1024 or duration >= 600
             else "server_side_frame_sampling"
         ),
         "sampled_frames": len(frames),
@@ -337,6 +370,7 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
         "conversation_history": _structured_context_value(context.get("conversation_history")),
         "customer_tone": _structured_context_value(context.get("customer_tone")),
         "sop_context": _structured_context_value(context.get("sop_context")),
+        "source_case": _structured_context_value(context.get("source_case")),
         "asset_manifest": _structured_context_value(context.get("asset_manifest")),
     }
     structured["frontdesk_evidence_package"] = {key: value for key, value in frontdesk_fields.items() if value}

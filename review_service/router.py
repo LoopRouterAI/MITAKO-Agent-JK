@@ -14,11 +14,14 @@ from auth.roles import ADMIN_MUTATE_ROLES
 from . import service, store
 from .schemas import (
     ReviewCaseMetadata,
+    ReviewBatchResponse,
     ReviewContractResponse,
     ReviewJobListResponse,
     ReviewJobResponse,
     ReviewMetadataValidationResponse,
     ReviewMetricsResponse,
+    ReviewSamplingPlanRequest,
+    ReviewSamplingPlanResponse,
 )
 
 
@@ -40,6 +43,21 @@ async def contracts(user=_integration_user()):
     return {"ok": True, "contract": service.contract()}
 
 
+@router.get("/batches/{batch_id}", response_model=ReviewBatchResponse)
+async def batch_detail(
+    batch_id: str,
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user=_integration_user(),
+):
+    if not batch_id.strip() or len(batch_id) > 160:
+        raise HTTPException(status_code=422, detail="invalid_review_batch_id")
+    result = service.batch_status(user.get("tenant_id") or "mitako", batch_id, limit=limit, offset=offset)
+    if not result["summary"]["total"]:
+        raise HTTPException(status_code=404, detail="review_batch_not_found")
+    return {"ok": True, **result}
+
+
 @router.post("/metadata/validate", response_model=ReviewMetadataValidationResponse)
 async def validate_metadata(metadata: ReviewCaseMetadata, user=_integration_user()):
     try:
@@ -47,6 +65,19 @@ async def validate_metadata(metadata: ReviewCaseMetadata, user=_integration_user
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"ok": True, "metadata": metadata}
+
+
+@router.post("/sampling-plan", response_model=ReviewSamplingPlanResponse)
+async def plan_sampling(payload: ReviewSamplingPlanRequest, user=_integration_user()):
+    return {
+        "ok": True,
+        "plan": service.sampling_plan(
+            payload.duration_seconds,
+            payload.source_bytes,
+            payload.video_count,
+            payload.sampling_policy.model_dump(mode="json"),
+        ),
+    }
 
 
 @router.post("/jobs", response_model=ReviewJobResponse, status_code=202)

@@ -563,6 +563,7 @@ New-Item -ItemType Directory -Path (Join-Path $CompileStage "poc") -Force | Out-
 Copy-Item -LiteralPath (Join-Path $Root "poc\visual_review_poc\local_video_triage_demo.py") -Destination (Join-Path $CompileStage "poc\visual_review_runtime.py") -Force
 Copy-RuntimeDir "auth"
 Copy-RuntimeDir "handoff_backend"
+Copy-RuntimeDir "private_domain"
 Copy-RuntimeDir "review_service"
 Copy-RuntimeDir "sla_worker"
 Rename-RuntimeSource "viking_memory.py" "service_memory.py"

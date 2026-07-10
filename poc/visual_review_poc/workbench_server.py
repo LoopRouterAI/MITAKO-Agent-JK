@@ -35,7 +35,7 @@ except ImportError:
     from url_video_fetcher import detect_platform, download_video_url, extract_video_url, fetch_metadata
 
 try:
-    from poc.visual_review_poc.model_selection_e2e import MODEL_CONFIGS, call_model, load_case_bundle, score_result
+    from poc.visual_review_poc.model_selection_e2e import MODEL_CONFIGS, call_model_chunked, load_case_bundle, score_result
     from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from poc.visual_review_poc.report_renderer import (
         render_public_report as _render_public_report,
@@ -43,7 +43,7 @@ try:
         safe_agent_next_step as _safe_agent_next_step,
     )
 except ImportError:
-    from model_selection_e2e import MODEL_CONFIGS, call_model, load_case_bundle, score_result
+    from model_selection_e2e import MODEL_CONFIGS, call_model_chunked, load_case_bundle, score_result
     from local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from report_renderer import (
         render_public_report as _render_public_report,
@@ -310,6 +310,7 @@ def _public_agent_report_payload(
 ) -> Dict[str, Any]:
     usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
     cost = result.get("cost") if isinstance(result.get("cost"), dict) else {}
+    chunking = result.get("chunking") if isinstance(result.get("chunking"), dict) else {}
     evidence_package = {
         "videos": case.get("videos") or [],
         "frames_sent": len(case.get("frames") or []),
@@ -334,6 +335,9 @@ def _public_agent_report_payload(
             "output_tokens": usage.get("output_tokens"),
             "total_tokens": usage.get("total_tokens"),
             "estimated_usd": cost.get("estimated_usd"),
+            "segment_count": chunking.get("segment_count"),
+            "frames_per_segment": chunking.get("frames_per_segment"),
+            "total_frames": chunking.get("total_frames"),
         },
         "public_brief": {
             "conclusion": public_conclusion,
@@ -720,8 +724,9 @@ def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> D
     load_visual_env()
     args = SimpleNamespace(
         fps=1.0,
-        max_frames_per_video=6,
-        api_frame_limit=18,
+        sampling_mode="adaptive",
+        max_frames_per_video=24,
+        api_frame_limit=24,
         probe_seconds=0.0,
         frame_width=960,
         supplemental_image_limit=20,
@@ -730,7 +735,7 @@ def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> D
     case = load_case_bundle(sample_dir, args, run_dir)
     case["scenario"] = scenario
     case["scenario_label"] = {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "资料审核"}[scenario]
-    result = call_model(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
+    result = call_model_chunked(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
     review = _agent_report_response(case, sample_dir, result, f"agent_{sample_id}")
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
@@ -771,12 +776,13 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
     }
 
 
-def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int) -> Dict[str, Any]:
+def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int) -> Dict[str, Any]:
     if model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
     args = SimpleNamespace(
         fps=fps,
+        sampling_mode=sampling_mode,
         max_frames_per_video=max_frames,
         api_frame_limit=api_frame_limit,
         probe_seconds=float(probe_seconds),
@@ -789,7 +795,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
-    result = call_model(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
+    result = call_model_chunked(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
     review = _agent_report_response(case, folder_dir, result, "agent_folder")
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
@@ -1160,18 +1166,22 @@ def review_folder(
     conversation_history: str = Form(""),
     customer_tone: str = Form(""),
     sop_context: str = Form(""),
+    source_case: str = Form(""),
     asset_manifest: str = Form(""),
+    sampling_mode: str = Form("adaptive"),
     fps: float = Form(1.0),
-    max_frames: int = Form(6),
-    api_frame_limit: int = Form(4),
+    max_frames: int = Form(24),
+    api_frame_limit: int = Form(24),
     probe_seconds: int = Form(12),
     files: List[UploadFile] = File(...),
 ) -> JSONResponse:
     if scenario not in {"video_unboxing", "product_damage", "minor_material"}:
         raise HTTPException(status_code=400, detail="未知审核场景")
+    if sampling_mode not in {"adaptive", "dense"}:
+        raise HTTPException(status_code=400, detail="未知抽帧策略")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
-    max_frames = _clamp_int(max_frames, 1, 24, 6)
-    api_frame_limit = _clamp_int(api_frame_limit, 1, min(12, max_frames), min(4, max_frames))
+    max_frames = _clamp_int(max_frames, 1, 1800, 24)
+    api_frame_limit = _clamp_int(api_frame_limit, 1, 24, 24)
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
     folder_dir = _save_folder_uploads(files)
     evidence_context = {
@@ -1189,9 +1199,10 @@ def review_folder(
         "conversation_history": conversation_history,
         "customer_tone": customer_tone,
         "sop_context": sop_context,
+        "source_case": source_case,
         "asset_manifest": asset_manifest,
     }
-    return JSONResponse(_run_folder_agent_review(folder_dir, scenario, "gemini35", evidence_context, fps, max_frames, api_frame_limit, probe_seconds))
+    return JSONResponse(_run_folder_agent_review(folder_dir, scenario, "gemini35", evidence_context, sampling_mode, fps, max_frames, api_frame_limit, probe_seconds))
 
 
 @app.post("/api/review")
@@ -1213,10 +1224,11 @@ def review(
     conversation_history: str = Form(""),
     customer_tone: str = Form(""),
     sop_context: str = Form(""),
+    source_case: str = Form(""),
     asset_manifest: str = Form(""),
     fps: float = Form(1.0),
-    max_frames: int = Form(6),
-    api_frame_limit: int = Form(4),
+    max_frames: int = Form(24),
+    api_frame_limit: int = Form(24),
     probe_seconds: int = Form(12),
     review_model: str = Form("standard"),
     file: Optional[UploadFile] = File(None),
@@ -1228,8 +1240,8 @@ def review(
     if review_model not in REVIEW_MODEL_PROFILES:
         raise HTTPException(status_code=400, detail="未知审核档位")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
-    max_frames = _clamp_int(max_frames, 1, 24, 6)
-    api_frame_limit = _clamp_int(api_frame_limit, 1, min(12, max_frames), min(4, max_frames))
+    max_frames = _clamp_int(max_frames, 1, 24, 24)
+    api_frame_limit = _clamp_int(api_frame_limit, 1, 24, 24)
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
     if source_type == "url":
         downloaded = download_video_url(video_url, seconds=probe_seconds)
@@ -1274,6 +1286,7 @@ def review(
         "conversation_history": conversation_history,
         "customer_tone": customer_tone,
         "sop_context": sop_context,
+        "source_case": source_case,
         "asset_manifest": asset_manifest,
     }
     result = _run_review(video, scenario, fps, max_frames, api_frame_limit, probe_seconds, review_model, evidence_context)

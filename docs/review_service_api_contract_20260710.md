@@ -6,7 +6,7 @@
 
 - 一个案件携带完整业务字段和多张图片、多段视频、文本/JSON 材料。
 - 每个案件独立获得 `job_id`，异步排队、查询、失败诊断和重试。
-- 批量任务由调用方并发提交案件，避免把多个大案件塞进一个超大 HTTP 请求。
+- 批量任务由调用方并发提交案件，并使用 `batch_id` 查询聚合状态，避免把多个大案件塞进一个超大 HTTP 请求。
 - 视觉工作台继续作为模型执行器，审核编排服务不重复实现模型调用。
 - 所有结果只提供证据、置信度和流程建议，不自动退款、补发、换货、拒绝或最终定责。
 
@@ -48,8 +48,24 @@
 - `order_items`、`product_master_data`、`warehouse_master_data`、`logistics`。
 - `conversation_history`、`sop_context`。
 - `asset_fields`：按原文件名声明素材来自 `images`、`reply`、`werehouse_message` 等字段。
+- `source_record`：原样保留甲方 manifest 的 `id/tag/status/admin_status/created_at/updated_at/resources` 等全部 JSON 字段。
+- `sampling_policy`：配置 `adaptive`、`strict`、`forensic` 或 `custom` 抽帧策略。
 
-### 2. 创建审核案件
+### 2. 上传前采样规划
+
+`POST /api/v1/review/sampling-plan`
+
+甲方后台可在上传前传入视频时长、文件大小、视频数量和采样策略。接口返回预计帧数、模型分段数、并行轮次和是否建议走对象存储转码代理。
+
+- `adaptive`：按时长/文件大小抽取 6-24 帧，适合低成本粗筛。
+- `strict`：`1 fps`，单视频最多 1200 帧，每 24 帧一个模型分段。
+- `forensic`：`2 fps`，单视频最多 1800 帧，每 24 帧一个模型分段。
+- `custom`：甲方配置 `0.1-2 fps`、帧上限和每次调用帧数。
+
+当前 543,351,335 字节、452.5 秒样本在 `strict` 下预计 454 帧、19 个模型分段、10 个并行轮次，并建议先走对象存储转码代理。
+同一视频在 `forensic` 下预计 906 帧。采样点按完整时轴均匀计算，不依赖原视频帧率整除，因此 25fps、29.97fps 等素材都保持接近后台配置的目标频率；触及帧上限后仍均匀覆盖首尾。
+
+### 3. 创建审核案件
 
 `POST /api/v1/review/jobs`
 
@@ -74,9 +90,10 @@ Content-Type：`multipart/form-data`
 }
 ```
 
-### 3. 查询、列表与重试
+### 4. 查询、列表与重试
 
 - `GET /api/v1/review/jobs/{job_id}`
+- `GET /api/v1/review/batches/{batch_id}?limit=100&offset=0`：全批次状态与成本由数据库聚合，案件明细分页返回。
 - `GET /api/v1/review/jobs?status=SUCCEEDED&scenario=wrong_item`
 - `POST /api/v1/review/jobs/{job_id}/retry`
 
@@ -91,7 +108,7 @@ Content-Type：`multipart/form-data`
 
 失败结果保留 `diagnostics`，可定位 HTTP 状态、执行阶段和错误类型。
 
-### 4. 指标
+### 5. 指标
 
 - `GET /api/v1/review/metrics`
 - `GET /metrics`
@@ -99,7 +116,7 @@ Content-Type：`multipart/form-data`
 
 当前指标：排队数、运行数、成功数、失败数、平均耗时、最老排队时长、worker 数、累计推理 Token、累计估算美元成本。
 
-### 5. HTML 报告
+### 6. HTML 报告
 
 - `GET /api/v1/review/jobs/{job_id}/report`
 - 使用与任务查询相同的 Bearer Token 鉴权。
@@ -111,9 +128,10 @@ Content-Type：`multipart/form-data`
 当前真实可运行路径支持单文件默认不超过 650MB、单案件默认不超过 750MB。已使用 556,390,436 字节案件完成实际 API 上传与审核。审核进程保留原始文件用于证据回看，但不会把完整视频直接发送给多模态模型，而是：
 
 1. 读取完整视频时轴，不再只扫描开头窗口。
-2. 按完整时轴均匀分段抽帧，包含首尾位置。
-3. 将模型输入帧缩放并压缩为 JPEG，再与业务上下文一并送审。
-4. 在结果中记录原始字节数、时长、采样策略、时轴覆盖率和大文件处理建议。
+2. 由甲方选择自适应粗筛、`1 fps` 严格审核、`2 fps` 取证审核或自定义频率。
+3. 密集帧每 24 帧形成一个模型分段，多分段并行执行，任一分段失败则案件失败并可重试。
+4. 将视频帧和大图片统一缩放、压缩为 JPEG，再与完整业务上下文一并送审。
+5. 聚合全部分段证据、风险、置信度、Token、成本和耗时，并在报告中记录实际帧数与分段数。
 
 对于甲方约 120GB 的生产批次，不应让所有原始素材经由 FastAPI 应用服务器中转。推荐生产链路：
 
@@ -135,9 +153,11 @@ Content-Type：`multipart/form-data`
 $env:E2E_BASE_URL="http://127.0.0.1:8000"
 venv\Scripts\python.exe scripts\check_private_deployment_api.py
 venv\Scripts\python.exe scripts\check_private_domain_agent_e2e.py
+venv\Scripts\python.exe scripts\check_private_domain_10k_scale.py
 venv\Scripts\python.exe scripts\check_review_input_isolation.py
 venv\Scripts\python.exe scripts\check_review_media_preprocessing.py
 venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_002,sample_004 --run-id acceptance-001
+venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_002,sample_004 --sampling-preset strict --run-id strict-acceptance-001
 ```
 
 完整样本：
@@ -148,9 +168,11 @@ venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_0
 
 ## 已验证结果
 
-- OpenAPI/API smoke：12/12。
+- OpenAPI/API smoke：13/13。
 - 私域 Agent 群分层、商品候选、舆情转客服、后台复盘：4/4。
+- 私域商品事件 1 万群本地规模验证：10,000/10,000 完成评估和候选持久化，风险群拦截正确，本机约 0.1 秒；该结果不等同于真实企微网络吞吐。
 - 两案件并发：发错货与未成年人资料均成功，置信度 0.95。
+- 严格采样批次：发错货视频按 `1 fps` 送审 38 帧，拆分为 2 个模型分段；批次共 86,897 tokens，估算成本 0.233567 美元。
 - 商品有伤：16 个文件约 106MB，成功，置信度 0.95。
 - 最大样本：10 个文件共 556,390,436 字节，成功，置信度 0.95。
 - 幂等重放：返回原 job_id，`created=false`。

@@ -4,7 +4,7 @@
 
 当前交付边界应从“演示版前端”切换为“FastAPI / OpenAPI 服务能力”。如果甲方不使用我方客服前台和人工客服工作台，那么前端只用于本地演示，不作为生产验收项；生产验收应围绕接口契约、鉴权、事件入站、视觉审核任务、运维可观测和联调边界进行。
 
-截至 2026-07-10，无前端 API 烟测通过：`12/12`。
+截至 2026-07-11，无前端 API 烟测通过：`13/13`。
 
 最新报告由验收脚本写入 `tests/reports/private_deployment_api_smoke_*.json`。
 
@@ -19,8 +19,8 @@ venv\Scripts\python.exe scripts\check_private_deployment_api.py
 
 | 能力 | API | 当前状态 | 说明 |
 |---|---|---|---|
-| OpenAPI 契约 | `GET /openapi.json` | 通过 | 当前导出 OpenAPI 3.1.0，包含 66 个 path。 |
-| 核心类型 Schema | `GroupMessageIn` / `ProductEventIn` / `ReviewCaseMetadata` / `ReviewJobResponse` | 通过 | 私域事件与案件审核模型已进入 OpenAPI components。 |
+| OpenAPI 契约 | `GET /openapi.json` | 通过 | 当前导出 OpenAPI 3.1.0，包含 68 个 path。 |
+| 核心类型 Schema | `GroupMessageIn` / `ProductEventIn` / `ReviewCaseMetadata` / `ReviewSamplingPolicy` / `ReviewJobResponse` | 通过 | 私域事件、采样策略与案件审核模型已进入 OpenAPI components。 |
 | 管理鉴权 | `POST /api/v1/auth/login` | 通过 | 本地验收使用演示账号；生产应改为甲方账号初始化或 SSO。 |
 | 客户会话令牌 | `POST /api/v1/auth/customer-session` | 通过 | POC 用白名单会话；生产必须替换为甲方登录态/小程序态校验。 |
 | 私域契约说明 | `GET /api/v1/private-domain/contracts` | 通过 | 返回企微、商品事件、客服/视觉审核等契约说明。 |
@@ -28,6 +28,8 @@ venv\Scripts\python.exe scripts\check_private_deployment_api.py
 | 商品事件入站 | `POST /api/v1/private-domain/product-event` | 通过 | 可接收商品/库存/抽赏事件并生成候选触达。 |
 | 甲方案件审核服务 | `POST /api/v1/review/jobs` | 已实测通过 | 一个案件支持多图、多视频、订单/商品/仓库/对话/SOP 上下文；异步返回 job_id。 |
 | 审核元数据校验 | `POST /api/v1/review/metadata/validate` | 通过 | 自动化客户端可在上传大文件前先校验强类型 metadata。 |
+| 抽帧成本规划 | `POST /api/v1/review/sampling-plan` | 已实测通过 | 后台可配置自适应、1fps、2fps 或自定义频率，并在上传前获得预计帧数、模型分段和转码建议。 |
+| 批次状态 | `GET /api/v1/review/batches/{batch_id}` | 已实测通过 | 数据库对全批次聚合状态、Token 与估算成本，案件明细通过 limit/offset 分页，不受单页数量截断。 |
 | 审核任务查询/重试 | `GET /api/v1/review/jobs/{job_id}` / `POST .../retry` | 已实测通过 | 支持幂等、独立查询、失败诊断和复用原素材重试。 |
 | 审核 HTML 报告 | `GET /api/v1/review/jobs/{job_id}/report` | 已实测通过 | 受 Bearer Token 保护，展示证据链、全时轴采样、耗时、Token 与估算成本，不暴露模型渠道、Key 或内部 Prompt。 |
 | 用户端单文件兼容 | `POST /api/v1/private-domain/review-tasks` | 已实测通过 | 保留照片/拍摄/视频上传兼容，不作为甲方批量案件的主要接口。 |
@@ -44,9 +46,9 @@ venv\Scripts\python.exe scripts\check_private_deployment_api.py
 3. 群消息接入：甲方企微会话存档/群机器人把消息转成 `/private-domain/group-message` 事件。
 4. 商品事件接入：商品库、订单、库存、抽赏、稀有掉落以 `/private-domain/product-event` 事件入站。
 5. 客服系统接入：甲方 Server 把一个工单的多媒体与结构化字段提交到 `/api/v1/review/jobs`，读取案件状态和安全审核报告后在甲方工单内展示和处理。
-6. 视觉审核链路：批量任务由调用方并发提交独立案件；服务端通过 SQLite 状态、幂等键和 worker 并发执行，避免一个超大批次请求拖垮全部案件。
+6. 视觉审核链路：批量任务由调用方并发提交独立案件；服务端通过 SQLite 状态、幂等键、batch_id 和 worker 并发执行，避免一个超大批次请求拖垮全部案件。
 7. 可观测与排障：甲方验收应检查 `/api/v1/ops/snapshot`、`/metrics`、应用日志、视觉审核工作台日志。
-8. 大文件：当前服务对完整视频时轴均匀抽帧并压缩为 JPEG 输入模型；120GB 生产批次应使用对象存储直传、七牛云或同类服务转码/故事板，再按案件引用代理素材。
+8. 大文件：当前服务支持自适应粗筛、1fps 严格审核和 2fps 取证审核；密集帧按 24 帧分段并行调用。120GB 生产批次仍应使用对象存储直传、七牛云或同类服务转码/故事板，再按案件引用代理素材。
 9. 标签隔离：人工结论和正负样本标签只能在模型返回后离线评测，服务入口会拒绝评测字段和 `sample_labels.json`。
 
 ## 明确不应承诺的内容
@@ -101,4 +103,6 @@ venv\Scripts\python.exe scripts\check_private_deployment_api.py
 - 大文件错发：`RJ-5F6BB513EAE8497D`，10 个文件共 556,390,436 字节，`SUCCEEDED`，置信度 `0.95`
 - 故障恢复：`RJ-3BCC852141DA48DF`，视觉服务关闭时 `FAILED` 并记录 502 诊断，恢复后原 job_id 重试成功
 - 全时轴/成本/HTML 回归：`RJ-D9E0FE9A613D453A` 与 `RJ-CF420A704A4D4723` 均通过；公开结果安全扫描通过，累计 `35,837 tokens`，估算成本 `$0.13267`
+- 1fps 严格审核：`RJ-2E5EADA997E24645` 送审 38 帧并拆成 2 个模型分段；批次 `sample-review-batch-strict-strict-chunk-20260711-0136` 两案全部成功，累计 `86,897 tokens`，估算成本 `$0.233567`
+- 1 万群规模：商品事件完成 10,000/10,000 群评估和候选持久化，风险群拦截正确，本机约 `0.1s`；真实企微吞吐仍待联调
 - 标签隔离：安全 metadata 通过；`ground_truth` metadata 与 `sample_labels.json` 附件均返回 HTTP 422

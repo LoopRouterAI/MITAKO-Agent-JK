@@ -118,8 +118,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples-dir", default=str(SAMPLE_ROOT), help="样本目录")
     parser.add_argument("--models", default="gemini35,gemini31lite,doubao20lite", help="逗号分隔模型 key")
     parser.add_argument("--fps", type=float, default=1.0)
-    parser.add_argument("--max-frames-per-video", type=int, default=6)
-    parser.add_argument("--api-frame-limit", type=int, default=18)
+    parser.add_argument("--sampling-mode", choices=["adaptive", "dense"], default="adaptive")
+    parser.add_argument("--max-frames-per-video", type=int, default=24)
+    parser.add_argument("--api-frame-limit", type=int, default=24)
     parser.add_argument("--probe-seconds", type=float, default=0.0)
     parser.add_argument("--frame-width", type=int, default=960)
     parser.add_argument("--supplemental-image-limit", type=int, default=20)
@@ -172,20 +173,33 @@ def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) 
     case = load_case(videos[0], args.supplemental_image_limit) if videos else load_case_from_folder(sample_dir, args.supplemental_image_limit)
     if not videos and not case.get("supplemental_images"):
         raise SystemExit(f"样本缺少可审核的视频或图片：{sample_dir}")
-    all_frames: List[Dict[str, Any]] = []
+    frame_groups: List[List[Dict[str, Any]]] = []
     video_summaries = []
     for video_index, video in enumerate(videos, start=1):
-        sample = sample_video_frames(video, args.fps, args.max_frames_per_video, args.probe_seconds, args.frame_width, run_dir / f"video_{video_index}")
+        sample = sample_video_frames(
+            video,
+            args.fps,
+            args.max_frames_per_video,
+            args.probe_seconds,
+            args.frame_width,
+            run_dir / f"video_{video_index}",
+            args.sampling_mode,
+        )
         picked = sample["frames"]
         video_summaries.append({"video_index": video_index, "file": video.name, **{k: v for k, v in sample.items() if k != "frames"}})
+        group: List[Dict[str, Any]] = []
         for frame in picked:
             copied = dict(frame)
             copied["video_index"] = video_index
             copied["video_file"] = video.name
-            copied["global_frame_index"] = len(all_frames) + 1
-            all_frames.append(copied)
+            group.append(copied)
+        frame_groups.append(group)
     case["videos"] = video_summaries
-    case["frames"] = all_frames[: args.api_frame_limit]
+    case["frames"] = [dict(frame) for group in frame_groups for frame in group]
+    for index, frame in enumerate(case["frames"], start=1):
+        frame["global_frame_index"] = index
+    case["model_frames_per_call"] = max(1, min(int(args.api_frame_limit), 24))
+    case["sampling_mode"] = args.sampling_mode
     case["supplemental_images"] = case["supplemental_images"][: args.supplemental_image_limit]
     media_dir = run_dir / "api_media"
     case["frames"] = prepare_media(case["frames"], media_dir / "frames")
@@ -462,6 +476,92 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
     }
+
+
+def _aggregate_chunk_results(case: Dict[str, Any], results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    parsed_rows = [item.get("parsed") or {} for item in results]
+    confidences = [float(item.get("confidence") or 0) for item in parsed_rows]
+    best_index = max(range(len(parsed_rows)), key=lambda index: confidences[index])
+    parsed = dict(parsed_rows[best_index])
+    label_scores = {"positive": 0.0, "negative": 0.0, "review": 0.0}
+    for item, confidence in zip(parsed_rows, confidences):
+        label = str(item.get("predicted_label") or "review")
+        label_scores[label if label in label_scores else "review"] = max(label_scores.get(label, 0.0), confidence)
+    ranked = sorted(label_scores.items(), key=lambda item: item[1], reverse=True)
+    predicted = "review" if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < 0.1 else ranked[0][0]
+    confidence = round(sum(confidences) / max(len(confidences), 1), 4)
+    for key in ("frame_findings", "adopted_evidence", "supporting_evidence", "challenging_evidence", "issue_timestamps", "material_gaps", "skeptical_questions", "audit_methods"):
+        parsed[key] = [entry for item in parsed_rows for entry in (item.get(key) or [])][:120]
+    conclusions = [str((item.get("overall_audit") or {}).get("conclusion") or "").strip() for item in parsed_rows]
+    parsed.update({
+        "predicted_label": predicted,
+        "system_yes_no": {"positive": "YES", "negative": "NO"}.get(predicted, "REVIEW"),
+        "confidence": confidence,
+        "overall_audit": {
+            "conclusion": "；".join(dict.fromkeys(item for item in conclusions if item))[:1200],
+            "confidence": confidence,
+            "core_reason": f"已完成 {len(results)} 个时间分段的独立审核并聚合证据。",
+            "business_follow_up_suggestion": "请VIP客服结合全部分段证据和业务规则复核。",
+        },
+        "business_action_allowed": False,
+        "human_required": True,
+        "chunk_audits": [
+            {"chunk_index": index, "predicted_label": item.get("predicted_label"), "confidence": item.get("confidence")}
+            for index, item in enumerate(parsed_rows, start=1)
+        ],
+    })
+    usage = {
+        key: sum(int((item.get("usage") or {}).get(key) or 0) for item in results)
+        for key in ("input_tokens", "output_tokens", "total_tokens")
+    }
+    estimated_usd = round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in results), 6)
+    label = load_report_label(case["case_id"])
+    parsed = enforce_boundary(parsed)
+    return {
+        "status": "success",
+        "latency_seconds": round(sum(float(item.get("latency_seconds") or 0) for item in results), 2),
+        "usage": usage,
+        "cost": {"estimated_usd": estimated_usd},
+        "parsed": parsed,
+        "evaluation": evaluate(parsed, label),
+        "policy_decision": policy_decision(parsed),
+        "chunking": {"segment_count": len(results), "frames_per_segment": case.get("model_frames_per_call"), "total_frames": len(case.get("frames") or [])},
+    }
+
+
+def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
+    frames = case.get("frames") or []
+    limit = max(1, min(int(case.get("model_frames_per_call") or 24), 24))
+    if len(frames) <= limit:
+        result = call_model(cfg, case, timeout, retries)
+        result["chunking"] = {"segment_count": 1, "frames_per_segment": limit, "total_frames": len(frames)}
+        return result
+    chunks = [frames[index:index + limit] for index in range(0, len(frames), limit)]
+    workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4, len(chunks)))
+
+    def review_chunk(index: int, chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
+        chunk_case = dict(case)
+        chunk_case["frames"] = chunk
+        chunk_case["supplemental_images"] = (case.get("supplemental_images") or [])[:4]
+        structured = dict(case.get("structured_business_context") or {})
+        structured["review_chunk"] = {"index": index + 1, "total": len(chunks)}
+        chunk_case["structured_business_context"] = structured
+        return call_model(cfg, chunk_case, timeout, retries)
+
+    results: List[Optional[Dict[str, Any]]] = [None] * len(chunks)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(review_chunk, index, chunk): index for index, chunk in enumerate(chunks)}
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                results[index] = future.result()
+            except Exception as exc:
+                results[index] = {"status": "failed", "error": str(exc)[:500]}
+    completed = [item or {"status": "failed", "error": "empty_chunk_result"} for item in results]
+    failures = [{"chunk_index": index + 1, "error": item.get("error") or item.get("status")} for index, item in enumerate(completed) if item.get("status") != "success"]
+    if failures:
+        return {"status": "failed", "error": "chunk_review_failed", "chunk_failures": failures, "chunking": {"segment_count": len(chunks), "total_frames": len(frames)}}
+    return _aggregate_chunk_results(case, completed)
 
 
 def score_result(result: Dict[str, Any]) -> Dict[str, Any]:

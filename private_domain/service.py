@@ -427,9 +427,9 @@ def integration_contracts() -> List[Dict[str, Any]]:
             "method": "POST multipart/form-data + GET 状态查询",
             "endpoint": "/api/v1/review/jobs",
             "auth": "Bearer 集成账号 Token + Idempotency-Key",
-            "fields": ["client_case_id", "scenario", "ticket_id", "order_no", "customer_claim", "order_items", "product_master_data", "warehouse_master_data", "logistics", "conversation_history", "sop_context", "files"],
+            "fields": ["client_case_id", "scenario", "batch_id", "ticket_id", "order_no", "customer_claim", "order_items", "product_master_data", "warehouse_master_data", "logistics", "conversation_history", "sop_context", "source_record", "sampling_policy", "files"],
             "owner": "甲方客服 Server / 工单系统",
-            "note": "每个案件支持多图、多视频和结构化上下文；批量任务由甲方并发提交，结果按 job_id 独立查询和重试。",
+            "note": "每个案件支持多图、多视频和结构化上下文；甲方可先调用采样计划接口，再并发提交同一 batch_id，按 job_id 独立查询和重试，并按 batch_id 聚合进度与成本。",
         },
     ]
 
@@ -548,7 +548,7 @@ def process_product_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     event = {**payload, "event_id": event_id}
     store.save_product_event(event)
     candidates: List[Dict[str, Any]] = []
-    for group in store.list_groups(limit=200):
+    for group in store.list_groups(limit=10000):
         tags = group.get("tags") or {}
         group_ips = set(tags.get("ip") or [])
         score = 0
@@ -572,8 +572,7 @@ def process_product_event(payload: Dict[str, Any]) -> Dict[str, Any]:
         reason = "、".join(reasons) if reasons else "缺少可解释匹配信号"
         candidates.append({"group_id": group["group_id"], "match_score": score, "decision": decision, "reason": reason})
 
-    for item in candidates:
-        store.add_campaign_candidate(event_id, item["group_id"], item["match_score"], item["decision"], item["reason"])
+    store.add_campaign_candidates(event_id, candidates)
     result = {
         "event": event,
         "candidates": candidates,

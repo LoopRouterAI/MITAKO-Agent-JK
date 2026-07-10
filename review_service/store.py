@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, List, Optional
 
 from runtime_paths import data_dir
 
@@ -14,13 +15,21 @@ DB_PATH = data_dir() / "review_service.db"
 JSON_FIELDS = ("metadata", "assets", "result", "diagnostics")
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _json(value: Any) -> str:
@@ -212,6 +221,39 @@ def list_jobs(tenant_id: str, status: str = "", scenario: str = "", limit: int =
     with _connect() as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
     return [_row(row) or {} for row in rows]
+
+
+def list_batch(tenant_id: str, batch_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM review_jobs
+            WHERE tenant_id=? AND json_extract(metadata, '$.batch_id')=?
+            ORDER BY created_at ASC LIMIT ? OFFSET ?
+            """,
+            (tenant_id, batch_id, max(1, min(limit, 200)), max(0, offset)),
+        ).fetchall()
+    return [_row(row) or {} for row in rows]
+
+
+def batch_snapshot(tenant_id: str, batch_id: str) -> List[Dict[str, Any]]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+              status,
+              COUNT(*) AS count,
+              COALESCE(SUM(CAST(json_extract(result, '$.review.agent_report.inference_estimate.total_tokens') AS INTEGER)), 0) AS total_tokens,
+              COALESCE(SUM(CAST(json_extract(result, '$.review.agent_report.inference_estimate.estimated_usd') AS REAL)), 0) AS estimated_usd
+            FROM review_jobs
+            WHERE tenant_id=? AND json_extract(metadata, '$.batch_id')=?
+            GROUP BY status
+            """,
+            (tenant_id, batch_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def snapshot(tenant_id: str = "") -> Dict[str, Any]:
