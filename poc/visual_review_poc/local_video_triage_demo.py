@@ -159,10 +159,10 @@ def sample_video_frames(video: Path, fps: float, max_frames: int, probe_seconds:
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     duration = total_frames / native_fps if native_fps else 0
     scan_frames = total_frames
-    if probe_seconds > 0:
-        scan_frames = min(total_frames, int(native_fps * probe_seconds))
     step = max(int(round(native_fps / max(fps, 0.1))), 1)
     candidates = list(range(0, max(scan_frames, 1), step))
+    if total_frames > 1 and (not candidates or candidates[-1] != total_frames - 1):
+        candidates.append(total_frames - 1)
     if len(candidates) > max_frames:
         positions = [round(i * (len(candidates) - 1) / max(max_frames - 1, 1)) for i in range(max_frames)]
         candidates = [candidates[pos] for pos in positions]
@@ -193,10 +193,26 @@ def sample_video_frames(video: Path, fps: float, max_frames: int, probe_seconds:
     if not frames:
         raise SystemExit("没有抽到可用帧")
     return {
+        "source_bytes": video.stat().st_size,
         "native_fps": round(native_fps, 2),
         "duration_seconds": round(duration, 2),
         "fps_requested": fps,
         "probe_seconds": probe_seconds,
+        "sampling_strategy": "full_timeline_uniform",
+        "timeline_coverage_ratio": round(
+            min(1.0, (frames[-1]["timestamp_seconds"] - frames[0]["timestamp_seconds"]) / duration),
+            4,
+        ) if duration > 0 and len(frames) > 1 else 1.0,
+        "model_input": {
+            "type": "compressed_jpeg_frames",
+            "max_width": frame_width,
+            "jpeg_quality": 84,
+        },
+        "large_media_recommendation": (
+            "object_storage_transcode_proxy"
+            if video.stat().st_size >= 500 * 1024 * 1024 or duration >= 600
+            else "server_side_frame_sampling"
+        ),
         "sampled_frames": len(frames),
         "frames": frames,
     }
@@ -270,17 +286,38 @@ def load_case(video: Path, supplemental_limit: int) -> Dict[str, Any]:
     return load_case_from_folder(video.parent, supplemental_limit, video)
 
 
+def _structured_context_value(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
 def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: str) -> Dict[str, Any]:
     """把工作台录入的客服证据包并入模型上下文。"""
-    if scenario:
-        case["scenario"] = scenario
-        case["scenario_label"] = {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "未成年人资料审核"}[scenario]
     try:
         context = json.loads(raw_context) if raw_context else {}
     except json.JSONDecodeError:
         context = {}
     if not isinstance(context, dict):
         context = {}
+    business_scenario = str(context.get("business_scenario") or "").strip()
+    if scenario:
+        case["scenario"] = scenario
+        case["scenario_label"] = {
+            "wrong_item": "发错货审核",
+            "missing_item": "漏发货审核",
+            "product_damage": "商品有伤审核",
+            "minor_refund": "未成年人退款资料审核",
+        }.get(
+            business_scenario,
+            {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "未成年人资料审核"}[scenario],
+        )
     customer_claim = str(context.get("customer_claim") or "").strip()
     if customer_claim:
         case["customer_claim"] = customer_claim
@@ -290,13 +327,17 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
         if value:
             order_context[key] = value
     structured = case.setdefault("structured_business_context", {})
+    if business_scenario:
+        structured["business_scenario"] = business_scenario
     frontdesk_fields = {
-        "order_item": str(context.get("order_item") or "").strip(),
-        "sku": str(context.get("sku") or "").strip(),
-        "product_master_data": str(context.get("product_master_data") or "").strip(),
-        "warehouse_master_data": str(context.get("warehouse_master_data") or "").strip(),
-        "conversation_history": str(context.get("conversation_history") or "").strip(),
-        "customer_tone": str(context.get("customer_tone") or "").strip(),
+        "order_item": _structured_context_value(context.get("order_item")),
+        "sku": _structured_context_value(context.get("sku")),
+        "product_master_data": _structured_context_value(context.get("product_master_data")),
+        "warehouse_master_data": _structured_context_value(context.get("warehouse_master_data")),
+        "conversation_history": _structured_context_value(context.get("conversation_history")),
+        "customer_tone": _structured_context_value(context.get("customer_tone")),
+        "sop_context": _structured_context_value(context.get("sop_context")),
+        "asset_manifest": _structured_context_value(context.get("asset_manifest")),
     }
     structured["frontdesk_evidence_package"] = {key: value for key, value in frontdesk_fields.items() if value}
     return case
@@ -332,16 +373,20 @@ def scenario_rules(scenario: str) -> str:
         return """未成年人资料审核专项规则：
 - 只判断材料是否完整、清晰、前后一致，不识别或暴露真实身份。
 - 必须要求人工终审；不得自动通过、自动退费或自动拒绝。
-- 重点检查监护关系证明、订单主体、付款主体、资料遮挡、重复使用和篡改痕迹。"""
-    return """开箱/发错货专项规则：
+- 必查五类材料：未成年人和监护人身份证明、监护关系证明、双方签字承诺书、订单及支付凭证、账号绑定手机号实名归属证明。
+- 检查监护人、手机号实名、付款主体、订单主体是否形成一致链路；主副卡、非法定监护人、10周岁以下等情况必须标记人工补充核验。
+- 重点检查资料遮挡、重复使用、篡改痕迹、发票备注手机号及金额一致性。"""
+    return """开箱/错发/漏发专项规则：
 - 如果订单截图/商品信息明确显示购买规格，实物包装或合格证明示另一个规格，并且能对应到同一角色/款式/SKU，这是强支持证据。
+- 发错货需比对“订单应收商品”和“实际收到商品”的角色、款式、规格、SKU；光栅换角度变图和隐藏款必须结合商品主数据，不可仅凭外观下结论。
+- 漏发货需比对订单数量、拆单/分包状态、完整开箱过程、到手实物全家福、绿色自封袋和面单；纸类商品可能叠放，必须先排除未拆开清点。
 - 缺 SKU 主数据时，不要机械降级为 review；要看订单截图、实物合格证、补充图和视频连续性是否已经形成足够证据链。
 - 如果视频连续性高、换货风险低，补充图片能对应同一实物，可以提高置信度；如果商品多次离镜、跳切或关键物品未从箱中出现，要降低置信度并说明。"""
 
 
 def build_system_prompt(scenario: str = "video_unboxing") -> str:
     objective = {
-        "video_unboxing": "用户提供的实物、包装/合格证、开箱过程和补充图片，是否支持“发错货/发错尺寸/规格不一致”的用户诉求。",
+        "video_unboxing": "用户提供的实物、包装/合格证、开箱过程和补充图片，是否支持“发错货/发错尺寸/规格不一致/漏发货”的用户诉求。",
         "product_damage": "用户提供的视频、补充图片和工单材料，是否支持“商品到手已有破损/压痕/划痕/折损/污损”等商品有伤诉求，并判断图片真实性与证据强度。",
         "minor_material": "用户提交的未成年人/监护人相关资料是否完整、清晰、前后一致，是否足以进入人工退费/售后终审。",
     }.get(scenario, "用户提供的视觉材料是否支持当前售后诉求。")

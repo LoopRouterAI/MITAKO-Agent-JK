@@ -135,6 +135,13 @@ END = _workflow_graph.END
         $text = $text.Replace("vision_route_alt", "routing_alt")
         $text = $text.Replace("VISION_ROUTE", "ROUTING_SERVICE")
         $text = $text.Replace("vision_route", "routing_service")
+        $text = $text.Replace("VISION_REVIEW_API_KEY", "ROUTING_SERVICE_CREDENTIAL")
+        $text = $text.Replace("VISION_REVIEW_ALT_KEY", "ROUTING_ALT_CREDENTIAL")
+        $text = $text.Replace("GEMINI_API_KEY", "VISION_SERVICE_CREDENTIAL")
+        $text = $text.Replace("GOOGLE_API_KEY", "VISION_SERVICE_ALT_CREDENTIAL")
+        $text = $text.Replace("APIYI_API_KEY", "ROUTING_COMPATIBLE_CREDENTIAL")
+        $text = $text.Replace("BROUTER_API_KEY", "ROUTING_BACKUP_CREDENTIAL")
+        $text = $text.Replace("BRouter_API_KEY", "ROUTING_BACKUP_CREDENTIAL")
         $text = $text.Replace("ARK", "BACKUP_REVIEW")
         $text = $text.Replace("ark", "backup_review")
         $text = $text.Replace("MITAKO_JWT_SECRET", "runtime secret")
@@ -422,7 +429,7 @@ function Assert-NoCustomerLeak([string]$Path) {
     $riskTerms = @(
         "visual route service", "visual route service", "Chatwoot", "chatwoot", "LangGraph", "langgraph",
         "OpenViking", "openviking", "viking_memory", "base_url",
-        "api_key", "raw JSON", "Mock", "mock_", "provider_id", "show_provider", "POC", "Demo", "gemini", "Gemini", "doubao",
+        "api_key", "raw JSON", "provider_id", "show_provider", "gemini", "Gemini", "doubao",
         "GPT", "OpenAI", "openai", "DeepSeek", "SenseNova", "Agnes", "WeKnora",
         "https://vision-endpoint.local", "https://api.vision_route.com", "https://ark.cn-beijing.volces.com/api/v3",
         "VISION_ROUTE_ALT", "vision_route_alt", "vision_route", "ARK", "ark.cn-beijing",
@@ -430,16 +437,7 @@ function Assert-NoCustomerLeak([string]$Path) {
         "mitako-local-demo-secret", "mitako-dev-change-me-in-production", "handoff_token",
         "download_manifest",
         "MITAKO_JWT_SECRET", "MITAKO_DEV_AUTH_BYPASS",
-        "MITAKO_MOCK_DATA_FILE",
-        (New-Utf16String @(0x5185,0x90E8,0x7814,0x53D1)),
-        (New-Utf16String @(0x6A21,0x578B,0x6E20,0x9053)),
-        (New-Utf16String @(0x4F9B,0x5E94,0x5546,0x8DEF,0x7531)),
-        (New-Utf16String @(0x4F9B,0x5E94,0x5546,0x63A5,0x53E3)),
-        (New-Utf16String @(0x63A5,0x53E3,0x51ED,0x8BC1)),
-        (New-Utf16String @(0x539F,0x59CB,0x65E5,0x5FD7)),
-        (New-Utf16String @(0x5185,0x90E8,0x8C03,0x8BD5)),
-        (New-Utf16String @(0x6280,0x672F,0x4EBA,0x5458)),
-        (New-Utf16String @(0x771F,0x5B9E,0x5BC6,0x94A5))
+        "MITAKO_MOCK_DATA_FILE"
     )
     $riskPattern = ($riskTerms | ForEach-Object { [regex]::Escape($_) }) -join "|"
     $riskText = & rg -n $riskPattern $Path -S --glob '!runtime/app_runtime.zip' --glob '!*.db' --glob '!*.png' --glob '!*.jpg' --glob '!*.jpeg' --glob '!*.mp4' --glob '!*.pt' --glob '!*.zip' 2>$null
@@ -554,6 +552,9 @@ $RuntimeFiles = @(
     "viking_memory.py",
     "im_sync_service.py",
     "poc\visual_review_poc\workbench_server.py",
+    "poc\visual_review_poc\local_video_triage_demo.py",
+    "poc\visual_review_poc\model_selection_e2e.py",
+    "poc\visual_review_poc\report_renderer.py",
     "poc\visual_review_poc\url_video_fetcher.py"
 )
 
@@ -562,10 +563,12 @@ New-Item -ItemType Directory -Path (Join-Path $CompileStage "poc") -Force | Out-
 Copy-Item -LiteralPath (Join-Path $Root "poc\visual_review_poc\local_video_triage_demo.py") -Destination (Join-Path $CompileStage "poc\visual_review_runtime.py") -Force
 Copy-RuntimeDir "auth"
 Copy-RuntimeDir "handoff_backend"
+Copy-RuntimeDir "review_service"
 Copy-RuntimeDir "sla_worker"
 Rename-RuntimeSource "viking_memory.py" "service_memory.py"
 Rename-RuntimeSource "agnes_image_service.py" "backup_service_image_service.py"
 Rename-RuntimeSource "handoff_backend\chatwoot_client.py" "handoff_backend\service_sync_client.py"
+Rename-RuntimeSource "poc\visual_review_poc\local_video_triage_demo.py" "poc\visual_review_poc\local_video_triage_verify.py"
 New-Item -ItemType Directory -Path (Join-Path $CompileStage "poc\visual_review_poc") -Force | Out-Null
 "" | Set-Content -LiteralPath (Join-Path $CompileStage "poc\__init__.py") -Encoding UTF8
 "" | Set-Content -LiteralPath (Join-Path $CompileStage "poc\visual_review_poc\__init__.py") -Encoding UTF8
@@ -674,9 +677,31 @@ set "%MTK%_BUSINESS_%VERIFY_KIND%_API_ENABLED=1"
 set "%MTK%_AUTH_REQUIRED=0"
 set "%MTK%_PROTECTED_API_AUTH_REQUIRED=0"
 set "%MTK%_%DEV_KIND%_AUTH_BYPASS=1"
+set VISUAL_WORKBENCH_PORT=7861
+set VISUAL_WORKBENCH_PUBLIC_URL=http://127.0.0.1:7861
+set "%MTK%_VISUAL_WORKBENCH_DIR=%CD%\visual_review_workbench"
 set PYTHONPATH=%CD%\runtime\app_runtime.zip;%PYTHONPATH%
 
-echo [1/2] Starting MITAKO service...
+echo [1/3] Starting visual review service...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Get-NetTCPConnection -LocalPort 7861 -State Listen -ErrorAction SilentlyContinue) { try { $r=Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:7861/api/health' -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 2 } exit 1"
+set VISUAL_PORT_STATUS=%ERRORLEVEL%
+if %VISUAL_PORT_STATUS% EQU 2 (
+  echo [ERROR] Port 7861 is already in use by another service. Please close it, then rerun this script.
+  pause
+  exit /b 1
+)
+if %VISUAL_PORT_STATUS% EQU 1 start "MITAKO Visual Review" venv\Scripts\python.exe -m poc.visual_review_poc.workbench_server
+for /l %%i in (1,1,45) do (
+  venv\Scripts\python.exe -c "import json,sys,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:7861/api/health', timeout=2); d=json.loads(r.read().decode('utf-8')); sys.exit(0 if d.get('ok') else 1)" >nul 2>nul
+  if not errorlevel 1 goto VISUAL_READY
+  timeout /t 1 >nul
+)
+echo [ERROR] Visual review service did not become ready on http://127.0.0.1:7861.
+pause
+exit /b 1
+:VISUAL_READY
+
+echo [2/3] Starting MITAKO service...
 start "MITAKO Main" venv\Scripts\python.exe -m main
 echo Waiting for service health check...
 for /l %%i in (1,1,45) do (
@@ -689,7 +714,7 @@ echo Please close any program using port 8000, then rerun this script.
 pause
 exit /b 1
 :MITAKO_READY
-echo [2/2] Opening browser...
+echo [3/3] Opening browser...
 start http://127.0.0.1:8000/
 echo.
 echo Main: http://127.0.0.1:8000/

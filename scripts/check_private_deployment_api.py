@@ -70,14 +70,22 @@ def main() -> int:
         "/api/v1/private-domain/product-event",
         "/api/v1/private-domain/review-tasks",
         "/api/v1/private-domain/review-tasks/{task_id}",
+        "/api/v1/review/contracts",
+        "/api/v1/review/metadata/validate",
+        "/api/v1/review/jobs",
+        "/api/v1/review/jobs/{job_id}",
+        "/api/v1/review/jobs/{job_id}/report",
+        "/api/v1/review/jobs/{job_id}/retry",
+        "/api/v1/review/metrics",
     }
     missing = sorted(required_paths - paths)
     _case(results, "OPENAPI-required-paths", code == 200 and not missing, f"paths={len(paths)} missing={missing}", t0)
 
     t0 = time.time()
     schemas = openapi.get("components", {}).get("schemas", {})
-    typed = all(name in schemas for name in ("GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse"))
-    _case(results, "OPENAPI-private-domain-schemas", typed, f"schemas={','.join(name for name in schemas if name in ('GroupMessageIn', 'ProductEventIn', 'ReviewTaskUploadResponse'))}", t0)
+    required_schemas = ("GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata", "ReviewJobResponse")
+    typed = all(name in schemas for name in required_schemas)
+    _case(results, "OPENAPI-typed-schemas", typed, f"schemas={','.join(name for name in schemas if name in required_schemas)}", t0)
 
     t0 = time.time()
     code, auth = _request(
@@ -95,6 +103,35 @@ def main() -> int:
     t0 = time.time()
     code, contracts = _request("GET", f"{base}/api/v1/private-domain/contracts", token=admin_token)
     _case(results, "PRIVATE-contracts", code == 200 and contracts.get("ok") is True, f"items={len(contracts.get('integration_contracts') or [])}", t0)
+
+    t0 = time.time()
+    code, review_contract = _request("GET", f"{base}/api/v1/review/contracts", token=admin_token)
+    supported = (review_contract.get("contract") or {}).get("supported_scenarios") or []
+    media_processing = (review_contract.get("contract") or {}).get("media_processing") or {}
+    _case(
+        results,
+        "REVIEW-contract",
+        code == 200
+        and set(supported) >= {"product_damage", "wrong_item", "missing_item", "minor_refund"}
+        and bool(media_processing.get("model_input")),
+        f"scenarios={supported} media_processing={bool(media_processing)}",
+        t0,
+    )
+
+    t0 = time.time()
+    code, missing_item_metadata = _request(
+        "POST",
+        f"{base}/api/v1/review/metadata/validate",
+        token=admin_token,
+        json_body={
+            "client_case_id": "api-smoke-missing-item",
+            "scenario": "missing_item",
+            "customer_claim": "订单有两件商品，用户称只收到一件；本项只校验接口字段，不作为准确率样本。",
+            "order_items": [{"sku": "api-smoke-sku", "quantity": 2}],
+            "logistics": {"split_shipment": False},
+        },
+    )
+    _case(results, "REVIEW-missing-item-metadata", code == 200 and (missing_item_metadata.get("metadata") or {}).get("scenario") == "missing_item", f"status={code}", t0)
 
     t0 = time.time()
     code, group = _request(
@@ -140,12 +177,32 @@ def main() -> int:
 
     t0 = time.time()
     code, metrics = _request("GET", f"{base}/metrics", token=admin_token)
-    _case(results, "METRICS-json", code == 200 and "handoff_queuing" in metrics, f"keys={sorted(metrics.keys())}", t0)
+    review_metrics = metrics.get("review_service") or {}
+    _case(
+        results,
+        "METRICS-json",
+        code == 200
+        and "handoff_queuing" in metrics
+        and "inference_total_tokens" in review_metrics
+        and "inference_estimated_usd" in review_metrics,
+        f"keys={sorted(metrics.keys())} review_keys={sorted(review_metrics.keys())}",
+        t0,
+    )
 
     t0 = time.time()
     status, prometheus = _request("GET", f"{base}/metrics/prometheus", token=admin_token)
     text = prometheus.get("detail", "")
-    _case(results, "METRICS-prometheus", status == 200 and "mitako_handoff_queuing" in text, text.splitlines()[0] if text else "", t0)
+    _case(
+        results,
+        "METRICS-prometheus",
+        status == 200
+        and "mitako_handoff_queuing" in text
+        and "mitako_review_jobs_queued" in text
+        and "mitako_review_inference_total_tokens" in text
+        and "mitako_review_inference_estimated_usd" in text,
+        text.splitlines()[0] if text else "",
+        t0,
+    )
 
     t0 = time.time()
     code, customer = _request(

@@ -85,6 +85,8 @@ from ops_service import ops_snapshot
 from runtime_paths import app_root, data_dir
 from private_domain.router import router as private_domain_router
 from private_domain import store as private_domain_store
+from review_service.router import router as review_service_router
+from review_service import service as review_service_core
 
 SUPER_ADMIN_ONLY = frozenset({Role.SUPER_ADMIN.value})
 
@@ -107,6 +109,7 @@ if _business_demo_enabled():
     app.include_router(business_router)
 
 app.include_router(private_domain_router)
+app.include_router(review_service_router)
 
 
 def _cors_origins() -> List[str]:
@@ -1010,6 +1013,7 @@ async def metrics(user=require_roles(ADMIN_MUTATE_ROLES)):
         "handoff_escalated": snap.get("escalated", 0),
         "sla_alerts": len(snap.get("sla_alerts") or []),
         "ws_connections": hub.connection_count(),
+        "review_service": review_service_core.metrics(user.get("tenant_id") or "mitako"),
     }
 
 
@@ -1043,6 +1047,17 @@ async def metrics_prometheus(user=require_roles(ADMIN_MUTATE_ROLES)):
         lines.append(metric("mitako_visual_review_success_rate", visual.get("success_rate")))
     report_safety = snap.get("public_report_safety") or {}
     lines.append(metric("mitako_public_report_unsafe_files", report_safety.get("unsafe_files")))
+    review_jobs = review_service_core.metrics(user.get("tenant_id") or "mitako")
+    lines.extend([
+        metric("mitako_review_jobs_queued", review_jobs.get("queued")),
+        metric("mitako_review_jobs_running", review_jobs.get("running")),
+        metric("mitako_review_jobs_succeeded", review_jobs.get("succeeded")),
+        metric("mitako_review_jobs_failed", review_jobs.get("failed")),
+        metric("mitako_review_inference_total_tokens", review_jobs.get("inference_total_tokens")),
+        metric("mitako_review_inference_estimated_usd", review_jobs.get("inference_estimated_usd")),
+    ])
+    if review_jobs.get("average_latency_seconds") is not None:
+        lines.append(metric("mitako_review_jobs_average_latency_seconds", review_jobs.get("average_latency_seconds")))
     return "\n".join(lines) + "\n"
 
 

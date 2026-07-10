@@ -66,8 +66,8 @@ REPORT_DIR = WORKBENCH_DIR / "reports"
 PUBLIC_SUMMARY_DIR = REPORT_DIR / "public_summaries"
 INDEX_HTML = WORKBENCH_DIR / "workbench.html"
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
-MAX_UPLOAD_BYTES = 300 * 1024 * 1024
-MAX_FOLDER_BYTES = 800 * 1024 * 1024
+MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
+MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
 SAMPLE_MAX_BYTES = 5 * 1024 * 1024
 PRIVATE_REPORT_KEYS = {
     "model",
@@ -308,6 +308,8 @@ def _public_agent_report_payload(
     public_conclusion: str,
     public_next_step: str,
 ) -> Dict[str, Any]:
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    cost = result.get("cost") if isinstance(result.get("cost"), dict) else {}
     evidence_package = {
         "videos": case.get("videos") or [],
         "frames_sent": len(case.get("frames") or []),
@@ -326,6 +328,12 @@ def _public_agent_report_payload(
         "runtime": {
             "latency_seconds": result.get("latency_seconds"),
             "status": result.get("status"),
+        },
+        "inference_estimate": {
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "total_tokens": usage.get("total_tokens"),
+            "estimated_usd": cost.get("estimated_usd"),
         },
         "public_brief": {
             "conclusion": public_conclusion,
@@ -674,6 +682,7 @@ def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[
         "summary": data["summary"],
         "frame_strategy": f"{len(case.get('videos') or [])} 个视频合并为同一证据包，送审 {len(case.get('frames') or [])} 帧，补充图片 {len(case.get('supplemental_images') or [])} 张。",
         "report": {"html_url": "/reports/" + report_name},
+        "agent_report": data.get("agent_report") or {},
         "agent_brief": {
             "conclusion": public_conclusion,
             "confidence": data["summary"].get("confidence"),
@@ -1137,6 +1146,7 @@ def review_samples_batch(payload: Dict[str, str]) -> JSONResponse:
 @app.post("/api/review-folder")
 def review_folder(
     scenario: str = Form("video_unboxing"),
+    business_scenario: str = Form(""),
     ticket_id: str = Form(""),
     user_id: str = Form(""),
     order_no: str = Form(""),
@@ -1149,6 +1159,8 @@ def review_folder(
     warehouse_master_data: str = Form(""),
     conversation_history: str = Form(""),
     customer_tone: str = Form(""),
+    sop_context: str = Form(""),
+    asset_manifest: str = Form(""),
     fps: float = Form(1.0),
     max_frames: int = Form(6),
     api_frame_limit: int = Form(4),
@@ -1163,6 +1175,7 @@ def review_folder(
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
     folder_dir = _save_folder_uploads(files)
     evidence_context = {
+        "business_scenario": business_scenario,
         "ticket_id": ticket_id,
         "user_id": user_id,
         "order_no": order_no,
@@ -1175,6 +1188,8 @@ def review_folder(
         "warehouse_master_data": warehouse_master_data,
         "conversation_history": conversation_history,
         "customer_tone": customer_tone,
+        "sop_context": sop_context,
+        "asset_manifest": asset_manifest,
     }
     return JSONResponse(_run_folder_agent_review(folder_dir, scenario, "gemini35", evidence_context, fps, max_frames, api_frame_limit, probe_seconds))
 
@@ -1184,6 +1199,7 @@ def review(
     source_type: str = Form("upload"),
     video_url: str = Form(""),
     scenario: str = Form("video_unboxing"),
+    business_scenario: str = Form(""),
     ticket_id: str = Form(""),
     user_id: str = Form(""),
     order_no: str = Form(""),
@@ -1196,6 +1212,8 @@ def review(
     warehouse_master_data: str = Form(""),
     conversation_history: str = Form(""),
     customer_tone: str = Form(""),
+    sop_context: str = Form(""),
+    asset_manifest: str = Form(""),
     fps: float = Form(1.0),
     max_frames: int = Form(6),
     api_frame_limit: int = Form(4),
@@ -1242,6 +1260,7 @@ def review(
         video = _save_upload(file)
         source_status = "ready"
     evidence_context = {
+        "business_scenario": business_scenario,
         "ticket_id": ticket_id,
         "user_id": user_id,
         "order_no": order_no,
@@ -1254,6 +1273,8 @@ def review(
         "warehouse_master_data": warehouse_master_data,
         "conversation_history": conversation_history,
         "customer_tone": customer_tone,
+        "sop_context": sop_context,
+        "asset_manifest": asset_manifest,
     }
     result = _run_review(video, scenario, fps, max_frames, api_frame_limit, probe_seconds, review_model, evidence_context)
     response = {"ok": result["ok"], "source_status": source_status, "review": result}

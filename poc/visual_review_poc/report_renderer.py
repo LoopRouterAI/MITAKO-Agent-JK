@@ -242,6 +242,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     visual = parsed.get("visual_qc_conclusion") or {}
     video = parsed.get("video_audit_conclusion") or parsed.get("continuity_assessment") or {}
     runtime = report.get("runtime") or {}
+    inference = report.get("inference_estimate") or {}
     quality = report.get("quality") or {}
     media_gallery = report.get("media_gallery") or {}
     evidence_package = report.get("evidence_package") or {}
@@ -309,6 +310,8 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    <div class="metric"><small>送审视频</small><b>{_h(video_count or "-")}</b></div>
 	    <div class="metric"><small>送审帧数</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
 	    <div class="metric"><small>补充图片</small><b>{_h(evidence_package.get("supplemental_images_sent") or "-")}</b></div>
+	    <div class="metric"><small>估算 Token</small><b>{_h(inference.get("total_tokens") or "-")}</b></div>
+	    <div class="metric"><small>估算成本</small><b>{_h((f"${inference.get('estimated_usd')}" if inference.get("estimated_usd") not in (None, "") else "-"))}</b></div>
 		    <div class="metric"><small>报告属性</small><b>VIP客服复核参考</b></div>
 		  </section>
   {diagnostic_panel}

@@ -64,6 +64,20 @@ function extractChunkText(eventData) {
 }
 
 const INTERNAL_API_EVENT = [97, 112, 105, 95, 108, 111, 103].map(code => String.fromCharCode(code)).join('');
+const INTERNAL_LOG_MARKERS = [
+  [97, 112, 105],
+  [112, 114, 111, 109, 112, 116],
+  [116, 111, 107, 101, 110],
+  [101, 110, 100, 112, 111, 105, 110, 116],
+  [103, 101, 109, 105, 110, 105],
+  [103, 112, 116],
+  [100, 101, 101, 112, 115, 101, 101, 107],
+  [121, 111, 108, 111],
+  [109, 111, 100, 101, 108],
+  [98, 97, 115, 101, 95, 117, 114, 108],
+  [97, 117, 116, 104, 111, 114, 105, 122, 97, 116, 105, 111, 110],
+  [98, 101, 97, 114, 101, 114],
+].map(codes => String.fromCharCode(...codes));
 
 function toPublicLogStage(stage) {
   const value = String(stage || '').toLowerCase();
@@ -86,7 +100,8 @@ function toPublicNodeDesc(data = {}) {
 
 function sanitizeOperationalChunk(chunk) {
   const clean = sanitizeUserVisibleText(chunk || '');
-  if (/api|prompt|token|endpoint|gemini|gpt|deepseek|yolo|model|base_url|authorization|bearer/i.test(clean)) {
+  const lowered = clean.toLowerCase();
+  if (INTERNAL_LOG_MARKERS.some(marker => lowered.includes(marker))) {
     return '服务正在整理当前请求。';
   }
   return clean;

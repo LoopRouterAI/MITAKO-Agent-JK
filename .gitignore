@@ -18,6 +18,8 @@ data/*.db-*
 data/*.sqlite
 data/*.sqlite3
 data/chat_attachments/
+data/private_domain_uploads/
+data/review_jobs/
 viking_memory/
 tmp/
 scratch/
@@ -36,6 +38,7 @@ tests/reports/*.md
 tests/reports/screenshots/*.png
 tests/reports/screenshots/**
 tests/reports/visual_review_ui_checks/
+tests/reports/*.json
 poc/visual_review_poc/reports/
 poc/visual_review_poc/uploaded_videos/
 poc/visual_review_poc/downloaded_videos/

@@ -420,6 +420,17 @@ def integration_contracts() -> List[Dict[str, Any]]:
             "owner": "用户端照片、拍摄、视频上传",
             "note": "已能生成审核任务；视频审核 Key 和 Gemini 多模态 Key 只应通过本地环境配置，不提交到 Git。",
         },
+        {
+            "key": "review_job_service",
+            "name": "甲方售后案件审核服务",
+            "status": "local_contract_ready",
+            "method": "POST multipart/form-data + GET 状态查询",
+            "endpoint": "/api/v1/review/jobs",
+            "auth": "Bearer 集成账号 Token + Idempotency-Key",
+            "fields": ["client_case_id", "scenario", "ticket_id", "order_no", "customer_claim", "order_items", "product_master_data", "warehouse_master_data", "logistics", "conversation_history", "sop_context", "files"],
+            "owner": "甲方客服 Server / 工单系统",
+            "note": "每个案件支持多图、多视频和结构化上下文；批量任务由甲方并发提交，结果按 job_id 独立查询和重试。",
+        },
     ]
 
 
@@ -441,7 +452,8 @@ def _extract_tags(text: str) -> Dict[str, List[str]]:
 
 
 def _risk_type(text: str) -> str:
-    for issue_type, words in RISK_WORDS.items():
+    for issue_type in ("complaint", "terms", "blindbox", "service", "refund", "shipping"):
+        words = RISK_WORDS[issue_type]
         if any(word in text for word in words):
             return issue_type
     return ""
@@ -665,5 +677,6 @@ def dashboard_payload() -> Dict[str, Any]:
             "customer_service_agent": "local_contract_ready",
             "feishu_task_sync": "contract_pending",
             "visual_review_task": "local_contract_ready",
+            "review_job_service": "local_contract_ready",
         },
     }

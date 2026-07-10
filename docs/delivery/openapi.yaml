@@ -56,7 +56,7 @@ paths:
               $ref: '#/components/schemas/HandoffRequest'
       responses:
         '200':
-          description: 返回VIP客服接入简报、队列状态与 handoff_token
+          description: 返回VIP客服接入简报、队列状态与服务会话凭证
   /api/v1/desk/sessions:
     get:
       summary: VIP客服读取待处理队列
