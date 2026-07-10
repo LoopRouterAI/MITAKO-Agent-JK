@@ -521,15 +521,15 @@ def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[
     diagnostics_text = json.dumps(result.get("diagnostics") or {}, ensure_ascii=False)
     if "未找到 Gemini 渠道 Key" in diagnostics_text:
         return {
-            "stage": "配置检查",
-            "message": "视觉审核服务缺少可用 Gemini 渠道 Key，未发起模型审核。",
-            "operator_hint": "请在服务环境配置 VISION_REVIEW_API_KEY、GEMINI_API_KEY、GOOGLE_API_KEY、APIYI_API_KEY 或 BROUTER_API_KEY 后重启视觉审核服务。",
+            "stage": "服务配置",
+            "message": "视觉审核服务尚未配置可用凭证，本轮未发起审核。",
+            "operator_hint": "请联系系统管理员检查视觉审核服务配置；当前工单先转VIP客服复核。",
         }
     if status == "success" and not structured_ok:
         return {
             "stage": "系统复核",
             "message": "系统复核暂未生成可用摘要，本轮不能作为业务判断依据。",
-            "operator_hint": "请保留原始素材并重试；若连续出现，请提交研发排查。",
+            "operator_hint": "请保留原始素材并重试；若连续出现，请联系系统管理员排查。",
         }
     if status == "skipped":
         return {
@@ -553,7 +553,7 @@ def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[
     return {
         "stage": "系统复核",
         "message": message,
-        "operator_hint": "这不是业务上的“证据不足”；请重试或转VIP客服处理，并保留该失败样本给研发排查。",
+        "operator_hint": "这不是业务上的“证据不足”；请重试或转VIP客服处理，并保留该失败样本供系统管理员排查。",
     }
 
 

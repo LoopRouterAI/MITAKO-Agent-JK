@@ -413,7 +413,8 @@ def compact_response(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
-    system_prompt = build_system_prompt(case["scenario"])
+    business_scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or "")
+    system_prompt = build_system_prompt(business_scenario or case["scenario"])
     user_prompt = build_selection_prompt(case)
     if cfg["provider"] == "gemini_native":
         options = gemini_request_options(cfg)

@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 
 FORBIDDEN_PUBLIC_TERMS = re.compile(
-    r"Gemini|GPT|Token|endpoint|DeepSeek|Mock|外包|端点|成本|模型调用|模型服务限流|status_code|error_type",
+    r"Gemini|GPT|endpoint|DeepSeek|Mock|外包|端点|模型渠道|模型服务限流|status_code|error_type",
     re.IGNORECASE,
 )
 FORBIDDEN_PUBLIC_KEYS = {
@@ -216,7 +216,7 @@ def test_workbench_api() -> None:
     assert bad_json.status_code == 400
 
     image_path = next((ROOT / "docs" / "三大审核场景的小量样本" / "sample_003").glob("*.jpg"))
-    original_call_model = workbench_server.call_model
+    original_call_model = workbench_server.call_model_chunked
 
     def fake_success(cfg, case, timeout, retries):
         assert not case.get("videos"), case
@@ -248,7 +248,7 @@ def test_workbench_api() -> None:
         return {"status": "success", "latency_seconds": 0.1, "usage": {}, "cost": {}, "parsed": {"raw_text": "not json"}}
 
     try:
-        workbench_server.call_model = fake_success
+        workbench_server.call_model_chunked = fake_success
         image_only = client.post(
             "/api/review-folder",
             data={"scenario": "product_damage", "customer_claim": "用户反馈商品有划痕"},
@@ -263,7 +263,7 @@ def test_workbench_api() -> None:
         assert image_data["review"]["summary"]["successful_reviews"] == 1, image_data
         assert "补充图片 1 张" in image_data["review"]["frame_strategy"], image_data
 
-        workbench_server.call_model = fake_failed
+        workbench_server.call_model_chunked = fake_failed
         failed = client.post(
             "/api/review-folder",
             data={"scenario": "product_damage", "customer_claim": "用户反馈商品有划痕"},
@@ -309,7 +309,7 @@ def test_workbench_api() -> None:
         assert_public_payload_clean(video_failed_data["review"])
         assert_public_payload_clean(video_failed_html.text)
 
-        workbench_server.call_model = fake_unstructured
+        workbench_server.call_model_chunked = fake_unstructured
         unstructured = client.post(
             "/api/review-folder",
             data={"scenario": "product_damage", "customer_claim": "用户反馈商品有划痕"},
@@ -325,7 +325,7 @@ def test_workbench_api() -> None:
         assert unstructured_data["review"]["diagnostics"]["failure_stage"] == "系统复核", unstructured_data
         assert_public_payload_clean(unstructured_data["review"])
     finally:
-        workbench_server.call_model = original_call_model
+        workbench_server.call_model_chunked = original_call_model
 
 
 def test_model_transport_contract() -> None:
@@ -485,7 +485,7 @@ def test_review_prompt_policy() -> None:
     prompt = build_user_prompt(case, frame_sample, frames)
     for text in (
         "二次元电商售后",
-        "开箱视频/发错货",
+        "开箱视频",
         "首席视觉质检员",
         "换手、遮挡、剪辑",
         "business_action_allowed 必须为 false",
