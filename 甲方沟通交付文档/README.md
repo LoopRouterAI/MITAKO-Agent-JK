@@ -1,31 +1,44 @@
 # 甲方沟通交付文档
 
-本目录面向甲方 CEO、客服负责人、业务负责人、信息化负责人、Java 开发团队和双方项目经理。文档只描述业务流程、对接契约、验收口径和上线准备，不包含我方内部密钥、模型渠道、调试参数或研发实现细节。
+版本：2026-07-11
+适用对象：甲方项目负责人、客服负责人、IT/Java 开发、运维、法务与双方项目经理。
 
-## 建议阅读顺序
+本目录只描述可交付能力、接口契约、测试方法、外部依赖和验收边界，不包含真实密钥、内部模型渠道、Prompt 或研发调试信息。
 
-| 角色 | 建议先读 |
+## 新版本先读
+
+1. [新版本交付说明-2026-07-11.md](./新版本交付说明-2026-07-11.md)：本次有哪些系统、哪些能力已完成、哪些仍需甲方联调。
+2. [全量需求复验报告](../docs/delivery/mitako-full-requirement-reaudit-20260711.html)：40 项需求状态、真实测试证据和生产阻塞项。
+3. [客服Agent与视觉审核对接指南.md](./客服Agent与视觉审核对接指南.md)：客服 Agent、人工客服和视觉审核如何协同。
+4. [甲方对接物料与接口清单.md](./甲方对接物料与接口清单.md)：甲方需要准备的系统、字段、权限、样本和负责人。
+5. [甲方POC测试说明.md](./甲方POC测试说明.md)：现场或远程验收步骤。
+
+## Java 与 OpenAPI
+
+| 文档 | 用途 |
 |---|---|
-| CEO / 项目负责人 | [客服Agent与视觉审核对接指南.html](./客服Agent与视觉审核对接指南.html)（[MD](./客服Agent与视觉审核对接指南.md)） |
-| 客服负责人 | [甲方POC测试说明.html](./甲方POC测试说明.html)（[MD](./甲方POC测试说明.md)）、[客服Agent与视觉审核对接指南.html](./客服Agent与视觉审核对接指南.html)（[MD](./客服Agent与视觉审核对接指南.md)）、[三类视觉审核优先说明.md](./三类视觉审核优先说明.md) |
-| 甲方 Java 开发 | [客服Agent与视觉审核对接指南.html](./客服Agent与视觉审核对接指南.html)（[MD](./客服Agent与视觉审核对接指南.md)）、[甲方对接物料与接口清单.html](./甲方对接物料与接口清单.html)（[MD](./甲方对接物料与接口清单.md)） |
-| 知识库负责人 | [知识库与视觉识别扩展需求.md](./知识库与视觉识别扩展需求.md) |
+| [OpenAPI 契约](../docs/delivery/openapi.yaml) | 当前 FastAPI 实际导出的完整接口契约 |
+| [Java / Spring Boot 接入样例](../docs/delivery/java-client-sample.md) | 登录、采样规划、多文件案件、状态轮询、批次查询 |
+| [部署指南](../docs/delivery/deployment-guide.md) | 主服务、视觉服务、环境变量、健康检查与大文件部署 |
+| [联调实验室](../docs/delivery/integration-lab.md) | 在没有生产权限时先验证契约和错误处理 |
+| [容量规划](../docs/delivery/capacity-planning.md) | 120GB 批次、对象存储、转码和并发规划输入 |
+| [可观测 Runbook](../docs/delivery/observability-runbook.md) | 指标、日志、失败诊断和告警 |
 
-## 联调与验收附件
+## 当前交付系统
 
-- [OpenAPI 契约草案](../docs/delivery/openapi.yaml)
-- [Java / Spring Boot 接入样例](../docs/delivery/java-client-sample.md)
-- [POC UAT 验收表](../docs/delivery/poc-uat-checklist.md)
-- [数据安全与模型合规清单](../docs/delivery/data-model-compliance-checklist.md)
-- [容量规划与并发建议](../docs/delivery/capacity-planning.md)
-- [可观测性与运维值班手册](../docs/delivery/observability-runbook.md)
+- 用户端 AI 客服。
+- VIP 人工客服工作台。
+- 客服运营管理后台。
+- 独立售后审核服务：商品有伤、发错货、漏发货、未成年人退款资料。
+- 视觉审核执行服务：图片压缩、视频抽帧、分段并发、报告生成。
+- 虾淘私域 Agent P0：群消息、风险禁推、商品事件候选和客服任务协同。
+- OpenAPI、Java 示例、部署、测试、运维、容量和合规材料。
 
-## HTML 版本
+## 必须明确的边界
 
-可直接打开 [index.html](./index.html) 浏览甲方独立文档系统。核心 HTML 页面均支持在线阅读、打开 MD、下载 MD 和复制 MD：
+- 本地 POC/API 已可运行，不代表已经接入甲方生产企微、订单、库存、CRM/CDP 或飞书。
+- 审核结果提供证据、置信度和人工建议，不自动退款、补发、换货、拒绝或最终定责。
+- 当前缺少真实漏发货样本；120GB 素材准确率必须在甲方盲测集上单独验收。
+- GitHub 与客户 ZIP 不包含真实 `.env` 密钥；凭证通过部署环境安全注入。
 
-- [甲方对接物料与接口清单.html](./甲方对接物料与接口清单.html)：甲方需要准备的业务物料、接口、测试环境、负责人和上线确认项。
-- [客服Agent与视觉审核对接指南.html](./客服Agent与视觉审核对接指南.html)：接口文档、对接说明、状态机、鉴权、回调和 Java 调用示例。
-- [甲方POC测试说明.html](./甲方POC测试说明.html)：现场或远程 POC 怎么启动、怎么测、怎么验收。
-
-HTML 版本与视觉审核工作台保持同款明亮工具风格，适合会议投屏、对齐开发接口和验收范围。
+浏览入口：[index.html](./index.html)

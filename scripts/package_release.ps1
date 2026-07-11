@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -9,6 +9,10 @@ $ZipName = "MITAKO_Agent-customer-preview-$Date.zip"
 $ZipPath = Join-Path (Split-Path -Parent $Root) $ZipName
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_customer_stage_$Date"
 $CompileStage = Join-Path $env:TEMP "mitako_runtime_compile_$Date"
+
+$InternalBaseUrl = if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }
+$InternalVisualUrl = if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }
+& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $InternalBaseUrl -VisualUrl $InternalVisualUrl
 
 Write-Host "=== MITAKO customer preview package ===" -ForegroundColor Cyan
 Write-Host "Project: $Root"
@@ -450,18 +454,14 @@ function Assert-NoCustomerLeak([string]$Path) {
 Reset-Dir $Stage
 Reset-Dir $CompileStage
 
-Write-Host "[1/6] Build frontend ..."
-Push-Location $Root
-try {
-    npm run build
-} finally {
-    Pop-Location
+Write-Host "[1/6] Verify validated frontend output ..."
+if (-not (Test-Path (Join-Path $Root "dist\index.html"))) {
+    throw "Validated frontend output is missing."
 }
 
 Write-Host "[2/6] Copy customer-visible files ..."
 Copy-Dir "dist"
 Copy-Dir "templates"
-Copy-Dir "public"
 Copy-Dir "docs\delivery"
 $deliveryEngineer = Join-Path $Stage "docs\delivery\engineer-onboarding.md"
 if (Test-Path $deliveryEngineer) { Remove-Item -LiteralPath $deliveryEngineer -Force }
@@ -469,6 +469,18 @@ if (Test-Path $deliveryEngineer) { Remove-Item -LiteralPath $deliveryEngineer -F
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
 if (Test-Path (Join-Path $Root $customerDocsName)) {
     Copy-Dir $customerDocsName $customerDocsName
+
+    # 保留仓库历史资料，但客户包只交付当前有效口径，避免旧“三类审核”等说明造成误解。
+    $obsoleteDoc1 = New-Utf16String @(0x0050,0x004F,0x0043,0x5BA1,0x67E5,0x0044,0x0065,0x006D,0x006F,0x4F7F,0x7528,0x4E0E,0x8FB9,0x754C,0x8BF4,0x660E,0x002D,0x0032,0x0030,0x0032,0x0036,0x002D,0x0030,0x0037,0x002D,0x0030,0x0033,0x002E,0x006D,0x0064)
+    $obsoleteDoc2 = New-Utf16String @(0x4E09,0x7C7B,0x89C6,0x89C9,0x5BA1,0x6838,0x4F18,0x5148,0x8BF4,0x660E,0x002E,0x006D,0x0064)
+    $obsoleteDoc3 = New-Utf16String @(0x77E5,0x8BC6,0x5E93,0x4E0E,0x89C6,0x89C9,0x8BC6,0x522B,0x6269,0x5C55,0x9700,0x6C42,0x002E,0x006D,0x0064)
+    $obsoleteCustomerDocs = @($obsoleteDoc1, $obsoleteDoc2, $obsoleteDoc3)
+    foreach ($name in $obsoleteCustomerDocs) {
+        $obsoletePath = Join-Path (Join-Path $Stage $customerDocsName) $name
+        if (Test-Path $obsoletePath) {
+            [System.IO.File]::Delete($obsoletePath)
+        }
+    }
 }
 
 Copy-File "config\handoff_routing.json"

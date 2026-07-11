@@ -1,191 +1,2833 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: MITAKO 客服 Agent 与视觉审核 POC 对接契约
-  version: 0.2.0-poc
-  description: >
-    本契约用于 POC 联调和 Java 技术栈复现。甲方后台业务接口、客户接口和订单接口在当前项目中均为 Mock 或契约占位，
-    不代表已接入甲方生产系统。
-servers:
-  - url: http://127.0.0.1:8000
-    description: 主客服 Agent POC
-  - url: http://127.0.0.1:7861
-    description: 视觉审核工作台 POC
+  title: MITAKO 客服 Agent 主站
+  description: 提供客服前台、VIP客服工作台与运营后台服务
+  version: 0.1.0
 paths:
-  /api/v1/auth/customer-session:
-    post:
-      summary: 签发客户前台会话令牌
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CustomerSessionAuthRequest'
+  /api/v1/private-domain/dashboard:
+    get:
+      tags:
+      - private-domain
+      summary: Dashboard
+      operationId: dashboard_api_v1_private_domain_dashboard_get
       responses:
         '200':
-          description: 已签发客户会话令牌
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthTokenResponse'
-  /api/v1/chat:
-    post:
-      summary: 客户侧客服 Agent SSE 对话
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ChatRequest'
-      responses:
-        '200':
-          description: text/event-stream
-        '401':
-          description: 缺少客户会话令牌
-  /api/v1/handoff/request:
-    post:
-      summary: 客户确认转VIP客服
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/HandoffRequest'
-      responses:
-        '200':
-          description: 返回VIP客服接入简报、队列状态与服务会话凭证
-  /api/v1/desk/sessions:
+                $ref: '#/components/schemas/DashboardResponse'
+  /api/v1/private-domain/contracts:
     get:
-      summary: VIP客服读取待处理队列
-      security:
-        - bearerAuth: []
+      tags:
+      - private-domain
+      summary: Contracts
+      operationId: contracts_api_v1_private_domain_contracts_get
       responses:
         '200':
-          description: 会话队列
-  /api/v1/desk/session/{sessionId}/accept:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractsResponse'
+  /api/v1/private-domain/demo/load:
     post:
-      summary: VIP客服原子接单
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: sessionId
-          in: path
-          required: true
-          schema:
-            type: string
+      tags:
+      - private-domain
+      summary: Demo Load
+      operationId: demo_load_api_v1_private_domain_demo_load_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoLoadResponse'
+  /api/v1/private-domain/demo/clear:
+    post:
+      tags:
+      - private-domain
+      summary: Demo Clear
+      operationId: demo_clear_api_v1_private_domain_demo_clear_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoClearResponse'
+  /api/v1/private-domain/group-message:
+    post:
+      tags:
+      - private-domain
+      summary: Group Message
+      operationId: group_message_api_v1_private_domain_group_message_post
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                agent_id:
-                  type: string
+              $ref: '#/components/schemas/GroupMessageIn'
+        required: true
       responses:
         '200':
-          description: 接单结果
-  /api/review-folder:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMessageResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/private-domain/product-event:
     post:
-      summary: 视觉审核文件夹证据包
+      tags:
+      - private-domain
+      summary: Product Event
+      operationId: product_event_api_v1_private_domain_product_event_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductEventIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductEventResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/private-domain/review-tasks:
+    post:
+      tags:
+      - private-domain
+      summary: Review Task Upload
+      operationId: review_task_upload_api_v1_private_domain_review_tasks_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_review_task_upload_api_v1_private_domain_review_tasks_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewTaskUploadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/private-domain/review-tasks/{task_id}:
+    get:
+      tags:
+      - private-domain
+      summary: Review Task Detail
+      operationId: review_task_detail_api_v1_private_domain_review_tasks__task_id__get
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewTaskDetailResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/contracts:
+    get:
+      tags:
+      - review-service
+      summary: Contracts
+      operationId: contracts_api_v1_review_contracts_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewContractResponse'
+  /api/v1/review/batches/{batch_id}:
+    get:
+      tags:
+      - review-service
+      summary: Batch Detail
+      operationId: batch_detail_api_v1_review_batches__batch_id__get
+      parameters:
+      - name: batch_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Batch Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewBatchResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/metadata/validate:
+    post:
+      tags:
+      - review-service
+      summary: Validate Metadata
+      operationId: validate_metadata_api_v1_review_metadata_validate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCaseMetadata'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewMetadataValidationResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/sampling-plan:
+    post:
+      tags:
+      - review-service
+      summary: Plan Sampling
+      operationId: plan_sampling_api_v1_review_sampling_plan_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewSamplingPlanRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewSamplingPlanResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/jobs:
+    post:
+      tags:
+      - review-service
+      summary: Create Job
+      operationId: create_job_api_v1_review_jobs_post
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Idempotency-Key
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
-              type: object
-              required: [scenario, files]
-              properties:
-                scenario:
-                  type: string
-                  enum: [video_unboxing, product_damage, minor_material]
-                ticket_id:
-                  type: string
-                user_id:
-                  type: string
-                order_no:
-                  type: string
-                customer_claim:
-                  type: string
-                order_item:
-                  type: string
-                sku:
-                  type: string
-                product_master_data:
-                  type: string
-                warehouse_master_data:
-                  type: string
-                conversation_history:
-                  type: string
-                files:
-                  type: array
-                  items:
-                    type: string
-                    format: binary
+              $ref: '#/components/schemas/Body_create_job_api_v1_review_jobs_post'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewJobResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - review-service
+      summary: List Jobs
+      operationId: list_jobs_api_v1_review_jobs_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 32
+          default: ''
+          title: Status
+      - name: scenario
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 32
+          default: ''
+          title: Scenario
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
       responses:
         '200':
-          description: 公开脱敏审核报告地址
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewJobListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/jobs/{job_id}:
+    get:
+      tags:
+      - review-service
+      summary: Job Detail
+      operationId: job_detail_api_v1_review_jobs__job_id__get
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewJobResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/jobs/{job_id}/report:
+    get:
+      tags:
+      - review-service
+      summary: Job Report
+      operationId: job_report_api_v1_review_jobs__job_id__report_get
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/html:
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/jobs/{job_id}/retry:
+    post:
+      tags:
+      - review-service
+      summary: Retry Job
+      operationId: retry_job_api_v1_review_jobs__job_id__retry_post
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewJobResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/metrics:
+    get:
+      tags:
+      - review-service
+      summary: Review Metrics
+      operationId: review_metrics_api_v1_review_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewMetricsResponse'
+  /:
+    get:
+      summary: Get Index
+      operationId: get_index__get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/html:
+              schema:
+                type: string
+  /xiaojiao_avatar.png:
+    get:
+      summary: Get Avatar
+      operationId: get_avatar_xiaojiao_avatar_png_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /templates/xiaojiao_avatar.png:
+    get:
+      summary: Get Avatar
+      operationId: get_avatar_templates_xiaojiao_avatar_png_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/test_cases:
+    get:
+      summary: Get Test Cases
+      operationId: get_test_cases_api_v1_test_cases_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/chat/attachments:
+    post:
+      summary: Upload Chat Attachment
+      operationId: upload_chat_attachment_api_v1_chat_attachments_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_chat_attachment_api_v1_chat_attachments_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/chat/attachments/{filename}:
+    get:
+      summary: Get Chat Attachment
+      operationId: get_chat_attachment_api_v1_chat_attachments__filename__get
+      parameters:
+      - name: filename
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Filename
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/login:
+    post:
+      summary: Auth Login
+      description: 管理员/坐席登录 — MITAKO_AUTH_REQUIRED=1 时 desk/admin 变更 API 需 token
+      operationId: auth_login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/customer-session:
+    post:
+      summary: Auth Customer Session
+      description: 客户前台会话令牌 — POC 阶段由前台会话换取，生产需替换为甲方登录态/小程序态校验。
+      operationId: auth_customer_session_api_v1_auth_customer_session_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerSessionAuthRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/tenants:
+    get:
+      summary: Auth Tenants
+      operationId: auth_tenants_api_v1_auth_tenants_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/auth/sso/{tenant_id}/authorize:
+    get:
+      summary: Auth Sso Authorize
+      operationId: auth_sso_authorize_api_v1_auth_sso__tenant_id__authorize_get
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Tenant Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/sso/callback:
+    post:
+      summary: Auth Sso Callback
+      operationId: auth_sso_callback_api_v1_auth_sso_callback_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SsoCallbackBody'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/sso/local/complete:
+    get:
+      summary: Auth Sso Demo Complete
+      description: 仅 MITAKO_SSO_DEMO=1 时供本地 E2E 使用 — 生产请走 IdP redirect
+      operationId: auth_sso_demo_complete_api_v1_auth_sso_local_complete_get
+      parameters:
+      - name: tenant_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Tenant Id
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          title: State
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/ops/snapshot:
+    get:
+      summary: Ops Snapshot Api
+      operationId: ops_snapshot_api_api_v1_ops_snapshot_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/auth/status:
+    get:
+      summary: Auth Status
+      operationId: auth_status_api_v1_auth_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/admin/agents:
+    get:
+      summary: Admin List Agents
+      operationId: admin_list_agents_api_v1_admin_agents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: Admin Upsert Agent
+      operationId: admin_upsert_agent_api_v1_admin_agents_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminAgentBody'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/agents/{agent_id}:
+    delete:
+      summary: Admin Delete Agent
+      operationId: admin_delete_agent_api_v1_admin_agents__agent_id__delete
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/queue/snapshot:
+    get:
+      summary: Admin Queue Snapshot
+      operationId: admin_queue_snapshot_api_v1_admin_queue_snapshot_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/admin/demo/status:
+    get:
+      summary: Admin Demo Status
+      operationId: admin_demo_status_api_v1_admin_demo_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/admin/demo/load:
+    post:
+      summary: Admin Demo Load
+      operationId: admin_demo_load_api_v1_admin_demo_load_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/admin/demo/clear:
+    post:
+      summary: Admin Demo Clear
+      operationId: admin_demo_clear_api_v1_admin_demo_clear_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/admin/queue/{session_id}/reassign:
+    post:
+      summary: Admin Reassign
+      operationId: admin_reassign_api_v1_admin_queue__session_id__reassign_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReassignBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/audit/events:
+    get:
+      summary: Admin Audit Events
+      operationId: admin_audit_events_api_v1_admin_audit_events_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 80
+          title: Limit
+      - name: event_type
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Event Type
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/audit/sessions/{session_id}/transcript:
+    get:
+      summary: Admin Transcript
+      operationId: admin_transcript_api_v1_admin_audit_sessions__session_id__transcript_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/qc/observer:
+    get:
+      summary: Admin Observer Qc
+      operationId: admin_observer_qc_api_v1_admin_qc_observer_get
+      parameters:
+      - name: flagged_only
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: true
+          title: Flagged Only
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/approvals:
+    get:
+      summary: Admin List Approvals
+      operationId: admin_list_approvals_api_v1_admin_approvals_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      summary: Admin Create Approval
+      operationId: admin_create_approval_api_v1_admin_approvals_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalCreateBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/approvals/{approval_id}/decide:
+    post:
+      summary: Admin Decide Approval
+      operationId: admin_decide_approval_api_v1_admin_approvals__approval_id__decide_post
+      parameters:
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Approval Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecisionBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/reports/summary:
+    get:
+      summary: Admin Reports Summary
+      operationId: admin_reports_summary_api_v1_admin_reports_summary_get
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 7
+          title: Days
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/reports/export.csv:
+    get:
+      summary: Admin Reports Export
+      operationId: admin_reports_export_api_v1_admin_reports_export_csv_get
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 7
+          title: Days
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/handoff/close:
+    post:
+      summary: Handoff Close
+      operationId: handoff_close_api_v1_handoff_close_post
+      parameters:
+      - name: session_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: note
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Note
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /metrics:
+    get:
+      summary: Metrics
+      operationId: metrics_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /metrics/prometheus:
+    get:
+      summary: Metrics Prometheus
+      operationId: metrics_prometheus_metrics_prometheus_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/models:
+    get:
+      summary: Get Models
+      description: 返回客户可见回复方式；真实模型配置仅在服务端映射。
+      operationId: get_models_api_v1_models_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/image-models:
+    get:
+      summary: Get Image Models
+      operationId: get_image_models_api_v1_image_models_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/images/generate:
+    post:
+      summary: Post Generate Image
+      description: 图片生成：客户响应只返回可展示结果。
+      operationId: post_generate_image_api_v1_images_generate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImageGenerateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/handoff/request:
+    post:
+      summary: Request Handoff
+      description: 用户确认转VIP客服 — 生成简报并加入排队（演示队列）
+      operationId: request_handoff_api_v1_handoff_request_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/handoff/status/{session_id}:
+    get:
+      summary: Handoff Status
+      operationId: handoff_status_api_v1_handoff_status__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /desk:
+    get:
+      summary: Get Desk
+      operationId: get_desk_desk_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/html:
+              schema:
+                type: string
+  /api/v1/handoff/connect:
+    post:
+      summary: Handoff Connect
+      description: 仅当人工已在工作台确认接单后，用户端轮询才会得到 connected
+      operationId: handoff_connect_api_v1_handoff_connect_post
+      parameters:
+      - name: session_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/handoff/reset:
+    post:
+      summary: Handoff Reset
+      operationId: handoff_reset_api_v1_handoff_reset_post
+      parameters:
+      - name: session_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/handoff/routing:
+    get:
+      summary: Handoff Routing Config
+      operationId: handoff_routing_config_api_v1_admin_handoff_routing_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: Admin Update Routing
+      operationId: admin_update_routing_api_v1_admin_handoff_routing_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Config
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin:
+    get:
+      summary: Get Admin
+      operationId: get_admin_admin_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/html:
+              schema:
+                type: string
+  /api/v1/handoff/messages/{session_id}:
+    get:
+      summary: Handoff Messages
+      operationId: handoff_messages_api_v1_handoff_messages__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: since
+        in: query
+        required: false
+        schema:
+          type: number
+          default: 0
+          title: Since
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/handoff/user-message:
+    post:
+      summary: Handoff User Message
+      operationId: handoff_user_message_api_v1_handoff_user_message_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffUserMessageRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/desk/agents:
+    get:
+      summary: Desk Agents
+      operationId: desk_agents_api_v1_desk_agents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/desk/sessions:
+    get:
+      summary: Desk Sessions
+      operationId: desk_sessions_api_v1_desk_sessions_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/desk/session/{session_id}:
+    get:
+      summary: Desk Session Detail
+      operationId: desk_session_detail_api_v1_desk_session__session_id__get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/desk/session/{session_id}/reply:
+    post:
+      summary: Desk Session Reply
+      operationId: desk_session_reply_api_v1_desk_session__session_id__reply_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeskReplyRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/desk/session/{session_id}/accept:
+    post:
+      summary: Desk Session Accept
+      operationId: desk_session_accept_api_v1_desk_session__session_id__accept_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeskAcceptRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/desk/session/{session_id}/escalate:
+    post:
+      summary: Desk Session Escalate
+      operationId: desk_session_escalate_api_v1_desk_session__session_id__escalate_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeskEscalateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/desk/session/{session_id}/transfer:
+    post:
+      summary: Desk Session Transfer
+      operationId: desk_session_transfer_api_v1_desk_session__session_id__transfer_post
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeskTransferRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/chat:
+    post:
+      summary: Chat Stream
+      operationId: chat_stream_api_v1_chat_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
   schemas:
-    CustomerSessionAuthRequest:
+    AdminAgentBody:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        name:
+          type: string
+          title: Name
+        title:
+          type: string
+          title: Title
+          default: ''
+        tier:
+          type: string
+          title: Tier
+          default: standard
+        team:
+          type: string
+          title: Team
+          default: ''
+        skills:
+          items:
+            type: string
+          type: array
+          title: Skills
+          default: []
+        enabled:
+          type: boolean
+          title: Enabled
+          default: true
       type: object
-      required: [user_id, session_id]
+      required:
+      - agent_id
+      - name
+      title: AdminAgentBody
+    ApprovalCreateBody:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+          default: ''
+        user_id:
+          type: string
+          title: User Id
+          default: ''
+        amount:
+          type: number
+          title: Amount
+        reason:
+          type: string
+          title: Reason
+          default: ''
+      type: object
+      required:
+      - amount
+      title: ApprovalCreateBody
+    ApprovalDecisionBody:
+      properties:
+        decision:
+          type: string
+          title: Decision
+      type: object
+      required:
+      - decision
+      title: ApprovalDecisionBody
+    AuthLoginRequest:
+      properties:
+        username:
+          type: string
+          title: Username
+        password:
+          type: string
+          title: Password
+        tenant_id:
+          type: string
+          title: Tenant Id
+          default: mitako
+      type: object
+      required:
+      - username
+      - password
+      title: AuthLoginRequest
+    Body_create_job_api_v1_review_jobs_post:
+      properties:
+        metadata:
+          type: string
+          title: Metadata
+        files:
+          items:
+            type: string
+            contentMediaType: application/octet-stream
+          type: array
+          title: Files
+      type: object
+      required:
+      - metadata
+      - files
+      title: Body_create_job_api_v1_review_jobs_post
+    Body_review_task_upload_api_v1_private_domain_review_tasks_post:
       properties:
         user_id:
           type: string
+          title: User Id
         session_id:
           type: string
+          title: Session Id
+        source:
+          type: string
+          title: Source
+          default: customer_upload
+        async_review:
+          type: boolean
+          title: Async Review
+          default: false
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - user_id
+      - session_id
+      - file
+      title: Body_review_task_upload_api_v1_private_domain_review_tasks_post
+    Body_upload_chat_attachment_api_v1_chat_attachments_post:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        session_id:
+          type: string
+          title: Session Id
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - user_id
+      - session_id
+      - file
+      title: Body_upload_chat_attachment_api_v1_chat_attachments_post
+    ChatAttachment:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        mime_type:
+          type: string
+          title: Mime Type
+        size:
+          type: integer
+          title: Size
+        url:
+          type: string
+          title: Url
+        kind:
+          type: string
+          title: Kind
+          default: chat_attachment
+        review_task_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Review Task Id
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+        scenario:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Scenario
+      type: object
+      required:
+      - id
+      - name
+      - mime_type
+      - size
+      - url
+      title: ChatAttachment
+    ChatRequest:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        session_id:
+          type: string
+          title: Session Id
+        content:
+          type: string
+          title: Content
+        history:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          type: array
+          title: History
+        model_id:
+          type: string
+          title: Model Id
+          default: standard-service
         tenant_id:
           type: string
+          title: Tenant Id
           default: mitako
-    AuthTokenResponse:
+        active_order_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Order Id
+        stream_reply:
+          type: boolean
+          title: Stream Reply
+          default: false
+        fixtures:
+          items:
+            type: string
+          type: array
+          title: Fixtures
+          default: []
+        attachments:
+          items:
+            $ref: '#/components/schemas/ChatAttachment'
+          type: array
+          title: Attachments
       type: object
+      required:
+      - user_id
+      - session_id
+      - content
+      - history
+      title: ChatRequest
+    ContractsResponse:
       properties:
         ok:
           type: boolean
-        token:
-          type: string
-        user:
-          type: object
-    ChatRequest:
+          title: Ok
+          default: true
+        integration_contracts:
+          items:
+            $ref: '#/components/schemas/IntegrationContract'
+          type: array
+          title: Integration Contracts
       type: object
-      required: [user_id, session_id, content]
+      required:
+      - integration_contracts
+      title: ContractsResponse
+    CustomerSessionAuthRequest:
       properties:
         user_id:
           type: string
+          title: User Id
         session_id:
           type: string
+          title: Session Id
+        tenant_id:
+          type: string
+          title: Tenant Id
+          default: mitako
+      type: object
+      required:
+      - user_id
+      - session_id
+      title: CustomerSessionAuthRequest
+    DashboardResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        snapshot:
+          additionalProperties: true
+          type: object
+          title: Snapshot
+        groups:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Groups
+        events:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Events
+        customer_service_tasks:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Customer Service Tasks
+        review_tasks:
+          items:
+            $ref: '#/components/schemas/ReviewTask'
+          type: array
+          title: Review Tasks
+        campaign_candidates:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Campaign Candidates
+        demo_ready:
+          type: boolean
+          title: Demo Ready
+        demo_script:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          type: array
+          title: Demo Script
+        integration_contracts:
+          items:
+            $ref: '#/components/schemas/IntegrationContract'
+          type: array
+          title: Integration Contracts
+        interface_status:
+          additionalProperties:
+            type: string
+          type: object
+          title: Interface Status
+      type: object
+      required:
+      - snapshot
+      - groups
+      - events
+      - customer_service_tasks
+      - review_tasks
+      - campaign_candidates
+      - demo_ready
+      - demo_script
+      - integration_contracts
+      - interface_status
+      title: DashboardResponse
+    DemoClearResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        removed:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Removed
+        snapshot:
+          additionalProperties: true
+          type: object
+          title: Snapshot
+        demo_ready:
+          type: boolean
+          title: Demo Ready
+      type: object
+      required:
+      - removed
+      - snapshot
+      - demo_ready
+      title: DemoClearResponse
+    DemoLoadResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        snapshot:
+          additionalProperties: true
+          type: object
+          title: Snapshot
+        demo_ready:
+          type: boolean
+          title: Demo Ready
+        summary:
+          additionalProperties: true
+          type: object
+          title: Summary
+        demo_script:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          type: array
+          title: Demo Script
+        integration_contracts:
+          items:
+            $ref: '#/components/schemas/IntegrationContract'
+          type: array
+          title: Integration Contracts
+      type: object
+      required:
+      - snapshot
+      - demo_ready
+      - summary
+      - demo_script
+      - integration_contracts
+      title: DemoLoadResponse
+    DeskAcceptRequest:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+      type: object
+      required:
+      - agent_id
+      title: DeskAcceptRequest
+    DeskEscalateRequest:
+      properties:
+        note:
+          type: string
+          title: Note
+          default: ''
+        agent_id:
+          type: string
+          title: Agent Id
+          default: ''
+      type: object
+      title: DeskEscalateRequest
+    DeskReplyRequest:
+      properties:
         content:
           type: string
-        history:
-          type: array
-          items:
-            type: object
-        model_id:
+          title: Content
+        agent_id:
           type: string
-        active_order_id:
-          type: string
-    HandoffRequest:
+          title: Agent Id
+          default: ''
       type: object
-      required: [user_id, session_id]
+      required:
+      - content
+      title: DeskReplyRequest
+    DeskTransferRequest:
+      properties:
+        from_agent_id:
+          type: string
+          title: From Agent Id
+        to_agent_id:
+          type: string
+          title: To Agent Id
+        note:
+          type: string
+          title: Note
+          default: ''
+      type: object
+      required:
+      - from_agent_id
+      - to_agent_id
+      title: DeskTransferRequest
+    GroupMessageIn:
+      properties:
+        group_id:
+          type: string
+          title: Group Id
+        content:
+          type: string
+          title: Content
+        group_name:
+          type: string
+          title: Group Name
+          default: ''
+        owner_id:
+          type: string
+          title: Owner Id
+          default: ''
+        member_count:
+          type: integer
+          title: Member Count
+          default: 0
+        user_id:
+          type: string
+          title: User Id
+          default: ''
+        external_user_id:
+          type: string
+          title: External User Id
+          default: ''
+        message_id:
+          type: string
+          title: Message Id
+          default: ''
+        source:
+          type: string
+          title: Source
+          default: ''
+        sent_at:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Sent At
+      additionalProperties: true
+      type: object
+      required:
+      - group_id
+      - content
+      title: GroupMessageIn
+    GroupMessageResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        group:
+          additionalProperties: true
+          type: object
+          title: Group
+        risk_level:
+          type: integer
+          title: Risk Level
+        risk_type:
+          type: string
+          title: Risk Type
+        need_disable_marketing:
+          type: boolean
+          title: Need Disable Marketing
+        need_customer_service:
+          type: boolean
+          title: Need Customer Service
+        need_supervisor_alert:
+          type: boolean
+          title: Need Supervisor Alert
+        reply:
+          type: string
+          title: Reply
+        tags:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
+          title: Tags
+        customer_service_task:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Customer Service Task
+        boundary:
+          type: string
+          title: Boundary
+      type: object
+      required:
+      - group
+      - risk_level
+      - risk_type
+      - need_disable_marketing
+      - need_customer_service
+      - need_supervisor_alert
+      - reply
+      - tags
+      - boundary
+      title: GroupMessageResponse
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HandoffRequest:
       properties:
         user_id:
           type: string
+          title: User Id
         session_id:
           type: string
+          title: Session Id
         history:
-          type: array
           items:
+            additionalProperties:
+              type: string
             type: object
+          type: array
+          title: History
+          default: []
         reason:
           type: string
+          title: Reason
+          default: 用户主动申请VIP客服
         last_user_message:
           type: string
+          title: Last User Message
+          default: ''
+        intent:
+          type: string
+          title: Intent
+          default: ''
+        emotion_level:
+          type: integer
+          title: Emotion Level
+          default: 2
+        tenant_id:
+          type: string
+          title: Tenant Id
+          default: mitako
+      type: object
+      required:
+      - user_id
+      - session_id
+      title: HandoffRequest
+    HandoffUserMessageRequest:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        content:
+          type: string
+          title: Content
+        user_id:
+          type: string
+          title: User Id
+          default: ''
+        attachments:
+          items:
+            $ref: '#/components/schemas/ChatAttachment'
+          type: array
+          title: Attachments
+      type: object
+      required:
+      - session_id
+      - content
+      title: HandoffUserMessageRequest
+    ImageGenerateRequest:
+      properties:
+        prompt:
+          type: string
+          title: Prompt
+        model_id:
+          type: string
+          title: Model Id
+          default: standard-image
+        size:
+          type: string
+          title: Size
+          default: 2752x1536
+        n:
+          type: integer
+          title: N
+          default: 1
+      type: object
+      required:
+      - prompt
+      title: ImageGenerateRequest
+    IntegrationContract:
+      properties:
+        key:
+          type: string
+          title: Key
+        name:
+          type: string
+          title: Name
+        status:
+          type: string
+          title: Status
+        method:
+          type: string
+          title: Method
+        endpoint:
+          type: string
+          title: Endpoint
+        auth:
+          type: string
+          title: Auth
+        fields:
+          items:
+            type: string
+          type: array
+          title: Fields
+        owner:
+          type: string
+          title: Owner
+        note:
+          type: string
+          title: Note
+      type: object
+      required:
+      - key
+      - name
+      - status
+      - method
+      - endpoint
+      - auth
+      - owner
+      - note
+      title: IntegrationContract
+    ProductEventIn:
+      properties:
+        event_id:
+          type: string
+          title: Event Id
+          default: ''
+        event_type:
+          type: string
+          title: Event Type
+        item_id:
+          type: string
+          title: Item Id
+        ip_name:
+          type: string
+          title: Ip Name
+        character_name:
+          type: string
+          title: Character Name
+          default: ''
+        category:
+          type: string
+          title: Category
+          default: ''
+        price:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Price
+        stock:
+          type: integer
+          title: Stock
+          default: 0
+        rarity:
+          type: string
+          title: Rarity
+          default: ''
+        mini_program_path:
+          type: string
+          title: Mini Program Path
+          default: ''
+        app_deep_link:
+          type: string
+          title: App Deep Link
+          default: ''
+        risk_flag:
+          type: string
+          title: Risk Flag
+          default: ''
+      additionalProperties: true
+      type: object
+      required:
+      - event_type
+      - item_id
+      - ip_name
+      title: ProductEventIn
+    ProductEventResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        event:
+          additionalProperties: true
+          type: object
+          title: Event
+        candidates:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Candidates
+        review_required:
+          type: boolean
+          title: Review Required
+        boundary:
+          type: string
+          title: Boundary
+      type: object
+      required:
+      - event
+      - candidates
+      - review_required
+      - boundary
+      title: ProductEventResponse
+    ReassignBody:
+      properties:
+        to_agent_id:
+          type: string
+          title: To Agent Id
+        note:
+          type: string
+          title: Note
+          default: ''
+      type: object
+      required:
+      - to_agent_id
+      title: ReassignBody
+    ReviewAsset:
+      properties:
+        asset_id:
+          type: string
+          title: Asset Id
+        original_name:
+          type: string
+          title: Original Name
+        stored_name:
+          type: string
+          title: Stored Name
+        mime_type:
+          type: string
+          title: Mime Type
+        size:
+          type: integer
+          title: Size
+        sha256:
+          type: string
+          title: Sha256
+        fields:
+          items:
+            type: string
+          type: array
+          title: Fields
+      type: object
+      required:
+      - asset_id
+      - original_name
+      - stored_name
+      - mime_type
+      - size
+      - sha256
+      title: ReviewAsset
+    ReviewAttachment:
+      properties:
+        id:
+          type: string
+          title: Id
+        kind:
+          type: string
+          title: Kind
+          default: review_task
+        review_task_id:
+          type: string
+          title: Review Task Id
+        name:
+          type: string
+          title: Name
+        mime_type:
+          type: string
+          title: Mime Type
+        size:
+          type: integer
+          title: Size
+        status:
+          type: string
+          title: Status
+        scenario:
+          type: string
+          title: Scenario
+        boundary:
+          type: string
+          title: Boundary
+          default: ''
+        review_result:
+          additionalProperties: true
+          type: object
+          title: Review Result
+        reviewed_at:
+          type: number
+          title: Reviewed At
+          default: 0
+        url:
+          type: string
+          title: Url
+      type: object
+      required:
+      - id
+      - review_task_id
+      - name
+      - mime_type
+      - size
+      - status
+      - scenario
+      - url
+      title: ReviewAttachment
+    ReviewBatchResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        batch_id:
+          type: string
+          title: Batch Id
+        summary:
+          additionalProperties: true
+          type: object
+          title: Summary
+        jobs:
+          items:
+            $ref: '#/components/schemas/ReviewJob'
+          type: array
+          title: Jobs
+      type: object
+      required:
+      - batch_id
+      - summary
+      - jobs
+      title: ReviewBatchResponse
+    ReviewCaseMetadata:
+      properties:
+        client_case_id:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Client Case Id
+        scenario:
+          type: string
+          enum:
+          - product_damage
+          - wrong_item
+          - missing_item
+          - minor_refund
+          title: Scenario
+        source:
+          type: string
+          title: Source
+          default: customer_service_system
+        batch_id:
+          type: string
+          maxLength: 160
+          title: Batch Id
+          default: ''
+        priority:
+          type: string
+          enum:
+          - low
+          - normal
+          - high
+          title: Priority
+          default: normal
+        idempotency_key:
+          type: string
+          maxLength: 160
+          title: Idempotency Key
+          default: ''
+        ticket_id:
+          type: string
+          title: Ticket Id
+          default: ''
+        user_id:
+          type: string
+          title: User Id
+          default: ''
+        order_no:
+          type: string
+          title: Order No
+          default: ''
+        customer_claim:
+          type: string
+          title: Customer Claim
+          default: ''
+        complaint_stage:
+          type: string
+          title: Complaint Stage
+          default: ''
+        customer_tone:
+          type: string
+          title: Customer Tone
+          default: ''
+        order_items:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Order Items
+        product_master_data:
+          additionalProperties: true
+          type: object
+          title: Product Master Data
+        warehouse_master_data:
+          additionalProperties: true
+          type: object
+          title: Warehouse Master Data
+        logistics:
+          additionalProperties: true
+          type: object
+          title: Logistics
+        conversation_history:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Conversation History
+        sop_context:
+          additionalProperties: true
+          type: object
+          title: Sop Context
+        asset_fields:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
+          title: Asset Fields
+        source_record:
+          additionalProperties: true
+          type: object
+          title: Source Record
+        sampling_policy:
+          $ref: '#/components/schemas/ReviewSamplingPolicy'
+      additionalProperties: true
+      type: object
+      required:
+      - client_case_id
+      - scenario
+      title: ReviewCaseMetadata
+    ReviewContractResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        contract:
+          additionalProperties: true
+          type: object
+          title: Contract
+      type: object
+      required:
+      - contract
+      title: ReviewContractResponse
+    ReviewJob:
+      properties:
+        job_id:
+          type: string
+          title: Job Id
+        tenant_id:
+          type: string
+          title: Tenant Id
+        client_case_id:
+          type: string
+          title: Client Case Id
+        idempotency_key:
+          type: string
+          title: Idempotency Key
+          default: ''
+        scenario:
+          type: string
+          enum:
+          - product_damage
+          - wrong_item
+          - missing_item
+          - minor_refund
+          title: Scenario
+        status:
+          type: string
+          title: Status
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+        assets:
+          items:
+            $ref: '#/components/schemas/ReviewAsset'
+          type: array
+          title: Assets
+        result:
+          additionalProperties: true
+          type: object
+          title: Result
+        diagnostics:
+          additionalProperties: true
+          type: object
+          title: Diagnostics
+        attempts:
+          type: integer
+          title: Attempts
+          default: 0
+        created_at:
+          type: number
+          title: Created At
+        started_at:
+          type: number
+          title: Started At
+          default: 0
+        completed_at:
+          type: number
+          title: Completed At
+          default: 0
+        updated_at:
+          type: number
+          title: Updated At
+      type: object
+      required:
+      - job_id
+      - tenant_id
+      - client_case_id
+      - scenario
+      - status
+      - metadata
+      - assets
+      - created_at
+      - updated_at
+      title: ReviewJob
+    ReviewJobListResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        jobs:
+          items:
+            $ref: '#/components/schemas/ReviewJob'
+          type: array
+          title: Jobs
+      type: object
+      required:
+      - jobs
+      title: ReviewJobListResponse
+    ReviewJobResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        created:
+          type: boolean
+          title: Created
+          default: false
+        job:
+          $ref: '#/components/schemas/ReviewJob'
+      type: object
+      required:
+      - job
+      title: ReviewJobResponse
+    ReviewMetadataValidationResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        metadata:
+          $ref: '#/components/schemas/ReviewCaseMetadata'
+      type: object
+      required:
+      - metadata
+      title: ReviewMetadataValidationResponse
+    ReviewMetricsResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        metrics:
+          additionalProperties: true
+          type: object
+          title: Metrics
+      type: object
+      required:
+      - metrics
+      title: ReviewMetricsResponse
+    ReviewSamplingPlanRequest:
+      properties:
+        duration_seconds:
+          type: number
+          maximum: 86400.0
+          exclusiveMinimum: 0.0
+          title: Duration Seconds
+        source_bytes:
+          type: integer
+          minimum: 0.0
+          title: Source Bytes
+        video_count:
+          type: integer
+          maximum: 40.0
+          minimum: 1.0
+          title: Video Count
+          default: 1
+        sampling_policy:
+          $ref: '#/components/schemas/ReviewSamplingPolicy'
+      type: object
+      required:
+      - duration_seconds
+      - source_bytes
+      title: ReviewSamplingPlanRequest
+    ReviewSamplingPlanResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        plan:
+          additionalProperties: true
+          type: object
+          title: Plan
+      type: object
+      required:
+      - plan
+      title: ReviewSamplingPlanResponse
+    ReviewSamplingPolicy:
+      properties:
+        preset:
+          type: string
+          enum:
+          - adaptive
+          - strict
+          - forensic
+          - custom
+          title: Preset
+          default: adaptive
+        fps:
+          type: number
+          maximum: 2.0
+          minimum: 0.1
+          title: Fps
+          default: 1.0
+        max_frames_per_video:
+          anyOf:
+          - type: integer
+            maximum: 1800.0
+            minimum: 1.0
+          - type: 'null'
+          title: Max Frames Per Video
+        frames_per_model_call:
+          type: integer
+          maximum: 24.0
+          minimum: 1.0
+          title: Frames Per Model Call
+          default: 24
+      type: object
+      title: ReviewSamplingPolicy
+    ReviewTask:
+      properties:
+        task_id:
+          type: string
+          title: Task Id
+        user_id:
+          type: string
+          title: User Id
+        session_id:
+          type: string
+          title: Session Id
+        tenant_id:
+          type: string
+          title: Tenant Id
+          default: mitako
+        source:
+          type: string
+          title: Source
+          default: customer_upload
+        scenario:
+          type: string
+          title: Scenario
+        file_name:
+          type: string
+          title: File Name
+        stored_name:
+          type: string
+          title: Stored Name
+        mime_type:
+          type: string
+          title: Mime Type
+        size:
+          type: integer
+          title: Size
+        status:
+          type: string
+          title: Status
+        boundary:
+          type: string
+          title: Boundary
+          default: ''
+        result:
+          additionalProperties: true
+          type: object
+          title: Result
+        reviewed_at:
+          type: number
+          title: Reviewed At
+          default: 0
+        created_at:
+          type: number
+          title: Created At
+        updated_at:
+          type: number
+          title: Updated At
+      type: object
+      required:
+      - task_id
+      - user_id
+      - session_id
+      - scenario
+      - file_name
+      - stored_name
+      - mime_type
+      - size
+      - status
+      - created_at
+      - updated_at
+      title: ReviewTask
+    ReviewTaskDetailResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        review_task:
+          $ref: '#/components/schemas/ReviewTask'
+      type: object
+      required:
+      - review_task
+      title: ReviewTaskDetailResponse
+    ReviewTaskUploadResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        review_task:
+          $ref: '#/components/schemas/ReviewTask'
+        attachment:
+          $ref: '#/components/schemas/ReviewAttachment'
+      type: object
+      required:
+      - review_task
+      - attachment
+      title: ReviewTaskUploadResponse
+    SsoCallbackBody:
+      properties:
+        tenant_id:
+          type: string
+          title: Tenant Id
+        code:
+          type: string
+          title: Code
+        state:
+          type: string
+          title: State
+      type: object
+      required:
+      - tenant_id
+      - code
+      - state
+      title: SsoCallbackBody
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
