@@ -91,6 +91,14 @@ python tests/e2e/run_desk_admin_screenshot_report.py
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package_release.ps1
 ```
 
+我方 Java/Python/测试人员使用包含源码、内部文档、当前 `.env` 和数据库快照的内部研发包：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package_internal_release.ps1
+```
+
+内部包含敏感配置和业务数据，不得转发甲方或上传公开位置。详见 `我方内部开发文档/内部研发包交付说明.md`。
+
 涉及审核提示词、抽帧或模型路由的正式候选版，还应额外执行真实多模态批次：
 
 ```powershell

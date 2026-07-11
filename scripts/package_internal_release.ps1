@@ -1,0 +1,104 @@
+﻿[CmdletBinding()]
+param(
+    [string]$BaseUrl = "http://127.0.0.1:8015",
+    [string]$VisualUrl = "http://127.0.0.1:7861"
+)
+
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+$Root = Split-Path -Parent $PSScriptRoot
+$Date = Get-Date -Format "yyyyMMdd"
+$Stage = Join-Path $env:TEMP "MITAKO_Agent_internal_stage_$Date"
+$ZipPath = Join-Path (Split-Path -Parent $Root) "MITAKO_Agent-internal-dev-$Date.zip"
+$Python = Join-Path $Root "venv\Scripts\python.exe"
+
+& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl
+
+function Reset-Stage {
+    $fullStage = [System.IO.Path]::GetFullPath($Stage)
+    $fullTemp = [System.IO.Path]::GetFullPath($env:TEMP)
+    if (-not $fullStage.StartsWith($fullTemp, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe internal package stage path: $fullStage"
+    }
+    if (Test-Path -LiteralPath $fullStage) {
+        Remove-Item -LiteralPath $fullStage -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $fullStage | Out-Null
+}
+
+function Copy-Path([string]$RelativePath) {
+    $source = Join-Path $Root $RelativePath
+    if (-not (Test-Path -LiteralPath $source)) { return }
+    $target = Join-Path $Stage $RelativePath
+    $parent = Split-Path -Parent $target
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    Copy-Item -LiteralPath $source -Destination $target -Recurse -Force
+}
+
+Reset-Stage
+
+Write-Host "[1/5] Copy committed source ..." -ForegroundColor Cyan
+git -c core.quotepath=false ls-files | ForEach-Object { Copy-Path $_ }
+Copy-Path ".env"
+Copy-Path ".env.example"
+
+Write-Host "[2/5] Snapshot runtime databases ..." -ForegroundColor Cyan
+$databaseNames = @("admin.db", "auth.db", "handoff.db", "private_domain.db", "review_service.db")
+foreach ($databaseName in $databaseNames) {
+    $source = Join-Path $Root "data\$databaseName"
+    if (-not (Test-Path -LiteralPath $source)) { throw "Missing runtime database: $databaseName" }
+    $target = Join-Path $Stage "data\$databaseName"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+    & $Python -c "import sqlite3,sys; src=sqlite3.connect(sys.argv[1]); dst=sqlite3.connect(sys.argv[2]); src.backup(dst); dst.close(); src.close()" $source $target
+    if ($LASTEXITCODE -ne 0) { throw "Database snapshot failed: $databaseName" }
+}
+
+Write-Host "[3/5] Copy runnable samples and small attachments ..." -ForegroundColor Cyan
+Copy-Path "docs\三大审核场景的小量样本\sample_002"
+Copy-Path "docs\三大审核场景的小量样本\sample_003"
+Copy-Path "docs\三大审核场景的小量样本\sample_004"
+Copy-Path "poc\visual_review_poc\sample_videos"
+Copy-Path "data\chat_attachments"
+Copy-Path "data\private_domain_uploads"
+
+$manifest = @{
+    generated_at = (Get-Date).ToString("s")
+    git_commit = (git rev-parse HEAD).Trim()
+    env_included = (Test-Path -LiteralPath (Join-Path $Stage ".env"))
+    databases = $databaseNames
+    samples = @("sample_002", "sample_003", "sample_004", "visual_review_poc/sample_videos")
+    excluded = @("venv", "node_modules", ".git", ".codegraph", "tmp", "logs", "archive", "sample_001", "data/review_jobs", "120G customer assets")
+}
+$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $Stage "internal-package-manifest.json") -Encoding UTF8
+
+Write-Host "[4/5] Validate internal package boundary ..." -ForegroundColor Cyan
+$required = @(
+    "main.py",
+    ".env",
+    "我方内部开发文档\Java开发部署与联调指南.md",
+    "我方内部开发文档\内部研发包交付说明.md",
+    "docs\delivery\openapi.yaml",
+    "scripts\pre_release_internal_validation.ps1",
+    "data\review_service.db"
+)
+foreach ($relativePath in $required) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {
+        throw "Internal package missing required file: $relativePath"
+    }
+}
+foreach ($blocked in @("venv", "node_modules", ".git", ".codegraph", "tmp", "logs", "archive", "data\review_jobs")) {
+    if (Test-Path -LiteralPath (Join-Path $Stage $blocked)) {
+        throw "Internal package contains blocked path: $blocked"
+    }
+}
+
+Write-Host "[5/5] Create internal development ZIP ..." -ForegroundColor Cyan
+if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $ZipPath -CompressionLevel Optimal
+Remove-Item -LiteralPath $Stage -Recurse -Force
+
+$sizeMb = [math]::Round((Get-Item -LiteralPath $ZipPath).Length / 1MB, 2)
+Write-Host "[OK] Internal development package: $ZipPath ($sizeMb MB)" -ForegroundColor Green
