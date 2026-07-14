@@ -798,6 +798,37 @@ endlocal
 '@
 $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbench\start-workbench-windows.bat") -Encoding UTF8
 
+$customerEvidenceFiles = @(
+    "docs\delivery\openapi.yaml",
+    "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
+    "甲方沟通交付文档\0714反馈整改与验收说明-2026-07-15.md",
+    "runtime\app_runtime.zip",
+    "sample_data.json",
+    "start-windows.bat"
+)
+$customerEvidence = @()
+foreach ($relativePath in $customerEvidenceFiles) {
+    $evidencePath = Join-Path $Stage $relativePath
+    if (-not (Test-Path -LiteralPath $evidencePath)) {
+        throw "Customer package missing evidence file: $relativePath"
+    }
+    $customerEvidence += [ordered]@{
+        path = $relativePath.Replace("\", "/")
+        sha256 = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+$customerManifest = [ordered]@{
+    generated_at = (Get-Date).ToString("s")
+    git_commit = (git rev-parse HEAD).Trim()
+    delivery_mode = "customer_demo_preview"
+    auth_mode = "demo_bypass"
+    evidence = $customerEvidence
+    includes = @("compiled runtime", "public OpenAPI and delivery docs", "demo data", "visual review workbench", "small demo videos")
+    excludes = @("API keys", "environment files", "databases", "Python source", "internal development docs", "blind-test labels", "customer production integrations")
+    integration_boundary = "Enterprise WeChat, Feishu, CRM/CDP, order, inventory, payment and fulfillment remain contract-ready demonstrations until customer-side credentials, callbacks and test environments are provided."
+}
+$customerManifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Stage "customer-package-manifest.json") -Encoding UTF8
+
 Write-Host "[5/6] Run customer package gate ..."
 Assert-NoCustomerLeak $Stage
 

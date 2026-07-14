@@ -90,17 +90,28 @@ def main() -> int:
     _case(results, "OPENAPI-typed-schemas", typed, f"schemas={','.join(name for name in schemas if name in required_schemas)}", t0)
 
     t0 = time.time()
-    code, auth = _request(
-        "POST",
-        f"{base}/api/v1/auth/login",
-        json_body={
-            "username": os.getenv("E2E_ADMIN_USERNAME", "admin"),
-            "password": os.getenv("E2E_ADMIN_PASSWORD", "admin123"),
-            "tenant_id": os.getenv("E2E_TENANT_ID", "mitako"),
-        },
+    status_code, auth_status = _request("GET", f"{base}/api/v1/auth/status")
+    auth_required = bool(
+        auth_status.get("protected_api_auth_required", auth_status.get("auth_required", True))
     )
-    admin_token = auth.get("token") or ""
-    _case(results, "AUTH-admin-token", code == 200 and bool(admin_token), auth.get("error", "token ok"), t0)
+    admin_token = ""
+    if auth_required:
+        code, auth = _request(
+            "POST",
+            f"{base}/api/v1/auth/login",
+            json_body={
+                "username": os.getenv("E2E_ADMIN_USERNAME", "admin"),
+                "password": os.getenv("E2E_ADMIN_PASSWORD", "admin123"),
+                "tenant_id": os.getenv("E2E_TENANT_ID", "mitako"),
+            },
+        )
+        admin_token = auth.get("token") or ""
+        auth_ok = code == 200 and bool(admin_token)
+        auth_detail = auth.get("error", "strict auth token ok")
+    else:
+        auth_ok = status_code == 200 and auth_status.get("ok") is True
+        auth_detail = "demo bypass declared by auth status; protected endpoints verified without token"
+    _case(results, "AUTH-runtime-mode", auth_ok, auth_detail, t0)
 
     t0 = time.time()
     code, contracts = _request("GET", f"{base}/api/v1/private-domain/contracts", token=admin_token)
