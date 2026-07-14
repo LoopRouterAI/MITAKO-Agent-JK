@@ -36,7 +36,15 @@ def _assert(condition: bool, message: str) -> None:
 
 def _zip_names(path: Path) -> set[str]:
     with zipfile.ZipFile(path) as archive:
-        return {item.filename.replace("\\", "/").lstrip("./") for item in archive.infolist() if not item.is_dir()}
+        names: set[str] = set()
+        for item in archive.infolist():
+            if item.is_dir():
+                continue
+            name = item.filename.replace("\\", "/")
+            if name.startswith("./"):
+                name = name[2:]
+            names.add(name)
+        return names
 
 
 def _extract(path: Path, target: Path) -> None:
