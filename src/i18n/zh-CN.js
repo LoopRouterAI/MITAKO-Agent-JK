@@ -70,7 +70,7 @@ export default {
     photoTemplate: '我选择了一张照片：',
     cameraTemplate: '我刚拍了一张照片：',
     videoTemplate: '我上传了一段视频：',
-    materialTemplateSuffix: '请帮我创建审核任务并转客服确认。',
+    materialTemplateSuffix: '请帮我创建审核任务。',
     attachmentReady: '待发送图片',
     videoReady: '待发送视频',
     removeAttachment: '移除材料',
@@ -205,7 +205,7 @@ export default {
     businessTicketType: '服务类型',
     businessPlannedAction: '下一步处理',
     businessAuditDefault: '已记录当前处理进度。',
-    requiresHuman: '需要VIP客服确认',
+    requiresHuman: '需要业务人工审批',
     generalInquiry: '通用咨询',
   },
   errors: {

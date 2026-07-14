@@ -9,6 +9,7 @@ import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 from runtime_paths import db_path
 
@@ -70,6 +71,18 @@ def _ensure_db() -> None:
                 note TEXT,
                 created_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS handoff_offers (
+                offer_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL DEFAULT 'mitako',
+                reason TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'offered',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_handoff_offers_session
+                ON handoff_offers(session_id, user_id, status, created_at);
             CREATE TABLE IF NOT EXISTS observer_audits (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -163,6 +176,75 @@ def _json_loads(raw: Optional[str], default: Any = None) -> Any:
         return json.loads(raw)
     except json.JSONDecodeError:
         return default
+
+
+def create_handoff_offer(session_id: str, user_id: str, reason: str, tenant_id: str = "mitako") -> Dict[str, Any]:
+    now = time.time()
+    offer_id = f"HO-{uuid4().hex[:12].upper()}"
+    with _lock, _connect() as conn:
+        conn.execute(
+            "UPDATE handoff_offers SET status='expired', updated_at=? WHERE session_id=? AND user_id=? AND status='offered'",
+            (now, session_id, user_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO handoff_offers(offer_id, session_id, user_id, tenant_id, reason, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'offered', ?, ?)
+            """,
+            (offer_id, session_id, user_id, tenant_id or "mitako", reason, now, now),
+        )
+    return {
+        "offer_id": offer_id,
+        "session_id": session_id,
+        "user_id": user_id,
+        "tenant_id": tenant_id or "mitako",
+        "reason": reason,
+        "status": "offered",
+        "created_at": now,
+    }
+
+
+def get_active_handoff_offer(session_id: str, user_id: str = "", max_age_seconds: int = 900) -> Optional[Dict[str, Any]]:
+    cutoff = time.time() - max(30, max_age_seconds)
+    with _lock, _connect() as conn:
+        if user_id:
+            row = conn.execute(
+                """
+                SELECT * FROM handoff_offers
+                WHERE session_id=? AND user_id=? AND status='offered' AND created_at>=?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (session_id, user_id, cutoff),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT * FROM handoff_offers
+                WHERE session_id=? AND status='offered' AND created_at>=?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (session_id, cutoff),
+            ).fetchone()
+    return dict(row) if row else None
+
+
+def update_handoff_offer(offer_id: str, status: str, session_id: str = "", user_id: str = "") -> Optional[Dict[str, Any]]:
+    allowed = {"consented", "declined", "expired", "failed", "queued"}
+    if status not in allowed:
+        raise ValueError("invalid_handoff_offer_status")
+    now = time.time()
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT * FROM handoff_offers WHERE offer_id=?", (offer_id,)).fetchone()
+        if not row:
+            return None
+        current = dict(row)
+        if session_id and current.get("session_id") != session_id:
+            return None
+        if user_id and current.get("user_id") != user_id:
+            return None
+        conn.execute("UPDATE handoff_offers SET status=?, updated_at=? WHERE offer_id=?", (status, now, offer_id))
+        current.update({"status": status, "updated_at": now})
+        return current
 
 
 def _row_to_session(row: sqlite3.Row) -> Dict[str, Any]:
@@ -483,7 +565,7 @@ def append_message(
             (session_id, role, content, agent_id or None, _json_dumps(meta or {}), ts),
         )
         msg_id = cur.lastrowid
-        if role == "human":
+        if role == "human" and (meta or {}).get("kind") != "welcome":
             conn.execute(
                 "UPDATE handoff_sessions SET last_agent_reply_at=?, updated_at=? WHERE session_id=?",
                 (ts, ts, session_id),
@@ -743,10 +825,16 @@ def list_sla_candidates(now: Optional[float] = None) -> List[Dict[str, Any]]:
     now = now or time.time()
     out: List[Dict[str, Any]] = []
     for sess in list_active_sessions():
-        if sess.get("status") != "connected":
-            continue
         sla = get_sla_config(sess.get("tenant_id") or "mitako")
         if not sla.get("auto_transfer_enabled"):
+            continue
+        if sess.get("status") in {"queuing", "escalated"}:
+            queue_timeout = 30 if sess.get("required_tier") == "supervisor" else 60
+            enqueued = sess.get("enqueued_at") or sess.get("created_at") or 0
+            if enqueued and (now - enqueued) > queue_timeout:
+                out.append({**sess, "sla_reason": "queue_wait_timeout"})
+            continue
+        if sess.get("status") != "connected":
             continue
         first_sec = int(sla.get("first_response_seconds") or 180)
         reply_sec = int(sla.get("reply_timeout_seconds") or 300)

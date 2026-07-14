@@ -30,14 +30,20 @@ def _case(layer: str, role: str, name: str, ok: bool, detail: str, ms: int, scre
 
 def _cleanup_sessions(client: httpx.Client, base: str) -> None:
     try:
-        ls = client.get(f"{base}/api/v1/desk/sessions").json()
+        login = client.post(
+            f"{base}/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123", "tenant_id": "mitako"},
+        ).json()
+        token = str(login.get("token") or "")
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        ls = client.get(f"{base}/api/v1/desk/sessions", params={"scope": "all"}, headers=headers).json()
         for s in ls.get("sessions", []):
             sid = s.get("session_id", "")
             if sid.startswith(("e2e_", "chain_", "role_", "comm_", "admin_", "browser_")):
-                client.post(f"{base}/api/v1/handoff/reset", params={"session_id": sid})
+                client.post(f"{base}/api/v1/handoff/reset", params={"session_id": sid}, headers=headers)
+        client.post(f"{base}/api/v1/handoff/reset", params={"session_id": SESSION_ID}, headers=headers)
     except Exception:
         pass
-    client.post(f"{base}/api/v1/handoff/reset", params={"session_id": SESSION_ID})
 
 
 def _handoff_headers(token: str) -> dict:
@@ -105,12 +111,12 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
                   if (!el) return false;
                   const text = el.innerText || '';
                   return !text.includes('已接入')
-                    && (text.includes('繁忙') || text.includes('联系人工') || text.includes('排队') || text.includes('转接'));
+                    && (text.includes('繁忙') || text.includes('联系人工') || text.includes('联系VIP客服') || text.includes('排队') || text.includes('转接') || text.includes('请稍候'));
                 }""",
                 timeout=20000,
             )
             banner = customer.locator('[data-testid="handoff-status-banner"]').inner_text()
-            ok = ("繁忙" in banner or "联系人工" in banner or "排队" in banner or "转接" in banner) and "已接入" not in banner
+            ok = any(word in banner for word in ("繁忙", "联系人工", "联系VIP客服", "排队", "转接", "请稍候")) and "已接入" not in banner
             b64 = _shot(customer, "01_customer_queuing")
             results.append(_case("BROWSER", "customer", "B-customer-queue-banner", ok, banner[:120], int((time.time() - t0) * 1000), b64))
             results.append(_case("BROWSER", "customer", "B-customer-ui-queuing", True, "UI 已进入排队状态", 0))
@@ -229,9 +235,32 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
             rm_page.goto(f"{base}/", wait_until="domcontentloaded", timeout=30000)
             rm_page.wait_for_selector("#root", timeout=10000)
             motion = rm_page.evaluate("() => window.matchMedia('(prefers-reduced-motion: reduce)').matches")
+            mobile_layout = rm_page.evaluate(
+                """() => ({
+                    innerWidth: window.innerWidth,
+                    bodyScrollWidth: document.body.scrollWidth,
+                    rootScrollWidth: document.documentElement.scrollWidth,
+                    hasChatInput: Boolean(document.querySelector('textarea, input[type="text"]')),
+                })"""
+            )
             b64 = _shot(rm_page, "07_reduced_motion")
             rm_ctx.close()
             results.append(_case("BROWSER", "customer", "B-reduced-motion", motion is True, "prefers-reduced-motion", int((time.time() - t0) * 1000), b64))
+            mobile_ok = (
+                mobile_layout.get("innerWidth") == 390
+                and mobile_layout.get("bodyScrollWidth", 9999) <= 391
+                and mobile_layout.get("rootScrollWidth", 9999) <= 391
+                and mobile_layout.get("hasChatInput") is True
+            )
+            results.append(_case(
+                "BROWSER",
+                "customer",
+                "B-mobile-390-no-overflow",
+                mobile_ok,
+                str(mobile_layout),
+                int((time.time() - t0) * 1000),
+                b64,
+            ))
         except Exception as e:
             results.append(_case("BROWSER", "customer", "B-reduced-motion", False, str(e)[:160], int((time.time() - t0) * 1000)))
 

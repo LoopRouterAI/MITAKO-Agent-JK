@@ -59,7 +59,8 @@ from admin_service import (
 import admin_store
 import handoff_store as handoff_store_module
 from handoff_ws import hub
-from business_api import business_router
+from business_api import business_router, load_data
+from viking_memory import viking_db
 from auth.jwt_utils import (
     auth_required,
     create_handoff_user_token,
@@ -282,6 +283,36 @@ def _valid_chat_attachments(items: List[ChatAttachment], user_id: str, session_i
             "url": f"/api/v1/chat/attachments/{filename}",
         })
     return valid
+
+
+def _review_task_attachment(task: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": task["task_id"],
+        "kind": "review_task",
+        "review_task_id": task["task_id"],
+        "name": task.get("file_name") or "审核材料",
+        "mime_type": task.get("mime_type") or "application/octet-stream",
+        "size": int(task.get("size") or 0),
+        "url": f"/api/v1/private-domain/review-tasks/{task['task_id']}",
+        "status": task.get("status") or "",
+        "scenario": task.get("scenario") or "",
+        "boundary": task.get("boundary") or "",
+        "review_result": task.get("result") or {},
+        "reviewed_at": task.get("reviewed_at") or 0,
+    }
+
+
+def _recent_review_attachments(user_id: str, session_id: str, tenant_id: str, content: str) -> List[Dict[str, Any]]:
+    query = str(content or "")
+    if not any(k in query for k in ["审核", "材料", "图片", "照片", "视频", "破损", "有伤", "瑕疵", "结果", "置信度", "报告"]):
+        return []
+    tasks = [
+        task for task in private_domain_store.list_review_tasks(limit=100)
+        if task.get("user_id") == user_id
+        and task.get("session_id") == session_id
+        and (task.get("tenant_id") or "mitako") == tenant_id
+    ]
+    return [_review_task_attachment(task) for task in tasks[:3]]
 
 
 def _require_all_chat_attachments_valid(items: List[ChatAttachment], user_id: str, session_id: str, tenant_id: str) -> List[Dict[str, Any]]:
@@ -600,10 +631,42 @@ def _format_public_date(value: Any) -> str:
 def _should_emit_order_progress(result: Dict[str, Any]) -> bool:
     sop = result.get("sop_state") or {}
     ticket_type = sop.get("ticket_type") or ""
-    if ticket_type in {"damage", "minor_refund", "refund", "account_binding", "product_consult"}:
+    if ticket_type in {"damage", "minor_refund", "refund", "account_binding", "product_consult", "lottery"}:
         return False
     intent = str(result.get("intent") or "")
     return ticket_type in {"logistics", "missing", "general"} or any(k in intent for k in ["订单", "物流", "发货", "催发货"])
+
+
+def _select_primary_customer_card(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    messages = result.get("messages") or []
+    last_user = ""
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            last_user = str(message.get("content") or "")
+            break
+    if any(k in last_user for k in ["一句话", "简短", "只说结论", "不要卡片"]):
+        return None
+
+    sop = result.get("sop_state") or {}
+    ticket_type = sop.get("ticket_type") or "general"
+    orders = (result.get("order_data") or {}).get("orders") or []
+
+    if ticket_type in {"logistics", "missing"} and orders and _should_emit_order_progress(result):
+        return {
+            "type": "order_progress",
+            "data": _build_order_progress_payload(orders[0], result.get("logistics_data") or {}),
+        }
+
+    compensation = result.get("compensation_given") or []
+    if compensation and any(k in last_user for k in ["补偿", "赔偿", "积分", "权益"]):
+        return {"type": "compensation", "data": compensation[0]}
+
+    if ticket_type in {"damage", "minor_refund", "refund", "account_binding", "product_consult", "lottery"}:
+        cards = result.get("business_cards") or []
+        if cards:
+            return _public_business_card(cards[0])
+
+    return None
 
 
 def _build_order_progress_payload(order: Dict[str, Any], logistics: Dict[str, Any]) -> Dict[str, Any]:
@@ -697,6 +760,15 @@ class HandoffRequest(BaseModel):
     last_user_message: str = ""
     intent: str = ""
     emotion_level: int = 2
+    tenant_id: str = "mitako"
+    offer_id: str = ""
+    active_order_id: str = ""
+
+
+class HandoffOfferRequest(BaseModel):
+    user_id: str
+    session_id: str
+    reason: str = "AI建议用户选择是否转接VIP客服"
     tenant_id: str = "mitako"
 
 
@@ -1093,6 +1165,26 @@ async def post_generate_image(req: ImageGenerateRequest):
     except Exception:
         return {"ok": False, "error": "图片服务暂时不可用，请稍后重试"}
 
+@app.post("/api/v1/handoff/offer")
+async def create_handoff_offer(req: HandoffOfferRequest, request: Request):
+    existing = handoff_store.get_session(req.session_id)
+    token_user = _resolve_customer_session_user(
+        request,
+        user_id=req.user_id,
+        session_id=req.session_id,
+        entry=existing,
+    )
+    tenant_id = _request_tenant_id(req.tenant_id, token_user, existing)
+    offer = handoff_store.create_handoff_offer(req.session_id, req.user_id, req.reason, tenant_id)
+    return {
+        "ok": True,
+        "offer": offer,
+        "data_mode": "demo",
+        "source_system": "mitako_fixture",
+        "integration_status": "not_connected",
+    }
+
+
 @app.post("/api/v1/handoff/request")
 async def request_handoff(req: HandoffRequest, request: Request):
     """用户确认转VIP客服 — 生成简报并加入排队（演示队列）"""
@@ -1126,10 +1218,35 @@ async def request_handoff(req: HandoffRequest, request: Request):
         token=token,
     )
     tenant_id = _request_tenant_id(req.tenant_id, token_user, existing)
+    if req.offer_id:
+        offer = handoff_store.update_handoff_offer(req.offer_id, "consented", req.session_id, req.user_id)
+        if not offer:
+            raise HTTPException(status_code=409, detail="handoff_offer_invalid_or_expired")
     server_messages = handoff_store.recent_chat_history(req.session_id, limit=20)
     messages = server_messages or req.history
     if req.last_user_message and (not messages or messages[-1].get("content") != req.last_user_message):
         messages = messages + [{"role": "user", "content": req.last_user_message}]
+    db = load_data()
+    user_orders = [
+        order for order in db.get("orders", {}).values()
+        if order.get("user_id") == req.user_id
+    ]
+    explicit_ref_match = re.search(r"(?:ORD[_-]?\d{4}[_-]?\d+|#\s*\d{5,8})", req.last_user_message or "", re.IGNORECASE)
+    focus_ref = (explicit_ref_match.group(0) if explicit_ref_match else req.active_order_id or "").replace("#", "").strip()
+    if focus_ref:
+        matched_orders = [
+            order for order in user_orders
+            if order.get("order_id") == focus_ref
+            or str(order.get("order_id") or "").endswith(re.sub(r"\D", "", focus_ref))
+        ]
+        user_orders = matched_orders
+    profile = viking_db.read_json(f"viking://user/{req.user_id}/profile")
+    recent_reviews = [
+        task for task in private_domain_store.list_review_tasks(limit=100)
+        if task.get("user_id") == req.user_id
+        and task.get("session_id") == req.session_id
+        and (task.get("tenant_id") or "mitako") == tenant_id
+    ][:5]
     pseudo_state = {
         "user_id": req.user_id,
         "session_id": req.session_id,
@@ -1137,7 +1254,13 @@ async def request_handoff(req: HandoffRequest, request: Request):
         "intent": req.intent,
         "emotion_level": req.emotion_level,
         "tenant_id": tenant_id,
-        "order_data": {},
+        "order_data": {"orders": user_orders, "total": len(user_orders)},
+        "user_memory": {
+            "nickname": profile.get("nickname") or "谷友",
+            "member_level": (profile.get("metadata") or {}).get("member_level") or "bronze",
+            "favorite_ips": (profile.get("metadata") or {}).get("favorite_ips") or [],
+        },
+        "review_tasks": recent_reviews,
         "transfer_reason": req.reason,
         "compensation_given": [],
         "reply_draft": "",
@@ -1149,6 +1272,8 @@ async def request_handoff(req: HandoffRequest, request: Request):
     brief = build_handoff_brief(pseudo_state, req.reason)
     brief["tenant_id"] = tenant_id
     queue_meta = enqueue_handoff(req.session_id, brief, tenant_id=brief["tenant_id"])
+    if req.offer_id:
+        handoff_store.update_handoff_offer(req.offer_id, "queued", req.session_id, req.user_id)
     handoff_token = create_handoff_user_token(
         session_id=req.session_id,
         user_id=req.user_id,
@@ -1160,6 +1285,9 @@ async def request_handoff(req: HandoffRequest, request: Request):
         "queue": build_public_queue_meta(queue_meta),
         "reason": "已为您转接VIP客服继续处理。",
         "handoff_token": handoff_token,
+        "data_mode": "demo",
+        "source_system": "mitako_fixture",
+        "integration_status": "not_connected",
     }
 
 
@@ -1354,8 +1482,26 @@ async def desk_agents(user=require_roles(DESK_ACCESS_ROLES)):
 
 
 @app.get("/api/v1/desk/sessions")
-async def desk_sessions(user=require_roles(DESK_ACCESS_ROLES)):
-    return {"ok": True, "sessions": list_desk_sessions(tenant_id=user.get("tenant_id"))}
+async def desk_sessions(scope: str = "available", user=require_roles(DESK_ACCESS_ROLES)):
+    if scope not in {"mine", "available", "all"}:
+        raise HTTPException(status_code=422, detail="invalid_queue_scope")
+    role = user.get("role") or ""
+    if scope == "all" and role not in {
+        Role.SUPER_ADMIN.value,
+        Role.SUPERVISOR.value,
+        Role.BPO_MANAGER.value,
+    }:
+        raise HTTPException(status_code=403, detail="queue_scope_forbidden")
+    agent_id = user.get("agent_id") or ""
+    return {
+        "ok": True,
+        "scope": scope,
+        "sessions": list_desk_sessions(
+            tenant_id=user.get("tenant_id"),
+            agent_id=agent_id,
+            scope=scope,
+        ),
+    }
 
 
 @app.get("/api/v1/desk/session/{session_id}")
@@ -1434,7 +1580,13 @@ async def chat_stream(req: ChatRequest, request: Request):
             existing_entry = None
         elif existing_entry.get("status") != "chatting":
             raise HTTPException(status_code=409, detail="handoff_active")
-    chat_attachments = _require_all_chat_attachments_valid(req.attachments, req.user_id, req.session_id, tenant_id)
+    uploaded_attachments = _require_all_chat_attachments_valid(req.attachments, req.user_id, req.session_id, tenant_id)
+    review_context = _recent_review_attachments(req.user_id, req.session_id, tenant_id, req.content)
+    uploaded_ids = {item.get("review_task_id") or item.get("id") for item in uploaded_attachments}
+    chat_attachments = uploaded_attachments + [
+        item for item in review_context
+        if (item.get("review_task_id") or item.get("id")) not in uploaded_ids
+    ]
 
     async def event_generator():
         queue = asyncio.Queue()
@@ -1459,6 +1611,7 @@ async def chat_stream(req: ChatRequest, request: Request):
         # 初始 State
         state = {
             "messages": server_history or (req.history + [{"role": "user", "content": model_content}]),
+            "raw_user_content": req.content,
             "user_id": req.user_id,
             "session_id": req.session_id,
             "active_order_id": req.active_order_id or "",
@@ -1473,6 +1626,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             "safety_check_result": "pass",
             "should_transfer": False,
             "transfer_reason": "",
+            "handoff_offer_id": "",
             "compensation_given": [],
             "meme_tags": [],
             "fixtures": req.fixtures or [],
@@ -1589,31 +1743,11 @@ async def chat_stream(req: ChatRequest, request: Request):
             result = await task
             reply_fallback = result.get("reply_draft", "") if isinstance(result, dict) else ""
 
-            # 推送卡片
-            if result.get("compensation_given"):
-                for comp in result["compensation_given"]:
-                    yield {
-                        "event": "card",
-                        "data": json.dumps({
-                            "type": "compensation",
-                            "data": comp
-                        }, ensure_ascii=False)
-                    }
-
-            for card in result.get("business_cards") or []:
+            primary_card = _select_primary_customer_card(result)
+            if primary_card:
                 yield {
                     "event": "card",
-                    "data": json.dumps(_public_business_card(card), ensure_ascii=False)
-                }
-
-            if _should_emit_order_progress(result) and result.get("order_data") and result["order_data"].get("orders"):
-                order = result["order_data"]["orders"][0]
-                yield {
-                    "event": "card",
-                    "data": json.dumps({
-                        "type": "order_progress",
-                        "data": _build_order_progress_payload(order, result.get("logistics_data") or {})
-                    }, ensure_ascii=False)
+                    "data": json.dumps(primary_card, ensure_ascii=False)
                 }
 
         except Exception as e:
@@ -1626,14 +1760,33 @@ async def chat_stream(req: ChatRequest, request: Request):
             clean_reply = sanitize_customer_reply(reply_fallback)
         if not clean_reply.strip():
             clean_reply = "我已经记录到这个问题了，会按服务流程继续帮你核实处理。"
+        handoff_offer = None
+        if (
+            clean_reply.strip()
+            and not (isinstance(result, dict) and result.get("should_transfer"))
+            and any(k in clean_reply for k in ["可以帮您转接VIP客服", "可以帮你转接VIP客服", "需要VIP客服", "是否转接人工客服", "帮您转人工"])
+        ):
+            handoff_offer = handoff_store.create_handoff_offer(
+                req.session_id,
+                req.user_id,
+                "AI在当前会话中提出VIP客服转接选项",
+                tenant_id,
+            )
         if clean_reply.strip():
             handoff_store.append_message(req.session_id, "assistant", clean_reply, meta={"kind": "ai_chat"})
+
+        if handoff_offer:
+            yield {
+                "event": "handoff_offer",
+                "data": json.dumps({"offer_id": handoff_offer["offer_id"], "status": "offered"}, ensure_ascii=False),
+            }
 
         yield {
             "event": "done",
             "data": json.dumps({
                 "status": "completed",
                 "reply": clean_reply,
+                "handoff_offer": handoff_offer,
             }, ensure_ascii=False)
         }
 

@@ -592,6 +592,10 @@ def create_review_task_from_upload(
     mime_type: str,
     raw: bytes,
     source: str = "customer_upload",
+    client_case_id: str = "",
+    order_id: str = "",
+    scenario: str = "",
+    context: Dict[str, Any] | None = None,
     run_review: bool = True,
 ) -> Dict[str, Any]:
     if not raw:
@@ -607,19 +611,27 @@ def create_review_task_from_upload(
     stored_name = f"{task_id}{ext}"
     path = store.upload_dir() / stored_name
     path.write_bytes(raw)
-    scenario = "video_unboxing" if mime_type.startswith("video/") else "product_damage"
+    supported_scenarios = {"product_damage", "wrong_item", "missing_item", "minor_refund", "video_unboxing"}
+    resolved_scenario = scenario.strip() if scenario else ""
+    if resolved_scenario and resolved_scenario not in supported_scenarios:
+        raise ValueError("unsupported_review_scenario")
+    if not resolved_scenario:
+        resolved_scenario = "video_unboxing" if mime_type.startswith("video/") else "product_damage"
     task = store.create_review_task({
         "task_id": task_id,
         "user_id": user_id,
         "session_id": session_id,
         "tenant_id": tenant_id,
         "source": source,
-        "scenario": scenario,
+        "client_case_id": client_case_id,
+        "order_id": order_id,
+        "scenario": resolved_scenario,
         "file_name": safe_name,
         "stored_name": stored_name,
         "mime_type": mime_type,
         "size": len(raw),
         "status": "MATERIAL_READY",
+        "context": context or {},
         "boundary": "材料已接收并生成审核任务；当前不自动定责，需视觉审核工作台或人工客服继续处理。",
     })
     return _run_visual_review(task, raw) if run_review else task

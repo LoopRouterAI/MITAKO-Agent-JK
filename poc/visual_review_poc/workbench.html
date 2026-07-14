@@ -1350,8 +1350,10 @@
                   <div>
                     <label for="fps" data-i18n="fpsLabel">取证密度</label>
                     <select name="fps" id="fps">
-                      <option value="1">常规取证</option>
-                      <option value="2">严格取证</option>
+                      <option value="0.2">低密度取证（每 5 秒 1 帧）</option>
+                      <option value="0.5">均衡取证（每 2 秒 1 帧）</option>
+                      <option value="1">常规取证（每秒 1 帧）</option>
+                      <option value="2">严格取证（每秒 2 帧）</option>
                     </select>
                   </div>
                   <div>
@@ -1716,18 +1718,28 @@
 
 	        function clearReports() {
 	          reportLink.style.display = 'none';
+	          reportLink.href = '#';
 	          reportList.replaceChildren();
+	        }
+
+	        function stopReportLinkEvent(event) {
+	          event.stopPropagation();
+	        }
+
+	        function prepareReportLink(link) {
+	          link.target = '_blank';
+	          link.rel = 'noopener noreferrer';
+	          link.addEventListener('click', stopReportLinkEvent);
+	          return link;
 	        }
 
 	        function showReportLinks(reports) {
 	          const items = (reports || []).filter((item) => item && item.html_url);
 	          reportList.replaceChildren(...items.map((item, index) => {
-	            const link = document.createElement('a');
+	            const link = prepareReportLink(document.createElement('a'));
 	            const title = document.createElement('b');
 	            const meta = document.createElement('span');
 	            link.href = item.html_url;
-	            link.target = '_blank';
-	            link.rel = 'noreferrer';
 	            title.textContent = (item.sample_id ? item.sample_id + ' · ' : '') + '查看第 ' + (index + 1) + ' 份报告';
 	            meta.textContent = item.confidence ? '置信度 ' + item.confidence : '打开 HTML';
 	            link.append(title, meta);
@@ -1780,8 +1792,10 @@
 	        uploadTab.addEventListener('click', () => setMode('upload'));
 	        urlTab.addEventListener('click', () => setMode('url'));
 	        folderTab.addEventListener('click', () => setMode('folder'));
+	        prepareReportLink(reportLink);
         entryCards.forEach((card) => {
-          card.addEventListener('click', () => {
+          card.addEventListener('click', (event) => {
+            if (event.target.closest('a')) return;
             const scenario = card.dataset.scenario || 'video_unboxing';
             applyScenario(scenario);
             const next = new URL(scenarioPaths[scenario] || '/', window.location.href);

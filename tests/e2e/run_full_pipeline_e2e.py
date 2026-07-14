@@ -231,8 +231,16 @@ async def run_customer_role(client: httpx.AsyncClient, base: str, results: list[
         json={"session_id": sid, "content": "还在吗", "user_id": "usr_e2e"},
         headers=headers,
     )).json()
-    ok = not um.get("ok") and um.get("error") == "not_connected"
-    results.append(CaseResult("ROLE", "customer", "U-user-msg-blocked-before-accept", ok, um.get("error", ""), int((time.time() - t0) * 1000)))
+    queued_user_messages = [m for m in um.get("messages", []) if m.get("role") == "user"]
+    ok = um.get("ok") is True and any("还在吗" in (m.get("content") or "") for m in queued_user_messages)
+    results.append(CaseResult(
+        "ROLE",
+        "customer",
+        "U-user-msg-allowed-before-accept",
+        ok,
+        f"queued_messages={len(queued_user_messages)}",
+        int((time.time() - t0) * 1000),
+    ))
 
     return sid, headers
 

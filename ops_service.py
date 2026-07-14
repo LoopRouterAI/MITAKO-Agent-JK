@@ -6,7 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import admin_service
 from auth.jwt_utils import auth_required
@@ -85,20 +85,55 @@ def _contains_forbidden_public_key(value: Any) -> bool:
     return False
 
 
+def _public_report_risk_categories(value: Any) -> List[str]:
+    categories = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            raw = str(key)
+            if raw in _PUBLIC_FORBIDDEN_KEYS:
+                if any(k in raw.lower() for k in ["prompt", "raw", "thought"]):
+                    categories.add("原始推理或提示内容")
+                elif any(k in raw.lower() for k in ["provider", "channel", "model", "base_url"]):
+                    categories.add("内部模型或渠道配置")
+                else:
+                    categories.add("不应公开的内部字段")
+            categories.update(_public_report_risk_categories(item))
+    elif isinstance(value, list):
+        for item in value:
+            categories.update(_public_report_risk_categories(item))
+    return sorted(categories)
+
+
 def _public_report_safety() -> Dict[str, Any]:
     files = sorted(_PUBLIC_SUMMARY_DIR.glob("*.json")) if _PUBLIC_SUMMARY_DIR.exists() else []
     unsafe = 0
+    risks = []
     for path in files:
         try:
-            if _contains_forbidden_public_key(json.loads(path.read_text(encoding="utf-8"))):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            categories = _public_report_risk_categories(data)
+            if categories:
                 unsafe += 1
+                risks.append({
+                    "file": path.name,
+                    "categories": categories,
+                    "severity": "high",
+                    "action": "重新生成脱敏公开摘要，并从公开目录移除旧文件。",
+                })
         except Exception:
             unsafe += 1
+            risks.append({
+                "file": path.name,
+                "categories": ["报告无法解析"],
+                "severity": "medium",
+                "action": "检查文件完整性，修复或移出公开目录。",
+            })
     return {
         "ok": unsafe == 0,
         "status": "正常" if unsafe == 0 else "需关注",
         "checked_files": len(files),
         "unsafe_files": unsafe,
+        "risks": risks,
     }
 
 

@@ -14,6 +14,20 @@ $InternalBaseUrl = if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_B
 $InternalVisualUrl = if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }
 & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $InternalBaseUrl -VisualUrl $InternalVisualUrl
 
+function Resolve-PythonRuntime {
+    foreach ($candidate in @(
+        (Join-Path $Root ".venv\Scripts\python.exe"),
+        (Join-Path $Root "venv\Scripts\python.exe")
+    )) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    foreach ($commandName in @("python", "python3")) {
+        $command = Get-Command $commandName -ErrorAction SilentlyContinue
+        if ($command) { return $command.Source }
+    }
+    throw "Missing Python runtime: expected .venv, venv, python, or python3."
+}
+
 Write-Host "=== MITAKO customer preview package ===" -ForegroundColor Cyan
 Write-Host "Project: $Root"
 Write-Host "Output: $ZipPath"
@@ -205,8 +219,7 @@ END = _workflow_graph.END
 
 function Assert-PycConstantsNoRuntimeLeak([string]$ZipFile) {
     if (-not (Test-Path $ZipFile)) { return }
-    $py = Join-Path $Root "venv\Scripts\python.exe"
-    if (-not (Test-Path $py)) { $py = "python" }
+    $py = Resolve-PythonRuntime
     $scanScript = Join-Path $env:TEMP "mitako_scan_pyc_constants.py"
     @'
 import json
@@ -594,8 +607,7 @@ Sanitize-RuntimeSources
 
 Push-Location $Root
 try {
-    $py = Join-Path $Root "venv\Scripts\python.exe"
-    if (-not (Test-Path $py)) { $py = "python" }
+    $py = Resolve-PythonRuntime
     & $py -OO -m compileall -q -b -s $CompileStage -p "." $CompileStage
     if ($LASTEXITCODE -ne 0) { throw "Python runtime compile failed" }
 } finally {

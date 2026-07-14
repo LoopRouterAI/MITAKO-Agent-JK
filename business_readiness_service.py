@@ -10,17 +10,25 @@ from business_api import load_data
 
 
 def _last_user_text(state: Dict[str, Any]) -> str:
+    raw = str(state.get("raw_user_content") or "").strip()
+    if raw:
+        return raw
     for msg in reversed(state.get("messages") or []):
         if msg.get("role") == "user":
-            return msg.get("content") or ""
+            text = str(msg.get("content") or "")
+            for marker in ("\n\n[用户已上传附件]", "\n\n[用户已上传材料]"):
+                if marker in text:
+                    text = text.split(marker, 1)[0]
+            return text.strip()
     return ""
 
 
 def classify_sop_branch(text: str, intent: str = "") -> Dict[str, Any]:
     query = f"{intent} {text}"
     rules = [
-        ("product_consult", "商品/库存/预售咨询", ["售前商品咨询", "还没下单", "想买", "库存", "预售", "规格", "商品咨询"], ["answer_product_policy"], ["promise_delivery_date", "reserve_inventory"]),
-        ("minor_refund", "未成年人退款", ["未成年", "孩子", "小孩", "家长", "监护人"], ["request_materials"], ["auto_refund", "auto_reject"]),
+        ("lottery", "抽赏规则与结果复核", ["盲盒", "抽赏", "抽选", "中奖率", "概率", "保底", "奖池", "稀有款", "抽号", "活动规则", "中奖名单", "吞烫", "普款"], ["answer_lottery_rules", "create_lottery_review"], ["promise_win", "change_probability"]),
+        ("product_consult", "商品/库存/预售咨询", ["售前商品咨询", "还没下单", "想买", "库存", "现货", "预售", "规格", "SKU", "sku", "商品咨询", "支付方式"], ["answer_product_policy"], ["promise_delivery_date", "reserve_inventory"]),
+        ("minor_refund", "未成年人退款", ["未成年", "孩子", "小孩", "家长", "监护人", "监护关系", "实名归属", "承诺书"], ["request_materials", "explain_review_status"], ["auto_refund", "auto_reject"]),
         ("account_binding", "账号换绑", ["换绑", "账号", "手机号", "改绑"], ["create_ticket"], ["auto_change_account"]),
         ("damage", "商品有伤", ["破损", "有伤", "划痕", "烂了", "瑕疵", "开箱"], ["create_after_sales_card"], ["auto_refund", "auto_reissue"]),
         ("missing", "漏发/发错货", ["漏发", "少发", "缺件", "发错", "错货"], ["create_after_sales_card", "create_warehouse_task"], ["auto_reissue"]),
@@ -38,6 +46,7 @@ def classify_sop_branch(text: str, intent: str = "") -> Dict[str, Any]:
                 "allowed_actions": allowed,
                 "blocked_actions": blocked,
                 "needs_human": needs_human,
+                "conversation_handoff_required": False,
                 "matched_keywords": [k for k in keys if k in query],
             }
     return {
@@ -47,6 +56,7 @@ def classify_sop_branch(text: str, intent: str = "") -> Dict[str, Any]:
         "allowed_actions": ["answer_with_sop"],
         "blocked_actions": ["auto_refund", "auto_reissue", "auto_change_account"],
         "needs_human": False,
+        "conversation_handoff_required": False,
         "matched_keywords": [],
     }
 
@@ -86,10 +96,8 @@ def _first_order(state: Dict[str, Any]) -> Dict[str, Any]:
     active_order_id = state.get("active_order_id") or ""
     db = load_data()
     if active_order_id:
-        return db.get("orders", {}).get(active_order_id, {})
-    user_id = state.get("user_id") or ""
-    for order in db.get("orders", {}).values():
-        if order.get("user_id") == user_id:
+        order = db.get("orders", {}).get(active_order_id, {})
+        if order and order.get("user_id") == (state.get("user_id") or ""):
             return order
     return {}
 
@@ -154,7 +162,7 @@ def _review_design(sop_state: Dict[str, Any], fixtures: List[Dict[str, Any]], te
             "optimized_checks": [
                 "核对监护人身份、订单归属、付款关系和隐私材料完整性",
                 "只做材料完整性与风险初筛，不自动同意或拒绝退款",
-                "默认转VIP客服/主管确认，避免误伤用户和平台规则",
+                "材料与退款动作由VIP客服/主管确认，但当前用户沟通仍由AI继续承接",
             ],
         })
         return base
@@ -185,6 +193,16 @@ def _review_design(sop_state: Dict[str, Any], fixtures: List[Dict[str, Any]], te
                 "确认用户是否已下单；未下单时只回答商品、库存、预售和售后规则",
                 "库存数量以下单页和甲方商品接口为准，不编造具体库存",
                 "不生成订单物流卡，不承诺确定出货日期",
+            ],
+        })
+        return base
+    if ticket_type == "lottery":
+        base.update({
+            "scene": "抽赏规则与结果复核",
+            "optimized_checks": [
+                "优先回答活动规则、奖池、概率公示和当前订单抽选结果",
+                "不把抽赏质疑归类为物流或仓库异常",
+                "需要复核时生成抽赏复核事项，不承诺改概率或必中",
             ],
         })
         return base
@@ -219,7 +237,7 @@ def _evaluation_tags(sop_state: Dict[str, Any], fixtures: List[Dict[str, Any]]) 
     if fixtures:
         tags.append("visual:fixture-reviewed")
     if sop_state.get("needs_human"):
-        tags.append("handoff:required")
+        tags.append("business-review:required")
     return tags
 
 
@@ -455,6 +473,12 @@ def run_business_flow(state: Dict[str, Any], fixtures: List[str] | None = None) 
             "requires_human": False,
             "reason": "按商品信息、预售说明和售后规则回答，不生成订单物流处理单",
         }
+    elif ticket_type == "lottery":
+        action = {
+            "type": "lottery_review",
+            "requires_human": False,
+            "reason": "按活动规则、奖池公示和抽选记录回答；存在争议时记录复核事项",
+        }
     elif ticket_type == "notification_preference":
         action = {
             "type": "service_feedback",
@@ -478,6 +502,9 @@ def run_business_flow(state: Dict[str, Any], fixtures: List[str] | None = None) 
     sop_state["readiness"] = {
         "mode": "local_preview",
         "real_partner_integration": False,
+        "data_mode": "demo",
+        "source_system": "mitako_fixture",
+        "integration_status": "not_connected",
         "prepared_adapters": ["sop_checklist", "business_audit", "task_center", "qc_sop_proposal", "private_domain_task"],
     }
     if action["type"] != "none":

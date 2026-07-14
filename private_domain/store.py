@@ -38,7 +38,7 @@ def _row(row: sqlite3.Row | None) -> Optional[Dict[str, Any]]:
     if not row:
         return None
     data = dict(row)
-    for key in ("tags", "metrics", "payload", "result", "evidence_messages"):
+    for key in ("tags", "metrics", "payload", "result", "context", "evidence_messages"):
         if key in data:
             try:
                 data[key] = json.loads(data[key] or "{}")
@@ -121,6 +121,8 @@ def init_db() -> None:
               session_id TEXT NOT NULL,
               tenant_id TEXT NOT NULL DEFAULT 'mitako',
               source TEXT NOT NULL DEFAULT 'customer_upload',
+              client_case_id TEXT NOT NULL DEFAULT '',
+              order_id TEXT NOT NULL DEFAULT '',
               scenario TEXT NOT NULL,
               file_name TEXT NOT NULL,
               stored_name TEXT NOT NULL,
@@ -128,6 +130,7 @@ def init_db() -> None:
               size INTEGER NOT NULL,
               status TEXT NOT NULL,
               boundary TEXT NOT NULL,
+              context TEXT NOT NULL DEFAULT '{}',
               result TEXT NOT NULL DEFAULT '{}',
               reviewed_at REAL NOT NULL DEFAULT 0,
               created_at REAL NOT NULL,
@@ -140,6 +143,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE review_tasks ADD COLUMN result TEXT NOT NULL DEFAULT '{}'")
         if "reviewed_at" not in cols:
             conn.execute("ALTER TABLE review_tasks ADD COLUMN reviewed_at REAL NOT NULL DEFAULT 0")
+        if "client_case_id" not in cols:
+            conn.execute("ALTER TABLE review_tasks ADD COLUMN client_case_id TEXT NOT NULL DEFAULT ''")
+        if "order_id" not in cols:
+            conn.execute("ALTER TABLE review_tasks ADD COLUMN order_id TEXT NOT NULL DEFAULT ''")
+        if "context" not in cols:
+            conn.execute("ALTER TABLE review_tasks ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
 
 
 def upsert_group(group: Dict[str, Any]) -> Dict[str, Any]:
@@ -340,9 +349,9 @@ def create_review_task(task: Dict[str, Any]) -> Dict[str, Any]:
         conn.execute(
             """
             INSERT INTO review_tasks(
-              task_id, user_id, session_id, tenant_id, source, scenario, file_name,
-              stored_name, mime_type, size, status, boundary, result, reviewed_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              task_id, user_id, session_id, tenant_id, source, client_case_id, order_id, scenario, file_name,
+              stored_name, mime_type, size, status, boundary, context, result, reviewed_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task["task_id"],
@@ -350,6 +359,8 @@ def create_review_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 task.get("session_id") or "",
                 task.get("tenant_id") or "mitako",
                 task.get("source") or "customer_upload",
+                task.get("client_case_id") or "",
+                task.get("order_id") or "",
                 task.get("scenario") or "",
                 task.get("file_name") or "",
                 task.get("stored_name") or "",
@@ -357,6 +368,7 @@ def create_review_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 int(task.get("size") or 0),
                 task.get("status") or "MATERIAL_READY",
                 task.get("boundary") or "",
+                _json(task.get("context") or {}),
                 _json(task.get("result") or {}),
                 float(task.get("reviewed_at") or 0),
                 now,

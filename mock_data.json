@@ -696,6 +696,39 @@
       ]
     }
   },
+  "product_catalog": {
+    "HQ-SCHOOL-BADGE-SET": {
+      "product_id": "SKU-HQ-SCHOOL-BADGE-SET",
+      "name": "排球少年 登校系列吧唧套装",
+      "data_mode": "demo",
+      "variants": [
+        {"sku": "HQ-SCHOOL-HINATA", "name": "日向翔阳", "stock_status": "in_stock", "available_quantity": 18, "ship_window": "付款后 48 小时内出库"},
+        {"sku": "HQ-SCHOOL-KAGEYAMA", "name": "影山飞雄", "stock_status": "in_stock", "available_quantity": 7, "ship_window": "付款后 48 小时内出库"},
+        {"sku": "HQ-SCHOOL-TSUKISHIMA", "name": "月岛萤", "stock_status": "preorder", "available_quantity": 0, "ship_window": "预计 2026-08-15 起按批次出库"}
+      ],
+      "payment_methods": ["微信支付", "支付宝", "平台余额"],
+      "integration_status": "not_connected"
+    }
+  },
+  "lottery_activities": {
+    "itm_bl_lottery_20": {
+      "activity_id": "LOTTERY-BLUELOCK-20260628",
+      "name": "蓝色监狱大赏盲盒 20 抽连包",
+      "data_mode": "demo",
+      "draw_rule": "每个抽号独立进入公示奖池，开奖后按抽号映射奖项；同一订单 20 抽会保留 20 条可复核抽号记录。",
+      "prize_pool": [
+        {"tier": "S", "name": "限定立牌", "probability": 0.01},
+        {"tier": "A", "name": "角色亚克力", "probability": 0.09},
+        {"tier": "B", "name": "角色色纸", "probability": 0.30},
+        {"tier": "C", "name": "徽章/贴纸", "probability": 0.60}
+      ],
+      "result_status": "published",
+      "published_at": "2026-06-28T22:00:00Z",
+      "review_sla": "提交具体抽号后 1 个工作日内给出复核记录",
+      "fulfillment_sla": "中奖结果确认后 3-5 个工作日内按订单合并出库",
+      "integration_status": "not_connected"
+    }
+  },
   "supply_chain_warnings": [
     {
       "warning_id": "W_2024_001",

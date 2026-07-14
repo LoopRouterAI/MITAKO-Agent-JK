@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -446,9 +448,73 @@ def test_workbench_html() -> None:
     assert "人工结论样本评测" in html
     assert not FORBIDDEN_PUBLIC_TERMS.search(html)
 
-    labels = json.loads((ROOT / "docs" / "三大审核场景的小量样本" / "sample_labels.json").read_text(encoding="utf-8"))
+    for fps in ("0.2", "0.5", "1", "2"):
+        assert re.search(rf'<option\s+value="{re.escape(fps)}"[^>]*>', html), fps
+    for label in ("每 5 秒 1 帧", "每 2 秒 1 帧", "每秒 1 帧", "每秒 2 帧"):
+        assert label in html, label
+
+    assert "function stopReportLinkEvent(event)" in html
+    assert "event.stopPropagation();" in html
+    assert "function prepareReportLink(link)" in html
+    assert "link.target = '_blank';" in html
+    assert "link.rel = 'noopener noreferrer';" in html
+    assert "prepareReportLink(reportLink);" in html
+    assert "prepareReportLink(document.createElement('a'))" in html
+    assert "if (event.target.closest('a')) return;" in html
+
+    labels_path = ROOT / "docs" / "三大审核场景的小量样本" / "sample_labels.json"
+    assert labels_path.exists(), labels_path
+    labels = json.loads(labels_path.read_text(encoding="utf-8-sig"))
+    assert labels.get("note") == "人工结论只用于报告侧评测，不进入模型 Prompt。", labels
     scenarios = {item.get("scenario") for item in (labels.get("samples") or {}).values()}
     assert {"video_unboxing", "product_damage", "minor_material"}.issubset(scenarios), scenarios
+
+
+def test_internal_package_visual_contract() -> None:
+    script = (ROOT / "scripts" / "package_internal_release.ps1").read_text(encoding="utf-8-sig")
+    for text in (
+        "function Copy-SafeSampleLabels",
+        'Copy-SafeSampleLabels',
+        'docs\\三大审核场景的小量样本\\sample_labels.json',
+        'usage_boundary = "report_evaluation_only"',
+        'send_to_model = $false',
+        'Packaged sample labels violate the report-only boundary.',
+        'function Invoke-InternalValidation',
+        '$PythonCandidates = @(',
+        '.venv\Scripts\python.exe',
+        'venv\Scripts\python.exe',
+        'evidence = $evidenceHashes',
+    ):
+        assert text in script, text
+    assert 'New-Item -ItemType Junction' not in script, "内部包不应再创建兼容 Junction"
+    assert not re.search(r"七牛云.{0,24}(已接入|已打通|生产可用)", script), script
+
+
+def test_sampling_density_runtime_contract() -> None:
+    from poc.visual_review_poc.local_video_triage_demo import sample_video_frames
+
+    sample_dir = ROOT / "docs" / "三大审核场景的小量样本" / "sample_002"
+    video = next(path for path in sorted(sample_dir.iterdir()) if path.suffix.lower() in {".mp4", ".mov", ".m4v", ".webm", ".mkv"})
+    tmp_root = ROOT / "tmp"
+    tmp_root.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="visual-fps-smoke-", dir=tmp_root) as workdir:
+        for fps in (0.2, 0.5, 1.0, 2.0):
+            result = sample_video_frames(
+                video,
+                fps=fps,
+                max_frames=2000,
+                probe_seconds=1.0,
+                frame_width=320,
+                run_dir=Path(workdir) / str(fps).replace(".", "_"),
+                sampling_mode="dense",
+            )
+            duration = float(result.get("duration_seconds") or 0)
+            actual = int(result.get("sampled_frames") or 0)
+            expected = math.ceil(duration * fps) + 1
+            assert result.get("fps_requested") == fps, result
+            assert result.get("sampling_strategy") == "full_timeline_dense", result
+            assert float(result.get("timeline_coverage_ratio") or 0) >= 0.9, result
+            assert abs(actual - expected) <= 1, {"fps": fps, "actual": actual, "expected": expected, "duration": duration}
 
 
 def test_url_guard() -> None:
@@ -645,6 +711,8 @@ def main() -> int:
         ("model_transport_contract", test_model_transport_contract),
         ("retry_after_is_honored", test_retry_after_is_honored),
         ("workbench_html", test_workbench_html),
+        ("internal_package_visual_contract", test_internal_package_visual_contract),
+        ("sampling_density_runtime_contract", test_sampling_density_runtime_contract),
         ("url_guard", test_url_guard),
         ("review_prompt_policy", test_review_prompt_policy),
         ("public_report_redaction", test_public_report_redaction),

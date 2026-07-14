@@ -32,6 +32,10 @@ def _demo_meta() -> Dict[str, Any]:
         "demo_only": True,
         "real_partner_integration": False,
         "execution_mode": "local_readiness",
+        "data_mode": "demo",
+        "source_system": "mitako_fixture",
+        "integration_status": "not_connected",
+        "write_effect": "none",
     }
 
 
@@ -280,8 +284,10 @@ def post_order_urgent(order_id: str, req: UrgentReq):
 @business_router.get("/api/v1/products")
 def get_products(q: Optional[str] = None):
     db = load_data()
-    products = []
+    products = list((db.get("product_catalog") or {}).values())
     seen = set()
+    for item in products:
+        seen.add(item.get("product_id") or item.get("name"))
     for order in db.get("orders", {}).values():
         for item in order.get("items") or []:
             item_id = item.get("item_id") or item.get("name")

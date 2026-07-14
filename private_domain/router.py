@@ -2,6 +2,7 @@
 """私域 Agent API：后台可追踪，用户上传材料可创建审核任务。"""
 from __future__ import annotations
 
+import json
 from typing import Any, Dict
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
@@ -117,12 +118,22 @@ async def review_task_upload(
     user_id: str = Form(...),
     session_id: str = Form(...),
     source: str = Form("customer_upload"),
+    client_case_id: str = Form(""),
+    order_id: str = Form(""),
+    scenario: str = Form(""),
+    context_json: str = Form("{}"),
     async_review: bool = Form(False),
     file: UploadFile = File(...),
 ):
     user = _customer_user(request, user_id, session_id)
     mime_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     raw = await file.read(300 * 1024 * 1024 + 1)
+    try:
+        context = json.loads(context_json or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="invalid_context_json") from exc
+    if not isinstance(context, dict):
+        raise HTTPException(status_code=422, detail="context_json_must_be_object")
     try:
         task = service.create_review_task_from_upload(
             user_id=user_id,
@@ -132,13 +143,24 @@ async def review_task_upload(
             mime_type=mime_type,
             raw=raw,
             source=source,
+            client_case_id=client_case_id,
+            order_id=order_id,
+            scenario=scenario,
+            context=context,
             run_review=not async_review,
         )
         if async_review:
             background_tasks.add_task(service.run_visual_review_for_task, task["task_id"])
     except ValueError as exc:
         detail = str(exc)
-        status = 413 if detail == "file_too_large" else 415 if detail == "unsupported_review_material" else 400
+        status = 413 if detail == "file_too_large" else 415 if detail == "unsupported_review_material" else 422 if detail == "unsupported_review_scenario" else 400
+        if detail == "file_too_large":
+            raise HTTPException(status_code=status, detail={
+                "error": detail,
+                "message": "聊天附件入口单文件上限为 300MB；大文件请使用标准审核服务或对象存储直传方案。",
+                "recommended_endpoint": "/api/v1/review/jobs",
+                "object_storage": {"integration_status": "customer_integration_required", "write_effect": "none"},
+            }) from exc
         raise HTTPException(status_code=status, detail=detail) from exc
     return {
         "ok": True,
@@ -157,6 +179,33 @@ async def review_task_upload(
             "reviewed_at": task.get("reviewed_at") or 0,
             "url": f"/api/v1/private-domain/review-tasks/{task['task_id']}",
         },
+    }
+
+
+@router.get("/review-tasks")
+async def review_task_list(
+    request: Request,
+    user_id: str,
+    session_id: str,
+    order_id: str = "",
+    client_case_id: str = "",
+):
+    user = _customer_user(request, user_id, session_id)
+    tenant_id = user.get("tenant_id") or "mitako"
+    tasks = [
+        task for task in store.list_review_tasks(limit=100)
+        if task.get("user_id") == user_id
+        and task.get("session_id") == session_id
+        and (task.get("tenant_id") or "mitako") == tenant_id
+        and (not order_id or task.get("order_id") == order_id)
+        and (not client_case_id or task.get("client_case_id") == client_case_id)
+    ]
+    return {
+        "ok": True,
+        "review_tasks": tasks,
+        "data_mode": "demo",
+        "source_system": "mitako_fixture",
+        "integration_status": "not_connected",
     }
 
 

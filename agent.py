@@ -44,6 +44,7 @@ from viking_memory import viking_db
 # 2. 定义 Agent 状态结构
 class AgentState(TypedDict):
     messages: List[Dict[str, str]]        # 格式[{"role": "user"/"assistant", "content": "..."}]
+    raw_user_content: str                 # 本轮用户原始输入，不包含审核附件的机器上下文
     user_id: str
     session_id: str
     active_order_id: str                  # 前端选中的焦点订单
@@ -57,6 +58,7 @@ class AgentState(TypedDict):
     safety_check_result: str              # 安全检查结果
     should_transfer: bool                 # 是否转接人工主管
     transfer_reason: str                  # 转接人工的具体原因
+    handoff_offer_id: str                 # 用户已同意的转接提议标识
     compensation_given: List[Dict[str, Any]] # 本次会话发放的补偿信息
     meme_tags: List[str]                  # 本次会话匹配的二次元表情包标签
     fixtures: List[str]                   # 本轮接入的多模态 fixture
@@ -145,6 +147,21 @@ JSON 格式：{"intent": "意图标签", "emotion_level": 情绪等级数字(1-6
 
 XIAO_JIAO_SYSTEM_PROMPT = UNIFIED_XIAO_JIAO_SYSTEM_PROMPT
 INTENT_EMOTION_SYSTEM_PROMPT = ""
+
+PUBLIC_INTENT_LABELS = {
+    "闲聊互动",
+    "VIP客服请求",
+    "通知渠道/服务建议",
+    "售前商品咨询",
+    "退款退货/未成年人退款",
+    "投诉升级",
+    "盲盒相关/吞烫质疑",
+    "盲盒相关/置换区咨询",
+    "换货补发/商品破损",
+    "物流追踪/催发货",
+    "退款退货/补偿",
+    "退款退货/申请退款",
+}
 
 
 def _extract_sop_snippet(text: str, max_len: int = 260) -> str:
@@ -250,8 +267,24 @@ def _extract_explicit_order_ref(text: str) -> str:
     return ""
 
 
+def _strip_attachment_context(content: str) -> str:
+    text = str(content or "")
+    for marker in ("\n\n[用户已上传附件]", "\n\n[用户已上传材料]"):
+        if marker in text:
+            text = text.split(marker, 1)[0]
+    return text.strip()
+
+
+def _current_user_text(state: AgentState) -> str:
+    raw = str(state.get("raw_user_content") or "").strip()
+    if raw:
+        return raw
+    messages = state.get("messages") or []
+    return _strip_attachment_context(messages[-1].get("content", "") if messages else "")
+
+
 def _recent_user_context(messages: List[Dict[str, str]], limit: int = 6) -> str:
-    texts = [m.get("content", "") for m in messages[-limit:] if m.get("role") == "user"]
+    texts = [_strip_attachment_context(m.get("content", "")) for m in messages[-limit:] if m.get("role") == "user"]
     return "\n".join(texts)
 
 
@@ -335,7 +368,10 @@ PUBLIC_REPLY_BLOCKED_TERMS = [
     _runtime_chars(0x4efb, 0x52a1, 0x6307, 0x4ee4),
     _runtime_chars(0x9700, 0x89e3, 0x91ca, 0x89c4, 0x5219),
     _runtime_chars(0x4fdd, 0x7559, 0x4eba, 0x5de5, 0x590d, 0x6838, 0x5165, 0x53e3),
-    _runtime_chars(0x5916, 0x5305),
+    _runtime_chars(0x5916, 0x5305, 0x5ba2, 0x670d),
+    _runtime_chars(0x5916, 0x5305, 0x56e2, 0x961f),
+    _runtime_chars(0x5916, 0x5305, 0x4eba, 0x5458),
+    _runtime_chars(0x5916, 0x5305, 0x516c, 0x53f8),
     _runtime_chars(0x5185, 0x90e8),
     _runtime_chars(0x539f, 0x59cb, 0x65e5, 0x5fd7),
     _runtime_chars(0x63a5, 0x53e3, 0x51ed, 0x8bc1),
@@ -388,6 +424,42 @@ def _build_lottery_guard_reply() -> str:
     return "我理解连续没抽到想要款会很失落。抽选结果需要以活动公示规则和可复核记录为准，我可以帮您整理这次抽选批次、订单和疑点提交客服复核，但不能直接承诺补偿到账。"
 
 
+def _load_demo_business_catalog() -> Dict[str, Any]:
+    path = str(mock_data_file())
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            return json.load(file)
+    except Exception:
+        return {}
+
+
+def _build_lottery_detail_reply(state: AgentState) -> str:
+    orders = (state.get("order_data") or {}).get("orders") or []
+    activities = _load_demo_business_catalog().get("lottery_activities") or {}
+    activity = {}
+    for order in orders:
+        for item in order.get("items") or []:
+            activity = activities.get(item.get("item_id") or "") or {}
+            if activity:
+                break
+        if activity:
+            break
+    if not activity:
+        return _build_lottery_guard_reply()
+    pool = "、".join(
+        f"{row.get('tier')}档 {row.get('name')} {round(float(row.get('probability') or 0) * 100)}%"
+        for row in activity.get("prize_pool") or []
+    )
+    return (
+        f"这笔{activity.get('name')}演示活动的规则是：{activity.get('draw_rule')}"
+        f"本轮演示奖池为{pool}。结果已在 2026-06-28 公布；如果您把具体抽号发我，"
+        f"可以按抽号记录复核，演示复核时效为{activity.get('review_sla')}；"
+        f"演示发货口径为{activity.get('fulfillment_sla')}。这些是演示数据，真实概率、开奖记录和履约时效需接甲方活动与订单系统后替换。"
+    )
+
+
 def _build_minor_refund_material_reply() -> str:
     return (
         "未成年人退款需要先整理材料：监护人与未成年人身份证明、户口本或出生证明、订单/支付凭证、退款申请承诺说明。"
@@ -395,8 +467,48 @@ def _build_minor_refund_material_reply() -> str:
     )
 
 
+def _build_minor_refund_status_reply(state: AgentState) -> str:
+    orders = (state.get("order_data") or {}).get("orders") or []
+    order = orders[0] if orders else {}
+    order_ref = _public_order_suffix(order.get("order_id") or "") or "当前订单"
+    status = order.get("status") or ""
+    status_label = order.get("status_label") or "待核对"
+    mapping = {
+        "minor_material_pending": "当前在材料补充阶段，补齐监护关系、支付凭证和承诺书后才开始审核计时。",
+        "minor_material_submitted": "材料完整性初筛已通过，正在等待客服一审；演示 SLA 为 1-2 个工作日，超过 2 个工作日会进入逾期升级。",
+        "minor_ai_passed": "AI 仅完成材料完整性初筛，当前由人工确认退款边界和账号影响；演示 SLA 为 1 个工作日。",
+        "minor_low_confidence": "关系链证据置信度不足，正在人工复查户口本或出生证明；通常 1-2 个工作日，不需要把当前对话转人工。",
+        "minor_review_rejected": "本轮因发票备注与绑定手机号不一致未通过；补充手机号实名归属证明后可申请复核，重新提交后演示 SLA 为 1-2 个工作日。",
+        "refunded": "退款已登记，原支付渠道通常 3-7 个工作日到账；超时可转人工核对资金流水。",
+    }
+    detail = mapping.get(status, "当前节点需要结合材料和人工审核记录继续核对；完整流程目标不超过 30 个工作日。")
+    return f"订单 #{order_ref} 当前状态是“{status_label}”。{detail}上述时效为演示口径，生产值需由甲方 SOP 和工单系统确认。"
+
+
 def _build_damage_material_reply() -> str:
-    return "商品有伤我先帮您整理证据：商品整体图、问题部位近景、外包装照片、完整开箱视频和订单信息。退款、补发或拒赔需要售后客服按材料复核后确认。"
+    return (
+        "商品有伤建议一次拍齐：商品正面、背面、左右侧、顶部/底部、问题部位近景各 1 张，"
+        "再补外包装六面、快递面单和从未拆封到取出商品的连续开箱视频。近景要同时有一张带整体定位，"
+        "避免只拍局部无法确认商品归属。AI会先给出证据结论和置信度；退款、补发或拒赔仍由售后按订单和规则确认。"
+    )
+
+
+def _build_product_inventory_reply(state: AgentState, user_text: str) -> str:
+    catalog = _load_demo_business_catalog().get("product_catalog") or {}
+    product = next((value for key, value in catalog.items() if key in user_text or key in str(value)), None)
+    if not product:
+        return "我暂时没有匹配到这个 SKU 的规格库存，请核对 SKU 后再发我；真实库存需接甲方商品中心后实时查询。"
+    variants = []
+    for item in product.get("variants") or []:
+        if item.get("stock_status") == "in_stock":
+            variants.append(f"{item.get('name')}：现货 {item.get('available_quantity')} 件，{item.get('ship_window')}")
+        else:
+            variants.append(f"{item.get('name')}：预售，{item.get('ship_window')}")
+    payments = "、".join(product.get("payment_methods") or [])
+    return (
+        f"{product.get('name')}当前演示库存：{'；'.join(variants)}。支持{payments}。"
+        "这是明确标记的演示商品数据；接入甲方 SKU/库存接口后会按实时可售库存返回，不会让您再确认一次是否查询。"
+    )
 
 
 def _is_notification_channel_request(text: str) -> bool:
@@ -527,7 +639,7 @@ async def classify_intent(state: AgentState, config: RunnableConfig) -> Dict[str
     if queue:
         await queue.put({"type": "node_start", "node": "intent_classify", "desc": "基于轻量规则的初步意图分析中..."})
 
-    last_user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    last_user_msg = _current_user_text(state)
     recent_user_text = _recent_user_context(state.get("messages") or [])
     short_negative_turn = len(last_user_msg.strip()) <= 18 or any(k in last_user_msg for k in ["md", "MD", "废话", "脑子", "敷衍", "垃圾"])
     context_msg = f"{recent_user_text}\n{last_user_msg}" if short_negative_turn else last_user_msg
@@ -539,19 +651,19 @@ async def classify_intent(state: AgentState, config: RunnableConfig) -> Dict[str
         intent = "VIP客服请求"
     elif _is_notification_channel_request(last_user_msg):
         intent = "通知渠道/服务建议"
-    elif "引用订单" in last_user_msg or re.search(r"ORD_\d{4}_\d+", last_user_msg) or _extract_explicit_order_ref(last_user_msg):
-        intent = "物流追踪/催发货"
-    # 规则快速匹配
     elif (
-        any(k in context_msg for k in ["还没下单", "库存", "预售", "规格", "想买"])
+        any(k in context_msg for k in ["还没下单", "库存", "现货", "预售", "规格", "SKU", "sku", "想买", "支付方式"])
         or ("商品" in context_msg and any(k in context_msg for k in ["咨询", "问一下", "能不能退"]))
     ) and not any(k in context_msg for k in ["订单", "物流", "发货", "清关", "破损", "划痕", "有伤", "瑕疵"]):
         intent = "售前商品咨询"
-    elif any(k in context_msg for k in ["未成年", "孩子", "小孩", "家长", "监护人"]):
+    elif any(k in context_msg for k in ["未成年", "孩子", "小孩", "家长", "监护人", "监护关系", "实名归属", "承诺书"]):
         intent = "退款退货/未成年人退款"
     elif any(k in context_msg for k in ["起诉", "黑猫", "12315", "曝光"]):
         intent = "投诉升级"
-    elif any(k in context_msg for k in ["盲盒", "普款", "改概率", "吞烫", "中奖率", "抽赏"]):
+    elif any(k in context_msg for k in [
+        "盲盒", "普款", "稀有款", "改概率", "概率", "保底", "奖池", "抽号",
+        "吞烫", "中奖率", "抽赏", "抽选", "活动规则", "中奖名单",
+    ]):
         intent = "盲盒相关/吞烫质疑"
     elif any(k in context_msg for k in ["破损", "烂了", "划痕", "有伤", "瑕疵", "开箱视频", "照片", "视频审核", "剪辑", "离开镜头"]):
         intent = "换货补发/商品破损"
@@ -563,6 +675,8 @@ async def classify_intent(state: AgentState, config: RunnableConfig) -> Dict[str
         intent = "退款退货/申请退款"
     elif any(k in context_msg for k in ["置换区", "重复", "交换"]):
         intent = "盲盒相关/置换区咨询"
+    elif "引用订单" in last_user_msg or re.search(r"ORD_\d{4}_\d+", last_user_msg) or _extract_explicit_order_ref(last_user_msg):
+        intent = "物流追踪/催发货"
 
     if any(k in context_msg for k in ["垃圾", "跑路", "无语", "恶心", "气人", "太慢", "一直拖", "等疯了", "毛线", "生气", "串单", "串了", "完全不对", "离谱", "再这样", "别敷衍", "废话", "脑子有病", "有病"]):
         emotion_level = 4
@@ -602,6 +716,18 @@ def _is_material_collection_turn(text: str, intent: str, attachments: Optional[L
     return any(k in query for k in ["图片", "照片", "视频", "破损", "有伤", "瑕疵", "划痕", "开箱", "需要提交", "什么材料", "材料", "怎么申请", "怎么处理", "未成年", "监护人"])
 
 
+def _accepted_recent_handoff_offer(messages: List[Dict[str, str]]) -> bool:
+    if not messages:
+        return False
+    last_user = _strip_attachment_context(messages[-1].get("content") or "")
+    if not re.fullmatch(r"(?:好(?:的)?|可以|行|同意|需要|麻烦了|帮我转|那就转|转吧)[！!。.]?", last_user):
+        return False
+    if len(messages) < 2 or messages[-2].get("role") != "assistant":
+        return False
+    content = str(messages[-2].get("content") or "")
+    return any(k in content for k in ["转接VIP客服", "转人工客服", "帮您转人工", "需要VIP客服", "联系VIP客服"])
+
+
 # 5.4 check_transfer 节点：转 VIP 客服硬逻辑规则判定
 async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
     """
@@ -611,12 +737,13 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
     if queue:
         await queue.put({"type": "node_start", "node": "check_transfer", "desc": "进行合规安全与VIP客服转接限额检查..."})
 
-    last_user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    last_user_msg = _current_user_text(state)
     intent = state["intent"]
     emotion_level = state["emotion_level"]
 
     should_transfer = False
     transfer_reason = ""
+    accepted_offer_id = ""
 
     # 1. 用户明确要求真人客服，必须真实进入 VIP客服队列，不能只在话术里口头承诺。
     human_request_words = ["我要人工", "人工客服", "真人客服", "VIP客服", "不想和机器人", "转人工", "转VIP客服", "找人工"]
@@ -625,6 +752,20 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
             should_transfer = True
             transfer_reason = "用户明确要求VIP客服接入"
             break
+
+    if not should_transfer and _accepted_recent_handoff_offer(state.get("messages") or []):
+        try:
+            import handoff_store
+            offer = handoff_store.get_active_handoff_offer(state.get("session_id") or "", state.get("user_id") or "")
+        except Exception:
+            offer = None
+        if offer:
+            handoff_store.update_handoff_offer(
+                offer["offer_id"], "consented", state.get("session_id") or "", state.get("user_id") or ""
+            )
+            accepted_offer_id = offer["offer_id"]
+            should_transfer = True
+            transfer_reason = "用户已同意此前的VIP客服转接提议"
 
     # 2. 维权和法律硬拦截敏感词
     sensitive_words = ["12315", "起诉", "黑猫", "消费者协会", "曝光", "报警", "律师"]
@@ -657,7 +798,11 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
             "desc": f"转交状态：{'需转交VIP客服' if should_transfer else 'AI承接中'} (原因: {transfer_reason or '无'})"
         })
         _emit_unified_analysis_event(queue, intent, emotion_level, should_transfer)
-    return {"should_transfer": should_transfer, "transfer_reason": transfer_reason}
+    return {
+        "should_transfer": should_transfer,
+        "transfer_reason": transfer_reason,
+        "handoff_offer_id": accepted_offer_id,
+    }
 
 
 # 5.5 query_order 节点：调用本地业务接口
@@ -668,16 +813,18 @@ async def query_order_system(state: AgentState, config: RunnableConfig) -> Dict[
     queue = config.get("configurable", {}).get("event_queue")
     user_id = state["user_id"]
     intent = state["intent"]
-    last_user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    last_user_msg = _current_user_text(state)
     active_order_id = state.get("active_order_id") or ""
     explicit_order_ref = _extract_explicit_order_ref(last_user_msg)
     if not active_order_id:
         match = re.search(r"ORD_\d{4}_\d+", last_user_msg)
         if match:
             active_order_id = match.group(0)
-    focus_ref = active_order_id or explicit_order_ref
+    focus_ref = explicit_order_ref or active_order_id
 
-    should_query = any(k in intent for k in ["订单", "物流", "发货", "预售", "退款", "换货", "未成年人", "破损", "通知", "提醒"]) or "引用订单" in last_user_msg or bool(focus_ref)
+    should_query = any(k in intent for k in [
+        "订单", "物流", "发货", "预售", "退款", "换货", "未成年人", "破损", "通知", "提醒", "盲盒", "抽赏",
+    ]) or "引用订单" in last_user_msg or bool(focus_ref)
     if not should_query:
         return {"order_data": {}}
 
@@ -775,7 +922,7 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
     queue = config.get("configurable", {}).get("event_queue")
     intent = state["intent"]
     order_data = state["order_data"]
-    last_user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    last_user_msg = _current_user_text(state)
 
     if queue:
         await queue.put({"type": "node_start", "node": "search_sop", "desc": "正在检索对应的业务 SOP 规范与供应链预警公告..."})
@@ -860,19 +1007,19 @@ async def plan_business_readiness_flow(state: AgentState, config: RunnableConfig
             "sop_state": {"state": "error", "sop_branch": "服务流程异常", "needs_human": True},
             "business_events": [],
             "business_cards": [],
-            "should_transfer": True,
-            "transfer_reason": f"服务流程规划失败: {type(exc).__name__}",
+            "should_transfer": False,
+            "transfer_reason": "",
+            "business_failure_reason": f"服务流程规划失败: {type(exc).__name__}",
         }
     sop_state = result.get("sop_state") or {}
     action = sop_state.get("planned_action") or {}
-    last_user_msg = state["messages"][-1]["content"] if state.get("messages") else ""
+    last_user_msg = _current_user_text(state)
     material_first_scene = (
         sop_state.get("ticket_type") in {"minor_refund", "damage"}
         and _is_material_collection_turn(last_user_msg, state.get("intent") or "", attachments)
     )
-    if (sop_state.get("needs_human") or action.get("requires_human")) and not material_first_scene:
-        result["should_transfer"] = True
-        result["transfer_reason"] = f"{sop_state.get('sop_branch')} 需要VIP客服/主管确认"
+    result["business_review_required"] = bool(sop_state.get("needs_human") or action.get("requires_human"))
+    result["material_collection_turn"] = material_first_scene
     if queue:
         await queue.put({
             "type": "node_end",
@@ -1063,11 +1210,9 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
     meme_tags = re.findall(r"<meme:\s*(\w+)>", reply)
     analysis = _parse_reply_analysis(reply)
     updates: Dict[str, Any] = {"reply_draft": reply, "meme_tags": meme_tags}
-    if analysis.get("should_transfer") and not _is_material_collection_turn(last_user_msg, intent, attachments):
-        updates["should_transfer"] = True
-        updates["transfer_reason"] = analysis.get("transfer_reason") or transfer_reason or "AI判定需要转VIP客服"
-    if analysis.get("intent"):
-        updates["intent"] = str(analysis.get("intent"))
+    llm_intent = str(analysis.get("intent") or "")
+    if llm_intent in PUBLIC_INTENT_LABELS:
+        updates["intent"] = llm_intent
     if analysis.get("emotion_level"):
         try:
             parsed_level = max(1, min(6, int(analysis.get("emotion_level"))))
@@ -1081,7 +1226,7 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
             queue,
             updates.get("intent") or intent,
             updates.get("emotion_level") or emotion_level,
-            updates.get("should_transfer") or should_transfer,
+            should_transfer,
         )
 
     if queue:
@@ -1133,37 +1278,52 @@ async def safety_review_agent(state: AgentState, config: RunnableConfig) -> Dict
     if re.search(liability_pattern, reply):
         safety_check_result = "review"
 
-    last_user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    last_user_msg = _current_user_text(state)
     if re.search(r"(火星|月球|外太空)", last_user_msg) and re.search(r"(地球|火星|月球|外太空|乖乖|飞走|跑丢)", reply):
         reply = _build_grounded_service_reply(state)
         modified = True
 
+    if _reply_conflicts_with_order_facts(reply, state):
+        reply = _build_grounded_service_reply(state)
+        modified = True
+
     intent = state.get("intent") or ""
-    if "盲盒" in intent and re.search(r"(绝对|肯定|一定).*(随机|人工|干预|没改)|非酋|关爱积分|专属挂件|稍后到账|200\\s*平台积分", reply):
+    ticket_type = ((state.get("sop_state") or {}).get("ticket_type") or "")
+    if ("盲盒" in intent or ticket_type == "lottery") and re.search(r"(绝对|肯定|一定).*(随机|人工|干预|没改)|非酋|关爱积分|专属挂件|稍后到账|200\\s*平台积分", reply):
         reply = _build_lottery_guard_reply()
         modified = True
 
-    if "未成年人" in intent and any(k in last_user_msg for k in ["需要提交", "什么材料", "材料", "怎么申请"]):
+    if ("盲盒" in intent or ticket_type == "lottery") and any(k in last_user_msg for k in [
+        "活动规则", "中奖率", "概率", "保底", "奖池", "稀有款", "抽号", "发货时效", "商品详情", "包含什么", "抽赏",
+    ]):
+        reply = _build_lottery_detail_reply(state)
+        modified = True
+
+    if ("未成年人" in intent or ticket_type == "minor_refund") and any(k in last_user_msg for k in ["需要提交", "什么材料", "材料", "怎么申请"]):
         clean = sanitize_customer_reply(reply)
         if not all(k in clean for k in ["身份证", "订单", "人工"]):
             reply = _build_minor_refund_material_reply()
             modified = True
 
-    if "破损" in intent and any(k in last_user_msg for k in ["材料", "照片", "开箱视频", "怎么处理"]):
+    if ("未成年人" in intent or ticket_type == "minor_refund") and any(k in last_user_msg for k in ["多久", "进度", "状态", "为什么", "实名归属", "审核完"]):
+        reply = _build_minor_refund_status_reply(state)
+        modified = True
+
+    if ("破损" in intent or ticket_type == "damage") and any(k in last_user_msg for k in ["材料", "照片", "开箱视频", "怎么处理"]):
         clean = sanitize_customer_reply(reply)
         if not any(k in clean for k in ["整体图", "近景", "开箱视频"]):
             reply = _build_damage_material_reply()
             modified = True
+
+    if ("售前商品咨询" in intent or ticket_type == "product_consult") and any(k in last_user_msg for k in ["SKU", "sku", "库存", "现货", "规格", "支付方式"]):
+        reply = _build_product_inventory_reply(state, last_user_msg)
+        modified = True
 
     if "通知渠道" in intent or _is_notification_channel_request(last_user_msg):
         clean = sanitize_customer_reply(reply)
         if not all(k in clean for k in ["电话", "记录"]) or not any(k in clean for k in ["站内信", "订单消息", "客服确认"]):
             reply = _build_notification_channel_reply(state)
             modified = True
-
-    if _reply_conflicts_with_order_facts(reply, state):
-        reply = _build_grounded_service_reply(state)
-        modified = True
 
     if not sanitize_customer_reply(reply).strip():
         reply = _build_grounded_service_reply(state)
@@ -1205,6 +1365,14 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
         state = {**state, "business_events": [event], "sop_state": event.get("result") or {}}
     brief = build_handoff_brief(state, reason)
     queue_meta = enqueue_handoff(session_id, brief, tenant_id=brief.get("tenant_id") or "mitako")
+    if state.get("handoff_offer_id"):
+        try:
+            import handoff_store
+            handoff_store.update_handoff_offer(
+                state["handoff_offer_id"], "queued", session_id, user_id
+            )
+        except Exception:
+            pass
     handoff_token = create_handoff_user_token(
         session_id=session_id,
         user_id=user_id,

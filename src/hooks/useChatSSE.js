@@ -218,11 +218,15 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
   const chatMessagesRef = useRef([]);
   const abortControllerRef = useRef(null);
   const activeTurnIdRef = useRef(0);
+  const userGenerationRef = useRef(0);
+  const sessionAbortControllerRef = useRef(new AbortController());
+  const currentUserRef = useRef(currentUser);
   const readTimerRef = useRef(null);
   const typingTimerRef = useRef(null);
   const agentName = t('agent.name');
   const [presencePhase, setPresencePhase] = useState(null); // null | 'read' | 'typing'
 
+  currentUserRef.current = currentUser;
   useEffect(() => { chatMessagesRef.current = chatMessages; }, [chatMessages]);
   useEffect(() => {
     customerAuthRef.current = readStoredCustomerAuth(currentUser);
@@ -240,6 +244,31 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     }
     setPresencePhase(null);
   }, []);
+
+  const captureSessionContext = useCallback(() => ({
+    generation: userGenerationRef.current,
+    userId: currentUserRef.current,
+    signal: sessionAbortControllerRef.current.signal,
+  }), []);
+
+  const isSessionContextActive = useCallback((context) => (
+    Boolean(context)
+    && !context.signal.aborted
+    && context.generation === userGenerationRef.current
+    && context.userId === currentUserRef.current
+  ), []);
+
+  const invalidateAsyncWork = useCallback(() => {
+    userGenerationRef.current += 1;
+    sessionAbortControllerRef.current.abort();
+    sessionAbortControllerRef.current = new AbortController();
+    activeTurnIdRef.current += 1;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    return captureSessionContext();
+  }, [captureSessionContext]);
 
   /** 从 UI 消息快照同步多轮 history。 */
   const syncHistoryFromUI = useCallback((pendingBotText = '') => {
@@ -275,13 +304,15 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     return { ...options, headers };
   }, []);
 
-  const ensureCustomerAuth = useCallback(async () => {
+  const ensureCustomerAuth = useCallback(async (sessionContext = captureSessionContext()) => {
+    if (!isSessionContextActive(sessionContext)) return '';
     if (customerAuthRef.current) return customerAuthRef.current;
-    const sessionId = `session_${currentUser}`;
+    const sessionId = `session_${sessionContext.userId}`;
     const res = await fetch('/api/v1/auth/customer-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: currentUser, session_id: sessionId, tenant_id: 'mitako' }),
+      signal: sessionContext.signal,
+      body: JSON.stringify({ user_id: sessionContext.userId, session_id: sessionId, tenant_id: 'mitako' }),
     });
     if (!res.ok) {
       const err = new Error(`customer auth failed: ${res.status}`);
@@ -292,27 +323,34 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     if (!data?.ok || !data.token) {
       throw new Error('customer auth token missing');
     }
+    if (!isSessionContextActive(sessionContext)) return '';
     customerAuthRef.current = data.token;
-    storeCustomerAuth(currentUser, data.token);
+    storeCustomerAuth(sessionContext.userId, data.token);
     return data.token;
-  }, [currentUser]);
+  }, [captureSessionContext, isSessionContextActive]);
 
-  const customerFetchOptions = useCallback(async (options = {}) => {
-    const token = await ensureCustomerAuth();
+  const customerFetchOptions = useCallback(async (options = {}, sessionContext = captureSessionContext()) => {
+    const token = await ensureCustomerAuth(sessionContext);
+    if (!token || !isSessionContextActive(sessionContext)) {
+      const error = new Error('stale customer session');
+      error.name = 'AbortError';
+      throw error;
+    }
     const headers = { ...(options.headers || {}), Authorization: `Bearer ${token}` };
-    return { ...options, headers };
-  }, [ensureCustomerAuth]);
+    return { ...options, signal: options.signal || sessionContext.signal, headers };
+  }, [captureSessionContext, ensureCustomerAuth, isSessionContextActive]);
 
-  const uploadAttachmentFiles = useCallback(async (files = []) => {
+  const uploadAttachmentFiles = useCallback(async (files = [], sessionContext = captureSessionContext()) => {
     const uploaded = [];
     for (const file of files) {
+      if (!isSessionContextActive(sessionContext)) return [];
       const form = new FormData();
-      form.append('user_id', currentUser);
-      form.append('session_id', `session_${currentUser}`);
+      form.append('user_id', sessionContext.userId);
+      form.append('session_id', `session_${sessionContext.userId}`);
       form.append('source', 'customer_chat');
       form.append('async_review', 'true');
       form.append('file', file);
-      const authOptions = await customerFetchOptions({ method: 'POST', body: form });
+      const authOptions = await customerFetchOptions({ method: 'POST', body: form }, sessionContext);
       const isReviewMaterial = file.type?.startsWith('image/') || file.type?.startsWith('video/');
       const res = await fetch(isReviewMaterial ? '/api/v1/private-domain/review-tasks' : '/api/v1/chat/attachments', authOptions);
       if (!res.ok) {
@@ -321,14 +359,16 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
         throw err;
       }
       const data = await res.json();
+      if (!isSessionContextActive(sessionContext)) return [];
       if (data?.attachment) uploaded.push(data.attachment);
     }
     return uploaded;
-  }, [currentUser, customerFetchOptions]);
+  }, [captureSessionContext, customerFetchOptions, isSessionContextActive]);
 
-  const ingestServerHandoffMessages = useCallback((messages) => {
-    if (!messages?.length) return;
+  const ingestServerHandoffMessages = useCallback((messages, sessionContext = captureSessionContext()) => {
+    if (!messages?.length || !isSessionContextActive(sessionContext)) return;
     setChatMessages(prev => {
+      if (!isSessionContextActive(sessionContext)) return prev;
       let next = prev;
       for (const m of messages) {
         if (handoffSyncedIdsRef.current.has(m.id)) continue;
@@ -372,17 +412,22 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       }
       return next;
     });
-  }, []);
+  }, [captureSessionContext, isSessionContextActive]);
 
-  const completeHandoffConnection = useCallback(async (queueId, statusPayload = null) => {
-    const sessionId = `session_${currentUser}`;
+  const completeHandoffConnection = useCallback(async (queueId, statusPayload = null, sessionContext = captureSessionContext()) => {
+    if (!isSessionContextActive(sessionContext)) return;
+    const sessionId = `session_${sessionContext.userId}`;
 
     let agent = statusPayload?.agent || statusPayload?.assigned_agent || null;
 
     if (!agent) {
       try {
-        const r = await fetch(`/api/v1/handoff/connect?session_id=${sessionId}`, handoffFetchOptions({ method: 'POST' }));
+        const r = await fetch(`/api/v1/handoff/connect?session_id=${sessionId}`, handoffFetchOptions({
+          method: 'POST',
+          signal: sessionContext.signal,
+        }));
         const data = r.ok ? await r.json() : null;
+        if (!isSessionContextActive(sessionContext)) return;
         if (!data?.ok || data?.status !== 'connected') return;
         agent = data.agent || agent;
         if (data.brief) setHandoffBrief(toPublicHandoffBrief(data.brief));
@@ -391,7 +436,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       }
     }
 
-    if (handoffStateRef.current !== 'queuing') return;
+    if (!isSessionContextActive(sessionContext) || handoffStateRef.current !== 'queuing') return;
 
     if (handoffQueueTimerRef.current) {
       clearTimeout(handoffQueueTimerRef.current);
@@ -424,54 +469,64 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     }]);
 
     try {
-      const mr = await fetch(`/api/v1/handoff/messages/${sessionId}?since=${handoffMsgSinceRef.current}`, handoffFetchOptions());
+      const mr = await fetch(`/api/v1/handoff/messages/${sessionId}?since=${handoffMsgSinceRef.current}`, handoffFetchOptions({
+        signal: sessionContext.signal,
+      }));
       const md = mr.ok ? await mr.json() : null;
-      if (md?.ok) ingestServerHandoffMessages(md.messages);
+      if (md?.ok && isSessionContextActive(sessionContext)) ingestServerHandoffMessages(md.messages, sessionContext);
     } catch { /* 蹇界暐 */ }
-  }, [currentUser, handoffFetchOptions, ingestServerHandoffMessages]);
+  }, [captureSessionContext, handoffFetchOptions, ingestServerHandoffMessages, isSessionContextActive]);
 
-  const pollHandoffSync = useCallback(async () => {
-    const sessionId = `session_${currentUser}`;
+  const pollHandoffSync = useCallback(async (sessionContext = captureSessionContext()) => {
+    if (!isSessionContextActive(sessionContext)) return;
+    const sessionId = `session_${sessionContext.userId}`;
     const hs = handoffStateRef.current;
     if (hs !== 'queuing' && hs !== 'connected') return;
 
     try {
-      const statusR = await fetch(`/api/v1/handoff/status/${sessionId}`, handoffFetchOptions());
+      const statusR = await fetch(`/api/v1/handoff/status/${sessionId}`, handoffFetchOptions({
+        signal: sessionContext.signal,
+      }));
       const statusData = statusR.ok ? await statusR.json() : null;
+      if (!isSessionContextActive(sessionContext)) return;
       if (statusData?.ok) {
         if (statusData.status === 'connected' && hs === 'queuing') {
-          await completeHandoffConnection(activeQueueIdRef.current, statusData);
+          await completeHandoffConnection(activeQueueIdRef.current, statusData, sessionContext);
           return;
         }
         if (statusData.assigned_agent) setAssignedHumanAgent(statusData.assigned_agent);
       }
 
       if (handoffStateRef.current === 'connected' || statusData?.status === 'connected') {
-        const msgR = await fetch(`/api/v1/handoff/messages/${sessionId}?since=${handoffMsgSinceRef.current}`, handoffFetchOptions());
+        const msgR = await fetch(`/api/v1/handoff/messages/${sessionId}?since=${handoffMsgSinceRef.current}`, handoffFetchOptions({
+          signal: sessionContext.signal,
+        }));
         const msgData = msgR.ok ? await msgR.json() : null;
-        if (msgData?.ok) ingestServerHandoffMessages(msgData.messages);
+        if (msgData?.ok && isSessionContextActive(sessionContext)) ingestServerHandoffMessages(msgData.messages, sessionContext);
       }
     } catch { /* 蹇界暐 */ }
-  }, [completeHandoffConnection, currentUser, handoffFetchOptions, ingestServerHandoffMessages]);
+  }, [captureSessionContext, completeHandoffConnection, handoffFetchOptions, ingestServerHandoffMessages, isSessionContextActive]);
 
   useEffect(() => {
     if (handoffState !== 'queuing' && handoffState !== 'connected') return undefined;
     const sessionId = `session_${currentUser}`;
+    const sessionContext = captureSessionContext();
     return attachHandoffTransport({
       sessionId,
       enabled: true,
       authValue: serviceAuthRef.current,
       onStatus: (data) => {
+        if (!isSessionContextActive(sessionContext)) return;
         if (data.status === 'connected' && handoffStateRef.current === 'queuing') {
-          completeHandoffConnection(activeQueueIdRef.current, data);
+          completeHandoffConnection(activeQueueIdRef.current, data, sessionContext);
         }
         if (data.assigned_agent) setAssignedHumanAgent(data.assigned_agent);
       },
-      onMessages: (msgs) => ingestServerHandoffMessages(msgs),
-      pollFn: pollHandoffSync,
+      onMessages: (msgs) => ingestServerHandoffMessages(msgs, sessionContext),
+      pollFn: () => pollHandoffSync(sessionContext),
       pollIntervalMs: 1500,
     });
-  }, [handoffState, currentUser, pollHandoffSync, completeHandoffConnection, ingestServerHandoffMessages]);
+  }, [captureSessionContext, completeHandoffConnection, currentUser, handoffState, ingestServerHandoffMessages, isSessionContextActive, pollHandoffSync]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -479,6 +534,8 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
   }, []);
 
   const resetMonitor = useCallback(() => {
+    handoffStateRef.current = 'none';
+    assignedHumanAgentRef.current = null;
     setIsTransfered(false);
     setHandoffState('none');
     setHandoffBrief(null);
@@ -527,31 +584,32 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     clearPresenceTimers();
   }, [clearPresenceTimers]);
 
-  const resetChat = useCallback(async () => {
-    const e2eHandoff = typeof window !== 'undefined' && (
-      new URLSearchParams(window.location.search).get('e2e') === '1'
-      || new URLSearchParams(window.location.search).get('e2e') === 'handoff'
-    );
-    if (!e2eHandoff) {
-      ensureCustomerAuth()
-        .then(() => fetch(
-          `/api/v1/handoff/reset?session_id=session_${currentUser}`,
-          handoffFetchOptions({ method: 'POST' }),
-        ))
-        .catch(() => {});
+  const prepareUserSwitch = useCallback(() => {
+    const sessionContext = invalidateAsyncWork();
+    for (const message of chatMessagesRef.current) {
+      for (const attachment of message.content?.attachments || []) {
+        if (String(attachment.previewUrl || '').startsWith('blob:')) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
+      }
     }
-    activeTurnIdRef.current += 1;
-    const welcomeTurnId = activeTurnIdRef.current;
     activeOrderIdRef.current = null;
     welcomeCallbacksRef.current.onClearActiveOrder?.();
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    streamInFlightRef.current = false;
-    streamFinalizedRef.current = false;
+    serviceAuthRef.current = '';
+    currentTurnUserValRef.current = '';
+    lastIntentRef.current = '';
+    lastEmotionRef.current = 2;
     historyDataRef.current = [];
+    chatMessagesRef.current = [];
+    setChatMessages([]);
+    setInputVal('');
     resetMonitor();
+    return sessionContext;
+  }, [invalidateAsyncWork, resetMonitor]);
+
+  const resetChat = useCallback(async () => {
+    const sessionContext = prepareUserSwitch();
+    const welcomeTurnId = activeTurnIdRef.current;
 
     const scanId = `welcome_scan_${Date.now()}`;
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -573,11 +631,13 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
 
     try {
       const weightsJson = encodeURIComponent(JSON.stringify(orderPriorityWeightsRef.current));
-      const welcomePromise = fetch(`/api/v1/welcome/${currentUser}?weights=${weightsJson}`)
+      const welcomePromise = fetch(`/api/v1/welcome/${sessionContext.userId}?weights=${weightsJson}`, {
+        signal: sessionContext.signal,
+      })
         .then(res => (res.ok ? res.json() : null));
 
       await sleep(1000);
-      if (activeTurnIdRef.current !== welcomeTurnId) return;
+      if (activeTurnIdRef.current !== welcomeTurnId || !isSessionContextActive(sessionContext)) return;
       setChatMessages(prev => prev.map(msg => (
         msg._id === scanId
           ? {
@@ -596,7 +656,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       )));
 
       const [data] = await Promise.all([welcomePromise, sleep(820)]);
-      if (activeTurnIdRef.current !== welcomeTurnId) return;
+      if (activeTurnIdRef.current !== welcomeTurnId || !isSessionContextActive(sessionContext)) return;
 
       setChatMessages(prev => prev.map(msg => (
         msg._id === scanId
@@ -618,7 +678,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       )));
 
       await sleep(460);
-      if (activeTurnIdRef.current !== welcomeTurnId) return;
+      if (activeTurnIdRef.current !== welcomeTurnId || !isSessionContextActive(sessionContext)) return;
 
       const msgs = [];
       if (data?.greeting) {
@@ -665,7 +725,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       const fallback = {
         _id: `greeting_${Date.now()}`,
         type: 'text',
-        content: { text: sanitizeUserVisibleText(t(`greetings.${currentUser}`)) },
+        content: { text: sanitizeUserVisibleText(t(`greetings.${sessionContext.userId}`)) },
         position: 'left',
         user: buildLeftUserMeta(SPEAKER.AI),
       };
@@ -673,23 +733,28 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       setChatMessages([staged[0]]);
       for (const msg of staged.slice(1)) {
         await sleep(420);
-        if (activeTurnIdRef.current !== welcomeTurnId) return;
+        if (activeTurnIdRef.current !== welcomeTurnId || !isSessionContextActive(sessionContext)) return;
         setChatMessages(prev => [...prev, msg]);
       }
     } catch (e) {
-      if (activeTurnIdRef.current !== welcomeTurnId) return;
+      if (activeTurnIdRef.current !== welcomeTurnId || !isSessionContextActive(sessionContext)) return;
       console.error('welcome sequence failed:', e);
       setChatMessages([{
         _id: `greeting_${Date.now()}`,
         type: 'text',
-        content: { text: sanitizeUserVisibleText(t(`greetings.${currentUser}`)) },
+        content: { text: sanitizeUserVisibleText(t(`greetings.${sessionContext.userId}`)) },
         position: 'left',
         user: buildLeftUserMeta(SPEAKER.AI),
       }]);
     }
-  }, [currentUser, ensureCustomerAuth, handoffFetchOptions, resetMonitor]);
+  }, [ensureCustomerAuth, handoffFetchOptions, isSessionContextActive, prepareUserSwitch]);
 
-  useEffect(() => { resetChat(); }, [currentUser, resetChat]);
+  useEffect(() => {
+    resetChat();
+    return () => {
+      invalidateAsyncWork();
+    };
+  }, [currentUser, invalidateAsyncWork, resetChat]);
   useEffect(() => { scrollToBottom(); }, [chatMessages, isAwaitingStream, streamingMsgId, scrollToBottom]);
 
   /** @deprecated 使用 syncHistoryFromUI，保留兼容调用。 */
@@ -1010,25 +1075,75 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     }]);
   }, []);
 
-  const confirmHandoff = useCallback(async () => {
-    const sessionId = `session_${currentUser}`;
+  const restoreHandoffState = useCallback(async () => {
+    const sessionContext = captureSessionContext();
+    const sessionId = `session_${sessionContext.userId}`;
     try {
+      const token = await ensureCustomerAuth(sessionContext);
+      if (!token || !isSessionContextActive(sessionContext)) return;
+      const response = await fetch(
+        `/api/v1/handoff/status/${sessionId}`,
+        handoffFetchOptions({ signal: sessionContext.signal }),
+      );
+      if (!response.ok || !isSessionContextActive(sessionContext)) return;
+      const data = await response.json();
+      if (!data?.ok || !['queuing', 'escalated', 'transferring', 'connected'].includes(data.status)) return;
+      startHandoffQueue('已恢复当前用户的客服接待状态。', data.brief, data);
+      if (data.status === 'connected') {
+        await completeHandoffConnection(activeQueueIdRef.current, data, sessionContext);
+      }
+    } catch (error) {
+      if (error?.name !== 'AbortError' && isSessionContextActive(sessionContext)) {
+        console.error('restore handoff state failed:', error);
+      }
+    }
+  }, [captureSessionContext, completeHandoffConnection, ensureCustomerAuth, handoffFetchOptions, isSessionContextActive, startHandoffQueue]);
+
+  useEffect(() => {
+    restoreHandoffState();
+  }, [currentUser, restoreHandoffState]);
+
+  const confirmHandoff = useCallback(async () => {
+    const sessionContext = captureSessionContext();
+    const sessionId = `session_${sessionContext.userId}`;
+    try {
+      const offerOptions = await customerFetchOptions({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: sessionContext.signal,
+        body: JSON.stringify({
+          user_id: sessionContext.userId,
+          session_id: sessionId,
+          reason: '用户在转接确认卡中选择VIP客服协助',
+        }),
+      }, sessionContext);
+      const offerRes = await fetch('/api/v1/handoff/offer', offerOptions);
+      if (!offerRes.ok || !isSessionContextActive(sessionContext)) {
+        console.error('handoff offer failed:', offerRes.status);
+        return;
+      }
+      const offerData = await offerRes.json();
+      const offerId = offerData?.offer?.offer_id || '';
       const authOptions = await customerFetchOptions({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: sessionContext.signal,
         body: JSON.stringify({
-          user_id: currentUser,
+          user_id: sessionContext.userId,
           session_id: sessionId,
           history: historyDataRef.current,
           reason: '用户主动申请客服协助',
           last_user_message: currentTurnUserValRef.current || '',
           intent: lastIntentRef.current,
           emotion_level: lastEmotionRef.current,
+          offer_id: offerId,
+          active_order_id: activeOrderIdRef.current || '',
         }),
-      });
+      }, sessionContext);
       const res = await fetch('/api/v1/handoff/request', authOptions);
       if (res.ok) {
         const data = await res.json();
+        if (!isSessionContextActive(sessionContext)) return;
         if (data[HANDOFF_AUTH_FIELD]) {
           serviceAuthRef.current = data[HANDOFF_AUTH_FIELD];
         }
@@ -1037,9 +1152,10 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       }
       console.error('handoff request failed:', res.status);
     } catch (e) {
+      if (e?.name === 'AbortError' || !isSessionContextActive(sessionContext)) return;
       console.error('handoff request failed:', e);
     }
-  }, [currentUser, customerFetchOptions, startHandoffQueue]);
+  }, [captureSessionContext, customerFetchOptions, isSessionContextActive, startHandoffQueue]);
 
   const dismissHandoffPrompt = useCallback(() => {
     setHandoffState('none');
@@ -1090,14 +1206,16 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
   }, [cleanupStreamUI, clearPresenceTimers, onTurnComplete, revealAssistantMessage, syncHistoryFromUI]);
 
   const handleSend = useCallback(async (val, sendOptions = {}) => {
+    const sessionContext = captureSessionContext();
     const attachmentFiles = Array.isArray(sendOptions.attachmentFiles) ? sendOptions.attachmentFiles : [];
     const hasVideo = attachmentFiles.some(file => file.type?.startsWith('video/'));
-    const userText = val.trim() || (attachmentFiles.length ? (hasVideo ? '我上传了一段视频，请帮我创建审核任务并转客服确认。' : '我上传了一张照片，请帮我创建审核任务并转客服确认。') : '');
+    const userText = val.trim() || (attachmentFiles.length ? (hasVideo ? '我上传了一段视频，请帮我创建审核任务。' : '我上传了一张照片，请帮我创建审核任务。') : '');
     if (!userText || streamInFlightRef.current) return;
     let attachments = [];
     try {
-      attachments = attachmentFiles.length ? await uploadAttachmentFiles(attachmentFiles) : [];
+      attachments = attachmentFiles.length ? await uploadAttachmentFiles(attachmentFiles, sessionContext) : [];
     } catch (e) {
+      if (e?.name === 'AbortError' || !isSessionContextActive(sessionContext)) return;
       console.error('attachment upload failed:', e);
       setChatMessages(prev => [...prev, {
         _id: `upload_err_${Date.now()}`,
@@ -1108,6 +1226,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       }]);
       return;
     }
+    if (!isSessionContextActive(sessionContext)) return;
     const visibleText = userText;
     const displayAttachments = attachments.map((item, index) => ({
       ...item,
@@ -1116,7 +1235,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
 
     // 已进入人工队列或已接入客服：消息优先进入人工链路，不再重启 AI 链路。
     if (handoffStateRef.current === 'queuing' || handoffStateRef.current === 'connected') {
-      const sessionId = `session_${currentUser}`;
+      const sessionId = `session_${sessionContext.userId}`;
       setChatMessages(prev => [...prev, {
         _id: `user_${Date.now()}`,
         type: 'text',
@@ -1137,16 +1256,19 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       try {
         const handoffMessageRes = await fetch('/api/v1/handoff/user-message', {
           method: 'POST',
+          signal: sessionContext.signal,
           headers: handoffFetchOptions({ headers: { 'Content-Type': 'application/json' } }).headers,
-          body: JSON.stringify({ session_id: sessionId, content: visibleText, user_id: currentUser, attachments }),
+          body: JSON.stringify({ session_id: sessionId, content: visibleText, user_id: sessionContext.userId, attachments }),
         });
         if (!handoffMessageRes.ok) throw new Error(`handoff user-message failed: ${handoffMessageRes.status}`);
         const handoffMessageData = await handoffMessageRes.json().catch(() => null);
+        if (!isSessionContextActive(sessionContext)) return;
         if (handoffMessageData?.analysis) {
           handleUnifiedAnalysis(handoffMessageData.analysis);
         }
-        await pollHandoffSync();
+        await pollHandoffSync(sessionContext);
       } catch (e) {
+        if (e?.name === 'AbortError' || !isSessionContextActive(sessionContext)) return;
         console.error('handoff user-message failed:', e);
       }
       return;
@@ -1202,10 +1324,10 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     } else {
       activeQueryStatusIdRef.current = null;
       readTimerRef.current = setTimeout(() => {
-        if (turnId === activeTurnIdRef.current) setPresencePhase('read');
+        if (turnId === activeTurnIdRef.current && isSessionContextActive(sessionContext)) setPresencePhase('read');
       }, 750);
       typingTimerRef.current = setTimeout(() => {
-        if (turnId === activeTurnIdRef.current) setPresencePhase('typing');
+        if (turnId === activeTurnIdRef.current && isSessionContextActive(sessionContext)) setPresencePhase('typing');
       }, 2200);
     }
 
@@ -1215,8 +1337,8 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
         headers: { 'Content-Type': 'application/json' },
         signal: abortControllerRef.current.signal,
         body: JSON.stringify({
-          user_id: currentUser,
-          session_id: `session_${currentUser}`,
+          user_id: sessionContext.userId,
+          session_id: `session_${sessionContext.userId}`,
           content: userText,
           history: historyDataRef.current,
           model_id: modelId,
@@ -1224,7 +1346,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
           stream_reply: streamReplyEnabledRef.current,
           attachments,
         }),
-      });
+      }, sessionContext);
       const response = await fetch('/api/v1/chat', authOptions);
 
       if (!response.ok) {
@@ -1241,7 +1363,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       let sseBuffer = '';
 
       const processSseBlock = (block) => {
-        if (turnId !== activeTurnIdRef.current) return;
+        if (turnId !== activeTurnIdRef.current || !isSessionContextActive(sessionContext)) return;
         block = block.trim();
         if (!block) return;
         let eventType = 'chunk';
@@ -1307,11 +1429,11 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
         clearPresenceTimers();
         return;
       }
-      if (turnId !== activeTurnIdRef.current) return;
+      if (turnId !== activeTurnIdRef.current || !isSessionContextActive(sessionContext)) return;
       console.error('stream error:', e);
       if (e?.status === 401) {
         customerAuthRef.current = '';
-        storeCustomerAuth(currentUser, '');
+        storeCustomerAuth(sessionContext.userId, '');
       }
       clearPresenceTimers();
       if (activeQueryStatusIdRef.current) {
@@ -1336,14 +1458,14 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
         setIsAwaitingStream(false);
       }
     } finally {
-      if (turnId !== activeTurnIdRef.current) return;
+      if (turnId !== activeTurnIdRef.current || !isSessionContextActive(sessionContext)) return;
       if (!streamFinalizedRef.current) {
         finalizeStream(userText, turnId);
       }
       streamInFlightRef.current = false;
       abortControllerRef.current = null;
     }
-  }, [appendAssistantDelta, appendCustomCard, clearPresenceTimers, currentUser, customerFetchOptions, finalizeStream, handleApiLogging, handleHandoff, handleNodeTrace, handleUnifiedAnalysis, handoffFetchOptions, modelId, pollHandoffSync, syncHistoryFromUI, uploadAttachmentFiles]);
+  }, [appendAssistantDelta, appendCustomCard, captureSessionContext, clearPresenceTimers, customerFetchOptions, finalizeStream, handleApiLogging, handleHandoff, handleNodeTrace, handleUnifiedAnalysis, handoffFetchOptions, isSessionContextActive, modelId, pollHandoffSync, syncHistoryFromUI, uploadAttachmentFiles]);
 
   const confirmWelcomeOrder = useCallback((orderMeta) => {
     const orderId = orderMeta?.order_id;
@@ -1395,6 +1517,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     nodeLogs,
     presencePhase,
     scrollContainerRef,
+    prepareUserSwitch,
     resetChat,
     handleSend,
     confirmWelcomeOrder,

@@ -1,6 +1,6 @@
 # Java 开发部署与联调指南
 
-版本：2026-07-11
+版本：2026-07-15
 
 ## 1. Java 的职责边界
 
@@ -63,10 +63,13 @@ Nginx / Java Gateway
 
 ```bat
 set E2E_BASE_URL=http://127.0.0.1:8000
-venv\Scripts\python.exe scripts\check_private_deployment_api.py
-venv\Scripts\python.exe scripts\check_review_input_isolation.py
-venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_002,sample_004 --run-id java-integration
+.venv\Scripts\python.exe scripts\check_private_deployment_api.py
+.venv\Scripts\python.exe scripts\check_review_input_isolation.py
+.venv\Scripts\python.exe scripts\check_customer_agent_0714_regression.py
+.venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_003 --run-id java-integration
 ```
+
+如果内部环境目录名为 `venv`，可将上述 `.venv` 替换为 `venv`。预发布脚本会自动识别两种目录。
 
 Java 侧至少补充：
 

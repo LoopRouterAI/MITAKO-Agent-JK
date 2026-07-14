@@ -65,6 +65,7 @@ UPLOAD_DIR = WORKBENCH_DIR / "uploaded_videos"
 REPORT_DIR = WORKBENCH_DIR / "reports"
 PUBLIC_SUMMARY_DIR = REPORT_DIR / "public_summaries"
 INDEX_HTML = WORKBENCH_DIR / "workbench.html"
+SAMPLE_MATERIAL_DIR = (ROOT / "docs" / "三大审核场景的小量样本").resolve()
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
 MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
@@ -1066,7 +1067,14 @@ def minor_material_entry() -> str:
 
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
-    return {"ok": True, "service": "visual_review_workbench"}
+    return {
+        "ok": True,
+        "service": "visual_review_workbench",
+        "data_mode": "demo",
+        "source_system": "mitako_fixture",
+        "integration_status": "not_connected",
+        "access_control": "生产部署必须由主服务或反向代理执行租户鉴权",
+    }
 
 
 @app.get("/favicon.ico")
@@ -1107,7 +1115,7 @@ def media_asset(rel_path: str) -> FileResponse:
         path = (ROOT / rel).resolve()
     except OSError as exc:
         raise HTTPException(status_code=404, detail="素材不存在") from exc
-    allowed_roots = [ROOT.resolve(), WORKBENCH_DIR.resolve()]
+    allowed_roots = [WORKBENCH_DIR.resolve(), SAMPLE_MATERIAL_DIR]
     if not any(path == base or base in path.parents for base in allowed_roots):
         raise HTTPException(status_code=404, detail="素材不存在")
     if not path.exists() or path.suffix.lower() not in ALLOWED_MEDIA_SUFFIXES:

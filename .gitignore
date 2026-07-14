@@ -2,6 +2,7 @@
 
 # 运行环境与依赖
 venv/
+.venv/
 node_modules/
 __pycache__/
 *.py[cod]
