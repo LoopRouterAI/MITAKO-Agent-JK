@@ -135,6 +135,7 @@ Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_d
 $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
+    "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
     "tests\reports\customer_agent_0714_regression_latest.json",
     "tests\reports\review_service_batch_latest.json",
     "tests\reports\review_media_preprocessing_latest.json",
@@ -172,6 +173,7 @@ $required = @(
     "我方内部开发文档\升级日志-2026-07-15.md",
     "docs\delivery\openapi.yaml",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
+    "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
     "甲方沟通交付文档\0714反馈整改与验收说明-2026-07-15.md",
     "docs\三大审核场景的小量样本\sample_labels.json",
     "scripts\pre_release_internal_validation.ps1",

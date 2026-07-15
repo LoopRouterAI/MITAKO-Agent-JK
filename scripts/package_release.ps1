@@ -801,6 +801,7 @@ $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbe
 $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
+    "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
     "甲方沟通交付文档\0714反馈整改与验收说明-2026-07-15.md",
     "runtime\app_runtime.zip",
     "sample_data.json",

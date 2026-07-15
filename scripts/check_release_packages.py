@@ -79,6 +79,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "我方内部开发文档/Java开发部署与联调指南.md",
         "我方内部开发文档/升级日志-2026-07-15.md",
         "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
+        "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
         "data/admin.db",
         "data/auth.db",
         "data/handoff.db",
@@ -108,6 +109,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "customer-package-manifest.json",
         "docs/delivery/openapi.yaml",
         "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
+        "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
         "甲方沟通交付文档/README.md",
         "visual_review_workbench/workbench.html",
     }

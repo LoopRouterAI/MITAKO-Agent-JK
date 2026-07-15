@@ -24,6 +24,7 @@ REQUIRED_FILES = (
     "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
     "甲方沟通交付文档/README.md",
     "甲方沟通交付文档/index.html",
+    "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
     "甲方沟通交付文档/0714反馈整改与验收说明-2026-07-15.md",
     "甲方沟通交付文档/新版本交付说明-2026-07-11.md",
     "我方内部开发文档/README.md",
