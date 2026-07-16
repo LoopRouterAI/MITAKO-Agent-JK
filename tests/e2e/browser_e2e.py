@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import json
+import os
 import time
 from pathlib import Path
 from typing import List
@@ -50,6 +52,30 @@ def _handoff_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
+def _staff_login(client: httpx.Client, base: str, username: str, password: str) -> dict:
+    response = client.post(
+        f"{base}/api/v1/auth/login",
+        json={"username": username, "password": password, "tenant_id": "mitako"},
+    )
+    data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+    if response.status_code != 200 or not data.get("ok") or not data.get("token"):
+        raise RuntimeError(f"浏览器 E2E 登录失败：username={username}, status={response.status_code}")
+    return data
+
+
+def _authenticated_context(browser, session: dict, viewport: dict):
+    context = browser.new_context(viewport=viewport, locale="zh-CN")
+    payload = json.dumps({"token": session["token"], "user": session["user"]}, ensure_ascii=False)
+    context.add_init_script(
+        f"""(() => {{
+          const {{ token, user }} = {payload};
+          window.sessionStorage.setItem('mitako_auth_token_v1', token);
+          window.sessionStorage.setItem('mitako_auth_user_v1', JSON.stringify(user));
+        }})()"""
+    )
+    return context
+
+
 def _wait_handoff_status(base: str, want: str, token: str = "", timeout_s: float = 20.0) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -90,13 +116,27 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
     results: List[CaseResult] = []
     with httpx.Client(timeout=30.0) as client:
         _cleanup_sessions(client, base)
+        desk_session = _staff_login(
+            client,
+            base,
+            os.getenv("E2E_DESK_USERNAME", "desk0816"),
+            os.getenv("E2E_DESK_PASSWORD", "desk123"),
+        )
+        admin_session = _staff_login(
+            client,
+            base,
+            os.getenv("E2E_ADMIN_USERNAME", "admin"),
+            os.getenv("E2E_ADMIN_PASSWORD", "admin123"),
+        )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
-        customer = ctx.new_page()
-        desk = ctx.new_page()
-        admin = ctx.new_page()
+        customer_ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
+        desk_ctx = _authenticated_context(browser, desk_session, {"width": 1440, "height": 900})
+        admin_ctx = _authenticated_context(browser, admin_session, {"width": 1440, "height": 900})
+        customer = customer_ctx.new_page()
+        desk = desk_ctx.new_page()
+        admin = admin_ctx.new_page()
 
         # ── 客户：输入真实高风险售后诉求，触发后端硬路由转VIP客服 ──
         t0 = time.time()
@@ -204,14 +244,17 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
             )
             b64 = _shot(admin, "06_admin_saved")
             results.append(_case("BROWSER", "admin", "B-admin-save-routing", True, "SLA=178", int((time.time() - t0) * 1000), b64))
-            # 恢复默认 SLA
-            token = admin.evaluate("() => sessionStorage.getItem('mitako_auth_token_v1') || ''")
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
-            cfg = httpx.get(f"{base}/api/v1/admin/handoff/routing", headers=headers, timeout=10).json().get("config", {})
-            cfg.setdefault("sla", {})["first_response_seconds"] = 180
-            httpx.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=cfg, timeout=10)
         except Exception as e:
             results.append(_case("BROWSER", "admin", "B-admin-save-routing", False, str(e)[:160], int((time.time() - t0) * 1000)))
+        finally:
+            headers = _handoff_headers(str(admin_session.get("token") or ""))
+            try:
+                cfg = httpx.get(f"{base}/api/v1/admin/handoff/routing", headers=headers, timeout=10).json().get("config", {})
+                if cfg:
+                    cfg.setdefault("sla", {})["first_response_seconds"] = 180
+                    httpx.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=cfg, timeout=10)
+            except Exception:
+                pass
 
         # ── Admin 运维大屏 ──
         t0 = time.time()
@@ -264,6 +307,9 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
         except Exception as e:
             results.append(_case("BROWSER", "customer", "B-reduced-motion", False, str(e)[:160], int((time.time() - t0) * 1000)))
 
+        customer_ctx.close()
+        desk_ctx.close()
+        admin_ctx.close()
         browser.close()
 
     return results, True

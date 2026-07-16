@@ -38,14 +38,62 @@ class CaseResult:
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
-async def admin_auth_headers(client: httpx.AsyncClient, base: str) -> Dict[str, str]:
-    """管理员 JWT — E2E 默认 admin/admin123"""
+async def staff_auth_session(
+    client: httpx.AsyncClient,
+    base: str,
+    username: str,
+    password: str,
+    tenant_id: str = "mitako",
+) -> Dict[str, Any]:
+    """使用项目内置测试账号获取真实员工会话，不在测试结果中暴露令牌。"""
     lr = await client.post(
         f"{base}/api/v1/auth/login",
-        json={"username": "admin", "password": "admin123", "tenant_id": "mitako"},
+        json={"username": username, "password": password, "tenant_id": tenant_id},
     )
-    token = lr.json().get("token") if lr.status_code == 200 else ""
-    return {"Authorization": f"Bearer {token}"} if token else {}
+    data = lr.json() if lr.headers.get("content-type", "").startswith("application/json") else {}
+    if lr.status_code != 200 or not data.get("ok") or not data.get("token"):
+        raise RuntimeError(f"E2E 员工账号登录失败：username={username}, status={lr.status_code}")
+    return data
+
+
+async def staff_auth_headers(
+    client: httpx.AsyncClient,
+    base: str,
+    username: str,
+    password: str,
+    tenant_id: str = "mitako",
+) -> Dict[str, str]:
+    data = await staff_auth_session(client, base, username, password, tenant_id)
+    return {"Authorization": f"Bearer {data['token']}"}
+
+
+async def admin_auth_headers(client: httpx.AsyncClient, base: str) -> Dict[str, str]:
+    """管理员 JWT；凭据可由 E2E_ADMIN_USERNAME/E2E_ADMIN_PASSWORD 覆盖。"""
+    return await staff_auth_headers(
+        client,
+        base,
+        os.getenv("E2E_ADMIN_USERNAME", "admin"),
+        os.getenv("E2E_ADMIN_PASSWORD", "admin123"),
+    )
+
+
+async def customer_auth_headers(
+    client: httpx.AsyncClient,
+    base: str,
+    user_id: str,
+    session_id: str,
+    tenant_id: str = "mitako",
+) -> Dict[str, str]:
+    response = await client.post(
+        f"{base}/api/v1/auth/customer-session",
+        json={"user_id": user_id, "session_id": session_id, "tenant_id": tenant_id},
+    )
+    data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+    if response.status_code != 200 or not data.get("ok") or not data.get("token"):
+        raise RuntimeError(
+            f"E2E 客户会话授权失败：user_id={user_id}, session_id={session_id}, status={response.status_code}"
+        )
+    return {"Authorization": f"Bearer {data['token']}"}
 
 
 async def _probe_handoff_server(client: httpx.AsyncClient, url: str) -> bool:
@@ -55,9 +103,11 @@ async def _probe_handoff_server(client: httpx.AsyncClient, url: str) -> bool:
         if r.status_code != 200 or not r.json().get("ok"):
             return False
         auth_status = r.json()
-        probe_sid = f"e2e_probe_{int(time.time())}"
+        probe_sid = "session_probe"
+        probe_headers = await customer_auth_headers(client, url, "probe", probe_sid)
         pr = await client.post(
             f"{url}/api/v1/handoff/request",
+            headers=probe_headers,
             json={
                 "user_id": "probe",
                 "session_id": probe_sid,
@@ -116,7 +166,8 @@ def hist_l5() -> List[Dict[str, str]]:
 
 
 async def reset_session(client: httpx.AsyncClient, base: str, sid: str) -> None:
-    await client.post(f"{base}/api/v1/handoff/reset", params={"session_id": sid})
+    headers = await admin_auth_headers(client, base)
+    await client.post(f"{base}/api/v1/handoff/reset", params={"session_id": sid}, headers=headers)
 
 
 async def request_handoff(
@@ -128,8 +179,10 @@ async def request_handoff(
     user_id: str = "usr_e2e",
     intent: str = "投诉",
 ) -> Dict[str, Any]:
+    headers = await customer_auth_headers(client, base, user_id, sid)
     r = await client.post(
         f"{base}/api/v1/handoff/request",
+        headers=headers,
         json={
             "user_id": user_id,
             "session_id": sid,

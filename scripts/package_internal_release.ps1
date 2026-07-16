@@ -17,12 +17,21 @@ $PythonCandidates = @(
 )
 $Python = $PythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $Python) { throw "Missing Python runtime: expected .venv or venv." }
+$GitCommit = (git rev-parse HEAD).Trim()
+$TrackedChanges = @(git status --porcelain --untracked-files=no)
+if ($TrackedChanges.Count -gt 0) {
+    throw "Tracked files contain uncommitted changes. Commit them before creating an auditable internal package."
+}
 
 function Invoke-InternalValidation {
     & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl
 }
 
 Invoke-InternalValidation
+$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=no)
+if ($TrackedChangesAfterValidation.Count -gt 0) {
+    throw "Release validation changed tracked files. Review and commit them before packaging."
+}
 
 function Reset-Stage {
     $fullStage = [System.IO.Path]::GetFullPath($Stage)
@@ -134,7 +143,10 @@ Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_d
 
 $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
+    "我方内部开发文档\升级日志-2026-07-16.md",
+    "甲方沟通交付文档\视觉审核下一轮测试建议-2026-07-16.md",
     "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
     "tests\reports\customer_agent_0714_regression_latest.json",
     "tests\reports\review_service_batch_latest.json",
@@ -155,7 +167,7 @@ foreach ($relativePath in $evidenceFiles) {
 
 $manifest = @{
     generated_at = (Get-Date).ToString("s")
-    git_commit = (git rev-parse HEAD).Trim()
+    git_commit = $GitCommit
     env_included = (Test-Path -LiteralPath (Join-Path $Stage ".env"))
     databases = $databaseNames
     samples = @("sample_002", "sample_003", "sample_004", "sample_labels.json (report evaluation only)", "visual_review_poc/sample_videos")
@@ -170,9 +182,14 @@ $required = @(
     ".env",
     "我方内部开发文档\Java开发部署与联调指南.md",
     "我方内部开发文档\内部研发包交付说明.md",
+    "我方内部开发文档\升级日志-2026-07-16.md",
     "我方内部开发文档\升级日志-2026-07-15.md",
     "docs\delivery\openapi.yaml",
+    "docs\delivery\java-client-sample.md",
+    "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
+    "docs\delivery\客服Agent与私域Agent正式接入前人工UAT指南_20260716.md",
+    "甲方沟通交付文档\视觉审核下一轮测试建议-2026-07-16.md",
     "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
     "甲方沟通交付文档\0714反馈整改与验收说明-2026-07-15.md",
     "docs\三大审核场景的小量样本\sample_labels.json",

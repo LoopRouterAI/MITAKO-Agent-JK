@@ -266,8 +266,13 @@
         <article class="card metric safe"><small>客服反馈回归</small><strong>38 / 38</strong><p>0709 为 10/10，0714 为 28/28</p></article>
         <article class="card metric safe"><small>私有化 API</small><strong>14 / 14</strong><p>含 strict 三通道和 adaptive 成本边界</p></article>
         <article class="card metric safe"><small>报告媒体回放</small><strong>8 / 8</strong><p>桌面/移动端，服务重启后无 4xx</p></article>
+        <article class="card metric safe"><small>严格鉴权全链路</small><strong>54 / 54</strong><p>REST、WebSocket、客户、坐席、主管、管理员与 Playwright</p></article>
+        <article class="card metric safe"><small>私域 Agent</small><strong>4 / 4</strong><p>群分层、商品事件、舆情转客服与后台复盘</p></article>
+        <article class="card metric safe"><small>万群容量演示</small><strong>10,000</strong><p>本地规则与候选持久化约 0.17 秒</p></article>
+        <article class="card metric safe"><small>内部研发包</small><strong>633</strong><p>文件条目；含源码、文档、5 个数据库快照和内部环境配置</p></article>
       </div>
       <div class="callout" style="margin:12px 0"><strong>真实 adaptive 作业</strong><p>31.43 秒视频按完整时间轴抽取 6 帧，仅执行 1 次主审核；22,968 tokens，估算成本 0.09578 美元，任务成功、HTML 成功、公开结果安全。452.5 秒 / 543MB 的 strict 预规划为 454 帧、19 次主审核、38 次连续性、23 次损伤因果，共 80 次调用；这是容量与成本预估，不是已实际消耗。</p></div>
+      <div class="callout"><strong>发布审计</strong><p>最终内部研发包必须在跟踪文件无未提交改动的状态下生成，包内清单记录精确 Git 提交号与关键证据 SHA-256。内部包可包含当前 <code>.env</code> 和数据库快照供我方开发部署；GitHub 与甲方公开包继续排除真实 Key。包内标签文件明确标记仅供推理后评测，不进入模型请求。</p></div>
       <div class="grid three">
         <article class="card role"><span class="role-index">A</span><div><h3>视觉评测负责人</h3><p>确认 0715 是探索性回归；指出标签语义、上下文缺失、review 路由和样本规模问题。</p></div></article>
         <article class="card role"><span class="role-index">B</span><div><h3>客服主管 / 产品验收</h3><p>确认当前可做受控 UAT；真实企微、客服平台和私域闭环仍需联调。</p></div></article>

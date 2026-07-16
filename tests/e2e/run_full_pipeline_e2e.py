@@ -34,6 +34,7 @@ from e2e_lib import (  # noqa: E402
     render_report,
     request_handoff,
     reset_session,
+    staff_auth_headers,
 )
 
 
@@ -96,7 +97,12 @@ def run_code_tests(results: list[CaseResult]) -> None:
 # ---------------------------------------------------------------------------
 # 通信层
 # ---------------------------------------------------------------------------
-async def run_comm_tests(client: httpx.AsyncClient, base: str, results: list[CaseResult]) -> None:
+async def run_comm_tests(
+    client: httpx.AsyncClient,
+    base: str,
+    desk_headers: dict,
+    results: list[CaseResult],
+) -> None:
     endpoints = [
         ("GET", "/api/v1/auth/status", None),
         ("GET", "/api/v1/desk/agents", None),
@@ -108,7 +114,8 @@ async def run_comm_tests(client: httpx.AsyncClient, base: str, results: list[Cas
     for method, path, _ in endpoints:
         t0 = time.time()
         try:
-            r = await client.request(method, f"{base}{path}")
+            headers = desk_headers if path.startswith("/api/v1/desk/") else {}
+            r = await client.request(method, f"{base}{path}", headers=headers)
             ok = r.status_code == 200
             if path == "/":
                 ok = ok and ("main-" in r.text or "index-" in r.text or "root" in r.text)
@@ -132,18 +139,28 @@ async def run_comm_tests(client: httpx.AsyncClient, base: str, results: list[Cas
     results.append(CaseResult("COMM", "customer", "M-connect-before-session", ok, str(d), int((time.time() - t0) * 1000)))
 
 
-async def run_ws_tests(client: httpx.AsyncClient, base: str, results: list[CaseResult]) -> None:
-    sid = f"comm_ws_{int(time.time())}"
+async def run_ws_tests(
+    client: httpx.AsyncClient,
+    base: str,
+    desk_headers: dict,
+    results: list[CaseResult],
+) -> None:
+    sid = "session_usr_e2e"
     await reset_session(client, base, sid)
+    handoff = await request_handoff(client, base, sid, emotion=3, intent="物流", user_id="usr_e2e")
+    customer_headers = handoff_headers(handoff)
     received: list = []
 
     async def listen():
         import websockets
 
         uri = base.replace("http", "ws") + f"/api/v1/handoff/ws/{sid}"
-        async with websockets.connect(uri) as ws:
-            await request_handoff(client, base, sid, emotion=3, intent="物流")
-            await client.post(f"{base}/api/v1/desk/session/{sid}/accept", json={"agent_id": "CS-0816"})
+        async with websockets.connect(uri, additional_headers=customer_headers) as ws:
+            await client.post(
+                f"{base}/api/v1/desk/session/{sid}/accept",
+                headers=desk_headers,
+                json={"agent_id": "CS-0816"},
+            )
             deadline = time.time() + 6
             while time.time() < deadline:
                 try:
@@ -155,6 +172,7 @@ async def run_ws_tests(client: httpx.AsyncClient, base: str, results: list[CaseR
                     continue
             await client.post(
                 f"{base}/api/v1/desk/session/{sid}/reply",
+                headers=desk_headers,
                 json={"content": "WS 测试回复 #优先发货特权#", "agent_id": "CS-0816"},
             )
             try:
@@ -188,13 +206,17 @@ async def run_ws_tests(client: httpx.AsyncClient, base: str, results: list[CaseR
 
     t0 = time.time()
     since = 0.0
-    await reset_session(client, base, sid + "_p")
-    sid2 = sid + "_p"
-    handoff = await request_handoff(client, base, sid2, emotion=2)
+    sid2 = "session_usr_006"
+    await reset_session(client, base, sid2)
+    handoff = await request_handoff(client, base, sid2, emotion=2, user_id="usr_006")
     headers = handoff_headers(handoff)
     r1 = await client.get(f"{base}/api/v1/handoff/messages/{sid2}", params={"since": since}, headers=headers)
     d1 = r1.json()
-    await client.post(f"{base}/api/v1/desk/session/{sid2}/accept", json={"agent_id": "CS-0816"})
+    await client.post(
+        f"{base}/api/v1/desk/session/{sid2}/accept",
+        headers=desk_headers,
+        json={"agent_id": "CS-0816"},
+    )
     latest = d1.get("latest_ts", since)
     r2 = await client.get(f"{base}/api/v1/handoff/messages/{sid2}", params={"since": latest}, headers=headers)
     d2 = r2.json()
@@ -206,11 +228,11 @@ async def run_ws_tests(client: httpx.AsyncClient, base: str, results: list[CaseR
 # 角色：客户
 # ---------------------------------------------------------------------------
 async def run_customer_role(client: httpx.AsyncClient, base: str, results: list[CaseResult]) -> tuple[str, dict]:
-    sid = f"role_user_{int(time.time())}"
+    sid = "session_usr_005"
     await reset_session(client, base, sid)
 
     t0 = time.time()
-    data = await request_handoff(client, base, sid, emotion=4)
+    data = await request_handoff(client, base, sid, emotion=4, user_id="usr_005")
     headers = handoff_headers(data)
     ok = data.get("ok") and data.get("queue")
     results.append(CaseResult("ROLE", "customer", "U-request-handoff", ok, f"tier={data.get('queue', {}).get('required_tier')}", int((time.time() - t0) * 1000)))
@@ -228,7 +250,7 @@ async def run_customer_role(client: httpx.AsyncClient, base: str, results: list[
     t0 = time.time()
     um = (await client.post(
         f"{base}/api/v1/handoff/user-message",
-        json={"session_id": sid, "content": "还在吗", "user_id": "usr_e2e"},
+        json={"session_id": sid, "content": "还在吗", "user_id": "usr_005"},
         headers=headers,
     )).json()
     queued_user_messages = [m for m in um.get("messages", []) if m.get("role") == "user"]
@@ -248,15 +270,23 @@ async def run_customer_role(client: httpx.AsyncClient, base: str, results: list[
 # ---------------------------------------------------------------------------
 # 角色：VIP客服
 # ---------------------------------------------------------------------------
-async def run_agent_role(client: httpx.AsyncClient, base: str, sid: str, customer_headers: dict, results: list[CaseResult]) -> None:
+async def run_agent_role(
+    client: httpx.AsyncClient,
+    base: str,
+    sid: str,
+    customer_headers: dict,
+    desk_headers: dict,
+    supervisor_headers: dict,
+    results: list[CaseResult],
+) -> None:
     t0 = time.time()
-    sessions = (await client.get(f"{base}/api/v1/desk/sessions")).json()
+    sessions = (await client.get(f"{base}/api/v1/desk/sessions", headers=desk_headers)).json()
     found = any(s.get("session_id") == sid for s in sessions.get("sessions", []))
     ok = sessions.get("ok") and found
     results.append(CaseResult("ROLE", "agent", "A-list-sees-session", ok, f"total={len(sessions.get('sessions', []))}", int((time.time() - t0) * 1000)))
 
     t0 = time.time()
-    detail = (await client.get(f"{base}/api/v1/desk/session/{sid}")).json()
+    detail = (await client.get(f"{base}/api/v1/desk/session/{sid}", headers=desk_headers)).json()
     brief = detail.get("brief") or {}
     ok = detail.get("ok") and brief.get("summary") and detail.get("can_accept") is True
     results.append(CaseResult("ROLE", "agent", "A-brief-before-accept", ok, (brief.get("summary") or "")[:80], int((time.time() - t0) * 1000)))
@@ -264,19 +294,25 @@ async def run_agent_role(client: httpx.AsyncClient, base: str, sid: str, custome
     t0 = time.time()
     reply = (await client.post(
         f"{base}/api/v1/desk/session/{sid}/reply",
+        headers=desk_headers,
         json={"content": "不应成功", "agent_id": "CS-0816"},
     )).json()
     ok = not reply.get("ok") and reply.get("error") == "not_accepted"
     results.append(CaseResult("ROLE", "agent", "A-reply-blocked-before-accept", ok, reply.get("error", ""), int((time.time() - t0) * 1000)))
 
     t0 = time.time()
-    acc = (await client.post(f"{base}/api/v1/desk/session/{sid}/accept", json={"agent_id": "CS-0816"})).json()
+    acc = (await client.post(
+        f"{base}/api/v1/desk/session/{sid}/accept",
+        headers=desk_headers,
+        json={"agent_id": "CS-0816"},
+    )).json()
     ok = acc.get("ok") and acc.get("status") == "connected"
     results.append(CaseResult("ROLE", "agent", "A-accept-connected", ok, acc.get("agent", {}).get("agent_id", ""), int((time.time() - t0) * 1000)))
 
     t0 = time.time()
     await client.post(
         f"{base}/api/v1/desk/session/{sid}/reply",
+        headers=desk_headers,
         json={"content": "您好，已为您加急 #优先发货特权#", "agent_id": "CS-0816"},
     )
     msgs = (await client.get(f"{base}/api/v1/handoff/messages/{sid}", headers=customer_headers)).json()
@@ -286,21 +322,32 @@ async def run_agent_role(client: httpx.AsyncClient, base: str, sid: str, custome
     t0 = time.time()
     tr = (await client.post(
         f"{base}/api/v1/desk/session/{sid}/transfer",
-        json={"from_agent_id": "CS-0816", "to_agent_id": "CS-0922", "note": "E2E转交"},
+        headers=desk_headers,
+        json={"from_agent_id": "CS-0816", "to_agent_id": "CS-1024", "note": "E2E转交主管复核"},
     )).json()
     ok = tr.get("ok") and tr.get("status") == "transferring"
     results.append(CaseResult("ROLE", "agent", "A-transfer-colleague", ok, str(tr.get("pending_agent", {}).get("agent_id")), int((time.time() - t0) * 1000)))
 
     t0 = time.time()
-    acc2 = (await client.post(f"{base}/api/v1/desk/session/{sid}/accept", json={"agent_id": "CS-0922"})).json()
-    ok = acc2.get("ok") and acc2.get("agent", {}).get("agent_id") == "CS-0922"
-    results.append(CaseResult("ROLE", "agent", "A-colleague-accept", ok, acc2.get("agent", {}).get("agent_id", ""), int((time.time() - t0) * 1000)))
+    acc2 = (await client.post(
+        f"{base}/api/v1/desk/session/{sid}/accept",
+        headers=supervisor_headers,
+        json={"agent_id": "CS-1024"},
+    )).json()
+    ok = acc2.get("ok") and acc2.get("agent", {}).get("agent_id") == "CS-1024"
+    results.append(CaseResult("ROLE", "agent", "A-supervisor-accept-transfer", ok, acc2.get("agent", {}).get("agent_id", ""), int((time.time() - t0) * 1000)))
 
 
 # ---------------------------------------------------------------------------
 # 角色：管理员
 # ---------------------------------------------------------------------------
-async def run_admin_role(client: httpx.AsyncClient, base: str, results: list[CaseResult]) -> None:
+async def run_admin_role(
+    client: httpx.AsyncClient,
+    base: str,
+    desk_headers: dict,
+    supervisor_headers: dict,
+    results: list[CaseResult],
+) -> None:
     headers = await admin_auth_headers(client, base)
     t0 = time.time()
     cfg_resp = (await client.get(f"{base}/api/v1/admin/handoff/routing", headers=headers)).json()
@@ -309,36 +356,46 @@ async def run_admin_role(client: httpx.AsyncClient, base: str, results: list[Cas
     results.append(CaseResult("ROLE", "admin", "AD-get-routing", ok, f"rules={len(cfg.get('rules', []))}", int((time.time() - t0) * 1000)))
 
     backup = json.loads(json.dumps(cfg))
-    t0 = time.time()
-    cfg["sla"] = {**(cfg.get("sla") or {}), "first_response_seconds": 179}
-    put = (await client.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=cfg)).json()
-    get = (await client.get(f"{base}/api/v1/admin/handoff/routing", headers=headers)).json()
-    ok = put.get("ok") and get.get("config", {}).get("sla", {}).get("first_response_seconds") == 179
-    results.append(CaseResult("ROLE", "admin", "AD-put-routing-persist", ok, "sla=179", int((time.time() - t0) * 1000)))
+    try:
+        t0 = time.time()
+        cfg["sla"] = {**(cfg.get("sla") or {}), "first_response_seconds": 179}
+        put = (await client.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=cfg)).json()
+        get = (await client.get(f"{base}/api/v1/admin/handoff/routing", headers=headers)).json()
+        ok = put.get("ok") and get.get("config", {}).get("sla", {}).get("first_response_seconds") == 179
+        results.append(CaseResult("ROLE", "admin", "AD-put-routing-persist", ok, "sla=179", int((time.time() - t0) * 1000)))
 
-    t0 = time.time()
-    for rule in cfg.get("rules", []):
-        if rule.get("id") == "high_emotion_supervisor":
-            rule["enabled"] = True
-    await client.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=cfg)
-    sid = f"admin_l5_{int(time.time())}"
-    await reset_session(client, base, sid)
-    data = await request_handoff(client, base, sid, emotion=5)
-    tier = data.get("queue", {}).get("required_tier") or data.get("brief", {}).get("required_tier")
-    bad = (await client.post(f"{base}/api/v1/desk/session/{sid}/accept", json={"agent_id": "CS-0816"})).json()
-    good = (await client.post(f"{base}/api/v1/desk/session/{sid}/accept", json={"agent_id": "CS-1024"})).json()
-    ok = (tier == "supervisor" or bad.get("error") == "need_supervisor") and not bad.get("ok") and good.get("ok")
-    results.append(
-        CaseResult(
-            "ROLE",
-            "admin",
-            "AD-rule-affects-new-session",
-            ok,
-            f"tier={tier}, std={bad.get('error')}, sup={good.get('ok')}",
-            int((time.time() - t0) * 1000),
+        t0 = time.time()
+        for rule in cfg.get("rules", []):
+            if rule.get("id") == "high_emotion_supervisor":
+                rule["enabled"] = True
+        await client.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=cfg)
+        sid = "session_usr_004"
+        await reset_session(client, base, sid)
+        data = await request_handoff(client, base, sid, emotion=5, user_id="usr_004")
+        tier = data.get("queue", {}).get("required_tier") or data.get("brief", {}).get("required_tier")
+        bad = (await client.post(
+            f"{base}/api/v1/desk/session/{sid}/accept",
+            headers=desk_headers,
+            json={"agent_id": "CS-0816"},
+        )).json()
+        good = (await client.post(
+            f"{base}/api/v1/desk/session/{sid}/accept",
+            headers=supervisor_headers,
+            json={"agent_id": "CS-1024"},
+        )).json()
+        ok = (tier == "supervisor" or bad.get("error") == "need_supervisor") and not bad.get("ok") and good.get("ok")
+        results.append(
+            CaseResult(
+                "ROLE",
+                "admin",
+                "AD-rule-affects-new-session",
+                ok,
+                f"tier={tier}, std={bad.get('error')}, sup={good.get('ok')}",
+                int((time.time() - t0) * 1000),
+            )
         )
-    )
-    await client.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=backup)
+    finally:
+        await client.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=backup)
 
     t0 = time.time()
     page = await client.get(f"{base}/admin")
@@ -349,18 +406,28 @@ async def run_admin_role(client: httpx.AsyncClient, base: str, results: list[Cas
 # ---------------------------------------------------------------------------
 # 链路层 — 跨角色编排
 # ---------------------------------------------------------------------------
-async def run_chain_tests(client: httpx.AsyncClient, base: str, results: list[CaseResult]) -> None:
-    sid = f"chain_full_{int(time.time())}"
+async def run_chain_tests(
+    client: httpx.AsyncClient,
+    base: str,
+    desk_headers: dict,
+    supervisor_headers: dict,
+    results: list[CaseResult],
+) -> None:
+    sid = "session_usr_003"
     await reset_session(client, base, sid)
 
     t0 = time.time()
-    handoff = await request_handoff(client, base, sid, emotion=4)
+    handoff = await request_handoff(client, base, sid, emotion=4, user_id="usr_003")
     headers = handoff_headers(handoff)
     st = (await client.get(f"{base}/api/v1/handoff/status/{sid}", headers=headers)).json()
     ok = st.get("status") == "queuing"
     results.append(CaseResult("CHAIN", "customer", "L-queue-before-accept", ok, st.get("status", ""), int((time.time() - t0) * 1000)))
 
-    await client.post(f"{base}/api/v1/desk/session/{sid}/accept", json={"agent_id": "CS-0816"})
+    await client.post(
+        f"{base}/api/v1/desk/session/{sid}/accept",
+        headers=desk_headers,
+        json={"agent_id": "CS-0816"},
+    )
     t0 = time.time()
     conn = (await client.post(f"{base}/api/v1/handoff/connect", params={"session_id": sid}, headers=headers)).json()
     ok = conn.get("ok") and conn.get("status") == "connected" and conn.get("welcome")
@@ -369,7 +436,7 @@ async def run_chain_tests(client: httpx.AsyncClient, base: str, results: list[Ca
     t0 = time.time()
     obs = (await client.post(
         f"{base}/api/v1/handoff/user-message",
-        json={"session_id": sid, "content": "@虾饺 帮我和专员确认发货时间", "user_id": "usr_e2e"},
+        json={"session_id": sid, "content": "@虾饺 帮我和专员确认发货时间", "user_id": "usr_003"},
         headers=headers,
     )).json()
     messages = obs.get("messages") or []
@@ -379,26 +446,37 @@ async def run_chain_tests(client: httpx.AsyncClient, base: str, results: list[Ca
     ok = obs.get("ok") and len(observer) >= 1 and not bad
     results.append(CaseResult("CHAIN", "customer", "L-observer-xiaojiao", ok, text[:90], int((time.time() - t0) * 1000)))
 
-    sid2 = f"chain_esc_{int(time.time())}"
+    sid2 = "session_usr_002"
     await reset_session(client, base, sid2)
-    await request_handoff(client, base, sid2, emotion=3)
-    await client.post(f"{base}/api/v1/desk/session/{sid2}/accept", json={"agent_id": "CS-0816"})
+    await request_handoff(client, base, sid2, emotion=3, user_id="usr_002")
+    await client.post(
+        f"{base}/api/v1/desk/session/{sid2}/accept",
+        headers=desk_headers,
+        json={"agent_id": "CS-0816"},
+    )
     t0 = time.time()
     esc = (await client.post(
         f"{base}/api/v1/desk/session/{sid2}/escalate",
+        headers=desk_headers,
         json={"note": "用户威胁投诉"},
     )).json()
-    detail = (await client.get(f"{base}/api/v1/desk/session/{sid2}")).json()
+    detail = (await client.get(f"{base}/api/v1/desk/session/{sid2}", headers=desk_headers)).json()
     ok = esc.get("ok") and esc.get("status") == "escalated" and detail.get("required_tier") == "supervisor"
     results.append(CaseResult("CHAIN", "agent", "L-escalate-to-supervisor", ok, esc.get("status", ""), int((time.time() - t0) * 1000)))
 
     t0 = time.time()
-    acc = (await client.post(f"{base}/api/v1/desk/session/{sid2}/accept", json={"agent_id": "CS-1024"})).json()
+    acc = (await client.post(
+        f"{base}/api/v1/desk/session/{sid2}/accept",
+        headers=supervisor_headers,
+        json={"agent_id": "CS-1024"},
+    )).json()
     ok = acc.get("ok") and acc.get("status") == "connected"
     results.append(CaseResult("CHAIN", "agent", "L-supervisor-accept-escalated", ok, acc.get("agent", {}).get("agent_id", ""), int((time.time() - t0) * 1000)))
 
     t0 = time.time()
-    r = await request_handoff(client, base, f"chain_tag_{int(time.time())}", emotion=2, intent="物流")
+    sid3 = "session_usr_001"
+    await reset_session(client, base, sid3)
+    r = await request_handoff(client, base, sid3, emotion=2, intent="物流", user_id="usr_001")
     brief = r.get("brief") or {}
     tag_ok = "#优先发货特权#" in str(brief.get("ai_dialogue_summary", "")) or "#优先发货特权#" in str(brief.get("conversation_snippet", ""))
     results.append(CaseResult("CHAIN", "system", "L-brief-richtext-tag", tag_ok, (brief.get("ai_dialogue_summary") or "")[:80], int((time.time() - t0) * 1000)))
@@ -440,14 +518,35 @@ async def run_api_suite(results: list[CaseResult]) -> tuple[str, int]:
 
         print(f"[E2E] API 套件 base={base}")
 
-        await run_comm_tests(client, base, results)
-        await run_ws_tests(client, base, results)
+        desk_headers = await staff_auth_headers(
+            client,
+            base,
+            os.getenv("E2E_DESK_USERNAME", "desk0816"),
+            os.getenv("E2E_DESK_PASSWORD", "desk123"),
+        )
+        supervisor_headers = await staff_auth_headers(
+            client,
+            base,
+            os.getenv("E2E_SUPERVISOR_USERNAME", "supervisor"),
+            os.getenv("E2E_SUPERVISOR_PASSWORD", "super123"),
+        )
+
+        await run_comm_tests(client, base, desk_headers, results)
+        await run_ws_tests(client, base, desk_headers, results)
 
         sid, customer_headers = await run_customer_role(client, base, results)
-        await run_agent_role(client, base, sid, customer_headers, results)
+        await run_agent_role(
+            client,
+            base,
+            sid,
+            customer_headers,
+            desk_headers,
+            supervisor_headers,
+            results,
+        )
         await run_customer_after_agent(client, base, sid, customer_headers, results)
-        await run_admin_role(client, base, results)
-        await run_chain_tests(client, base, results)
+        await run_admin_role(client, base, desk_headers, supervisor_headers, results)
+        await run_chain_tests(client, base, desk_headers, supervisor_headers, results)
 
     return base, 0
 
