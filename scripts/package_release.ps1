@@ -9,10 +9,19 @@ $ZipName = "MITAKO_Agent-customer-preview-$Date.zip"
 $ZipPath = Join-Path (Split-Path -Parent $Root) $ZipName
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_customer_stage_$Date"
 $CompileStage = Join-Path $env:TEMP "mitako_runtime_compile_$Date"
+$GitCommit = (git rev-parse HEAD).Trim()
+$TrackedChanges = @(git status --porcelain --untracked-files=no)
+if ($TrackedChanges.Count -gt 0) {
+    throw "Tracked files contain uncommitted changes. Commit them before creating an auditable customer package."
+}
 
 $InternalBaseUrl = if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }
 $InternalVisualUrl = if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }
 & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $InternalBaseUrl -VisualUrl $InternalVisualUrl
+$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=no)
+if ($TrackedChangesAfterValidation.Count -gt 0) {
+    throw "Release validation changed tracked files. Review and commit them before customer packaging."
+}
 
 function Resolve-PythonRuntime {
     foreach ($candidate in @(
@@ -572,6 +581,7 @@ $RuntimeFiles = @(
     "logging_utils.py",
     "ops_service.py",
     "partner_guard.py",
+    "review_input_safety.py",
     "runtime_paths.py",
     "sla_lock.py",
     "viking_memory.py",
@@ -579,7 +589,18 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\workbench_server.py",
     "poc\visual_review_poc\local_video_triage_demo.py",
     "poc\visual_review_poc\model_selection_e2e.py",
+    "poc\visual_review_poc\continuity_model_prompt.py",
+    "poc\visual_review_poc\damage_causality.py",
+    "poc\visual_review_poc\damage_causality_model_prompt.py",
+    "poc\visual_review_poc\fulfillment_reconciliation.py",
+    "poc\visual_review_poc\model_catalog.py",
+    "poc\visual_review_poc\model_result_scoring.py",
+    "poc\visual_review_poc\object_continuity.py",
+    "poc\visual_review_poc\report_assessment_sections.py",
     "poc\visual_review_poc\report_renderer.py",
+    "poc\visual_review_poc\review_model_prompt.py",
+    "poc\visual_review_poc\sample_evaluation.py",
+    "poc\visual_review_poc\specialized_model_pass.py",
     "poc\visual_review_poc\url_video_fetcher.py"
 )
 
@@ -800,7 +821,10 @@ $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbe
 
 $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
+    "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-16.html",
+    "甲方沟通交付文档\视觉审核下一轮测试建议-2026-07-16.md",
     "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
     "甲方沟通交付文档\0714反馈整改与验收说明-2026-07-15.md",
     "runtime\app_runtime.zip",
@@ -820,7 +844,7 @@ foreach ($relativePath in $customerEvidenceFiles) {
 }
 $customerManifest = [ordered]@{
     generated_at = (Get-Date).ToString("s")
-    git_commit = (git rev-parse HEAD).Trim()
+    git_commit = $GitCommit
     delivery_mode = "customer_demo_preview"
     auth_mode = "demo_bypass"
     evidence = $customerEvidence
