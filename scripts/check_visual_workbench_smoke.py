@@ -98,11 +98,21 @@ def test_workbench_api() -> None:
     )
     assert rejected.status_code == 400
 
-    single_failure = workbench_server._public_result(
-        False,
-        "商品有伤审核",
-        {"status": "review_timeout", "status_code": 429, "error_type": "soft"},
-    )
+    with tempfile.TemporaryDirectory() as temp_dir:
+        single_failure = workbench_server._agent_report_response(
+            {
+                "case_id": "SMOKE-FAILURE",
+                "scenario": "product_damage",
+                "scenario_label": "商品有伤审核",
+                "videos": [],
+                "frames": [],
+                "supplemental_images": [],
+                "structured_business_context": {},
+            },
+            Path(temp_dir),
+            {"status": "failed", "status_code": 429, "error_type": "soft", "error": "review_timeout"},
+            "smoke_failure",
+        )
     assert single_failure["summary"]["cases"] == 1, single_failure
     assert single_failure["summary"]["total_reviews"] == 1, single_failure
     assert single_failure["summary"]["successful_reviews"] == 0, single_failure
@@ -136,7 +146,7 @@ def test_workbench_api() -> None:
     assert data["summary"]["accuracy"] == 0.75, data
     assert data["summary"]["target_evaluable"] == 4, data
     assert data["summary"]["target_accuracy"] == 0.75, data
-    assert data["summary"]["ready_for_accuracy"] is False, data
+    assert data["summary"]["ready_for_accuracy"] is None, data
     assert not FORBIDDEN_PUBLIC_TERMS.search(json.dumps(data, ensure_ascii=False)), data
 
     json_payload = {
@@ -194,12 +204,12 @@ def test_workbench_api() -> None:
         "/api/evaluate-samples",
         files={"file": ("not_ready.csv", "\n".join(rows_without_prediction).encode("utf-8"), "text/csv")},
     ).json()
-    assert not_ready["summary"]["ready_for_accuracy"] is False, not_ready
+    assert not_ready["summary"]["ready_for_accuracy"] is None, not_ready
     ready = client.post(
         "/api/evaluate-samples",
         files={"file": ("ready.csv", "\n".join(rows_ready).encode("utf-8"), "text/csv")},
     ).json()
-    assert ready["summary"]["ready_for_accuracy"] is True, ready
+    assert ready["summary"]["ready_for_accuracy"] is None, ready
     assert ready["summary"]["evaluable"] == 300, ready
     assert ready["summary"]["target_evaluable"] == 300, ready
     assert ready["summary"]["accuracy"] == 1.0, ready
@@ -627,18 +637,10 @@ def test_review_prompt_policy() -> None:
 
 
 def test_public_report_redaction() -> Path:
-    from poc.visual_review_poc.workbench_server import _agent_report_response, _public_result
+    from poc.visual_review_poc.workbench_server import _agent_report_response
 
     public_dir = ROOT / "poc" / "visual_review_poc" / "reports" / "public_summaries"
     before = {item.name for item in public_dir.glob("*.json")} if public_dir.exists() else set()
-
-    result = _public_result(True, "高精度审核", {"summary": {"available": True, "hit": False}})
-    report_name = result["report"]["html_url"].rsplit("/", 1)[-1]
-    html_path = ROOT / "poc" / "visual_review_poc" / "reports" / "public_summaries" / Path(report_name).with_suffix(".json").name
-    assert html_path.exists(), html_path
-    data = json.loads(html_path.read_text(encoding="utf-8"))
-    assert not FORBIDDEN_PUBLIC_TERMS.search(json.dumps(data, ensure_ascii=False)), data
-    assert not contains_forbidden_public_key(data), data
 
     sample_dir = ROOT / "docs" / "三大审核场景的小量样本" / "sample_004"
     agent = _agent_report_response(
@@ -689,7 +691,7 @@ def test_public_report_redaction() -> Path:
             continue
         payload = json.loads(item.read_text(encoding="utf-8"))
         assert not contains_forbidden_public_key(payload), item
-    return html_path
+    return agent_json
 
 
 def test_public_report_root_has_no_technical_reports() -> None:

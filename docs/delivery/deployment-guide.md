@@ -63,7 +63,7 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 - JWT/访问保护相关变量。
 - 主文本服务凭证。
 - 视觉审核服务凭证。
-- `VISUAL_WORKBENCH_URL` 或视觉服务端口。
+- `VISUAL_WORKBENCH_URL`：主服务调用视觉执行器的内网地址；分机部署时必须显式配置。未配置时才回退 `VISUAL_WORKBENCH_PORT`。
 - 主服务和视觉服务上传/案件大小限制。
 - 数据目录和日志目录。
 

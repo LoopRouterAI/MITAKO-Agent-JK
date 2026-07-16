@@ -73,6 +73,7 @@ python tests/e2e/run_desk_admin_screenshot_report.py
 | `docs/delivery/openapi.yaml` | 面向 Java 技术栈的接口契约参考 |
 | `docs/delivery/mitako-full-requirement-reaudit-20260711.html` | 全需求复核与未完成边界报告 |
 | `docs/delivery/mitako-0714-adversarial-acceptance-20260715.html` | 0714 反馈整改、真实样本与对抗式验收报告 |
+| `docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html` | 0715 评测复核、三通道审核、损伤因果、履约对账与边界报告 |
 | `docs/delivery/deployment-guide.md` | 部署与上线说明 |
 | `Codex接续开发交接说明.md` | 迁移到另一台设备和 Codex 接续开发的上下文 |
 | `tests/reports/customer_chat_acceptance_20260706.html` | 用户端客服交互最后一轮验收报告 |

@@ -142,10 +142,12 @@ def main() -> int:
             "duration_seconds": 452.5,
             "source_bytes": 543351335,
             "video_count": 1,
+            "scenario": "product_damage",
             "sampling_policy": {"preset": "strict", "frames_per_model_call": 24},
         },
     )
     sampling_plan = sampling.get("plan") or {}
+    channel_calls = sampling_plan.get("estimated_channel_calls") or {}
     _case(
         results,
         "REVIEW-sampling-plan",
@@ -153,8 +155,41 @@ def main() -> int:
         and sampling_plan.get("fps") == 1.0
         and sampling_plan.get("estimated_frames_per_video", 0) >= 453
         and sampling_plan.get("estimated_model_segments") == 19
+        and channel_calls.get("main_review") == 19
+        and channel_calls.get("object_continuity", 0) > 0
+        and channel_calls.get("damage_causality", 0) > 0
+        and sampling_plan.get("estimated_total_model_calls") == sum(channel_calls.values())
         and sampling_plan.get("transcode_recommended") is True,
         f"plan={sampling_plan}",
+        t0,
+    )
+
+    t0 = time.time()
+    code, adaptive_sampling = _request(
+        "POST",
+        f"{base}/api/v1/review/sampling-plan",
+        token=admin_token,
+        json_body={
+            "duration_seconds": 452.5,
+            "source_bytes": 543351335,
+            "video_count": 1,
+            "scenario": "product_damage",
+            "sampling_policy": {"preset": "adaptive", "frames_per_model_call": 24},
+        },
+    )
+    adaptive_plan = adaptive_sampling.get("plan") or {}
+    adaptive_channels = adaptive_plan.get("estimated_channel_calls") or {}
+    _case(
+        results,
+        "REVIEW-adaptive-cost-boundary",
+        code == 200
+        and adaptive_plan.get("sampling_mode") == "adaptive"
+        and adaptive_plan.get("estimated_frames_per_video") == 18
+        and adaptive_channels.get("main_review") == 1
+        and adaptive_channels.get("object_continuity") == 0
+        and adaptive_channels.get("damage_causality") == 0
+        and adaptive_plan.get("estimated_total_model_calls") == 1,
+        f"plan={adaptive_plan}",
         t0,
     )
 
@@ -167,11 +202,35 @@ def main() -> int:
             "client_case_id": "api-smoke-missing-item",
             "scenario": "missing_item",
             "customer_claim": "订单有两件商品，用户称只收到一件；本项只校验接口字段，不作为准确率样本。",
-            "order_items": [{"sku": "api-smoke-sku", "quantity": 2}],
-            "logistics": {"split_shipment": False},
+            "fulfillment_baseline": {
+                "baseline_version": "api-smoke-order@v1",
+                "expected_items": [
+                    {"item_ref": "line-1", "sku": "api-smoke-sku", "expected_quantity": 2}
+                ],
+                "expected_package_count": 1,
+                "packages": [
+                    {"package_ref": "pkg-1", "tracking_no": "api-smoke-tracking-1", "expected_item_refs": ["line-1"]}
+                ],
+                "benefit_rules_complete": True,
+                "selection_rules_complete": True,
+            },
+            "evidence_coverage": {
+                "submitted_package_refs": ["pkg-1"],
+                "submitted_tracking_nos": ["api-smoke-tracking-1"],
+                "all_packages_uploaded": True,
+                "all_items_displayed": True,
+            },
         },
     )
-    _case(results, "REVIEW-missing-item-metadata", code == 200 and (missing_item_metadata.get("metadata") or {}).get("scenario") == "missing_item", f"status={code}", t0)
+    _case(
+        results,
+        "REVIEW-missing-item-metadata",
+        code == 200
+        and (missing_item_metadata.get("metadata") or {}).get("scenario") == "missing_item"
+        and (missing_item_metadata.get("readiness") or {}).get("full_review_ready") is True,
+        f"status={code} readiness={(missing_item_metadata.get('readiness') or {}).get('status')}",
+        t0,
+    )
 
     t0 = time.time()
     code, group = _request(

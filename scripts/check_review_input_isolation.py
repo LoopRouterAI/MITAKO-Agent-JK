@@ -14,7 +14,7 @@ REPORT = ROOT / "tests" / "reports" / "review_input_isolation_latest.json"
 
 
 def main() -> int:
-    base_url = os.getenv("E2E_BASE_URL", "http://127.0.0.1:8015").rstrip("/")
+    base_url = os.getenv("E2E_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
     with httpx.Client(timeout=30) as client:
         login = client.post(
             f"{base_url}/api/v1/auth/login",

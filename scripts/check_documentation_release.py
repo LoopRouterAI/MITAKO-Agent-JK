@@ -22,10 +22,13 @@ REQUIRED_FILES = (
     "docs/delivery/openapi.yaml",
     "docs/delivery/mitako-full-requirement-reaudit-20260711.html",
     "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
+    "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
+    "docs/delivery/客服Agent与私域Agent正式接入前人工UAT指南_20260716.md",
     "甲方沟通交付文档/README.md",
     "甲方沟通交付文档/index.html",
     "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
     "甲方沟通交付文档/0714反馈整改与验收说明-2026-07-15.md",
+    "甲方沟通交付文档/视觉审核下一轮测试建议-2026-07-16.md",
     "甲方沟通交付文档/新版本交付说明-2026-07-11.md",
     "我方内部开发文档/README.md",
     "我方内部开发文档/index.html",
@@ -35,6 +38,7 @@ REQUIRED_FILES = (
     "我方内部开发文档/内部研发包交付说明.md",
     "我方内部开发文档/升级日志-2026-07-11.md",
     "我方内部开发文档/升级日志-2026-07-15.md",
+    "我方内部开发文档/升级日志-2026-07-16.md",
 )
 REQUIRED_API_PATHS = (
     "/api/v1/review/contracts",

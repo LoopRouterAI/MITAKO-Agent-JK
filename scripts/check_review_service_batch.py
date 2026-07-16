@@ -216,8 +216,17 @@ def main() -> int:
         all_videos_represented = not videos or {
             int(item.get("video_index")) for item in videos if item.get("video_index") is not None
         }.issubset({int(item.get("video_index")) for item in gallery_frames if item.get("video_index") is not None})
-        expected_strategy = "full_timeline_adaptive" if args.sampling_preset == "adaptive" else "full_timeline_dense"
-        timeline_ok = all(item.get("sampling_strategy") == expected_strategy for item in videos)
+        allowed_strategies = (
+            {"full_timeline_adaptive", "full_timeline_dense"}
+            if args.sampling_preset == "adaptive"
+            else {"full_timeline_dense"}
+        )
+        timeline_ok = all(
+            item.get("sampling_strategy") in allowed_strategies
+            and float(item.get("timeline_coverage_ratio") or 0) >= 0.9
+            and int(item.get("sampled_frames") or 0) > 0
+            for item in videos
+        )
         source_fields_ok = (job.get("metadata") or {}).get("source_record") == read_json(SAMPLE_ROOT / item["sample_id"] / "manifest.json", {})
         report_url = (review.get("report") or {}).get("html_url") or ""
         with httpx.Client(timeout=30) as client:

@@ -44,73 +44,33 @@ from poc.visual_review_poc.local_video_triage_demo import (
     policy_decision,
     sample_video_frames,
 )
+from poc.visual_review_poc.damage_causality import (
+    aggregate_damage_causality,
+    apply_damage_causality_guard,
+)
+from poc.visual_review_poc.object_continuity import (
+    aggregate_object_continuity,
+    apply_object_continuity_guard,
+)
+from poc.visual_review_poc.model_catalog import MODEL_CONFIGS, PRICING_NOTE
+from poc.visual_review_poc.review_model_prompt import build_selection_prompt
+from poc.visual_review_poc.model_result_scoring import score_result
+from poc.visual_review_poc.fulfillment_reconciliation import (
+    aggregate_fulfillment_reconciliation,
+    apply_fulfillment_guard,
+)
+from poc.visual_review_poc.specialized_model_pass import run_specialized_frame_pass
 from runtime_paths import app_root
 
 ROOT = app_root()
 SAMPLE_ROOT = ROOT / "docs" / "三大审核场景的小量样本"
 CNY_PER_USD = 7.0
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
-PRICING_NOTE = "Gemini 3.1 Flash Lite 按用户成本表 0.25/1.50 USD 每百万 tokens 并按 7 元/USD 折算；Qwen3.5-Flash 与 Doubao Seed 2.0 Lite 按用户提供阶梯价依据输入 tokens 选择区间；本轮未使用音频输入。Gemini 3.5 Flash 仍按脚本内官方价格基准估算。"
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
-
-
-MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
-    "gemini35": {
-        "label": "Gemini 3.5 Flash",
-        "provider": "gemini_native",
-        "model": "gemini-3.5-flash",
-        "input_price": 1.50,
-        "output_price": 9.00,
-        "currency": "USD",
-        "source": "https://ai.google.dev/gemini-api/docs/pricing",
-    },
-    "gemini31lite": {
-        "label": "Gemini 3.1 Flash Lite",
-        "provider": "gemini_native",
-        "model": "gemini-3.1-flash-lite",
-        "input_price": 0.25,
-        "output_price": 1.50,
-        "currency": "USD",
-        "source": "https://ai.google.dev/gemini-api/docs/pricing",
-    },
-    "qwen35flash": {
-        "label": "Qwen3.5 Flash",
-        "provider": "openai_compatible",
-        "model": "qwen3.5-flash",
-        "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-        "key_env": "DASHSCOPE_API_KEY",
-        "input_price": 0.20,
-        "output_price": 2.00,
-        "currency": "CNY",
-        "source": "用户提供成本表：Qwen3.5-Flash 阶梯价",
-        "pricing_tiers": [
-            {"max_input_tokens": 128_000, "input_price": 0.20, "output_price": 2.00},
-            {"max_input_tokens": 256_000, "input_price": 0.80, "output_price": 8.00},
-            {"max_input_tokens": 1_000_000, "input_price": 1.20, "output_price": 12.00},
-        ],
-    },
-    "doubao20lite": {
-        "label": "Doubao Seed 2.0 Lite",
-        "provider": "openai_compatible",
-        "model": "doubao-seed-2-0-lite-260428",
-        "display_model": "doubao-seed-2.0-lite",
-        "endpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-        "key_env": "ARK_API_KEY",
-        "input_price": 0.60,
-        "output_price": 3.60,
-        "currency": "CNY",
-        "source": "用户提供成本表：Doubao-Seed-2.0-lite 阶梯价",
-        "pricing_tiers": [
-            {"max_input_tokens": 32_000, "input_price": 0.60, "output_price": 3.60},
-            {"max_input_tokens": 128_000, "input_price": 0.90, "output_price": 5.40},
-            {"max_input_tokens": 256_000, "input_price": 1.80, "output_price": 10.80},
-        ],
-    },
-}
 
 
 def parse_args() -> argparse.Namespace:
@@ -176,6 +136,14 @@ def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) 
     frame_groups: List[List[Dict[str, Any]]] = []
     video_summaries = []
     for video_index, video in enumerate(videos, start=1):
+        window_metadata: Dict[str, Any] = {}
+        window_sidecar = video.with_suffix(video.suffix + ".window.json")
+        if window_sidecar.exists():
+            try:
+                window_metadata = json.loads(window_sidecar.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError):
+                window_metadata = {}
+        source_offset = float(window_metadata.get("source_start_seconds") or 0.0)
         sample = sample_video_frames(
             video,
             args.fps,
@@ -186,12 +154,20 @@ def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) 
             args.sampling_mode,
         )
         picked = sample["frames"]
-        video_summaries.append({"video_index": video_index, "file": video.name, **{k: v for k, v in sample.items() if k != "frames"}})
+        video_summaries.append({
+            "video_index": video_index,
+            "file": video.name,
+            "source_start_seconds": source_offset,
+            "source_end_seconds": window_metadata.get("source_end_seconds"),
+            **{k: v for k, v in sample.items() if k != "frames"},
+        })
         group: List[Dict[str, Any]] = []
         for frame in picked:
             copied = dict(frame)
             copied["video_index"] = video_index
             copied["video_file"] = video.name
+            copied["source_timestamp_seconds"] = round(float(copied.get("timestamp_seconds") or 0) + source_offset, 3)
+            copied["source_timestamp"] = format_time(copied["source_timestamp_seconds"])
             group.append(copied)
         frame_groups.append(group)
     case["videos"] = video_summaries
@@ -207,90 +183,15 @@ def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) 
     return case
 
 
-def build_selection_prompt(case: Dict[str, Any]) -> str:
-    frames = [
-        {
-            "global_frame_index": f["global_frame_index"],
-            "video_index": f["video_index"],
-            "video_file": f["video_file"],
-            "timestamp": f["timestamp"],
-            "file": f["file"],
-        }
-        for f in case["frames"]
-    ]
-    images = [
-        {
-            "image_index": i["image_index"],
-            "file": i["file"],
-            "fields": i.get("fields", []),
-            "width": i.get("width"),
-            "height": i.get("height"),
-            "has_exif": i.get("has_exif"),
-        }
-        for i in case["supplemental_images"]
-    ]
-    return f"""请基于同一证据包进行售后视觉审核。
-
-审核场景：{case.get("scenario_label")}
-用户诉求：{case.get("customer_claim") or "未提供"}
-订单/工单上下文：{json.dumps(case.get("order_context") or {}, ensure_ascii=False)}
-结构化业务上下文：{json.dumps(case.get("structured_business_context") or {}, ensure_ascii=False)}
-证据资源字段说明：{json.dumps(case.get("evidence_assets") or [], ensure_ascii=False)}
-视频清单：{json.dumps(case.get("videos") or [], ensure_ascii=False)}
-送入模型的视频帧清单：{json.dumps(frames, ensure_ascii=False)}
-送入模型的补充图片清单：{json.dumps(images, ensure_ascii=False)}
-
-审核方法要求：
-1. 先拆解用户诉求：用户认为应该收到什么、实际收到什么、争议类型是什么。
-2. 再核对业务上下文：订单商品名、SKU、规格、角色、款式、数量、随机/盲抽规则，以及仓库/商品主数据。
-3. 对所有视频按 video_index + global_frame_index + timestamp 做跨帧审查：箱子/商品是否持续在镜头内，是否离镜、跳切、遮挡、换手、剪辑或可能调包。
-4. 对补充图片做交叉验证：是否能对应视频里的同一实物，是否有 EXIF、低分辨率、AI 水印、生成痕迹、局部裁剪或过度锐化风险。
-5. 必须同时写支持证据和反证/不确定性。证据足够时要敢于输出 positive 或 negative；证据不足才输出 review。
-6. 只能引用已提供的帧编号和时间戳，不得编造不存在的时间点。
-7. 样本目录名、人工结论、expected_predicted_label 没有提供给你；你只能根据本证据包独立判断。
-
-请严格输出 JSON 对象，字段：
-- decision: pass / manual_review / request_more_material / fail。只表示 POC 流转，不代表业务裁决。
-- predicted_label: positive / negative / review。
-- system_yes_no: YES / NO / REVIEW。
-- confidence: 0 到 1。
-- overall_audit: 整体审核结论，必须包含 conclusion、confidence、core_reason、business_follow_up_suggestion。
-- visual_evidence_verdict: 一句话视觉质检结论。
-- visual_qc_conclusion: 视觉质检结论，必须包含 verdict、confidence、core_reason。
-- confidence_reason: 置信度理由。
-- video_audit_conclusion: 视频审核结论，必须包含 continuity_score、continuity_reason、swap_risk_level(high/medium/low)、edit_or_cut_risk、opening_integrity。
-- customer_claim_parse: expected_item、claimed_received_item、claimed_mismatch_type。
-- expected_order_item: 订单要求的商品/角色/SKU/规格/数量。
-- actual_received_item: 实际收到的商品/角色/SKU/规格/数量或破损事实。
-- audit_methods: 实际使用的审核方法数组。
-- frame_findings: 每帧一句客观观察，必须含 video_index、global_frame_index、timestamp、visible_facts、risk。
-- adopted_evidence: 模型采信的关键证据数组，每项必须含 source_type、video_index、global_frame_index 或 image_index、timestamp、file、fact、why_it_matters、confidence；必须能回链到上方帧清单或补充图片清单。
-- supporting_evidence: 支持用户诉求的证据数组。
-- challenging_evidence: 反证或风险数组。
-- continuity_assessment: 多视频整体连续性、调包/剪辑风险。
-- authenticity_assessment: 图片真实性、AI生成/水印/EXIF/低分辨率/裁剪风险，尤其商品有伤场景必须填写。
-- size_sku_assessment: 发错货/发错尺寸场景填写；其他场景可写 null。
-- issue_timestamps: 问题帧数组，只能使用上面帧清单中的时间戳。
-- skeptical_questions: 你主动质疑自己结论的问题数组。
-- material_gaps: 还缺什么材料。
-- conclusion_argument: support、challenge、why_not_final_business_decision。
-- business_action_allowed: false。
-- human_required: true。
-- business_follow_up_reason: 人工跟进原因。
-- next_step: 后续VIP客服建议，不直接退款、拒赔、补发或定责。
-- model_limitations: 局限。
-"""
-
-
 def gemini_payload(system_prompt: str, user_prompt: str, case: Dict[str, Any]) -> Dict[str, Any]:
     parts: List[Dict[str, Any]] = [{"text": user_prompt}]
     for frame in case["frames"]:
         path = Path(frame["api_path"])
-        parts.append({"text": f"视频{frame['video_index']} 帧{frame['global_frame_index']} / {frame['timestamp']} / {frame['video_file']}"})
+        parts.append({"text": f"视频{frame['video_index']} 帧{frame['global_frame_index']} / {frame['timestamp']} / asset_ref=video_{frame['video_index']}_frame_{frame['global_frame_index']}"})
         parts.append({"inline_data": {"mime_type": frame["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     for image in case["supplemental_images"]:
         path = Path(image["api_path"])
-        parts.append({"text": f"补充图片 {image['image_index']} / {image['file']} / fields={image.get('fields', [])}"})
+        parts.append({"text": f"补充图片 {image['image_index']} / asset_ref=supplemental_image_{image['image_index']}"})
         parts.append({"inline_data": {"mime_type": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     return {
         "system_instruction": {"parts": [{"text": system_prompt}]},
@@ -303,11 +204,11 @@ def openai_messages(system_prompt: str, user_prompt: str, case: Dict[str, Any]) 
     content: List[Dict[str, Any]] = [{"type": "text", "text": user_prompt}]
     for frame in case["frames"]:
         path = Path(frame["api_path"])
-        content.append({"type": "text", "text": f"视频{frame['video_index']} 帧{frame['global_frame_index']} / {frame['timestamp']} / {frame['video_file']}"})
+        content.append({"type": "text", "text": f"视频{frame['video_index']} 帧{frame['global_frame_index']} / {frame['timestamp']} / asset_ref=video_{frame['video_index']}_frame_{frame['global_frame_index']}"})
         content.append({"type": "image_url", "image_url": {"url": data_url(path, frame["api_mime_type"])}})
     for image in case["supplemental_images"]:
         path = Path(image["api_path"])
-        content.append({"type": "text", "text": f"补充图片 {image['image_index']} / {image['file']} / fields={image.get('fields', [])}"})
+        content.append({"type": "text", "text": f"补充图片 {image['image_index']} / asset_ref=supplemental_image_{image['image_index']}"})
         content.append({"type": "image_url", "image_url": {"url": data_url(path, image["api_mime_type"])}})
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}]
 
@@ -414,6 +315,7 @@ def compact_response(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
     business_scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or "")
+    analysis_mode = str((case.get("structured_business_context") or {}).get("analysis_mode") or "")
     system_prompt = build_system_prompt(business_scenario or case["scenario"])
     user_prompt = build_selection_prompt(case)
     if cfg["provider"] == "gemini_native":
@@ -455,7 +357,25 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
             "raw": raw_usage,
         }
     parsed_before_boundary = parse_model_json(text)
-    parsed = enforce_boundary(parsed_before_boundary)
+    if analysis_mode in {"object_continuity_only", "damage_causality_only"}:
+        parsed = parsed_before_boundary
+    else:
+        if (business_scenario or case["scenario"]) in {"wrong_item", "missing_item"}:
+            parsed_before_boundary["fulfillment_reconciliation"] = aggregate_fulfillment_reconciliation(
+                [parsed_before_boundary], case, business_scenario or case["scenario"]
+            )
+        parsed = apply_damage_causality_guard(
+            enforce_boundary(parsed_before_boundary),
+            business_scenario or case["scenario"],
+            case.get("frames") or [],
+        )
+        parsed = apply_object_continuity_guard(
+            parsed,
+            business_scenario or case["scenario"],
+            bool(case.get("videos") or case.get("frames")),
+            (case.get("structured_business_context") or {}).get("continuity_policy"),
+        )
+        parsed = apply_fulfillment_guard(parsed, business_scenario or case["scenario"])
     label = load_report_label(case["case_id"])
     return {
         "status": "success",
@@ -479,7 +399,24 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
     }
 
 
-def _aggregate_chunk_results(case: Dict[str, Any], results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _aggregate_chunk_results(
+    case: Dict[str, Any],
+    results: List[Dict[str, Any]],
+    continuity_results: Optional[List[Dict[str, Any]]] = None,
+    continuity_failures: Optional[List[Dict[str, Any]]] = None,
+    causality_results: Optional[List[Dict[str, Any]]] = None,
+    causality_failures: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    def channel_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return {
+            "model_calls": len(items),
+            "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in items), 2),
+            "input_tokens": sum(int((item.get("usage") or {}).get("input_tokens") or 0) for item in items),
+            "output_tokens": sum(int((item.get("usage") or {}).get("output_tokens") or 0) for item in items),
+            "total_tokens": sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in items),
+            "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in items), 6),
+        }
+
     parsed_rows = [item.get("parsed") or {} for item in results]
     confidences = [float(item.get("confidence") or 0) for item in parsed_rows]
     best_index = max(range(len(parsed_rows)), key=lambda index: confidences[index])
@@ -493,6 +430,33 @@ def _aggregate_chunk_results(case: Dict[str, Any], results: List[Dict[str, Any]]
     confidence = round(sum(confidences) / max(len(confidences), 1), 4)
     for key in ("frame_findings", "adopted_evidence", "supporting_evidence", "challenging_evidence", "issue_timestamps", "material_gaps", "skeptical_questions", "audit_methods"):
         parsed[key] = [entry for item in parsed_rows for entry in (item.get(key) or [])][:120]
+    business_scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or case.get("scenario") or "")
+    causality_complete = bool(causality_results) and not causality_failures
+    causality_rows = [item.get("parsed") or {} for item in (causality_results or [])] if causality_complete else []
+    if business_scenario == "product_damage":
+        parsed["damage_causality_assessment"] = aggregate_damage_causality(causality_rows or parsed_rows)
+        if causality_rows:
+            parsed["causality_frame_findings"] = [
+                finding
+                for row in causality_rows
+                for finding in (row.get("frame_findings") or [])
+            ][:2400]
+    continuity_complete = bool(continuity_results) and not continuity_failures
+    continuity_rows = [item.get("parsed") or {} for item in (continuity_results or [])] if continuity_complete else []
+    if case.get("videos") or case.get("frames"):
+        parsed["object_continuity_assessment"] = aggregate_object_continuity(
+            continuity_rows or parsed_rows,
+            case.get("frames") or [],
+            (case.get("structured_business_context") or {}).get("continuity_policy"),
+        )
+        if continuity_rows:
+            parsed["continuity_frame_findings"] = [
+                finding
+                for row in continuity_rows
+                for finding in (row.get("frame_findings") or [])
+            ][:2400]
+    if business_scenario in {"wrong_item", "missing_item"}:
+        parsed["fulfillment_reconciliation"] = aggregate_fulfillment_reconciliation(parsed_rows, case, business_scenario)
     conclusions = [str((item.get("overall_audit") or {}).get("conclusion") or "").strip() for item in parsed_rows]
     parsed.update({
         "predicted_label": predicted,
@@ -511,31 +475,95 @@ def _aggregate_chunk_results(case: Dict[str, Any], results: List[Dict[str, Any]]
             for index, item in enumerate(parsed_rows, start=1)
         ],
     })
+    billed_results = results + (continuity_results or []) + (causality_results or [])
     usage = {
-        key: sum(int((item.get("usage") or {}).get(key) or 0) for item in results)
+        key: sum(int((item.get("usage") or {}).get(key) or 0) for item in billed_results)
         for key in ("input_tokens", "output_tokens", "total_tokens")
     }
-    estimated_usd = round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in results), 6)
+    estimated_usd = round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in billed_results), 6)
     label = load_report_label(case["case_id"])
-    parsed = enforce_boundary(parsed)
+    parsed = apply_damage_causality_guard(enforce_boundary(parsed), business_scenario, case.get("frames") or [])
+    parsed = apply_object_continuity_guard(
+        parsed,
+        business_scenario,
+        bool(case.get("videos") or case.get("frames")),
+        (case.get("structured_business_context") or {}).get("continuity_policy"),
+    )
+    parsed = apply_fulfillment_guard(parsed, business_scenario)
+    specialized_failures = (continuity_failures or []) + (causality_failures or [])
+    if specialized_failures:
+        parsed.update({
+            "predicted_label": "review",
+            "system_yes_no": "REVIEW",
+            "decision": "manual_review",
+            "confidence": min(float(parsed.get("confidence") or 0.5), 0.69),
+            "business_action_allowed": False,
+            "human_required": True,
+            "specialized_pass_guard_reason": "专项审核存在失败、漏帧或结构不完整，不能使用部分结果形成确定结论。",
+        })
+    damage_assessment = parsed.get("damage_causality_assessment") or {}
+    fulfillment_assessment = parsed.get("fulfillment_reconciliation") or {}
+    continuity_assessment = parsed.get("object_continuity_assessment") or {}
+    visibility_coverages = [
+        float(item.get("visibility_coverage") or 0)
+        for item in continuity_assessment.get("tracked_subjects") or []
+        if isinstance(item, dict)
+    ]
+    parsed["confidence_components"] = {
+        "main_segment_mean": confidence,
+        "damage_origin": damage_assessment.get("origin_confidence"),
+        "fulfillment_reconciliation": fulfillment_assessment.get("confidence"),
+        "continuity_visibility_coverage": (
+            round(sum(visibility_coverages) / len(visibility_coverages), 4)
+            if visibility_coverages
+            else None
+        ),
+        "final_decision": parsed.get("confidence"),
+        "calibration_status": "uncalibrated_model_score",
+        "interpretation": "各分数分别表示模型自评、成因假设、对账识别和规则降级后的决策强度；在留出集校准前均不等同于真实正确率。",
+    }
     return {
         "status": "success",
-        "latency_seconds": round(sum(float(item.get("latency_seconds") or 0) for item in results), 2),
+        "latency_seconds": round(sum(float(item.get("latency_seconds") or 0) for item in billed_results), 2),
+        "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in billed_results), 2),
         "usage": usage,
         "cost": {"estimated_usd": estimated_usd},
         "parsed": parsed,
         "evaluation": evaluate(parsed, label),
         "policy_decision": policy_decision(parsed),
-        "chunking": {"segment_count": len(results), "frames_per_segment": case.get("model_frames_per_call"), "total_frames": len(case.get("frames") or [])},
+        "chunking": {
+            "segment_count": len(results),
+            "frames_per_segment": case.get("model_frames_per_call"),
+            "total_frames": len(case.get("frames") or []),
+            "total_model_calls": len(billed_results),
+            "channels": {
+                "main_review": channel_summary(results),
+                "object_continuity": channel_summary(continuity_results or []),
+                "damage_causality": channel_summary(causality_results or []),
+            },
+            "continuity_pass": {
+                "status": "completed" if continuity_complete else ("degraded" if continuity_failures else "disabled"),
+                "segment_count": len(continuity_results or []),
+                "failures": continuity_failures or [],
+            },
+            "damage_causality_pass": {
+                "status": "completed" if causality_complete else ("degraded" if causality_failures else "disabled"),
+                "segment_count": len(causality_results or []),
+                "failures": causality_failures or [],
+            },
+        },
     }
 
 
 def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
+    wall_started = time.time()
     frames = case.get("frames") or []
     limit = max(1, min(int(case.get("model_frames_per_call") or 24), 24))
-    if len(frames) <= limit:
+    if not frames:
         result = call_model(cfg, case, timeout, retries)
-        result["chunking"] = {"segment_count": 1, "frames_per_segment": limit, "total_frames": len(frames)}
+        result["chunking"] = {"segment_count": 1, "frames_per_segment": limit, "total_frames": 0}
+        result["model_latency_seconds_sum"] = result.get("latency_seconds")
+        result["latency_seconds"] = round(time.time() - wall_started, 2)
         return result
     chunks = [frames[index:index + limit] for index in range(0, len(frames), limit)]
     workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4, len(chunks)))
@@ -562,64 +590,44 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     failures = [{"chunk_index": index + 1, "error": item.get("error") or item.get("status")} for index, item in enumerate(completed) if item.get("status") != "success"]
     if failures:
         return {"status": "failed", "error": "chunk_review_failed", "chunk_failures": failures, "chunking": {"segment_count": len(chunks), "total_frames": len(frames)}}
-    return _aggregate_chunk_results(case, completed)
-
-
-def score_result(result: Dict[str, Any]) -> Dict[str, Any]:
-    if result.get("status") != "success":
-        return {"quality": 0, "value": 0, "field_completeness": 0, "evidence_reference_score": 0}
-    parsed = result.get("parsed") or {}
-    hit = 1 if (result.get("evaluation") or {}).get("hit") else 0
-
-    def value_at(path: str) -> Any:
-        current: Any = parsed
-        for part in path.split("."):
-            if not isinstance(current, dict):
-                return None
-            current = current.get(part)
-        return current
-
-    required_paths = [
-        "predicted_label",
-        "system_yes_no",
-        "confidence",
-        "overall_audit.conclusion",
-        "overall_audit.confidence",
-        "overall_audit.core_reason",
-        "overall_audit.business_follow_up_suggestion",
-        "visual_qc_conclusion.verdict",
-        "visual_qc_conclusion.confidence",
-        "visual_qc_conclusion.core_reason",
-        "video_audit_conclusion.continuity_score",
-        "video_audit_conclusion.continuity_reason",
-        "video_audit_conclusion.swap_risk_level",
-        "video_audit_conclusion.edit_or_cut_risk",
-        "adopted_evidence",
-        "frame_findings",
-        "business_follow_up_reason",
-        "next_step",
-    ]
-    field_completeness = sum(1 for path in required_paths if value_at(path) not in (None, "", [])) / len(required_paths)
-    adopted = parsed.get("adopted_evidence") or parsed.get("supporting_evidence") or []
-    referenced = [
-        item
-        for item in adopted
-        if isinstance(item, dict)
-        and (item.get("timestamp") or item.get("global_frame_index") or item.get("frame_index") or item.get("image_index") or item.get("file"))
-        and (item.get("fact") or item.get("description"))
-    ]
-    evidence_reference_score = min(1.0, len(referenced) / 3) if adopted else 0.0
-    structured = 1 if field_completeness >= 0.85 and evidence_reference_score >= 0.67 else 0
-    confidence = float(parsed.get("confidence") or 0)
-    quality = hit * 35 + structured * 15 + field_completeness * 25 + evidence_reference_score * 20 + confidence * 5
-    cost = float((result.get("cost") or {}).get("estimated_usd") or 0.001)
-    value = quality / max(cost, 0.001)
-    return {
-        "quality": round(quality, 2),
-        "value": round(value, 2),
-        "field_completeness": round(field_completeness, 2),
-        "evidence_reference_score": round(evidence_reference_score, 2),
-    }
+    policy = (case.get("structured_business_context") or {}).get("continuity_policy") or {}
+    causality_policy = (case.get("structured_business_context") or {}).get("damage_causality_policy") or {}
+    scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or case.get("scenario") or "")
+    continuity_results: List[Dict[str, Any]] = []
+    continuity_failures: List[Dict[str, Any]] = []
+    if policy.get("force_dense_scan") and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}:
+        continuity_limit = max(4, min(int(policy.get("dedicated_chunk_frames") or 12), 16))
+        continuity_results, continuity_failures = run_specialized_frame_pass(
+            case,
+            mode="object_continuity_only",
+            target_index_key="continuity_target_frame_indices",
+            chunk_size=continuity_limit,
+            context_frame_count=3,
+            workers=workers,
+            invoke=lambda pass_case: call_model(cfg, pass_case, timeout, retries),
+        )
+    causality_results: List[Dict[str, Any]] = []
+    causality_failures: List[Dict[str, Any]] = []
+    if scenario == "product_damage" and causality_policy.get("force_action_scan"):
+        causality_results, causality_failures = run_specialized_frame_pass(
+            case,
+            mode="damage_causality_only",
+            target_index_key="causality_target_frame_indices",
+            chunk_size=max(8, min(int(causality_policy.get("dedicated_chunk_frames") or 20), 24)),
+            context_frame_count=max(2, min(int(causality_policy.get("context_frames") or 6), 8)),
+            workers=workers,
+            invoke=lambda pass_case: call_model(cfg, pass_case, timeout, retries),
+        )
+    aggregated = _aggregate_chunk_results(
+        case,
+        completed,
+        continuity_results,
+        continuity_failures,
+        causality_results,
+        causality_failures,
+    )
+    aggregated["latency_seconds"] = round(time.time() - wall_started, 2)
+    return aggregated
 
 
 def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:

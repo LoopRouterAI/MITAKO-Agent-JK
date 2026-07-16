@@ -12,6 +12,7 @@ from auth.middleware import require_roles
 from auth.roles import ADMIN_MUTATE_ROLES
 
 from . import service, store
+from .input_readiness import assess_input_readiness
 from .schemas import (
     ReviewCaseMetadata,
     ReviewBatchResponse,
@@ -64,7 +65,11 @@ async def validate_metadata(metadata: ReviewCaseMetadata, user=_integration_user
         service.ensure_label_isolation(metadata.model_dump(mode="json"))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"ok": True, "metadata": metadata}
+    return {
+        "ok": True,
+        "metadata": metadata,
+        "readiness": assess_input_readiness(metadata.model_dump(mode="json")),
+    }
 
 
 @router.post("/sampling-plan", response_model=ReviewSamplingPlanResponse)
@@ -76,6 +81,9 @@ async def plan_sampling(payload: ReviewSamplingPlanRequest, user=_integration_us
             payload.source_bytes,
             payload.video_count,
             payload.sampling_policy.model_dump(mode="json"),
+            payload.scenario,
+            payload.continuity_policy.model_dump(mode="json"),
+            payload.damage_causality_policy.model_dump(mode="json"),
         ),
     }
 

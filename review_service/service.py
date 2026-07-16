@@ -14,7 +14,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
 import httpx
@@ -23,8 +23,11 @@ from fastapi import UploadFile
 from runtime_paths import data_dir
 from poc.visual_review_poc.report_renderer import render_public_report
 from poc.visual_review_poc.local_video_triage_demo import adaptive_frame_budget
+from review_input_safety import assert_review_input_safe
 
 from . import store
+from .media_forensics import inspect_job_media
+from .input_readiness import assess_input_readiness
 from .schemas import ReviewCaseMetadata
 
 
@@ -43,35 +46,6 @@ SCENARIO_LABELS = {
 }
 MAX_WORKERS = max(1, min(int(os.getenv("REVIEW_JOB_WORKERS", "2") or 2), 8))
 EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="mitako-review")
-EVALUATION_LABEL_KEYS = {
-    "expected_predicted_label",
-    "human_conclusion",
-    "previous_human_conclusion",
-    "ground_truth",
-    "groundtruth",
-    "ground_truth_label",
-    "expected_label",
-    "manual_label",
-    "reference_label",
-    "final_label",
-    "gold_label",
-    "人工结论",
-    "标准答案",
-    "样本标签",
-}
-EVALUATION_LABEL_MARKERS = (
-    "expected_predicted_label",
-    "human_conclusion",
-    "ground_truth",
-    "标准答案：",
-    "标准答案=",
-    "正确答案：",
-    "正确答案=",
-    "正向样本",
-    "负向样本",
-)
-
-
 def _limit_bytes(name: str, default_mb: int) -> int:
     try:
         value = int(os.getenv(name, str(default_mb)) or default_mb)
@@ -107,20 +81,7 @@ def _valid_magic(suffix: str, head: bytes) -> bool:
 
 def ensure_label_isolation(value: Any) -> None:
     """评测标签只能在模型返回后离线比对，禁止进入审核输入。"""
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if str(key).strip().lower() in EVALUATION_LABEL_KEYS:
-                raise ValueError("evaluation_label_not_allowed")
-            ensure_label_isolation(item)
-        return
-    if isinstance(value, (list, tuple)):
-        for item in value:
-            ensure_label_isolation(item)
-        return
-    if isinstance(value, str):
-        lowered = value.lower()
-        if any(marker in lowered for marker in EVALUATION_LABEL_MARKERS):
-            raise ValueError("evaluation_label_not_allowed")
+    assert_review_input_safe(value)
 
 
 def _request_hash(metadata: ReviewCaseMetadata, uploads: Sequence[UploadFile]) -> str:
@@ -267,10 +228,22 @@ def _public_media_urls(value: Any) -> Any:
     return value
 
 
+def _effective_review_policies(metadata: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    continuity = dict(metadata.get("continuity_policy") or {})
+    causality = dict(metadata.get("damage_causality_policy") or {})
+    preset = str((metadata.get("sampling_policy") or {}).get("preset") or "adaptive")
+    scenario = str(metadata.get("scenario") or "")
+    if preset in {"strong", "strict", "forensic"}:
+        continuity["force_dense_scan"] = True
+        if scenario == "product_damage":
+            causality["force_action_scan"] = True
+    return continuity, causality
+
+
 def _sampling_fields(metadata: Dict[str, Any]) -> Dict[str, str]:
     policy = metadata.get("sampling_policy") or {}
     preset = str(policy.get("preset") or "adaptive")
-    if preset == "strict":
+    if preset in {"strong", "strict"}:
         mode, fps, max_frames = "dense", 1.0, min(int(policy.get("max_frames_per_video") or 1200), 1200)
     elif preset == "forensic":
         mode, fps, max_frames = "dense", 2.0, min(int(policy.get("max_frames_per_video") or 1800), 1800)
@@ -280,6 +253,20 @@ def _sampling_fields(metadata: Dict[str, Any]) -> Dict[str, str]:
         max_frames = max(1, min(int(policy.get("max_frames_per_video") or 1200), 1800))
     else:
         mode, fps, max_frames = "adaptive", 1.0, int(os.getenv("REVIEW_ADAPTIVE_MAX_FRAMES", "24") or 24)
+    scenario = str(metadata.get("scenario") or "")
+    continuity, causality = _effective_review_policies(metadata)
+    if scenario in {"product_damage", "wrong_item", "missing_item"} and continuity.get("force_dense_scan") is True:
+        warning_seconds = max(0.5, min(float(continuity.get("out_of_frame_warning_seconds") or 2.0), 30.0))
+        required_fps = continuity.get("scan_fps")
+        if required_fps in (None, ""):
+            required_fps = min(2.0, max(0.2, 2.0 / warning_seconds))
+        mode = "dense"
+        fps = max(fps if preset != "adaptive" else 0.0, float(required_fps))
+        max_frames = max(max_frames, min(int(policy.get("max_frames_per_video") or 1200), 1800))
+    if scenario == "product_damage" and causality.get("force_action_scan") is True:
+        mode = "dense"
+        fps = max(fps if preset != "adaptive" else 0.0, 1.0)
+        max_frames = max(max_frames, min(int(policy.get("max_frames_per_video") or 1200), 1800))
     frames_per_call = max(1, min(int(policy.get("frames_per_model_call") or 24), 24))
     return {
         "sampling_mode": mode,
@@ -289,8 +276,21 @@ def _sampling_fields(metadata: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def sampling_plan(duration_seconds: float, source_bytes: int, video_count: int, policy: Dict[str, Any]) -> Dict[str, Any]:
-    fields = _sampling_fields({"sampling_policy": policy})
+def sampling_plan(
+    duration_seconds: float,
+    source_bytes: int,
+    video_count: int,
+    policy: Dict[str, Any],
+    scenario: Optional[str] = None,
+    continuity_policy: Optional[Dict[str, Any]] = None,
+    damage_causality_policy: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    fields = _sampling_fields({
+        "sampling_policy": policy,
+        "scenario": scenario or "",
+        "continuity_policy": continuity_policy or {},
+        "damage_causality_policy": damage_causality_policy or {},
+    })
     mode = fields["sampling_mode"]
     fps = float(fields["fps"])
     max_frames = int(fields["max_frames"])
@@ -302,6 +302,21 @@ def sampling_plan(duration_seconds: float, source_bytes: int, video_count: int, 
     )
     total_frames = frames_per_video * video_count
     segments = max(1, math.ceil(total_frames / frames_per_call))
+    effective_continuity, effective_causality = _effective_review_policies({
+        "sampling_policy": policy,
+        "scenario": scenario or "",
+        "continuity_policy": continuity_policy or {},
+        "damage_causality_policy": damage_causality_policy or {},
+    })
+    continuity_enabled = effective_continuity.get("force_dense_scan") is True and scenario in {
+        "wrong_item", "missing_item", "product_damage"
+    }
+    continuity_chunk_frames = max(4, min(int(effective_continuity.get("dedicated_chunk_frames") or 12), 16))
+    continuity_segments = math.ceil(total_frames / continuity_chunk_frames) if continuity_enabled else 0
+    causality_enabled = scenario == "product_damage" and effective_causality.get("force_action_scan") is True
+    causality_chunk_frames = max(8, min(int(effective_causality.get("dedicated_chunk_frames") or 20), 24))
+    causality_segments = math.ceil(total_frames / causality_chunk_frames) if causality_enabled else 0
+    estimated_total_calls = segments + continuity_segments + causality_segments
     chunk_workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4))
     return {
         "preset": policy.get("preset") or "adaptive",
@@ -311,7 +326,17 @@ def sampling_plan(duration_seconds: float, source_bytes: int, video_count: int, 
         "estimated_total_frames": total_frames,
         "frames_per_model_call": frames_per_call,
         "estimated_model_segments": segments,
-        "estimated_parallel_waves": math.ceil(segments / chunk_workers),
+        "estimated_channel_calls": {
+            "main_review": segments,
+            "object_continuity": continuity_segments,
+            "damage_causality": causality_segments,
+        },
+        "estimated_total_model_calls": estimated_total_calls,
+        "effective_review_policies": {
+            "continuity_policy": effective_continuity,
+            "damage_causality_policy": effective_causality,
+        },
+        "estimated_parallel_waves": math.ceil(estimated_total_calls / chunk_workers),
         "chunk_workers": chunk_workers,
         "transcode_recommended": source_bytes >= 500 * 1024 * 1024 or duration_seconds >= 600,
         "large_media_route": "object_storage_transcode_proxy" if source_bytes >= 500 * 1024 * 1024 or duration_seconds >= 600 else "direct_upload_and_frame_sampling",
@@ -320,6 +345,7 @@ def sampling_plan(duration_seconds: float, source_bytes: int, video_count: int, 
 
 def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
     metadata = job.get("metadata") or {}
+    continuity_policy, damage_causality_policy = _effective_review_policies(metadata)
     return {
         "scenario": SCENARIO_MAP[job["scenario"]],
         "business_scenario": job["scenario"],
@@ -337,7 +363,18 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         "customer_tone": str(metadata.get("customer_tone") or ""),
         "sop_context": json.dumps(metadata.get("sop_context") or {}, ensure_ascii=False),
         "source_case": json.dumps(metadata.get("source_record") or {}, ensure_ascii=False),
-        "asset_manifest": json.dumps(job.get("assets") or [], ensure_ascii=False),
+        "asset_manifest": json.dumps(
+            {
+                "assets": job.get("assets") or [],
+                "fulfillment_baseline": metadata.get("fulfillment_baseline") or {},
+                "evidence_coverage": metadata.get("evidence_coverage") or {},
+            },
+            ensure_ascii=False,
+        ),
+        "fulfillment_baseline": json.dumps(metadata.get("fulfillment_baseline") or {}, ensure_ascii=False),
+        "evidence_coverage": json.dumps(metadata.get("evidence_coverage") or {}, ensure_ascii=False),
+        "continuity_policy": json.dumps(continuity_policy, ensure_ascii=False),
+        "damage_causality_policy": json.dumps(damage_causality_policy, ensure_ascii=False),
         **_sampling_fields(metadata),
         "probe_seconds": os.getenv("REVIEW_PROBE_SECONDS", "12"),
     }
@@ -364,25 +401,252 @@ def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _media_forensics(job: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = job.get("metadata") or {}
+    policy = metadata.get("sampling_policy") or {}
+    configured_checks = policy.get("forensic_checks")
+    checks = None if configured_checks is True else ([] if configured_checks is False else configured_checks)
+    try:
+        return inspect_job_media(
+            upload_root() / job["job_id"],
+            job.get("assets") or [],
+            checks=checks,
+        )
+    except Exception:
+        return {
+            "status": "unavailable",
+            "checks": checks if isinstance(checks, list) else [],
+            "assets": [],
+            "summary": {
+                "video_assets": sum(
+                    1
+                    for item in job.get("assets") or []
+                    if str(item.get("mime_type") or "").lower().startswith("video/")
+                ),
+                "analyzed_assets": 0,
+                "unavailable_assets": 0,
+                "risk_signal_count": 0,
+                "risk_level": "none",
+            },
+            "unavailable_reason": "media_forensics_internal_error",
+            "interpretation": "媒体取证本轮不可用，不能据此判断视频是否被剪辑、替换或篡改。",
+        }
+
+
+def _first_number(values: Sequence[Any]) -> Optional[float]:
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            return number / 100.0 if number > 1.0 and number <= 100.0 else number
+    return None
+
+
+def _material_gaps(review: Dict[str, Any]) -> List[str]:
+    agent_report = review.get("agent_report") if isinstance(review.get("agent_report"), dict) else {}
+    parsed = agent_report.get("parsed") if isinstance(agent_report.get("parsed"), dict) else {}
+    raw = parsed.get("material_gaps", review.get("material_gaps"))
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, dict):
+        return [f"{key}: {value}" for key, value in raw.items() if value is not None and value != "" and value != [] and value != {}]
+    return [str(raw).strip()] if raw not in {None, ""} else []
+
+
+def _recommended_escalation(
+    job: Dict[str, Any],
+    review: Dict[str, Any],
+    forensics: Dict[str, Any],
+) -> Dict[str, Any]:
+    metadata = job.get("metadata") or {}
+    policy = metadata.get("sampling_policy") or {}
+    preset = str(policy.get("preset") or "adaptive")
+    try:
+        threshold = float(policy.get("confidence_threshold") if policy.get("confidence_threshold") is not None else 0.75)
+    except (TypeError, ValueError):
+        threshold = 0.75
+    threshold = max(0.0, min(threshold, 1.0))
+
+    summary = review.get("summary") if isinstance(review.get("summary"), dict) else {}
+    agent_report = review.get("agent_report") if isinstance(review.get("agent_report"), dict) else {}
+    parsed = agent_report.get("parsed") if isinstance(agent_report.get("parsed"), dict) else {}
+    overall = parsed.get("overall_audit") if isinstance(parsed.get("overall_audit"), dict) else {}
+    confidence = _first_number(
+        [
+            summary.get("confidence"),
+            parsed.get("confidence"),
+            overall.get("confidence"),
+            review.get("confidence"),
+        ]
+    )
+    predicted_label = str(
+        summary.get("predicted_label")
+        or parsed.get("predicted_label")
+        or review.get("predicted_label")
+        or ""
+    ).strip().lower()
+    decision = str(parsed.get("decision") or review.get("decision") or "").strip().lower()
+    gaps = _material_gaps(review)
+    forensic_summary = forensics.get("summary") if isinstance(forensics.get("summary"), dict) else {}
+    forensic_risk = str(forensic_summary.get("risk_level") or "none").lower()
+    forensic_signals = int(forensic_summary.get("risk_signal_count") or 0)
+
+    reasons: List[Dict[str, Any]] = []
+    if confidence is None or confidence < threshold:
+        reasons.append(
+            {
+                "code": "low_confidence",
+                "message": "审核置信度未达到策略阈值。",
+                "observed": confidence,
+                "threshold": threshold,
+            }
+        )
+    if predicted_label == "review" or decision in {"manual_review", "request_more_material", "review"}:
+        reasons.append(
+            {
+                "code": "review_conclusion",
+                "message": "当前结论为复核或补充材料，尚不适合直接进入业务动作。",
+                "observed": predicted_label or decision,
+            }
+        )
+    if gaps:
+        reasons.append(
+            {
+                "code": "material_gaps",
+                "message": "现有材料存在缺口，增加抽帧强度不能替代缺失的业务证据。",
+                "items": gaps[:12],
+            }
+        )
+    if forensic_signals > 0:
+        reasons.append(
+            {
+                "code": "forensic_risk",
+                "message": "非 AI 媒体取证发现需复核的风险信号；信号不是已证实的剪辑结论。",
+                "risk_level": forensic_risk,
+                "signal_count": forensic_signals,
+            }
+        )
+
+    current_fps = float(_sampling_fields(metadata)["fps"])
+    if preset == "adaptive":
+        target_preset, target_fps = "strong", 1.0
+    elif preset in {"strong", "strict"}:
+        target_preset, target_fps = "forensic", 2.0
+    elif preset == "custom" and current_fps < 1.0:
+        target_preset, target_fps = "strong", 1.0
+    else:
+        target_preset, target_fps = "forensic", 2.0
+
+    actions: List[Dict[str, Any]] = []
+    if reasons:
+        if target_fps > current_fps or preset == "adaptive":
+            actions.append(
+                {
+                    "type": "increase_sampling_strength",
+                    "target_preset": target_preset,
+                    "target_fps": target_fps,
+                    "bounded": True,
+                }
+            )
+        actions.append(
+            {
+                "type": "enhanced_visual_review",
+                "description": "可在人工确认后使用更高能力的视觉审核配置复核疑点片段。",
+            }
+        )
+        if gaps or forensic_signals:
+            actions.append(
+                {
+                    "type": "human_evidence_review",
+                    "description": "核对原始文件、材料缺口和风险信号后再进行业务判断。",
+                }
+            )
+
+    return {
+        "recommended": bool(reasons),
+        "policy_auto_escalate": bool(policy.get("auto_escalate")),
+        "execution_mode": "recommendation_only",
+        "automatic_model_retries": 0,
+        "current": {"preset": preset, "fps": current_fps},
+        "reasons": reasons,
+        "actions": actions,
+        "boundary": "本计划不自动重复调用模型，也不自动执行退款、补发、换货、拒绝或最终定责。",
+    }
+
+
+def _apply_input_readiness_guard(review: Dict[str, Any], readiness: Dict[str, Any]) -> Dict[str, Any]:
+    output = dict(review)
+    if readiness.get("full_review_ready") is True:
+        return output
+    missing = [str(item) for item in readiness.get("missing_required") or []]
+    agent_report = dict(output.get("agent_report") or {})
+    parsed = dict(agent_report.get("parsed") or {})
+    try:
+        confidence = min(float(parsed.get("confidence") or 0.5), 0.69)
+    except (TypeError, ValueError):
+        confidence = 0.5
+    parsed.update(
+        {
+            "predicted_label": "review",
+            "system_yes_no": "REVIEW",
+            "decision": "manual_review",
+            "confidence": confidence,
+            "business_action_allowed": False,
+            "human_required": True,
+            "input_readiness_guard": {
+                "applied": True,
+                "missing_required": missing,
+                "reason": "缺少支撑该场景确定判断的订单、履约或证据覆盖基准。",
+            },
+        }
+    )
+    material_gaps = [str(item) for item in parsed.get("material_gaps") or []]
+    parsed["material_gaps"] = list(dict.fromkeys(material_gaps + missing))
+    agent_report["parsed"] = parsed
+    output["agent_report"] = agent_report
+    summary = dict(output.get("summary") or {})
+    summary.update(
+        {
+            "predicted_label": "review",
+            "system_yes_no": "REVIEW",
+            "confidence": confidence,
+            "input_readiness_guard_applied": True,
+        }
+    )
+    output["summary"] = summary
+    return output
+
+
 def run_job(job_id: str) -> Dict[str, Any]:
     lease_seconds = max(30, int(os.getenv("REVIEW_JOB_TIMEOUT_SECONDS", "1800") or 1800)) + 60
     if not store.claim_job(job_id, lease_seconds):
         return store.get_job(job_id) or {}
     job = store.get_job(job_id) or {}
+    forensics = _media_forensics(job)
+    readiness = assess_input_readiness(job.get("metadata") or {})
+    base_result = {
+        "trace_id": job_id,
+        "client_case_id": job.get("client_case_id"),
+        "scenario": job.get("scenario"),
+        "scenario_label": SCENARIO_LABELS.get(job.get("scenario"), job.get("scenario")),
+        "media_forensics": forensics,
+        "input_readiness": readiness,
+        "boundary": "审核服务只输出证据、置信度和流程建议；退款、补发、换货、拒绝及最终定责由甲方系统和授权人员执行。",
+    }
     try:
         payload = _call_workbench(job)
         review = dict(payload.get("review")) if isinstance(payload.get("review"), dict) else {}
+        review = _apply_input_readiness_guard(review, readiness)
         review.pop("report", None)
         review["report"] = {"html_url": f"/api/v1/review/jobs/{job_id}/report"}
         diagnostics = review.get("diagnostics") or payload.get("diagnostics") or {}
         result = {
-            "trace_id": job_id,
-            "client_case_id": job.get("client_case_id"),
-            "scenario": job.get("scenario"),
-            "scenario_label": SCENARIO_LABELS.get(job.get("scenario"), job.get("scenario")),
+            **base_result,
             "source_status": payload.get("source_status"),
             "review": review,
-            "boundary": "审核服务只输出证据、置信度和流程建议；退款、补发、换货、拒绝及最终定责由甲方系统和授权人员执行。",
+            "recommended_escalation": _recommended_escalation(job, review, forensics),
         }
         status = "SUCCEEDED" if payload.get("ok") is True else "FAILED"
         return store.finish_job(job_id, status=status, result=result, diagnostics=diagnostics)
@@ -394,7 +658,8 @@ def run_job(job_id: str) -> Dict[str, Any]:
         }
     except Exception as exc:
         diagnostics = {"error_type": exc.__class__.__name__, "message": str(exc)[:1200]}
-    return store.finish_job(job_id, status="FAILED", result={}, diagnostics=diagnostics)
+    base_result["recommended_escalation"] = _recommended_escalation(job, {}, forensics)
+    return store.finish_job(job_id, status="FAILED", result=base_result, diagnostics=diagnostics)
 
 
 def render_job_report(job: Dict[str, Any]) -> str:
@@ -473,6 +738,12 @@ def contract() -> Dict[str, Any]:
         "idempotency_header": "Idempotency-Key",
         "supported_scenarios": list(SCENARIO_MAP),
         "required_metadata": ["client_case_id", "scenario"],
+        "scenario_input_readiness": {
+            "wrong_item": "需要可唯一确定应收商品的订单基准；SKU 优先，但条码/包装编码或商品名+规格/款式/数量组合可替代。",
+            "product_damage": "SKU/商品主数据为推荐增信字段，不是识别明显损伤或审核视频连续性的硬门槛。",
+            "missing_item": "需要应收商品基准和应收数量；拆单/包裹状态为重要增信字段。",
+            "opening_continuity": "独立于 SKU，按快递包装、商品包装和争议商品分别跟踪离镜时间线。",
+        },
         "business_fields": [
             "ticket_id", "user_id", "order_no", "customer_claim", "order_items",
             "product_master_data", "warehouse_master_data", "logistics",
@@ -488,11 +759,27 @@ def contract() -> Dict[str, Any]:
         },
         "sampling_presets": {
             "adaptive": "按时长和文件大小抽取 6-24 帧，适合低成本粗筛。",
+            "strong": "固定 1 fps；作为 strict 的清晰业务别名，最多 1200 帧。",
             "strict": "固定 1 fps，最多 1200 帧，每 24 帧一个并行模型分段。",
             "forensic": "固定 2 fps，最多 1800 帧，每 24 帧一个并行模型分段。",
             "custom": "甲方配置 0.1-2 fps、单视频帧上限和每次调用帧数。",
         },
+        "sampling_policy_fields": {
+            "auto_escalate": "仅生成有界的推荐升级计划，不自动重复调用模型。",
+            "confidence_threshold": "0-1 的升级建议置信度阈值，默认 0.75。",
+            "forensic_checks": "可选的容器完整性、流一致性、帧率、包时间轴和编辑器元数据检查列表。",
+        },
+        "continuity_policy_fields": {
+            "out_of_frame_warning_seconds": "0.5-30 秒，默认 2 秒；超过后转人工复核，不自动拒绝。",
+            "require_identity_reestablishment": "主体重新入镜后要求核验是否仍为同一物件。",
+            "force_dense_scan": "开启时按离镜阈值反推最低时间分辨率，避免稀疏抽帧声称全程连续。",
+            "scan_fps": "可选 0.2-2 FPS；为空时自动使用 min(2, max(0.2, 2/离镜阈值秒数))。",
+        },
+        "media_forensics": "模型调用前执行 ffprobe 元数据检查；不可用时明确降级，风险信号不等同于已证实剪辑。",
         "statuses": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "RETRYING"],
-        "result_fields": ["predicted_label", "confidence", "agent_report", "agent_brief", "diagnostics", "boundary"],
+        "result_fields": [
+            "predicted_label", "confidence", "agent_report", "agent_brief", "media_forensics",
+            "recommended_escalation", "input_readiness", "diagnostics", "boundary",
+        ],
         "boundary": "不自动退款、补发、换货、拒绝或最终定责。",
     }

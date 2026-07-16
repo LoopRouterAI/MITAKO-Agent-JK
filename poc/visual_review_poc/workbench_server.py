@@ -2,13 +2,10 @@
 """客服视觉审核工作台：上传/URL -> 本地视频 -> 视觉复核报告。"""
 from __future__ import annotations
 
-import csv
-import io
 import json
 import math
 import os
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -42,6 +39,7 @@ try:
         safe_agent_conclusion as _safe_agent_conclusion,
         safe_agent_next_step as _safe_agent_next_step,
     )
+    from poc.visual_review_poc.sample_evaluation import evaluate_sample_rows, read_sample_rows
 except ImportError:
     from model_selection_e2e import MODEL_CONFIGS, call_model_chunked, load_case_bundle, score_result
     from local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
@@ -50,26 +48,23 @@ except ImportError:
         safe_agent_conclusion as _safe_agent_conclusion,
         safe_agent_next_step as _safe_agent_next_step,
     )
+    from sample_evaluation import evaluate_sample_rows, read_sample_rows
 
 ROOT = app_root()
 def _env_name(*parts: str) -> str:
     return "_".join(parts)
 
 
-def _runtime_word(*parts: str) -> str:
-    return "".join(parts)
-
-
 WORKBENCH_DIR = Path(os.getenv(_env_name("MITAKO", "VISUAL", "WORKBENCH", "DIR")) or ROOT / "poc" / "visual_review_poc").resolve()
 UPLOAD_DIR = WORKBENCH_DIR / "uploaded_videos"
 REPORT_DIR = WORKBENCH_DIR / "reports"
 PUBLIC_SUMMARY_DIR = REPORT_DIR / "public_summaries"
+RUNTIME_MEDIA_DIR = (ROOT / "tmp" / "visual_review_workbench").resolve()
 INDEX_HTML = WORKBENCH_DIR / "workbench.html"
 SAMPLE_MATERIAL_DIR = (ROOT / "docs" / "三大审核场景的小量样本").resolve()
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
 MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
-SAMPLE_MAX_BYTES = 5 * 1024 * 1024
 PRIVATE_REPORT_KEYS = {
     "model",
     "display_model",
@@ -100,27 +95,8 @@ PRIVATE_REPORT_KEYS = {
 }
 ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/x-m4v"}
-ALLOWED_SAMPLE_SUFFIXES = {".csv", ".json"}
 ALLOWED_MEDIA_SUFFIXES = ALLOWED_VIDEO_SUFFIXES | {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_FOLDER_SUFFIXES = ALLOWED_MEDIA_SUFFIXES | {".txt", ".json"}
-TARGET_REVIEW_TASKS = ("video_unboxing", "product_damage", "minor_material")
-TASK_PUBLIC_NAMES = {
-    "video_unboxing": "开箱视频",
-    "product_damage": "商品有伤",
-    "minor_material": "资料审核",
-    "wrong_item": "发错货",
-    "unknown": "未识别场景",
-}
-FIELD_ALIASES = {
-    "task": ("task", "scenario", "scene", "queue", "业务队列", "场景", "审核场景", "任务"),
-    "human_label": ("human_label", "manual_label", "final_label", "human_result", "result", "人工结论", "最终人工结论", "人工最终结论", "结论"),
-    "predicted_label": ("predicted_label", "model_label", "system_label", "review_label", "assistant_label", "辅助结论", "系统结论", "预测结论"),
-    "user_text": ("user_text", "customer_text", "claim_text", "诉求", "用户诉求", "用户描述", "客服记录"),
-    "human_reason": ("human_reason", "manual_reason", "reason", "人工原因", "人工结论原因", "结论原因", "原因"),
-    "order_item": ("order_item", "product_name", "item_name", "商品名", "订单商品名", "商品"),
-    "sku": ("sku", "spec", "sku_spec", "variant", "规格", "款式", "SKU", "SKU规格"),
-    "material": ("video", "video_url", "image", "image_url", "material", "material_url", "素材", "视频", "图片", "资料"),
-}
 
 app = FastAPI(
     title="MITAKO 视觉审核工作台",
@@ -130,14 +106,10 @@ app = FastAPI(
 )
 
 REVIEW_MODEL_PROFILES = {
-    "standard": {"label": "标准视觉复核"},
-    "fast": {"label": "快速初筛"},
-    "backup": {"label": "补充复核"},
+    "standard": {"label": "标准连续性复核", "sampling_mode": "dense", "default_max_frames": 1200},
+    "fast": {"label": "经济初筛", "sampling_mode": "adaptive", "default_max_frames": 12},
+    "backup": {"label": "Strong 强化复核", "sampling_mode": "dense", "default_max_frames": 1800},
 }
-
-
-def _module_entry(name: str) -> str:
-    return f"poc.visual_review_poc.{name}"
 
 
 def _save_upload(file: UploadFile) -> Path:
@@ -148,7 +120,9 @@ def _save_upload(file: UploadFile) -> Path:
     if suffix not in ALLOWED_VIDEO_SUFFIXES or (content_type and content_type not in ALLOWED_VIDEO_TYPES and not content_type.startswith("video/")):
         raise HTTPException(status_code=415, detail="仅支持常见视频文件")
     stem = re.sub(r"[^a-zA-Z0-9._-]+", "_", Path(file.filename or "upload").stem).strip("._-")[:60] or "upload"
-    target = UPLOAD_DIR / f"{time.strftime('%Y%m%d_%H%M%S')}_{stem}{suffix}"
+    case_dir = UPLOAD_DIR / f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns()}"
+    case_dir.mkdir(parents=True, exist_ok=False)
+    target = case_dir / f"{stem}{suffix}"
     total = 0
     with target.open("wb") as fh:
         while chunk := file.file.read(1024 * 1024):
@@ -206,36 +180,6 @@ def _save_folder_uploads(files: List[UploadFile]) -> Path:
     return target_dir
 
 
-def _latest_report_from_stdout(stdout: str) -> Dict[str, Any]:
-    decoder = json.JSONDecoder()
-    for idx, char in enumerate(stdout):
-        if char != "{":
-            continue
-        try:
-            data, _ = decoder.raw_decode(stdout[idx:])
-            report = {k: data.get(k) for k in ("json_report", "html_report", "summary") if k in data}
-            json_report = report.get("json_report")
-            if json_report:
-                path = Path(str(json_report)).resolve()
-                report_root = (ROOT / "poc" / "visual_review_poc" / "reports").resolve()
-                if path.exists() and (path == report_root or report_root in path.parents):
-                    try:
-                        full_report = json.loads(path.read_text(encoding="utf-8"))
-                        report.update({
-                            "status": (full_report.get("gemini") or {}).get("status"),
-                            "gemini": full_report.get("gemini") or {},
-                            "frame_sampling": full_report.get("frame_sampling") or {},
-                            "frames": full_report.get("frames") or [],
-                            "supplemental_images": full_report.get("supplemental_images") or [],
-                        })
-                    except Exception as exc:
-                        report["diagnostics"] = {"json_report_read_error": str(exc)[:180]}
-            return report
-        except Exception:
-            continue
-    return {}
-
-
 def _clamp_float(value: float, low: float, high: float, fallback: float) -> float:
     try:
         parsed = float(value)
@@ -252,18 +196,6 @@ def _clamp_int(value: int, low: int, high: int, fallback: int) -> int:
     except (TypeError, ValueError):
         return fallback
     return max(low, min(high, parsed))
-
-
-def _load_env() -> None:
-    env_path = ROOT / ".env"
-    if not env_path.exists():
-        return
-    for raw in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def _public_summary(raw_report: Dict[str, Any]) -> Dict[str, Any]:
@@ -329,6 +261,7 @@ def _public_agent_report_payload(
         },
         "runtime": {
             "latency_seconds": result.get("latency_seconds"),
+            "model_latency_seconds_sum": result.get("model_latency_seconds_sum"),
             "status": result.get("status"),
         },
         "inference_estimate": {
@@ -336,7 +269,9 @@ def _public_agent_report_payload(
             "output_tokens": usage.get("output_tokens"),
             "total_tokens": usage.get("total_tokens"),
             "estimated_usd": cost.get("estimated_usd"),
-            "segment_count": chunking.get("segment_count"),
+            "segment_count": chunking.get("total_model_calls") or chunking.get("segment_count"),
+            "main_segment_count": chunking.get("segment_count"),
+            "channels": chunking.get("channels") or {},
             "frames_per_segment": chunking.get("frames_per_segment"),
             "total_frames": chunking.get("total_frames"),
         },
@@ -447,72 +382,6 @@ def _report_data_name(report_name: str) -> str:
     return path.name
 
 
-def _public_result(ok: bool, review_label: str, report: Dict[str, Any]) -> Dict[str, Any]:
-    report = {**(report or {}), "ok": ok}
-    summary = _public_summary(report)
-    failure = {} if ok else _public_failure_reason(report, False)
-    public_next_step = "VIP客服结合订单、库存、售后规则和原始素材确认，不自动退款、补发、拒赔或定责。"
-    public_conclusion = "建议VIP客服复核后再做最终业务处置" if ok else f"审核未完成：{failure.get('message')}"
-    report_name = f"summary_{int(time.time())}_{len(ALLOWED_REPORTS) + 1}.html"
-    data = {
-        "ok": ok,
-        "review_label": review_label,
-        "frame_strategy": "按当前抽帧配置生成证据",
-        "summary": summary,
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "conclusion": public_conclusion,
-        "agent_brief": {
-            "conclusion": public_conclusion,
-            "confidence": summary.get("confidence"),
-            "system_yes_no": summary.get("system_yes_no"),
-            "next_step": public_next_step if ok else failure.get("operator_hint", public_next_step),
-        },
-    }
-    if failure:
-        gemini = report.get("gemini") if isinstance(report.get("gemini"), dict) else {}
-        attempts = gemini.get("attempts") if isinstance(gemini.get("attempts"), list) else []
-        public_attempts = [
-            {
-                "channel": item.get("channel"),
-                "status_code": item.get("status_code"),
-                "error_type": item.get("error_type"),
-                "error": str(item.get("error") or "")[:500],
-                "latency_seconds": item.get("latency_seconds"),
-                "attempt": item.get("attempt"),
-            }
-            for item in attempts[-3:]
-        ]
-        raw_diag = report.get("diagnostics") if isinstance(report.get("diagnostics"), dict) else {}
-        data["diagnostics"] = {
-            "review_status": "failed",
-            "failure_stage": failure.get("stage"),
-            "failure_reason": failure.get("message"),
-            "operator_hint": failure.get("operator_hint"),
-            "frames_sent": 0,
-            "supplemental_images_sent": 0,
-            "videos_received": 1,
-            "model_status": gemini.get("status"),
-            "model_attempts": public_attempts,
-            "subprocess": raw_diag.get("subprocess"),
-            "json_report_read_error": raw_diag.get("json_report_read_error"),
-            "subprocess_error": raw_diag.get("subprocess_error"),
-        }
-    ALLOWED_REPORTS[report_name] = data
-    PUBLIC_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
-    (PUBLIC_SUMMARY_DIR / _report_data_name(report_name)).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    response = {
-        "ok": ok,
-        "review_label": review_label,
-        "frame_strategy": "按当前抽帧配置生成证据",
-        "summary": summary,
-        "report": {"html_url": "/reports/" + report_name},
-        "agent_brief": data["agent_brief"],
-    }
-    if data.get("diagnostics"):
-        response["diagnostics"] = data["diagnostics"]
-    return response
-
-
 def _structured_review_ok(parsed: Dict[str, Any]) -> bool:
     return bool(parsed.get("predicted_label")) and parsed.get("confidence") not in (None, "")
 
@@ -558,15 +427,6 @@ def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[
     }
 
 
-def _review_report_ok(report: Dict[str, Any]) -> bool:
-    if not report:
-        return False
-    gemini = report.get("gemini") if isinstance(report.get("gemini"), dict) else {}
-    if gemini:
-        return gemini.get("status") == "success"
-    return str(report.get("status") or "") not in {"review_subprocess_failed", "review_no_report", "review_timeout", "review_subprocess_error", "failed"}
-
-
 def _run_review(
     video: Path,
     scenario: str,
@@ -577,63 +437,55 @@ def _run_review(
     review_model: str,
     evidence_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    _load_env()
     profile = REVIEW_MODEL_PROFILES.get(review_model) or REVIEW_MODEL_PROFILES["standard"]
-    command = [
-        sys.executable,
-        "-m",
-        _module_entry("local_video_triage_demo"),
-        "--video",
-        str(video),
-        "--scenario",
-        scenario,
-        "--context-json",
-        json.dumps(evidence_context or {}, ensure_ascii=False),
-        "--fps",
-        str(fps),
-        "--max-frames",
-        str(max_frames),
-        "--api-frame-limit",
-        str(api_frame_limit),
-        "--probe-seconds",
-        str(probe_seconds),
-        "--frame-width",
-        "768",
-    ]
-    env = os.environ.copy()
+    load_visual_env()
+    effective_fps = fps
+    effective_max_frames = max_frames
+    if review_model == "fast":
+        effective_fps = min(fps, 0.5)
+        effective_max_frames = min(max_frames, int(profile["default_max_frames"]))
+    elif review_model == "standard":
+        effective_fps = max(fps, 1.0)
+        effective_max_frames = max(max_frames, int(profile["default_max_frames"]))
+    elif review_model == "backup":
+        effective_fps = max(fps, 2.0)
+        effective_max_frames = max(max_frames, int(profile["default_max_frames"]))
+    args = SimpleNamespace(
+        fps=effective_fps,
+        sampling_mode=profile["sampling_mode"],
+        max_frames_per_video=effective_max_frames,
+        api_frame_limit=api_frame_limit,
+        probe_seconds=float(probe_seconds),
+        frame_width=960,
+        supplemental_image_limit=20,
+    )
+    run_dir = ROOT / "tmp" / "visual_review_workbench" / f"single_{video.parent.name}_{time.time_ns()}"
     try:
-        proc = subprocess.run(
-            command,
-            cwd=str(ROOT),
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=1800,
-        )
-    except subprocess.TimeoutExpired:
-        return _public_result(False, profile["label"], {"summary": {}, "status": "review_timeout"})
-    except OSError as exc:
-        return _public_result(False, profile["label"], {"summary": {}, "status": "review_subprocess_error", "diagnostics": {"subprocess_error": str(exc)[:240]}})
-    report = _latest_report_from_stdout(proc.stdout)
-    subprocess_diag = {
-        "return_code": proc.returncode,
-        "stdout_tail": (proc.stdout or "")[-1200:],
-        "stderr_tail": (proc.stderr or "")[-1200:],
+        case = load_case_bundle(video.parent, args, run_dir)
+    except SystemExit as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
+    result = call_model_chunked(MODEL_CONFIGS["gemini35"], case, timeout=300, retries=2)
+    review = _agent_report_response(case, video.parent, result, "agent_single", profile["label"])
+    review["sampling"] = {
+        "profile": review_model,
+        "label": profile["label"],
+        "sampling_mode": profile["sampling_mode"],
+        "fps": effective_fps,
+        "sampled_frames": len(case.get("frames") or []),
+        "model_segments": ((review.get("agent_report") or {}).get("inference_estimate") or {}).get("segment_count"),
+        "frames_per_segment": api_frame_limit,
     }
-    if proc.returncode != 0:
-        report.setdefault("status", "review_subprocess_failed")
-        report["diagnostics"] = {**(report.get("diagnostics") or {}), "subprocess": subprocess_diag}
-    elif not report:
-        report["status"] = "review_no_report"
-        report["diagnostics"] = {"subprocess": subprocess_diag}
-    elif (report.get("gemini") or {}).get("status") == "failed":
-        report["diagnostics"] = {**(report.get("diagnostics") or {}), "subprocess": subprocess_diag}
-    return _public_result(proc.returncode == 0 and _review_report_ok(report), profile["label"], report)
+    return {"ok": (review.get("summary") or {}).get("review_status") == "completed", **review}
 
 
-def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[str, Any], report_stem: str) -> Dict[str, Any]:
+def _agent_report_response(
+    case: Dict[str, Any],
+    sample_dir: Path,
+    result: Dict[str, Any],
+    report_stem: str,
+    review_profile_label: str = "标准视觉复核",
+) -> Dict[str, Any]:
     parsed = result.get("parsed") or {}
     structured_ok = _structured_review_ok(parsed)
     ok = result.get("status") == "success" and structured_ok
@@ -653,7 +505,7 @@ def _agent_report_response(case: Dict[str, Any], sample_dir: Path, result: Dict[
     )
     data = {
         "ok": ok,
-        "review_label": f"{case['scenario_label']} / 标准视觉复核",
+        "review_label": f"{case['scenario_label']} / {review_profile_label}",
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "summary": {
             "cases": 1,
@@ -805,246 +657,6 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
     }
 
 
-def _row_value(row: Dict[str, Any], aliases: tuple[str, ...]) -> str:
-    lookup = {str(key).strip().lower(): value for key, value in row.items()}
-    for alias in aliases:
-        value = lookup.get(alias.strip().lower())
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    return ""
-
-
-def _normalize_task(value: str) -> str:
-    raw = str(value or "").strip().lower()
-    compact = re.sub(r"[\s_\-/]+", "", raw)
-    if raw in {"video_unboxing", "unboxing", "unboxing_video"} or any(key in compact for key in ("开箱", "拆箱", "unboxing")):
-        return "video_unboxing"
-    if raw in {"product_damage", "damage", "damaged_item"} or any(key in compact for key in ("有伤", "破损", "划痕", "damage")):
-        return "product_damage"
-    if raw in {"minor_material", "minor", "minor_refund"} or any(key in compact for key in ("未成年", "监护", "资料", "minor")):
-        return "minor_material"
-    if raw in {"wrong_item", "wrong_sku", "sku_mismatch"} or any(key in compact for key in ("发错", "错发", "sku", "wrongitem")):
-        return "wrong_item"
-    return "unknown"
-
-
-def _normalize_label(value: str) -> str:
-    raw = str(value or "").strip().lower()
-    compact = re.sub(r"[\s_\-/，。:：；;]+", "", raw)
-    if not compact:
-        return ""
-    negative = {
-        "fail", "failed", "no", "n", "false", "invalid", "reject", "rejected", "unsupported",
-        "negative", "incomplete", "missing", "mismatch", "nodamage", "不通过", "未通过", "不合格",
-        "不合规", "不支持", "拒绝", "无伤", "没伤", "未见损伤", "未破损", "没发错", "未发错",
-        "不一致", "资料缺失", "缺失", "不完整", "不成立", "剪辑", "离镜",
-    }
-    positive = {
-        "pass", "passed", "ok", "yes", "y", "true", "valid", "support", "supported", "confirmed",
-        "positive", "approved", "approve", "accept", "complete", "match", "compliant", "damage",
-        "damaged", "wrong", "通过", "合格", "合规", "支持", "确认", "确认有伤", "有伤", "破损",
-        "发错", "错发", "资料完整", "完整", "一致", "同意", "可支持", "可通过", "成立",
-    }
-    review = {
-        "suspect", "manualreview", "review", "uncertain", "unclear", "ambiguous", "needreview",
-        "pending", "疑似", "存疑", "人工复核", "待复核", "不确定", "看不清", "需补件", "补件", "待确认",
-    }
-    if compact in negative:
-        return "negative"
-    if compact in positive:
-        return "positive"
-    if compact in review:
-        return "review"
-    return "unmapped:" + compact[:40]
-
-
-def _valid_label(value: str) -> bool:
-    return value in {"positive", "negative", "review"}
-
-
-def _public_label(value: str) -> str:
-    if value == "positive":
-        return "正向"
-    if value == "negative":
-        return "负向"
-    if value == "review":
-        return "需复核"
-    if value.startswith("unmapped:"):
-        return "未映射"
-    return "-"
-
-
-def _read_sample_rows(file: UploadFile) -> List[Dict[str, Any]]:
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_SAMPLE_SUFFIXES:
-        raise HTTPException(status_code=415, detail="仅支持 CSV 或 JSON 样本表")
-    raw = file.file.read(SAMPLE_MAX_BYTES + 1)
-    if len(raw) > SAMPLE_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="样本表过大，请拆分后上传")
-    if not raw:
-        raise HTTPException(status_code=400, detail="样本表为空")
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail="样本表需要使用 UTF-8 编码") from exc
-    if suffix == ".csv":
-        reader = csv.DictReader(io.StringIO(text))
-        if not reader.fieldnames:
-            raise HTTPException(status_code=400, detail="CSV 缺少表头")
-        rows = []
-        for row in reader:
-            if None in row:
-                raise HTTPException(status_code=400, detail="CSV 行列数量与表头不一致")
-            if any(str(value or "").strip() for value in row.values()):
-                rows.append(dict(row))
-    else:
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="JSON 格式无法解析") from exc
-        if isinstance(payload, dict):
-            payload = payload.get("samples") or payload.get("rows") or []
-        if not isinstance(payload, list):
-            raise HTTPException(status_code=400, detail="JSON 需要是数组或包含 samples 数组")
-        bad_index = next((index for index, item in enumerate(payload, start=1) if not isinstance(item, dict)), None)
-        if bad_index is not None:
-            raise HTTPException(status_code=400, detail=f"JSON 第 {bad_index} 条样本不是对象")
-        rows = list(payload)
-    if not rows:
-        raise HTTPException(status_code=400, detail="未读取到有效样本")
-    if len(rows) > 5000:
-        raise HTTPException(status_code=413, detail="单次最多评测 5000 条样本")
-    return [{str(key): value for key, value in row.items()} for row in rows]
-
-
-def _empty_task_stats() -> Dict[str, Any]:
-    return {
-        "total": 0,
-        "evaluable": 0,
-        "correct": 0,
-        "accuracy": None,
-        "labels": {"positive": 0, "negative": 0, "review": 0, "other": 0},
-        "evaluable_labels": {"positive": 0, "negative": 0, "review": 0, "other": 0},
-    }
-
-
-def _evaluate_sample_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    tasks: Dict[str, Dict[str, Any]] = {}
-    missing_fields = {name: 0 for name in ("业务场景", "人工结论", "用户诉求", "素材", "商品信息", "规格信息", "人工原因")}
-    errors: List[Dict[str, Any]] = []
-    unmapped_labels: Dict[str, Dict[str, int]] = {"人工结论": {}, "辅助结论": {}}
-    total = len(rows)
-    evaluable = 0
-    correct = 0
-    target_total = 0
-    target_evaluable = 0
-    target_correct = 0
-
-    for index, row in enumerate(rows, start=1):
-        task = _normalize_task(_row_value(row, FIELD_ALIASES["task"]))
-        human_label_raw = _row_value(row, FIELD_ALIASES["human_label"])
-        predicted_label_raw = _row_value(row, FIELD_ALIASES["predicted_label"])
-        human_label = _normalize_label(human_label_raw)
-        predicted_label = _normalize_label(predicted_label_raw)
-        stats = tasks.setdefault(task, _empty_task_stats())
-        stats["total"] += 1
-        if task in TARGET_REVIEW_TASKS:
-            target_total += 1
-
-        if task == "unknown":
-            missing_fields["业务场景"] += 1
-        if not human_label:
-            missing_fields["人工结论"] += 1
-        if not _row_value(row, FIELD_ALIASES["user_text"]):
-            missing_fields["用户诉求"] += 1
-        if not _row_value(row, FIELD_ALIASES["material"]):
-            missing_fields["素材"] += 1
-        if not _row_value(row, FIELD_ALIASES["order_item"]):
-            missing_fields["商品信息"] += 1
-        if not _row_value(row, FIELD_ALIASES["sku"]):
-            missing_fields["规格信息"] += 1
-        if not _row_value(row, FIELD_ALIASES["human_reason"]):
-            missing_fields["人工原因"] += 1
-
-        if human_label.startswith("unmapped:"):
-            raw = human_label_raw[:40]
-            unmapped_labels["人工结论"][raw] = unmapped_labels["人工结论"].get(raw, 0) + 1
-        if predicted_label.startswith("unmapped:"):
-            raw = predicted_label_raw[:40]
-            unmapped_labels["辅助结论"][raw] = unmapped_labels["辅助结论"].get(raw, 0) + 1
-
-        if human_label and _valid_label(human_label):
-            bucket = human_label if human_label in {"positive", "negative", "review"} else "other"
-            stats["labels"][bucket] += 1
-        elif human_label:
-            stats["labels"]["other"] += 1
-
-        if _valid_label(human_label) and _valid_label(predicted_label):
-            evaluable += 1
-            stats["evaluable"] += 1
-            bucket = human_label if human_label in {"positive", "negative", "review"} else "other"
-            stats["evaluable_labels"][bucket] += 1
-            matched = human_label == predicted_label
-            if matched:
-                correct += 1
-                stats["correct"] += 1
-            if task in TARGET_REVIEW_TASKS:
-                target_evaluable += 1
-                if matched:
-                    target_correct += 1
-            if not matched and len(errors) < 12:
-                errors.append({
-                    "row": index,
-                    "task": TASK_PUBLIC_NAMES.get(task, task),
-                    "human_label": _public_label(human_label),
-                    "assistant_label": _public_label(predicted_label),
-                })
-
-    for stats in tasks.values():
-        if stats["evaluable"]:
-            stats["accuracy"] = round(stats["correct"] / stats["evaluable"], 4)
-
-    readiness = {}
-    for task in TARGET_REVIEW_TASKS:
-        stats = tasks.get(task) or _empty_task_stats()
-        labels = stats["evaluable_labels"]
-        minimum_ready = labels["positive"] >= 50 and labels["negative"] >= 50
-        recommended_ready = labels["positive"] >= 200 and labels["negative"] >= 200
-        readiness[task] = {
-            "name": TASK_PUBLIC_NAMES[task],
-            "positive": labels["positive"],
-            "negative": labels["negative"],
-            "evaluable": stats["evaluable"],
-            "minimum_ready": minimum_ready,
-            "recommended_ready": recommended_ready,
-        }
-
-    return {
-        "ok": True,
-        "summary": {
-            "total": total,
-            "evaluable": evaluable,
-            "correct": correct,
-            "accuracy": round(correct / evaluable, 4) if evaluable else None,
-            "target_total": target_total,
-            "target_evaluable": target_evaluable,
-            "target_correct": target_correct,
-            "target_accuracy": round(target_correct / target_evaluable, 4) if target_evaluable else None,
-            "non_target_total": total - target_total,
-            "ready_for_accuracy": all(item["minimum_ready"] for item in readiness.values()),
-            "minimum_required": "三类主场景每个正向/负向结论至少 50 条",
-            "recommended_required": "每个结论类 200-300 条更适合对外验收",
-        },
-        "tasks": {
-            TASK_PUBLIC_NAMES.get(task, task): stats for task, stats in sorted(tasks.items())
-        },
-        "readiness": readiness,
-        "missing_fields": missing_fields,
-        "unmapped_labels": unmapped_labels,
-        "mismatches": errors,
-    }
-
-
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return INDEX_HTML.read_text(encoding="utf-8")
@@ -1115,7 +727,7 @@ def media_asset(rel_path: str) -> FileResponse:
         path = (ROOT / rel).resolve()
     except OSError as exc:
         raise HTTPException(status_code=404, detail="素材不存在") from exc
-    allowed_roots = [WORKBENCH_DIR.resolve(), SAMPLE_MATERIAL_DIR]
+    allowed_roots = [WORKBENCH_DIR.resolve(), SAMPLE_MATERIAL_DIR, RUNTIME_MEDIA_DIR]
     if not any(path == base or base in path.parents for base in allowed_roots):
         raise HTTPException(status_code=404, detail="素材不存在")
     if not path.exists() or path.suffix.lower() not in ALLOWED_MEDIA_SUFFIXES:
@@ -1139,8 +751,7 @@ def url_metadata(payload: Dict[str, str]) -> JSONResponse:
 
 @app.post("/api/evaluate-samples")
 def evaluate_samples(file: UploadFile = File(...)) -> JSONResponse:
-    rows = _read_sample_rows(file)
-    return JSONResponse(_evaluate_sample_rows(rows))
+    return JSONResponse(evaluate_sample_rows(read_sample_rows(file)))
 
 
 @app.post("/api/review-sample")
@@ -1176,6 +787,10 @@ def review_folder(
     sop_context: str = Form(""),
     source_case: str = Form(""),
     asset_manifest: str = Form(""),
+    continuity_policy: str = Form(""),
+    damage_causality_policy: str = Form(""),
+    fulfillment_baseline: str = Form(""),
+    evidence_coverage: str = Form(""),
     sampling_mode: str = Form("adaptive"),
     fps: float = Form(1.0),
     max_frames: int = Form(24),
@@ -1209,6 +824,10 @@ def review_folder(
         "sop_context": sop_context,
         "source_case": source_case,
         "asset_manifest": asset_manifest,
+        "continuity_policy": continuity_policy,
+        "damage_causality_policy": damage_causality_policy,
+        "fulfillment_baseline": fulfillment_baseline,
+        "evidence_coverage": evidence_coverage,
     }
     return JSONResponse(_run_folder_agent_review(folder_dir, scenario, "gemini35", evidence_context, sampling_mode, fps, max_frames, api_frame_limit, probe_seconds))
 
@@ -1234,6 +853,10 @@ def review(
     sop_context: str = Form(""),
     source_case: str = Form(""),
     asset_manifest: str = Form(""),
+    continuity_policy: str = Form(""),
+    damage_causality_policy: str = Form(""),
+    fulfillment_baseline: str = Form(""),
+    evidence_coverage: str = Form(""),
     fps: float = Form(1.0),
     max_frames: int = Form(24),
     api_frame_limit: int = Form(24),
@@ -1248,7 +871,7 @@ def review(
     if review_model not in REVIEW_MODEL_PROFILES:
         raise HTTPException(status_code=400, detail="未知审核档位")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
-    max_frames = _clamp_int(max_frames, 1, 24, 24)
+    max_frames = _clamp_int(max_frames, 1, 1800, 24)
     api_frame_limit = _clamp_int(api_frame_limit, 1, 24, 24)
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
     if source_type == "url":
@@ -1279,6 +902,15 @@ def review(
             raise HTTPException(status_code=400, detail="请选择本地视频或切换 URL 模式")
         video = _save_upload(file)
         source_status = "ready"
+    if not damage_causality_policy and scenario == "product_damage":
+        damage_causality_policy = json.dumps(
+            {
+                "force_action_scan": review_model in {"standard", "backup"},
+                "dedicated_chunk_frames": 20,
+                "context_frames": 6,
+            },
+            ensure_ascii=False,
+        )
     evidence_context = {
         "business_scenario": business_scenario,
         "ticket_id": ticket_id,
@@ -1296,6 +928,10 @@ def review(
         "sop_context": sop_context,
         "source_case": source_case,
         "asset_manifest": asset_manifest,
+        "continuity_policy": continuity_policy,
+        "damage_causality_policy": damage_causality_policy,
+        "fulfillment_baseline": fulfillment_baseline,
+        "evidence_coverage": evidence_coverage,
     }
     result = _run_review(video, scenario, fps, max_frames, api_frame_limit, probe_seconds, review_model, evidence_context)
     response = {"ok": result["ok"], "source_status": source_status, "review": result}

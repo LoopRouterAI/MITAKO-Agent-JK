@@ -1,6 +1,6 @@
 # Java / Spring Boot 接入样例
 
-版本：2026-07-11
+版本：2026-07-16
 推荐：Spring Boot 3、WebClient、Jackson。
 
 Java 系统只调用 FastAPI 主服务。内部视觉服务、模型凭证和数据库不对 Java 网关暴露。
@@ -57,8 +57,38 @@ public Mono<JsonNode> validateMetadata(WebClient client, String token, Map<Strin
   "scenario": "wrong_item",
   "batch_id": "BATCH-20260711-001",
   "customer_claim": "用户称收到的角色与订单不一致",
-  "order_items": [{"sku": "SKU-001", "quantity": 1}],
-  "sampling_policy": {"preset": "strict", "frames_per_model_call": 24}
+  "order_items": [{"sku": "SKU-001", "product_name": "角色拍立得", "specification": "A款", "quantity": 1}],
+  "product_master_data": {"items": [{"sku": "SKU-001", "product_name": "角色拍立得", "specification": "A款"}]},
+  "sampling_policy": {"preset": "strict", "frames_per_model_call": 24},
+  "continuity_policy": {"out_of_frame_warning_seconds": 2.0, "force_dense_scan": true}
+}
+```
+
+漏发货案件不能只传订单号。以下字段是自动形成确定结论的最低结构；任一缺失时服务仍可审核视频连续性，但最终强制返回 `review`：
+
+```json
+{
+  "client_case_id": "CASE-MISSING-001",
+  "scenario": "missing_item",
+  "customer_claim": "用户称少发一个徽章和一份特典",
+  "fulfillment_baseline": {
+    "baseline_version": "ORDER-001@2026-07-16T10:00:00+08:00",
+    "expected_items": [
+      {"item_ref": "LINE-1", "sku": "SKU-001", "product_name": "徽章", "expected_quantity": 2},
+      {"item_ref": "BONUS-1", "sku": "BONUS-001", "product_name": "活动特典", "expected_quantity": 1, "item_type": "bonus"}
+    ],
+    "expected_package_count": 1,
+    "packages": [{"package_ref": "PKG-1", "tracking_no": "SF000001", "expected_item_refs": ["LINE-1", "BONUS-1"]}],
+    "benefit_rules": [{"rule_id": "PROMO-1", "description": "满额赠活动特典一份"}],
+    "benefit_rules_complete": true,
+    "selection_rules_complete": true
+  },
+  "evidence_coverage": {
+    "submitted_package_refs": ["PKG-1"],
+    "submitted_tracking_nos": ["SF000001"],
+    "all_packages_uploaded": true,
+    "all_items_displayed": true
+  }
 }
 ```
 
@@ -74,11 +104,18 @@ public Mono<JsonNode> samplingPlan(WebClient client, String token) {
           "duration_seconds", 452.5,
           "source_bytes", 543351335,
           "video_count", 1,
-          "sampling_policy", Map.of("preset", "strict", "frames_per_model_call", 24)))
+          "scenario", "product_damage",
+          "sampling_policy", Map.of("preset", "strict", "frames_per_model_call", 24),
+          "continuity_policy", Map.of("out_of_frame_warning_seconds", 2.0, "force_dense_scan", true),
+          "damage_causality_policy", Map.of("force_action_scan", true, "dedicated_chunk_frames", 20)))
       .retrieve()
       .bodyToMono(JsonNode.class);
 }
 ```
+
+采样规划返回 `estimated_channel_calls.main_review/object_continuity/damage_causality` 和 `estimated_total_model_calls`。Java 侧应使用总调用数做容量与成本预估，不要只读取旧字段 `estimated_model_segments`。
+
+`adaptive` 默认只执行主审核；`strong/strict/forensic` 会自动启用连续性专项，商品有伤还会自动启用损伤因果专项。请求中的显式策略可以进一步收紧，但不能关闭强度档位要求的专项保护。
 
 ## 5. 多文件案件提交
 

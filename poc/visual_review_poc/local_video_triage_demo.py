@@ -1,9 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""Gemini 3.5 Flash 单样本视觉审核。
-
-只做一件事：把一个本地视频抽帧 + 同目录补充图片 + 用户诉求交给 Gemini 3.5 Flash，
-生成一份可复盘 HTML。没有模型选型或双盲。
-"""
+"""本地单样本视觉审核、抽帧和兼容报告工具。"""
 from __future__ import annotations
 
 import argparse
@@ -39,17 +35,11 @@ MODEL = "gemini-3.5-flash"
 GEMINI_35_FLASH_INPUT_USD_PER_1M = 1.50
 GEMINI_35_FLASH_OUTPUT_USD_PER_1M = 9.00
 GEMINI_PRICING_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
-DEFAULT_POLICY = {
-    "auto_confidence": 0.80,
-    "manual_confidence": 0.65,
-}
-
+DEFAULT_POLICY = {"auto_confidence": 0.80, "manual_confidence": 0.65}
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Gemini 3.5 Flash 单样本视觉审核")
     parser.add_argument("--video", required=True, help="本地视频路径")
@@ -372,8 +362,16 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
         "sop_context": _structured_context_value(context.get("sop_context")),
         "source_case": _structured_context_value(context.get("source_case")),
         "asset_manifest": _structured_context_value(context.get("asset_manifest")),
+        "fulfillment_baseline": _structured_context_value(context.get("fulfillment_baseline")),
+        "evidence_coverage": _structured_context_value(context.get("evidence_coverage")),
     }
     structured["frontdesk_evidence_package"] = {key: value for key, value in frontdesk_fields.items() if value}
+    continuity_policy = _structured_context_value(context.get("continuity_policy"))
+    if isinstance(continuity_policy, dict):
+        structured["continuity_policy"] = continuity_policy
+    damage_causality_policy = _structured_context_value(context.get("damage_causality_policy"))
+    if isinstance(damage_causality_policy, dict):
+        structured["damage_causality_policy"] = damage_causality_policy
     return case
 
 
@@ -399,13 +397,16 @@ def load_report_label(case_id: str) -> Dict[str, Any]:
 def scenario_rules(scenario: str) -> str:
     if scenario == "product_damage":
         return """商品有伤专项规则：
+- 必须把“当前能看见损伤”和“损伤在何时、由什么原因形成”拆成两个问题。看见损伤不等于证明商品在原包装内已经有伤，也不等于可以给商家、物流或用户定责。
+- 按时间顺序寻找三个锚点：拆封/操作前状态、撕拉/挤压/取出等动作、动作后状态；记录损伤首次清晰可见的帧或图片。只有连续前后画面能证明变化时，才可使用 direct 因果证据等级。
 - 开箱视频优先核验一镜到底、未拆封快递盒与面单、瑕疵位置清晰可见；任一项不满足时只能标记材料不足或转人工，不得自动拒赔。
 - 判断图片/视频是否能看到真实破损、折痕、划痕、压痕、掉漆或污损，并说明位置、数量、严重程度。
 - 伤情按 SOP 描述：轻伤为 2 处及以内且不超过 5mm 的细划痕或较轻压痕；中伤包括 3 处及以内细划痕、锈点或明显压痕；重伤包括大面积划痕、凹陷、破损、锈迹或爆膜。
-- 区分商品品控、用户暴力拆件和快递暴力运输；外箱严重破损/浸水且内件重伤时，只建议补充内件图、外包装图和物流单号后人工核验。
+- 区分原包装/生产品控、物流运输、用户拆封或后续操作、混合原因和无法判断。外箱严重受压、撞角或浸水只支持“物流原因可能性”，没有连续开箱和内外伤情对应关系时不得直接认定。
+- 若损伤在用户撕拉、弯折、挤压或使用工具之后首次出现，只有连续画面清楚展示动作前无伤、动作过程和动作后出现同位置损伤，才能判断为用户操作导致；静态结果图不能证明是谁造成。
 - 判断证据是否像真实手机/相机拍摄：看纹理、光影、透视、噪点、EXIF 是否缺失、分辨率是否过低、是否存在 Gemini/OpenAI/豆包等 AI 水印或生成痕迹。
 - 缺 EXIF 不能单独否定用户，但应作为可信度因素；如果图像疑似 AI 生成、过度锐化、局部纹理异常或只给裁剪局部，应降低置信度并要求补拍。
-- 输出 positive 需要说明破损清晰可见且与用户诉求一致；输出 review 需要说明缺少哪类补拍角度。"""
+- positive 只用于直接证据证明损伤在拆封/用户操作前已经存在且支持用户诉求；negative 只用于直接证据证明诉求不成立或损伤由用户操作形成；其他情况一律 review，并明确缺少哪段因果证据。"""
     if scenario in {"minor_material", "minor_refund"}:
         return """未成年人资料审核专项规则：
 - 只判断材料是否完整、清晰、前后一致，不识别或暴露真实身份。
@@ -450,7 +451,8 @@ def build_system_prompt(scenario: str = "video_unboxing") -> str:
 - 从用户诉求中拆出“用户认为应该收到什么”和“用户认为实际收到什么”。
 - 从订单截图、商品截图、SKU/规格字段、补充图片中提取原始商品名、角色、款式、尺寸、数量、随机/盲抽规则。
 - 从实物图、包装袋、合格证、尺子或对比图中判断用户提供的实物到底是什么规格。
-- 逐帧审查开箱视频是否连续可信：箱子是否从未拆封开始，商品是否持续在镜头内，是否离镜、跳切、换手、遮挡、剪辑或可疑替换。
+	- 逐帧审查开箱视频是否连续可信：箱子是否从未拆封开始，商品是否持续在镜头内，是否离镜、跳切、换手、遮挡、剪辑或可疑替换。
+	- 主体连续性必须分别跟踪快递包装、商品包装和争议商品；“尚未从不透明包装中拆出”不算离镜，手部短暂遮挡、真实出框和重新出现必须分开记录起止时间与时长。
 - 同时给出支持证据和反证。证据足够时要敢于输出 positive 或 negative；证据不足时才输出 review。
 - 尺寸争议不能只看一个数字，要核对数字属于商品主体、原袋/外包装、展示卡、合格证还是官方销售口径。但如果订单截图明确承诺某规格，实物合格证/包装明确显示同一角色的另一规格，且视频连续性低可疑，可以形成高置信发错证据。
 

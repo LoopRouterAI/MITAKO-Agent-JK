@@ -1300,7 +1300,7 @@
                   <span class="upload-icon">+</span>
                   <span>
                     <span class="upload-title">拖放或选择待审核视频</span>
-                    <span class="upload-desc">支持 mp4、mov、m4v、webm、mkv，最大 300MB；也可以把文件拖到这里。</span>
+                    <span class="upload-desc">支持 mp4、mov、m4v、webm、mkv，单文件最大 650MB；也可以把文件拖到这里。</span>
                     <span class="file-state strong" id="fileState">尚未选择文件</span>
                   </span>
                   <span class="upload-action">选择文件</span>
@@ -1335,13 +1335,13 @@
 	              <div class="source-note">后期打通订单、客服和素材接口后，这里会由系统自动组包；当前 POC 支持客服手动选择本地文件夹完成同样链路。</div>
 	            </div>
 
-            <label for="reviewModel">审核强度</label>
+            <label for="reviewModel">审核策略</label>
             <select name="review_model" id="reviewModel">
-              <option value="standard">标准复核（默认）</option>
-              <option value="fast">快速初筛</option>
-              <option value="backup">补充复核</option>
+              <option value="standard">标准连续性复核（默认 · 1 FPS）</option>
+              <option value="fast">经济初筛（不输出连续通过）</option>
+              <option value="backup">Strong 强化复核（全时间轴 · 2 FPS）</option>
             </select>
-            <div class="hint">默认使用标准复核；爆单初筛可切快速初筛，疑难材料可切补充复核。</div>
+            <div class="hint">标准档按 1 FPS 核对主体连续性；Strong 档按 2 FPS 加密取证；经济档只做粗筛。</div>
 
             <details class="advanced-settings">
               <summary>高级取证设置</summary>
@@ -1364,16 +1364,27 @@
 
                 <div class="row">
                   <div>
+                    <label for="continuityPolicy">离镜复核阈值</label>
+                    <select name="continuity_policy" id="continuityPolicy">
+                      <option value='{"out_of_frame_warning_seconds":1,"force_dense_scan":true,"scan_fps":2}'>1 秒（2 FPS）</option>
+                      <option value='{"out_of_frame_warning_seconds":2,"force_dense_scan":true,"scan_fps":1}' selected>2 秒（1 FPS）</option>
+                      <option value='{"out_of_frame_warning_seconds":4,"force_dense_scan":true,"scan_fps":0.5}'>4 秒（0.5 FPS）</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="row">
+                  <div>
                     <label for="maxFrames" data-i18n="maxFramesLabel">最多证据帧</label>
-                    <input id="maxFrames" name="max_frames" type="number" min="1" max="24" value="6" />
+                    <input id="maxFrames" name="max_frames" type="number" min="1" max="1800" value="24" />
                   </div>
                   <div>
                     <label for="apiFrameLimit" data-i18n="apiFramesLabel">提交复核证据数</label>
-                    <input id="apiFrameLimit" name="api_frame_limit" type="number" min="1" max="12" value="4" />
+                    <input id="apiFrameLimit" name="api_frame_limit" type="number" min="1" max="24" value="24" />
                   </div>
                 </div>
                 <div class="source-note">
-                  第三方多模态接口对大视频直传通常不稳定，尤其是超过 20MB 的素材。本工作台不会把整段大视频直接送审：本地上传会完整落盘到 300MB 上限后抽取前置片段证据帧；平台 URL 会尝试只下载前置片段；公开视频直链可能需要下载完整文件，超过上限会失败。当前支持 1 秒 1 帧或 1 秒 2 帧取证，最后只提交必要证据帧进入复核。
+                  本工作台不会把整段大视频直接送入模型。标准档按 1 秒 1 帧覆盖全时间轴；Strong 档按 1 秒 2 帧取证，并将证据分成每组最多 24 帧并行复核。超大素材建议由对象存储和转码服务先做受控码率转码，再提交审核服务。
                 </div>
               </div>
             </details>
@@ -1386,7 +1397,7 @@
           <section class="sample-eval-card" aria-label="人工结论样本评测">
             <div class="sample-eval-head">
               <h3>人工结论样本评测</h3>
-              <p>导入已由人工确认的 CSV/JSON 样本表。没有辅助结论时只检查样本完备性；包含辅助结论时才统计命中情况。三类主场景每个正向/负向结论至少 50 条，才适合对外讨论准确率。</p>
+              <p>导入推理完成后关联的 CSV/JSON 人工结果。没有辅助结论时只检查样本完备性；包含辅助结论时统计探索性指标。样本规模、标签口径和正式阈值由双方评测方案确认，不是审核 API 的运行时门槛。</p>
             </div>
             <form id="sampleEvalForm">
               <input name="file" id="sampleFile" type="file" accept=".csv,.json,text/csv,application/json" />
@@ -1510,6 +1521,7 @@
         const taskBadge = document.getElementById('taskBadge');
         const taskDesc = document.getElementById('taskDesc');
         const materialList = document.getElementById('materialList');
+        const reviewModel = document.getElementById('reviewModel');
         const fpsSelect = document.getElementById('fps');
         const probeSeconds = document.getElementById('probeSeconds');
         const maxFrames = document.getElementById('maxFrames');
@@ -1601,6 +1613,22 @@
           product_damage: '/product-damage',
           minor_material: '/minor-material'
         };
+
+        const reviewStrategyDefaults = {
+          fast: { fps: '0.2', maxFrames: '12', apiFrames: '12' },
+          standard: { fps: '1', maxFrames: '1200', apiFrames: '24' },
+          backup: { fps: '2', maxFrames: '1800', apiFrames: '24' }
+        };
+        reviewModel.addEventListener('change', () => {
+          try {
+            const strategy = reviewStrategyDefaults[reviewModel.value] || reviewStrategyDefaults.standard;
+            fpsSelect.value = strategy.fps;
+            maxFrames.value = strategy.maxFrames;
+            apiFrameLimit.value = strategy.apiFrames;
+          } catch (error) {
+            console.error('审核策略切换失败', error);
+          }
+        });
         const pathScenarios = Object.fromEntries(Object.entries(scenarioPaths).map(([key, value]) => [value, key]));
 
 	        function setMode(mode) {
@@ -1883,7 +1911,7 @@
             if (!file) {
               fileState.textContent = '请先选择或拖放待审核视频。';
               uploadCard.classList.add('dragging');
-              writeLog('请先选择或拖放待审核视频。支持 mp4、mov、m4v、webm、mkv，最大 300MB。');
+              writeLog('请先选择或拖放待审核视频。支持 mp4、mov、m4v、webm、mkv，单文件最大 650MB。');
               return false;
             }
             if (!isVideoFile(file)) {
@@ -1891,8 +1919,8 @@
               writeLog('请上传常见视频格式文件，或切换为公开视频链接。');
               return false;
             }
-	            if (file.size && file.size > 300 * 1024 * 1024) {
-	              fileState.textContent = '视频超过 300MB，请先压缩或截取关键片段。';
+	            if (file.size && file.size > 650 * 1024 * 1024) {
+	              fileState.textContent = '视频超过 650MB，请先转码压缩或走对象存储代理。';
 	              writeLog('当前文件超过工作台上传上限，请先压缩、截取关键片段，或联系项目对接人处理。');
 	              return false;
 	            }

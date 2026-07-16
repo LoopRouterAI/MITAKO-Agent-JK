@@ -113,11 +113,11 @@ paths:
       summary: Review Task Upload
       operationId: review_task_upload_api_v1_private_domain_review_tasks_post
       requestBody:
+        required: true
         content:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/Body_review_task_upload_api_v1_private_domain_review_tasks_post'
-        required: true
       responses:
         '200':
           description: Successful Response
@@ -125,6 +125,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewTaskUploadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - private-domain
+      summary: Review Task List
+      operationId: review_task_list_api_v1_private_domain_review_tasks_get
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: User Id
+      - name: session_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: order_id
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Order Id
+      - name: client_case_id
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Client Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
         '422':
           description: Validation Error
           content:
@@ -1086,6 +1130,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/handoff/offer:
+    post:
+      summary: Create Handoff Offer
+      operationId: create_handoff_offer_api_v1_handoff_offer_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffOfferRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/handoff/request:
     post:
       summary: Request Handoff
@@ -1300,12 +1366,26 @@ paths:
     get:
       summary: Desk Sessions
       operationId: desk_sessions_api_v1_desk_sessions_get
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          type: string
+          default: available
+          title: Scope
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/desk/session/{session_id}:
     get:
       summary: Desk Session Detail
@@ -1579,6 +1659,22 @@ components:
           type: string
           title: Source
           default: customer_upload
+        client_case_id:
+          type: string
+          title: Client Case Id
+          default: ''
+        order_id:
+          type: string
+          title: Order Id
+          default: ''
+        scenario:
+          type: string
+          title: Scenario
+          default: ''
+        context_json:
+          type: string
+          title: Context Json
+          default: '{}'
         async_review:
           type: boolean
           title: Async Review
@@ -2036,6 +2132,27 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HandoffOfferRequest:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        session_id:
+          type: string
+          title: Session Id
+        reason:
+          type: string
+          title: Reason
+          default: AI建议用户选择是否转接VIP客服
+        tenant_id:
+          type: string
+          title: Tenant Id
+          default: mitako
+      type: object
+      required:
+      - user_id
+      - session_id
+      title: HandoffOfferRequest
     HandoffRequest:
       properties:
         user_id:
@@ -2072,6 +2189,14 @@ components:
           type: string
           title: Tenant Id
           default: mitako
+        offer_id:
+          type: string
+          title: Offer Id
+          default: ''
+        active_order_id:
+          type: string
+          title: Active Order Id
+          default: ''
       type: object
       required:
       - user_id
@@ -2437,6 +2562,12 @@ components:
             type: object
           type: array
           title: Order Items
+        fulfillment_baseline:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewFulfillmentBaseline'
+          - type: 'null'
+        evidence_coverage:
+          $ref: '#/components/schemas/ReviewEvidenceCoverage'
         product_master_data:
           additionalProperties: true
           type: object
@@ -2472,12 +2603,41 @@ components:
           title: Source Record
         sampling_policy:
           $ref: '#/components/schemas/ReviewSamplingPolicy'
+        continuity_policy:
+          $ref: '#/components/schemas/ReviewContinuityPolicy'
+        damage_causality_policy:
+          $ref: '#/components/schemas/ReviewDamageCausalityPolicy'
       additionalProperties: true
       type: object
       required:
       - client_case_id
       - scenario
       title: ReviewCaseMetadata
+    ReviewContinuityPolicy:
+      properties:
+        out_of_frame_warning_seconds:
+          type: number
+          maximum: 30.0
+          minimum: 0.5
+          title: Out Of Frame Warning Seconds
+          default: 2.0
+        require_identity_reestablishment:
+          type: boolean
+          title: Require Identity Reestablishment
+          default: true
+        force_dense_scan:
+          type: boolean
+          title: Force Dense Scan
+          default: false
+        scan_fps:
+          anyOf:
+          - type: number
+            maximum: 2.0
+            minimum: 0.2
+          - type: 'null'
+          title: Scan Fps
+      type: object
+      title: ReviewContinuityPolicy
     ReviewContractResponse:
       properties:
         ok:
@@ -2492,6 +2652,187 @@ components:
       required:
       - contract
       title: ReviewContractResponse
+    ReviewDamageCausalityPolicy:
+      properties:
+        force_action_scan:
+          type: boolean
+          title: Force Action Scan
+          default: false
+        dedicated_chunk_frames:
+          type: integer
+          maximum: 24.0
+          minimum: 8.0
+          title: Dedicated Chunk Frames
+          default: 20
+        context_frames:
+          type: integer
+          maximum: 8.0
+          minimum: 2.0
+          title: Context Frames
+          default: 6
+      type: object
+      title: ReviewDamageCausalityPolicy
+    ReviewEvidenceCoverage:
+      properties:
+        submitted_package_refs:
+          items:
+            type: string
+          type: array
+          title: Submitted Package Refs
+        submitted_tracking_nos:
+          items:
+            type: string
+          type: array
+          title: Submitted Tracking Nos
+        all_packages_uploaded:
+          type: boolean
+          title: All Packages Uploaded
+          default: false
+        all_items_displayed:
+          type: boolean
+          title: All Items Displayed
+          default: false
+        coverage_notes:
+          type: string
+          title: Coverage Notes
+          default: ''
+      additionalProperties: true
+      type: object
+      title: ReviewEvidenceCoverage
+    ReviewExpectedItem:
+      properties:
+        item_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Item Ref
+        sku:
+          type: string
+          title: Sku
+          default: ''
+        product_name:
+          type: string
+          title: Product Name
+          default: ''
+        specification:
+          type: string
+          title: Specification
+          default: ''
+        expected_quantity:
+          type: integer
+          maximum: 10000.0
+          minimum: 1.0
+          title: Expected Quantity
+        item_type:
+          type: string
+          enum:
+          - paid_item
+          - bundle_component
+          - gift
+          - bonus
+          - insert
+          - other
+          title: Item Type
+          default: paid_item
+        master_image_urls:
+          items:
+            type: string
+          type: array
+          title: Master Image Urls
+        packaging_identifiers:
+          items:
+            type: string
+          type: array
+          title: Packaging Identifiers
+      additionalProperties: true
+      type: object
+      required:
+      - item_ref
+      - expected_quantity
+      title: ReviewExpectedItem
+    ReviewExpectedPackage:
+      properties:
+        package_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Package Ref
+        tracking_no:
+          type: string
+          title: Tracking No
+          default: ''
+        expected_item_refs:
+          items:
+            type: string
+          type: array
+          title: Expected Item Refs
+        shipment_status:
+          type: string
+          title: Shipment Status
+          default: ''
+      additionalProperties: true
+      type: object
+      required:
+      - package_ref
+      title: ReviewExpectedPackage
+    ReviewFulfillmentBaseline:
+      properties:
+        baseline_version:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Baseline Version
+        expected_items:
+          items:
+            $ref: '#/components/schemas/ReviewExpectedItem'
+          type: array
+          title: Expected Items
+        expected_package_count:
+          type: integer
+          maximum: 100.0
+          minimum: 1.0
+          title: Expected Package Count
+          default: 1
+        packages:
+          items:
+            $ref: '#/components/schemas/ReviewExpectedPackage'
+          type: array
+          title: Packages
+        split_shipment:
+          type: boolean
+          title: Split Shipment
+          default: false
+        benefit_rules:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Benefit Rules
+        benefit_rules_complete:
+          type: boolean
+          title: Benefit Rules Complete
+          default: false
+        selection_rules:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Selection Rules
+        selection_rules_complete:
+          type: boolean
+          title: Selection Rules Complete
+          default: false
+        standard_packing_list:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Standard Packing List
+      additionalProperties: true
+      type: object
+      required:
+      - baseline_version
+      title: ReviewFulfillmentBaseline
     ReviewJob:
       properties:
         job_id:
@@ -2604,9 +2945,14 @@ components:
           default: true
         metadata:
           $ref: '#/components/schemas/ReviewCaseMetadata'
+        readiness:
+          additionalProperties: true
+          type: object
+          title: Readiness
       type: object
       required:
       - metadata
+      - readiness
       title: ReviewMetadataValidationResponse
     ReviewMetricsResponse:
       properties:
@@ -2639,8 +2985,22 @@ components:
           minimum: 1.0
           title: Video Count
           default: 1
+        scenario:
+          anyOf:
+          - type: string
+            enum:
+            - product_damage
+            - wrong_item
+            - missing_item
+            - minor_refund
+          - type: 'null'
+          title: Scenario
         sampling_policy:
           $ref: '#/components/schemas/ReviewSamplingPolicy'
+        continuity_policy:
+          $ref: '#/components/schemas/ReviewContinuityPolicy'
+        damage_causality_policy:
+          $ref: '#/components/schemas/ReviewDamageCausalityPolicy'
       type: object
       required:
       - duration_seconds
@@ -2666,6 +3026,7 @@ components:
           type: string
           enum:
           - adaptive
+          - strong
           - strict
           - forensic
           - custom
@@ -2690,6 +3051,35 @@ components:
           minimum: 1.0
           title: Frames Per Model Call
           default: 24
+        auto_escalate:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Auto Escalate
+          default: false
+        confidence_threshold:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence Threshold
+          default: 0.75
+        forensic_checks:
+          anyOf:
+          - type: boolean
+          - items:
+              type: string
+              enum:
+              - container_integrity
+              - timeline_consistency
+              - stream_consistency
+              - frame_rate_consistency
+              - packet_timeline
+              - editor_metadata
+            type: array
+          - type: 'null'
+          title: Forensic Checks
       type: object
       title: ReviewSamplingPolicy
     ReviewTask:
@@ -2711,6 +3101,14 @@ components:
           type: string
           title: Source
           default: customer_upload
+        client_case_id:
+          type: string
+          title: Client Case Id
+          default: ''
+        order_id:
+          type: string
+          title: Order Id
+          default: ''
         scenario:
           type: string
           title: Scenario
@@ -2733,6 +3131,10 @@ components:
           type: string
           title: Boundary
           default: ''
+        context:
+          additionalProperties: true
+          type: object
+          title: Context
         result:
           additionalProperties: true
           type: object
