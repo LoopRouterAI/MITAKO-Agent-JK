@@ -14,7 +14,15 @@ from poc.visual_review_poc.local_video_triage_demo import build_system_prompt
 
 
 REQUIRED = {
-    "product_damage": ("一镜到底", "未拆封", "5mm", "用户暴力拆件", "快递暴力运输"),
+    "product_damage": (
+        "一镜到底",
+        "未拆封",
+        "5mm",
+        "物流运输",
+        "用户拆封或后续操作",
+        "连续前后画面",
+        "不得直接认定",
+    ),
     "wrong_item": ("绿色自封袋", "光栅", "隐藏款", "角色", "SKU"),
     "missing_item": ("拆单", "纸类", "全家福", "绿色自封袋", "_1"),
     "minor_refund": ("五类材料", "主副卡", "10周岁以下", "人工一审", "二审", "终审"),
