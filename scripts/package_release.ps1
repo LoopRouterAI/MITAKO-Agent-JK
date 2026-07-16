@@ -152,8 +152,6 @@ END = _workflow_graph.END
         $text = $text.Replace("mock", "sample")
         $text = $text.Replace("provider", "route")
         $text = $text.Replace("Provider", "Route")
-        $text = $text.Replace("channel", "route")
-        $text = $text.Replace("Channel", "Route")
         $text = $text.Replace("https://vision-endpoint.local", "https://vision-endpoint.local")
         $text = $text.Replace("https://api.vision_route.com/v1", "https://review-endpoint.local/v1")
         $text = $text.Replace("https://api.vision_route.com", "https://review-endpoint.local")
@@ -338,7 +336,6 @@ function Assert-ZipNoRuntimeLeak([string]$ZipFile) {
         "mock_",
         "Mock",
         "provider",
-        "channel",
         "download_manifest",
         "https://vision-endpoint.local",
         "https://api.vision_route.com",
