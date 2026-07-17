@@ -287,7 +287,7 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
         if item.get("local_file")
     ]
     resource_fields = {str(item.get("local_file")): item.get("fields") or [] for item in (manifest.get("resources") or []) if item.get("local_file")}
-    scenario = infer_scenario(claim)
+    scenario = infer_scenario("\n".join((claim, str(manifest.get("tag") or ""))))
     structured_business_context = {
         "order_items": read_json(folder / "order_items.json") or manifest.get("order_items") or [],
         "product_master_data": read_json(folder / "product_master.json") or manifest.get("product_master_data") or {},

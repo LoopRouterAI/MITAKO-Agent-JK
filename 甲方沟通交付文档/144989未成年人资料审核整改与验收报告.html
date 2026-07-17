@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>144989 未成年人资料审核整改与验收报告</title>
+  <style>
+    :root{--ink:#18221d;--muted:#657168;--line:#d9e2dc;--paper:#fff;--wash:#f2f5f2;--green:#176b43;--red:#a13b32;--amber:#946116}
+    *{box-sizing:border-box}body{margin:0;background:var(--wash);color:var(--ink);font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;letter-spacing:0}
+    main{max-width:1160px;margin:auto;padding:28px 18px 64px}section{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:20px;margin:14px 0}
+    h1{font-size:30px;margin:5px 0 10px}h2{font-size:20px;margin:0 0 12px}h3{font-size:16px;margin:0 0 8px}p,li{line-height:1.75}.muted{color:var(--muted)}
+    .badge{display:inline-block;color:var(--green);font-size:13px;font-weight:700}.lead{font-size:17px;max-width:900px}.metrics,.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+    .metric,.card{border:1px solid var(--line);border-radius:7px;padding:14px;background:#fbfdfb}.metric small{display:block;color:var(--muted);margin-bottom:6px}.metric b{font-size:23px}.ok{color:var(--green)}.bad{color:var(--red)}.warn{color:var(--amber)}
+    table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:11px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#edf2ee}.callout{border-left:4px solid var(--green);background:#f4faf6}
+    code{background:#edf1ee;padding:2px 6px;border-radius:4px;word-break:break-all}@media(max-width:700px){main{padding:16px 10px 40px}h1{font-size:24px}.table-wrap{overflow:auto}table{min-width:760px}}
+  </style>
+</head>
+<body><main>
+  <section>
+    <span class="badge">甲方反馈闭环 · 2026-07-17</span>
+    <h1>144989 未成年人资料审核整改与验收报告</h1>
+    <p class="lead">甲方反馈成立。旧版本没有让模型看到完整资料，却把“未识别到”写成“用户缺失”，导致结论明显偏向不通过。本轮已经修复证据编排、SOP 规则、缺件门禁、隐私保护和报告展示，并使用正式异步 API 对原样本重新盲测。</p>
+  </section>
+
+  <section>
+    <h2>一句话结论</h2>
+    <div class="metrics">
+      <div class="metric"><small>正式任务</small><b class="ok">SUCCEEDED</b></div>
+      <div class="metric"><small>图片覆盖</small><b class="ok">20 / 20</b></div>
+      <div class="metric"><small>SOP 材料</small><b class="ok">5 / 5</b></div>
+      <div class="metric"><small>自动验收</small><b class="ok">11 / 11</b></div>
+      <div class="metric"><small>证据标签</small><b class="ok">positive</b></div>
+      <div class="metric"><small>后续流转</small><b>人工一审</b></div>
+    </div>
+    <p>新结论为：五类材料均已在全量图片中识别到，可进入 VIP 客服人工一审；这不代表自动退款或终审通过。</p>
+  </section>
+
+  <section>
+    <h2>为什么旧版本会错</h2>
+    <div class="grid">
+      <article class="card"><h3 class="bad">只看了前 4 张图</h3><p>案件同时有视频时，旧代码把视频分段送模，但每个分段只附带 <code>supplemental_images[:4]</code>。出生证明、支付记录、发票和后续整改身份证均不在前四张。</p></article>
+      <article class="card"><h3 class="bad">把未看见写成缺失</h3><p>旧聚合没有核对“申报图片数、接收图片数、模型逐张返回数”，因此即使证据没有送到模型，也允许输出缺件结论。</p></article>
+      <article class="card"><h3 class="bad">材料存在与材料有效混在一起</h3><p>运营商发票已经提交，但主体、手机号备注是否一致仍需人工核对。旧结论直接写成没有实名证明，表达过度。</p></article>
+      <article class="card"><h3 class="bad">没有处理补件批次</h3><p>该工单经历补出生证明、身份证退回整改、重新提交、发票通过和登记退款。旧版本没有把不同时间提交的材料作为一个完整证据包聚合。</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>本轮改了什么</h2>
+    <ol>
+      <li>未成年人资料改为独立管线：全部图片按小批次并发识别，视频只审核开票/材料展示过程。</li>
+      <li>每批必须逐张返回 <code>image_index</code>；HTTP 成功但漏图片会自动结构重试，额外调用计入成本和耗时。</li>
+      <li>增加覆盖门禁：申报、接收、处理数量不一致时，禁止声称用户缺件。</li>
+      <li>按《未成年人退款 2.0》执行五类材料规则；户口本相关页与出生证明是二选一。</li>
+      <li>运营商话费账单/电子发票记为“已提交候选证明”，实名主体、购物手机号和备注一致性仍由人工核对。</li>
+      <li>公开报告只保留材料类型、图片编号、清晰度和待核点，不输出姓名、手机号、证件号、住址或 OCR 原文。</li>
+      <li>正式 HTML 增加五类材料面板，可查看图片覆盖率、证据编号、验证状态、过程视频和业务边界。</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>144989 复测结果</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>材料组</th><th>结果</th><th>识别说明</th><th>仍需人工确认</th></tr></thead>
+      <tbody>
+        <tr><td>未成年人及监护人身份证明</td><td class="ok">已识别</td><td>识别到双方身份证明候选材料及后续整改图片</td><td>正反面归属、遮挡规则和主体一致性</td></tr>
+        <tr><td>监护关系证明</td><td class="ok">已识别</td><td>户口本相关页和出生证明均有证据；SOP 实际只要求二选一</td><td>法定监护关系真实性</td></tr>
+        <tr><td>双方签字承诺书</td><td class="ok">已识别</td><td>识别到手写承诺材料</td><td>签字真实性和申请范围</td></tr>
+        <tr><td>订单或支付凭证</td><td class="ok">已识别</td><td>识别到多张消费/支付记录</td><td>订单范围、金额和付款主体</td></tr>
+        <tr><td>绑定手机号实名归属证明</td><td class="ok">已提交候选材料</td><td>识别到话费账单和运营商电子发票</td><td>实名主体、购物手机号、主副卡和备注一致性</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="callout">
+    <h2>仍然不能自动做什么</h2>
+    <p>Agent 的 <code>positive</code> 表示“当前证据支持材料已提交并可进入人工一审”，不表示自动退款。身份真实性、监护关系、发票备注、金额、账号归属、历史补件有效性和最终退款动作仍由甲方授权人员及业务系统确认。</p>
+  </section>
+
+  <section>
+    <h2>验收证据</h2>
+    <p>正式任务：<code>RJ-9B10F73C68D04716</code></p>
+    <p>机器报告：<code>tests/reports/minor_refund_144989_20260717-final.json</code></p>
+    <p>专项 HTML：<code>tests/reports/minor_refund_144989_20260717-final.html</code></p>
+    <p class="muted">盲测请求未上传正样本目录标签、reply.json、manifest.json 或人工退款结论。该单样本用于缺陷回归，不用于宣称整体准确率或生产召回率。</p>
+  </section>
+</main></body></html>

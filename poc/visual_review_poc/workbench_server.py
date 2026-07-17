@@ -76,6 +76,7 @@ SAMPLE_MATERIAL_DIR = (ROOT / "docs" / "三大审核场景的小量样本").reso
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
 MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
+MAX_SUPPLEMENTAL_IMAGES = max(1, min(int(os.getenv("VISUAL_MAX_SUPPLEMENTAL_IMAGES", "40") or 40), 80))
 MAX_FOLDER_FILES = max(1, int(os.getenv("VISUAL_MAX_FOLDER_FILES", "200") or 200))
 PRIVATE_REPORT_KEYS = {
     "model",
@@ -550,11 +551,11 @@ def _run_review(
         api_frame_limit=api_frame_limit,
         probe_seconds=float(probe_seconds),
         frame_width=960,
-        supplemental_image_limit=20,
+        supplemental_image_limit=MAX_SUPPLEMENTAL_IMAGES,
     )
     run_dir = ROOT / "tmp" / "visual_review_workbench" / f"single_{video.parent.name}_{time.time_ns()}"
     try:
-        case = load_case_bundle(video.parent, args, run_dir)
+        case = load_case_bundle(video.parent, args, run_dir, scenario_override=scenario)
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
@@ -683,10 +684,10 @@ def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> D
         api_frame_limit=24,
         probe_seconds=0.0,
         frame_width=960,
-        supplemental_image_limit=20,
+        supplemental_image_limit=MAX_SUPPLEMENTAL_IMAGES,
     )
     run_dir = ROOT / "tmp" / "visual_review_workbench" / f"workbench_{sample_id}_{int(time.time())}"
-    case = load_case_bundle(sample_dir, args, run_dir)
+    case = load_case_bundle(sample_dir, args, run_dir, scenario_override=scenario)
     case["scenario"] = scenario
     case["scenario_label"] = {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "资料审核"}[scenario]
     result = call_model_chunked(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
@@ -750,11 +751,11 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         api_frame_limit=api_frame_limit,
         probe_seconds=float(probe_seconds),
         frame_width=960,
-        supplemental_image_limit=20,
+        supplemental_image_limit=MAX_SUPPLEMENTAL_IMAGES,
     )
     run_dir = ROOT / "tmp" / "visual_review_workbench" / f"folder_{folder_dir.name}_{int(time.time())}"
     try:
-        case = load_case_bundle(folder_dir, args, run_dir)
+        case = load_case_bundle(folder_dir, args, run_dir, scenario_override=scenario)
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))

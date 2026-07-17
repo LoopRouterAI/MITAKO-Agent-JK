@@ -60,6 +60,7 @@ from poc.visual_review_poc.fulfillment_reconciliation import (
     apply_fulfillment_guard,
 )
 from poc.visual_review_poc.specialized_model_pass import run_specialized_frame_pass
+from poc.visual_review_poc.minor_material_pipeline import run_minor_material_pipeline
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
 
@@ -116,11 +117,22 @@ def compress_image(src: Path, dest: Path, max_edge: int = 1280, quality: int = 8
     return dest
 
 
-def prepare_media(items: List[Dict[str, Any]], media_dir: Path) -> List[Dict[str, Any]]:
+def prepare_media(
+    items: List[Dict[str, Any]],
+    media_dir: Path,
+    *,
+    max_edge: int = 1280,
+    quality: int = 82,
+) -> List[Dict[str, Any]]:
     prepared = []
     for index, item in enumerate(items, start=1):
         src = Path(item["path"])
-        api_path = compress_image(src, media_dir / f"{index:03d}_{src.stem}.jpg")
+        api_path = compress_image(
+            src,
+            media_dir / f"{index:03d}_{src.stem}.jpg",
+            max_edge=max_edge,
+            quality=quality,
+        )
         copied = dict(item)
         copied["api_path"] = str(api_path)
         copied["api_mime_type"] = "image/jpeg" if api_path.suffix.lower() in {".jpg", ".jpeg"} else mime_for(api_path)
@@ -129,7 +141,12 @@ def prepare_media(items: List[Dict[str, Any]], media_dir: Path) -> List[Dict[str
     return prepared
 
 
-def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) -> Dict[str, Any]:
+def load_case_bundle(
+    sample_dir: Path,
+    args: argparse.Namespace,
+    run_dir: Path,
+    scenario_override: str = "",
+) -> Dict[str, Any]:
     videos = sorted(
         p
         for p in sample_dir.iterdir()
@@ -139,6 +156,8 @@ def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) 
         and valid_media_file(p)
     )
     case = load_case(videos[0], args.supplemental_image_limit) if videos else load_case_from_folder(sample_dir, args.supplemental_image_limit)
+    if scenario_override:
+        case["scenario"] = scenario_override
     if not videos and not case.get("supplemental_images"):
         raise SystemExit(f"样本缺少可审核的视频或图片：{sample_dir}")
     frame_groups: List[List[Dict[str, Any]]] = []
@@ -199,7 +218,13 @@ def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) 
     case["supplemental_images"] = case["supplemental_images"][: args.supplemental_image_limit]
     media_dir = run_dir / "api_media"
     case["frames"] = prepare_media(case["frames"], media_dir / "frames")
-    case["supplemental_images"] = prepare_media(case["supplemental_images"], media_dir / "images")
+    minor_material = case.get("scenario") in {"minor_material", "minor_refund"}
+    case["supplemental_images"] = prepare_media(
+        case["supplemental_images"],
+        media_dir / "images",
+        max_edge=1920 if minor_material else 1280,
+        quality=88 if minor_material else 82,
+    )
     return case
 
 
@@ -739,6 +764,18 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     wall_started = time.time()
     frames = case.get("frames") or []
     limit = max(1, min(int(case.get("model_frames_per_call") or 24), 24))
+    scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or case.get("scenario") or "")
+    if scenario in {"minor_material", "minor_refund"}:
+        workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4))
+        output = run_minor_material_pipeline(
+            case,
+            invoke=lambda batch_case: call_model(cfg, batch_case, timeout, retries),
+            workers=workers,
+        )
+        parsed = output.get("parsed") or {}
+        output["evaluation"] = evaluate(parsed, load_report_label(case["case_id"]))
+        output["policy_decision"] = policy_decision(parsed)
+        return output
     if not frames:
         result = call_model(cfg, case, timeout, retries)
         result["chunking"] = {"segment_count": 1, "frames_per_segment": limit, "total_frames": 0}
@@ -778,7 +815,6 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         return {"status": "failed", "error": "chunk_review_failed", "chunk_failures": failures, "chunking": {"segment_count": len(chunks), "total_frames": len(frames)}}
     policy = (case.get("structured_business_context") or {}).get("continuity_policy") or {}
     causality_policy = (case.get("structured_business_context") or {}).get("damage_causality_policy") or {}
-    scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or case.get("scenario") or "")
     continuity_results: List[Dict[str, Any]] = []
     continuity_failures: List[Dict[str, Any]] = []
     if policy.get("force_dense_scan") and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}:

@@ -24,7 +24,7 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                 "supplemental_images": [],
             }
 
-            def load_bundle(sample_dir, args, run_dir):
+            def load_bundle(sample_dir, args, run_dir, scenario_override=""):
                 observed.update(
                     {
                         "sample_dir": sample_dir,
@@ -32,6 +32,7 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                         "fps": args.fps,
                         "max_frames": args.max_frames_per_video,
                         "api_frame_limit": args.api_frame_limit,
+                        "scenario_override": scenario_override,
                     }
                 )
                 return case
@@ -65,6 +66,7 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
         self.assertEqual(observed["fps"], 2.0)
         self.assertEqual(observed["max_frames"], 1800)
         self.assertEqual(observed["api_frame_limit"], 24)
+        self.assertEqual(observed["scenario_override"], "video_unboxing")
         self.assertEqual(model.call_count, 1)
         self.assertTrue(result["ok"])
         self.assertEqual(result["sampling"]["sampled_frames"], 905)
@@ -76,8 +78,13 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
             video = Path(temp_dir) / "evidence.mp4"
             video.write_bytes(b"video")
 
-            def load_bundle(sample_dir, args, run_dir):
-                observed.update({"sampling_mode": args.sampling_mode, "fps": args.fps, "max_frames": args.max_frames_per_video})
+            def load_bundle(sample_dir, args, run_dir, scenario_override=""):
+                observed.update({
+                    "sampling_mode": args.sampling_mode,
+                    "fps": args.fps,
+                    "max_frames": args.max_frames_per_video,
+                    "scenario_override": scenario_override,
+                })
                 return {
                     "case_id": "CASE-STANDARD",
                     "scenario": "product_damage",
@@ -100,7 +107,12 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
             ):
                 workbench_server._run_review(video, "product_damage", 0.2, 24, 24, 12, "standard", {})
 
-        self.assertEqual(observed, {"sampling_mode": "dense", "fps": 1.0, "max_frames": 1200})
+        self.assertEqual(observed, {
+            "sampling_mode": "dense",
+            "fps": 1.0,
+            "max_frames": 1200,
+            "scenario_override": "product_damage",
+        })
 
 
 if __name__ == "__main__":

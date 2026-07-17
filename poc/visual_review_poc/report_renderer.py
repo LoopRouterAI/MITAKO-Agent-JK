@@ -11,6 +11,7 @@ from poc.visual_review_poc.report_assessment_sections import (
     render_confidence_components_panel,
     render_damage_causality_panel,
     render_fulfillment_reconciliation_panel,
+    render_minor_material_panel,
     render_object_continuity_panel,
 )
 
@@ -435,6 +436,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         parsed.get("object_continuity_assessment"), media_gallery, _evidence_items, _h
     )
     fulfillment_panel = render_fulfillment_reconciliation_panel(parsed.get("fulfillment_reconciliation"), _h)
+    minor_material_panel = render_minor_material_panel(parsed.get("minor_material_assessment"), _h)
     confidence_components_panel = render_confidence_components_panel(parsed.get("confidence_components"), _h)
     yes_no = "REVIEW" if failed else _public_yes_no(parsed)
     latency = runtime.get("latency_seconds") or "-"
@@ -530,6 +532,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    </div>
 	  </section>
 
+    {minor_material_panel}
     {confidence_components_panel}
     {damage_causality_panel}
   {object_continuity_panel}

@@ -5,14 +5,23 @@ from typing import Any, Dict
 
 from poc.visual_review_poc.continuity_model_prompt import build_object_continuity_prompt
 from poc.visual_review_poc.damage_causality_model_prompt import build_damage_causality_prompt
+from poc.visual_review_poc.minor_material_model_prompt import (
+    build_minor_material_inventory_prompt,
+    build_minor_material_video_prompt,
+)
 from review_input_safety import sanitize_review_input
 
 
 def build_selection_prompt(case: Dict[str, Any]) -> str:
     safe_case = sanitize_review_input(case)
-    if (safe_case.get("structured_business_context") or {}).get("analysis_mode") == "object_continuity_only":
+    analysis_mode = (safe_case.get("structured_business_context") or {}).get("analysis_mode")
+    if analysis_mode == "minor_material_inventory":
+        return build_minor_material_inventory_prompt(safe_case)
+    if analysis_mode == "minor_material_process_video":
+        return build_minor_material_video_prompt(safe_case)
+    if analysis_mode == "object_continuity_only":
         return build_object_continuity_prompt(safe_case)
-    if (safe_case.get("structured_business_context") or {}).get("analysis_mode") == "damage_causality_only":
+    if analysis_mode == "damage_causality_only":
         return build_damage_causality_prompt(safe_case)
     frames = [
         {

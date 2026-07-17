@@ -2,6 +2,7 @@
 param(
     [string]$BaseUrl = "http://127.0.0.1:8015",
     [string]$VisualUrl = "http://127.0.0.1:7861",
+    [string]$MinorSampleRoot = "",
     [switch]$RunModelBatch
 )
 
@@ -48,7 +49,7 @@ try {
 
     Invoke-Step "Frontend production build" { npm run build }
     Invoke-Step "Python core compilation" {
-        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py review_service\decision_policy.py private_domain\service.py scripts\check_documentation_release.py scripts\check_review_runtime_dependencies.py scripts\check_review_0717_four_samples.py
+        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py review_service\decision_policy.py private_domain\service.py scripts\check_documentation_release.py scripts\check_review_runtime_dependencies.py scripts\check_review_0717_four_samples.py scripts\check_minor_refund_144989.py
     }
     Invoke-Step "Documentation and OpenAPI" { & $Python scripts\check_documentation_release.py }
     Invoke-Step "Private deployment API smoke" { & $Python scripts\check_private_deployment_api.py }
@@ -57,6 +58,7 @@ try {
     Invoke-Step "Media preprocessing and sampling" { & $Python scripts\check_review_media_preprocessing.py }
     Invoke-Step "Media upload safety" { & $Python -m unittest tests.review_service.test_media_upload_safety tests.visual_review.test_workbench_upload_safety }
     Invoke-Step "0717 review decision and timeline regression" { & $Python -m unittest tests.review_service.test_decision_policy_0717 tests.review_service.test_review_strength_and_forensics tests.visual_review.test_global_timeline_aggregation_0717 }
+    Invoke-Step "Minor refund material coverage and privacy regression" { & $Python -m unittest tests.visual_review.test_minor_material_pipeline tests.visual_review.test_model_request_isolation tests.visual_review.test_report_evidence_rendering }
     Invoke-Step "Visual workbench smoke" { & $Python scripts\check_visual_workbench_smoke.py }
     Invoke-Step "Customer Agent 0709 regression" { & $Python scripts\check_customer_agent_0709_regression.py }
     Invoke-Step "Customer Agent 0714 regression" { & $Python scripts\check_customer_agent_0714_regression.py }
@@ -81,6 +83,14 @@ try {
 
     if ($RunModelBatch) {
         Invoke-Step "Live multimodal review batch" { & $Python scripts\check_review_service_batch.py --samples "sample_003" --run-id "internal-release" }
+    }
+    if ($MinorSampleRoot) {
+        if (-not (Test-Path -LiteralPath $MinorSampleRoot -PathType Container)) {
+            throw "Minor sample root does not exist: $MinorSampleRoot"
+        }
+        Invoke-Step "144989 live minor-refund blind review" {
+            & $Python scripts\check_minor_refund_144989.py --sample-root $MinorSampleRoot --base-url $BaseUrl
+        }
     }
 
     Write-Host "[OK] Internal deployment, build, and release validation passed." -ForegroundColor Green

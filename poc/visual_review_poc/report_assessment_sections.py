@@ -256,3 +256,60 @@ def render_confidence_components_panel(value: Any, escape: Callable[[Any], str])
     <p><b>校准状态：</b>{escape("已校准" if calibrated else "尚未使用独立留出集校准")}</p>
     <p><b>解释：</b>{escape(value.get("interpretation") or "请结合证据卡和人工复核边界解读。")}</p>
   </section>"""
+
+
+def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str:
+    if not isinstance(value, dict):
+        return ""
+    status_labels = {
+        "present": "已识别到候选材料",
+        "needs_manual_confirmation": "已观察到，待人工确认",
+        "not_observed_after_full_scan": "全量扫描后尚未确认",
+        "not_assessed": "尚未完成识别",
+        "needs_manual_consistency_check": "需人工核对主体与一致性",
+        "needs_business_system_check": "需业务系统核对金额与订单",
+        "confirmed_by_visual_category": "视觉类别已确认",
+        "not_validated": "尚未验证",
+    }
+    checklist_cards = []
+    for item in (value.get("checklist") or [])[:10]:
+        if not isinstance(item, dict):
+            continue
+        image_indices = "、".join(str(index) for index in item.get("evidence_image_indices") or []) or "无"
+        checklist_cards.append(
+            '<article class="boundary-card">'
+            f'<h3>{escape(item.get("label") or item.get("requirement_id") or "未命名材料")}</h3>'
+            f'<p><b>材料状态：</b>{escape(status_labels.get(item.get("status"), item.get("status") or "未知"))}</p>'
+            f'<p><b>验证状态：</b>{escape(status_labels.get(item.get("validation_status"), item.get("validation_status") or "未知"))}</p>'
+            f'<p><b>证据图片：</b>{escape(image_indices)}</p>'
+            f'<p>{escape(item.get("rule_note") or "")}</p></article>'
+        )
+    process_items = []
+    for item in (value.get("process_evidence") or [])[:20]:
+        if not isinstance(item, dict):
+            continue
+        process_items.append(
+            f'<li>视频 {escape(item.get("video_index") or "-")} / 帧 {escape(item.get("global_frame_index") or "-")} / '
+            f'{escape(item.get("timestamp") or "-")}：{escape(item.get("process_type") or "uncertain")}，'
+            f'质量 {escape(item.get("evidence_quality") or "-")}</li>'
+        )
+    unclassified = "、".join(str(index) for index in value.get("unclassified_image_indices") or []) or "无"
+    return f"""
+  <section class="panel minor-material-panel">
+    <div class="section-head"><h2>未成年人退款五类材料核对</h2><p>材料存在性、字段一致性和最终退款裁决分开表达；报告不展示任何个人号码或OCR原文。</p></div>
+    <div class="causality-grid">
+      <article><small>申报图片</small><b>{escape(value.get("declared_image_count") or 0)}</b></article>
+      <article><small>接收图片</small><b>{escape(value.get("accepted_image_count") or 0)}</b></article>
+      <article><small>已处理图片</small><b>{escape(value.get("processed_image_count") or 0)}</b></article>
+      <article><small>覆盖率</small><b>{escape(value.get("coverage_ratio") or 0)}</b></article>
+      <article><small>覆盖是否完整</small><b>{escape("是" if value.get("coverage_complete") else "否")}</b></article>
+      <article><small>流程准备度</small><b>{escape(value.get("readiness") or "-")}</b></article>
+    </div>
+    <p><b>未分类图片编号：</b>{escape(unclassified)}</p>
+    <div class="boundary-grid">{"".join(checklist_cards) or '<p class="muted">本轮未形成材料清单。</p>'}</div>
+    <h3>过程视频证据</h3><ul class="boundary-list">{"".join(process_items) or '<li>本轮没有形成可回链的过程视频证据。</li>'}</ul>
+    <div class="boundary-grid">
+      <article class="boundary-card"><h3>隐私边界</h3><p>{escape(value.get("privacy_boundary") or "公开报告不展示个人敏感信息。")}</p></article>
+      <article class="boundary-card"><h3>业务边界</h3><p>{escape(value.get("business_boundary") or "最终业务动作由授权人员执行。")}</p></article>
+    </div>
+  </section>"""
