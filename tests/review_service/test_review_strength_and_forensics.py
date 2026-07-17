@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,7 +62,9 @@ class MediaForensicsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "stored.mp4"
             path.write_bytes(b"test")
-            with patch.object(media_forensics.shutil, "which", return_value=None):
+            with patch.dict(os.environ, {"REVIEW_FFPROBE_PATH": ""}), patch.object(
+                media_forensics.shutil, "which", return_value=None
+            ):
                 result = media_forensics.inspect_job_media(Path(temp_dir), [self._asset()])
 
         self.assertEqual(result["status"], "unavailable")
