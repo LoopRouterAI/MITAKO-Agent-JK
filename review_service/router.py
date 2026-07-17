@@ -171,3 +171,11 @@ async def retry_job(job_id: str, user=_integration_user()):
 @router.get("/metrics", response_model=ReviewMetricsResponse)
 async def review_metrics(user=_integration_user()):
     return {"ok": True, "metrics": service.metrics(user.get("tenant_id") or "mitako")}
+
+
+@router.get("/readiness")
+async def review_readiness(user=_integration_user()):
+    result = service.runtime_readiness()
+    if not result["ready"]:
+        raise HTTPException(status_code=503, detail=result)
+    return {"ok": True, **result}

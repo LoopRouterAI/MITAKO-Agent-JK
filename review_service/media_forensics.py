@@ -355,6 +355,16 @@ def _packet_timeline_facts(
     }
 
 
+def resolve_ffprobe() -> str:
+    """优先使用部署配置的固定路径，再回退到服务进程 PATH。"""
+    configured = os.getenv("REVIEW_FFPROBE_PATH", "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if path.is_file():
+            return str(path.resolve())
+    return shutil.which("ffprobe") or ""
+
+
 def inspect_job_media(
     job_dir: Path,
     assets: Iterable[Dict[str, Any]],
@@ -388,7 +398,7 @@ def inspect_job_media(
         base["status"] = "disabled"
         return base
 
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = resolve_ffprobe()
     if not ffprobe:
         base["status"] = "unavailable"
         base["summary"]["unavailable_assets"] = len(video_assets)

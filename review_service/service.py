@@ -27,8 +27,9 @@ from review_input_safety import assert_review_input_safe
 from review_media_safety import ignored_upload_reason, valid_media_magic
 
 from . import store
-from .media_forensics import inspect_job_media
+from .media_forensics import inspect_job_media, resolve_ffprobe
 from .input_readiness import assess_input_readiness
+from .decision_policy import apply_review_decision_policy
 from .schemas import ReviewCaseMetadata
 
 
@@ -47,6 +48,15 @@ SCENARIO_LABELS = {
 }
 MAX_WORKERS = max(1, min(int(os.getenv("REVIEW_JOB_WORKERS", "2") or 2), 8))
 EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="mitako-review")
+
+
+class WorkbenchRequestError(RuntimeError):
+    def __init__(self, status_code: int, attempts: List[Dict[str, Any]]):
+        super().__init__(f"workbench_http_{status_code}")
+        self.status_code = status_code
+        self.attempts = attempts
+
+
 def _limit_bytes(name: str, default_mb: int) -> int:
     try:
         value = int(os.getenv(name, str(default_mb)) or default_mb)
@@ -239,6 +249,9 @@ def _effective_review_policies(metadata: Dict[str, Any]) -> tuple[Dict[str, Any]
     causality = dict(metadata.get("damage_causality_policy") or {})
     preset = str((metadata.get("sampling_policy") or {}).get("preset") or "adaptive")
     scenario = str(metadata.get("scenario") or "")
+    if preset == "adaptive" and scenario == "product_damage":
+        continuity["force_dense_scan"] = True
+        causality["force_action_scan"] = True
     if preset in {"strong", "strict", "forensic"}:
         continuity["force_dense_scan"] = True
         if scenario == "product_damage":
@@ -249,7 +262,9 @@ def _effective_review_policies(metadata: Dict[str, Any]) -> tuple[Dict[str, Any]
 def _sampling_fields(metadata: Dict[str, Any]) -> Dict[str, str]:
     policy = metadata.get("sampling_policy") or {}
     preset = str(policy.get("preset") or "adaptive")
-    if preset in {"strong", "strict"}:
+    if preset == "strong":
+        mode, fps, max_frames = "dense", 2.0, min(int(policy.get("max_frames_per_video") or 1800), 1800)
+    elif preset == "strict":
         mode, fps, max_frames = "dense", 1.0, min(int(policy.get("max_frames_per_video") or 1200), 1200)
     elif preset == "forensic":
         mode, fps, max_frames = "dense", 2.0, min(int(policy.get("max_frames_per_video") or 1800), 1800)
@@ -271,7 +286,7 @@ def _sampling_fields(metadata: Dict[str, Any]) -> Dict[str, str]:
         max_frames = max(max_frames, min(int(policy.get("max_frames_per_video") or 1200), 1800))
     if scenario == "product_damage" and causality.get("force_action_scan") is True:
         mode = "dense"
-        fps = max(fps if preset != "adaptive" else 0.0, 1.0)
+        fps = max(fps, 1.0)
         max_frames = max(max_frames, min(int(policy.get("max_frames_per_video") or 1200), 1800))
     frames_per_call = max(1, min(int(policy.get("frames_per_model_call") or 24), 24))
     return {
@@ -379,6 +394,7 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         ),
         "fulfillment_baseline": json.dumps(metadata.get("fulfillment_baseline") or {}, ensure_ascii=False),
         "evidence_coverage": json.dumps(metadata.get("evidence_coverage") or {}, ensure_ascii=False),
+        "claim_scope": json.dumps(metadata.get("claim_scope") or {}, ensure_ascii=False),
         "continuity_policy": json.dumps(continuity_policy, ensure_ascii=False),
         "damage_causality_policy": json.dumps(damage_causality_policy, ensure_ascii=False),
         **_sampling_fields(metadata),
@@ -389,21 +405,48 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
 def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
     job_dir = upload_root() / job["job_id"]
     timeout_seconds = max(30, int(os.getenv("REVIEW_JOB_TIMEOUT_SECONDS", "1800") or 1800))
-    with ExitStack() as stack:
-        files = []
-        for asset in job.get("assets") or []:
-            path = job_dir / asset["stored_name"]
-            if not path.exists():
-                raise FileNotFoundError(f"审核素材不存在：{asset['asset_id']}")
-            handle = stack.enter_context(path.open("rb"))
-            files.append(("files", (asset["original_name"], handle, asset["mime_type"])))
-        timeout = httpx.Timeout(timeout_seconds, connect=10, write=timeout_seconds, read=timeout_seconds)
-        with httpx.Client(timeout=timeout) as client:
-            response = client.post(f"{_workbench_url()}/api/review-folder", data=_review_fields(job), files=files)
-        response.raise_for_status()
+    retries = max(0, min(int(os.getenv("REVIEW_WORKBENCH_RETRIES", "2") or 2), 4))
+    retryable = {429, 502, 503, 504}
+    attempts: List[Dict[str, Any]] = []
+    payload: Any = None
+    for attempt in range(1, retries + 2):
+        with ExitStack() as stack:
+            files = []
+            for asset in job.get("assets") or []:
+                path = job_dir / asset["stored_name"]
+                if not path.exists():
+                    raise FileNotFoundError(f"审核素材不存在：{asset['asset_id']}")
+                handle = stack.enter_context(path.open("rb"))
+                files.append(("files", (asset["original_name"], handle, asset["mime_type"])))
+            timeout = httpx.Timeout(timeout_seconds, connect=10, write=timeout_seconds, read=timeout_seconds)
+            started = time.time()
+            with httpx.Client(timeout=timeout, trust_env=False) as client:
+                response = client.post(
+                    f"{_workbench_url()}/api/review-folder",
+                    headers={
+                        "X-Request-ID": f"{job['job_id']}-workbench-{attempt}",
+                        "X-MITAKO-Internal-Metrics": "1",
+                    },
+                    data=_review_fields(job),
+                    files=files,
+                )
+        attempts.append(
+            {
+                "attempt": attempt,
+                "status_code": response.status_code,
+                "latency_seconds": round(time.time() - started, 3),
+            }
+        )
+        if response.status_code in retryable and attempt <= retries:
+            time.sleep(min(2 ** (attempt - 1), 4))
+            continue
+        if response.is_error:
+            raise WorkbenchRequestError(response.status_code, attempts)
         payload = response.json()
+        break
     if not isinstance(payload, dict):
         raise ValueError("invalid_visual_review_response")
+    payload["_workbench_transport"] = {"attempts": attempts, "retry_count": max(0, len(attempts) - 1)}
     return payload
 
 
@@ -643,8 +686,10 @@ def run_job(job_id: str) -> Dict[str, Any]:
     }
     try:
         payload = _call_workbench(job)
+        workbench_transport = payload.pop("_workbench_transport", {})
         review = dict(payload.get("review")) if isinstance(payload.get("review"), dict) else {}
         review = _apply_input_readiness_guard(review, readiness)
+        review = apply_review_decision_policy(job, review)
         review.pop("report", None)
         review["report"] = {"html_url": f"/api/v1/review/jobs/{job_id}/report"}
         diagnostics = review.get("diagnostics") or payload.get("diagnostics") or {}
@@ -653,14 +698,15 @@ def run_job(job_id: str) -> Dict[str, Any]:
             "source_status": payload.get("source_status"),
             "review": review,
             "recommended_escalation": _recommended_escalation(job, review, forensics),
+            "workbench_transport": workbench_transport,
         }
         status = "SUCCEEDED" if payload.get("ok") is True else "FAILED"
         return store.finish_job(job_id, status=status, result=result, diagnostics=diagnostics)
-    except httpx.HTTPStatusError as exc:
+    except WorkbenchRequestError as exc:
         diagnostics = {
             "error_type": "workbench_http_error",
-            "status_code": exc.response.status_code,
-            "response_tail": exc.response.text[-1200:],
+            "status_code": exc.status_code,
+            "attempts": exc.attempts,
         }
     except Exception as exc:
         diagnostics = {"error_type": exc.__class__.__name__, "message": str(exc)[:1200]}
@@ -706,6 +752,48 @@ def metrics(tenant_id: str = "") -> Dict[str, Any]:
     return {**store.snapshot(tenant_id), "workers": MAX_WORKERS}
 
 
+def runtime_readiness() -> Dict[str, Any]:
+    checks: Dict[str, Any] = {}
+    ffprobe = resolve_ffprobe()
+    checks["ffprobe"] = {
+        "ready": bool(ffprobe),
+        "source": "REVIEW_FFPROBE_PATH" if os.getenv("REVIEW_FFPROBE_PATH", "").strip() else "PATH",
+    }
+    root = upload_root()
+    probe = root / f".readiness-{uuid4().hex}"
+    try:
+        probe.write_text("ok", encoding="ascii")
+        probe.unlink()
+        disk = shutil.disk_usage(root)
+        required = _limit_bytes("REVIEW_MAX_CASE_MB", 750) * 3
+        checks["upload_storage"] = {
+            "ready": disk.free >= required,
+            "free_bytes": disk.free,
+            "minimum_free_bytes": required,
+            "writable": True,
+        }
+    except OSError as exc:
+        checks["upload_storage"] = {
+            "ready": False,
+            "writable": False,
+            "error_type": exc.__class__.__name__,
+        }
+    try:
+        with httpx.Client(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
+            response = client.get(f"{_workbench_url()}/api/health")
+        checks["visual_workbench"] = {
+            "ready": response.status_code == 200 and bool(response.json().get("ok")),
+            "status_code": response.status_code,
+        }
+    except Exception as exc:
+        checks["visual_workbench"] = {"ready": False, "error_type": exc.__class__.__name__}
+    return {
+        "ready": all(bool(item.get("ready")) for item in checks.values()),
+        "checks": checks,
+        "acceptance_boundary": "生产编排应只在 ready=true 时接收新审核任务。",
+    }
+
+
 def batch_status(tenant_id: str, batch_id: str, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
     jobs = store.list_batch(tenant_id, batch_id, limit=limit, offset=offset)
     aggregate = store.batch_snapshot(tenant_id, batch_id)
@@ -739,6 +827,7 @@ def contract() -> Dict[str, Any]:
         "sampling_plan_endpoint": "POST /api/v1/review/sampling-plan",
         "batch_status_endpoint": "GET /api/v1/review/batches/{batch_id}",
         "html_report_endpoint": "GET /api/v1/review/jobs/{job_id}/report",
+        "readiness_endpoint": "GET /api/v1/review/readiness",
         "content_type": "multipart/form-data",
         "auth": "Bearer 集成账号 Token",
         "idempotency_header": "Idempotency-Key",
@@ -754,6 +843,7 @@ def contract() -> Dict[str, Any]:
             "ticket_id", "user_id", "order_no", "customer_claim", "order_items",
             "product_master_data", "warehouse_master_data", "logistics",
             "conversation_history", "sop_context", "asset_fields", "batch_id", "source_record",
+            "claim_scope", "decision_policy",
         ],
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",
@@ -764,8 +854,8 @@ def contract() -> Dict[str, Any]:
             "large_batch": "120GB 级生产批次应由对象存储直传、云转码/故事板服务和案件引用适配层承接；当前未伪装为已接入。",
         },
         "sampling_presets": {
-            "adaptive": "按时长和文件大小抽取 6-24 帧，适合低成本粗筛。",
-            "strong": "固定 1 fps；作为 strict 的清晰业务别名，最多 1200 帧。",
+            "adaptive": "一般场景按时长和文件大小抽取 6-24 帧；商品有伤自动执行 1 fps 连续性与损伤成因质量底线。",
+            "strong": "固定 2 fps，最多 1800 帧；用于离镜、动作前后和争议时点强化复核。",
             "strict": "固定 1 fps，最多 1200 帧，每 24 帧一个并行模型分段。",
             "forensic": "固定 2 fps，最多 1800 帧，每 24 帧一个并行模型分段。",
             "custom": "甲方配置 0.1-2 fps、单视频帧上限和每次调用帧数。",
@@ -780,6 +870,13 @@ def contract() -> Dict[str, Any]:
             "require_identity_reestablishment": "主体重新入镜后要求核验是否仍为同一物件。",
             "force_dense_scan": "开启时按离镜阈值反推最低时间分辨率，避免稀疏抽帧声称全程连续。",
             "scan_fps": "可选 0.2-2 FPS；为空时自动使用 min(2, max(0.2, 2/离镜阈值秒数))。",
+        },
+        "decision_policy_fields": {
+            "mode": "默认 conservative_review；只有甲方显式选择 classification_recommendation 才评估规则判负。",
+            "opening_video_required": "商品有伤是否必须提供开箱视频。",
+            "missing_required_opening_video": "review 或 negative；仅影响审核分类建议，不执行拒绝业务动作。",
+            "complete_video_no_claimed_damage": "只有完整性、同物关联、主张部位特写、必检视角、无冲突和置信度门槛全部满足时才可 negative。",
+            "claim_scope": "明确本次诉求阶段、原子诉求、商品与证据范围，后续追加诉求不得混入当前结论。",
         },
         "media_forensics": "模型调用前执行 ffprobe 元数据检查；不可用时明确降级，风险信号不等同于已证实剪辑。",
         "statuses": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "RETRYING"],

@@ -419,6 +419,164 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
     }
 
 
+def _time_seconds(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    match = re.search(r"(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)", text)
+    if match:
+        return int(match.group(1) or 0) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
+    try:
+        return float(text.rstrip("s秒"))
+    except ValueError:
+        return None
+
+
+def _aggregate_damage_observability(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    values = [item.get("damage_observability") for item in rows if isinstance(item.get("damage_observability"), dict)]
+    if not values:
+        return {
+            "status": "unknown",
+            "same_item_linkage": False,
+            "claimed_region_closeup": False,
+            "required_view_coverage": 0.0,
+            "conflicting_evidence": False,
+            "missing_views": ["模型未返回结构化可观察性结果"],
+        }
+    statuses = {str(item.get("status") or "unknown") for item in values}
+    conflicting = any(item.get("conflicting_evidence") is True for item in values)
+    fully_observable = statuses == {"fully_observable"} and not conflicting
+    return {
+        "status": "fully_observable" if fully_observable else (
+            "not_observable" if statuses == {"not_observable"} else "partial"
+        ),
+        "same_item_linkage": all(item.get("same_item_linkage") is True for item in values),
+        "claimed_region_closeup": all(item.get("claimed_region_closeup") is True for item in values),
+        "required_view_coverage": min(
+            max(0.0, min(float(item.get("required_view_coverage") or 0.0), 1.0)) for item in values
+        ),
+        "conflicting_evidence": conflicting,
+        "missing_views": list(dict.fromkeys(
+            str(view)
+            for item in values
+            for view in item.get("missing_views") or []
+            if str(view).strip()
+        ))[:40],
+        "segment_assessments": values,
+    }
+
+
+def _apply_global_timeline_summary(
+    case: Dict[str, Any],
+    parsed: Dict[str, Any],
+    parsed_rows: List[Dict[str, Any]],
+    chunk_conclusions: List[str],
+) -> Dict[str, Any]:
+    """用全量帧注册表生成公开摘要，局部分段叙述只保留为内部审计。"""
+    output = dict(parsed)
+    frames = list(case.get("frames") or [])
+    frame_times = [_time_seconds(item.get("timestamp")) for item in frames]
+    valid_frame_times = [value for value in frame_times if value is not None]
+    sampled_start = min(valid_frame_times) if valid_frame_times else None
+    sampled_end = max(valid_frame_times) if valid_frame_times else None
+    source_durations = [
+        float(item.get("duration_seconds"))
+        for item in case.get("videos") or []
+        if item.get("duration_seconds") not in (None, "")
+    ]
+    source_duration = max(source_durations) if source_durations else None
+    continuity = output.get("object_continuity_assessment") or {}
+    claimed_subjects = [
+        item for item in continuity.get("tracked_subjects") or []
+        if isinstance(item, dict) and str(item.get("subject_id") or "") == "claimed_item"
+    ]
+    first_exposed_values = [
+        (_time_seconds(item.get("first_exposed_timestamp")), str(item.get("first_exposed_timestamp") or ""))
+        for item in claimed_subjects
+    ]
+    valid_first_exposed = [item for item in first_exposed_values if item[0] is not None]
+    first_exposed = min(valid_first_exposed, key=lambda item: item[0])[1] if valid_first_exposed else ""
+
+    contradictions: List[Dict[str, Any]] = []
+    end_pattern = re.compile(r"(?:视频)?(?:在|于)?\s*((?:\d+:)?\d{1,2}:\d{1,2}(?:\.\d+)?)\s*(?:结束|截止)")
+    for index, conclusion in enumerate(chunk_conclusions, start=1):
+        for token in end_pattern.findall(conclusion):
+            alleged_end = _time_seconds(token)
+            if alleged_end is not None and sampled_end is not None and alleged_end + 0.25 < sampled_end:
+                contradictions.append(
+                    {
+                        "code": "chunk_end_before_later_evidence",
+                        "chunk_index": index,
+                        "alleged_end": token,
+                        "later_sampled_evidence_seconds": round(sampled_end, 3),
+                    }
+                )
+
+    opening_values = {
+        str((item.get("video_audit_conclusion") or {}).get("opening_integrity") or "").strip().lower()
+        for item in parsed_rows
+    }
+    if continuity.get("continuity_verdict") in {"long_absence", "indeterminate"}:
+        opening_integrity = "incomplete" if continuity.get("continuity_verdict") == "long_absence" else "indeterminate"
+    elif opening_values and opening_values.issubset({"complete", "完整", "完整开箱", "complete_opening"}):
+        opening_integrity = "complete"
+    else:
+        opening_integrity = "indeterminate"
+    risk_rank = {"low": 0, "medium": 1, "high": 2}
+    swap_risk = max(
+        (str((item.get("video_audit_conclusion") or {}).get("swap_risk_level") or "low").lower() for item in parsed_rows),
+        key=lambda value: risk_rank.get(value, 1),
+        default="medium",
+    )
+    coverage_text = ""
+    if sampled_end is not None:
+        coverage_text = f"送审时间轴已覆盖至 {format_time(sampled_end)}"
+    if source_duration is not None:
+        coverage_text += f"，源视频时长约 {format_time(source_duration)}"
+    if first_exposed:
+        coverage_text += f"；争议商品首次曝光于 {first_exposed}"
+    continuity_reason = coverage_text or "未获得可规范化的全局视频时间轴。"
+    if continuity.get("continuity_verdict") == "long_absence":
+        continuity_reason += f"；检测到最长离镜 {float(continuity.get('longest_out_of_frame_seconds') or 0):.2f} 秒。"
+
+    label = str(output.get("predicted_label") or "review")
+    label_text = {"positive": "当前证据支持本次诉求", "negative": "当前证据不支持本次诉求", "review": "当前证据仍需复核"}.get(label, "当前证据仍需复核")
+    if contradictions:
+        label = "review"
+        output.update({
+            "predicted_label": "review",
+            "system_yes_no": "REVIEW",
+            "decision": "manual_review",
+            "confidence": min(float(output.get("confidence") or 0.5), 0.69),
+        })
+        label_text = "检测到分段叙述与全局时间轴冲突，当前结论需复核"
+    output["video_audit_conclusion"] = {
+        "continuity_score": None,
+        "continuity_reason": continuity_reason,
+        "swap_risk_level": swap_risk,
+        "edit_or_cut_risk": "需结合媒体取证与连续性时间轴判断",
+        "opening_integrity": opening_integrity,
+        "source": "deterministic_global_timeline",
+    }
+    output["overall_audit"] = {
+        "conclusion": f"{label_text}。{continuity_reason}",
+        "confidence": output.get("confidence"),
+        "core_reason": "结论由完整帧注册表、专项连续性结果和全部分段结构化证据聚合，未采用局部分段的结束叙述。",
+        "business_follow_up_suggestion": "按证据门槛和甲方已批准策略处理；本服务不自动执行退款、补发、换货或拒绝。",
+    }
+    output["global_review_summary"] = {
+        "sampled_start_seconds": sampled_start,
+        "sampled_end_seconds": sampled_end,
+        "source_duration_seconds": source_duration,
+        "claimed_item_first_exposed_timestamp": first_exposed or None,
+        "opening_integrity": opening_integrity,
+        "continuity_verdict": continuity.get("continuity_verdict") or "indeterminate",
+        "chunk_narratives_excluded_from_public_conclusion": True,
+    }
+    output["aggregation_warnings"] = contradictions
+    return output
+
+
 def _aggregate_chunk_results(
     case: Dict[str, Any],
     results: List[Dict[str, Any]],
@@ -455,6 +613,7 @@ def _aggregate_chunk_results(
     causality_rows = [item.get("parsed") or {} for item in (causality_results or [])] if causality_complete else []
     if business_scenario == "product_damage":
         parsed["damage_causality_assessment"] = aggregate_damage_causality(causality_rows or parsed_rows)
+        parsed["damage_observability"] = _aggregate_damage_observability(causality_rows or parsed_rows)
         if causality_rows:
             parsed["causality_frame_findings"] = [
                 finding
@@ -483,7 +642,7 @@ def _aggregate_chunk_results(
         "system_yes_no": {"positive": "YES", "negative": "NO"}.get(predicted, "REVIEW"),
         "confidence": confidence,
         "overall_audit": {
-            "conclusion": "；".join(dict.fromkeys(item for item in conclusions if item))[:1200],
+            "conclusion": "分段结论已转入内部审计，公开结论将在全局时间轴校验后生成。",
             "confidence": confidence,
             "core_reason": f"已完成 {len(results)} 个时间分段的独立审核并聚合证据。",
             "business_follow_up_suggestion": "请VIP客服结合全部分段证据和业务规则复核。",
@@ -521,6 +680,7 @@ def _aggregate_chunk_results(
             "human_required": True,
             "specialized_pass_guard_reason": "专项审核存在失败、漏帧或结构不完整，不能使用部分结果形成确定结论。",
         })
+    parsed = _apply_global_timeline_summary(case, parsed, parsed_rows, conclusions)
     damage_assessment = parsed.get("damage_causality_assessment") or {}
     fulfillment_assessment = parsed.get("fulfillment_reconciliation") or {}
     continuity_assessment = parsed.get("object_continuity_assessment") or {}
@@ -593,7 +753,13 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         chunk_case["frames"] = chunk
         chunk_case["supplemental_images"] = (case.get("supplemental_images") or [])[:4]
         structured = dict(case.get("structured_business_context") or {})
-        structured["review_chunk"] = {"index": index + 1, "total": len(chunks)}
+        structured["review_chunk"] = {
+            "index": index + 1,
+            "total": len(chunks),
+            "is_final_chunk": index + 1 == len(chunks),
+            "global_video_frame_count": len(frames),
+            "instruction": "本段最后一帧只代表本分段观察截止点；除非 is_final_chunk=true 且有全局媒体时长佐证，不得表述为视频结束。",
+        }
         chunk_case["structured_business_context"] = structured
         return call_model(cfg, chunk_case, timeout, retries)
 

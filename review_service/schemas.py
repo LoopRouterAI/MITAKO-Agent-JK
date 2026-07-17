@@ -42,6 +42,50 @@ class ReviewDamageCausalityPolicy(BaseModel):
     context_frames: int = Field(default=6, ge=2, le=8)
 
 
+class ReviewAtomicClaim(BaseModel):
+    claim_id: str = Field(min_length=1, max_length=160)
+    role: Literal["primary", "additional"] = "primary"
+    subject_ref: str = Field(default="", max_length=160)
+    issue_type: str = Field(default="unspecified", max_length=160)
+    location: str = Field(default="unspecified", max_length=240)
+    first_asserted_at: str = Field(default="", max_length=80)
+    turn_id: str = Field(default="", max_length=160)
+    evidence_asset_ids: List[str] = Field(default_factory=list, max_length=80)
+    required_views: List[str] = Field(default_factory=list, max_length=40)
+
+
+class ReviewClaimScope(BaseModel):
+    """本次审核实际覆盖的诉求，避免把后续追加问题混入当前结论。"""
+
+    claim_id: str = Field(default="", max_length=160)
+    scope_version: str = Field(default="1", max_length=40)
+    split_status: Literal["resolved", "single_legacy", "ambiguous", "unresolved"] = "unresolved"
+    stage: Literal["initial", "supplemental", "appeal", "combined"] = "initial"
+    claim_text: str = Field(default="", max_length=4000)
+    issue_types: List[str] = Field(default_factory=list, max_length=40)
+    item_refs: List[str] = Field(default_factory=list, max_length=40)
+    evidence_asset_names: List[str] = Field(default_factory=list, max_length=80)
+    excluded_issue_types: List[str] = Field(default_factory=list, max_length=40)
+    active_claim_ids: List[str] = Field(default_factory=list, max_length=40)
+    claims: List[ReviewAtomicClaim] = Field(default_factory=list, max_length=40)
+
+
+class ReviewDecisionPolicy(BaseModel):
+    """甲方可选的规则判定策略；默认不把证据不足自动判为不支持。"""
+
+    mode: Literal["conservative_review", "classification_recommendation"] = "conservative_review"
+    policy_ref: str = Field(default="", max_length=160)
+    opening_video_required: bool = False
+    missing_required_opening_video: Literal["review", "negative"] = "review"
+    complete_video_no_claimed_damage: Literal["review", "negative"] = "review"
+    require_claim_scope: bool = True
+    minimum_visibility_coverage: float = Field(default=0.85, ge=0.5, le=1.0)
+    minimum_confidence: float = Field(default=0.8, ge=0.5, le=1.0)
+    require_claimed_region_closeup: bool = True
+    require_same_item_linkage: bool = True
+    max_unobserved_seconds: float = Field(default=0.0, ge=0.0, le=30.0)
+
+
 class ReviewSamplingPlanRequest(BaseModel):
     duration_seconds: float = Field(gt=0, le=86400)
     source_bytes: int = Field(ge=0)
@@ -129,6 +173,8 @@ class ReviewCaseMetadata(BaseModel):
     sop_context: Dict[str, Any] = Field(default_factory=dict)
     asset_fields: Dict[str, List[str]] = Field(default_factory=dict)
     source_record: Dict[str, Any] = Field(default_factory=dict)
+    claim_scope: ReviewClaimScope = Field(default_factory=ReviewClaimScope)
+    decision_policy: ReviewDecisionPolicy = Field(default_factory=ReviewDecisionPolicy)
     sampling_policy: ReviewSamplingPolicy = Field(default_factory=ReviewSamplingPolicy)
     continuity_policy: ReviewContinuityPolicy = Field(default_factory=ReviewContinuityPolicy)
     damage_causality_policy: ReviewDamageCausalityPolicy = Field(default_factory=ReviewDamageCausalityPolicy)

@@ -819,6 +819,7 @@ $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbe
 
 $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",

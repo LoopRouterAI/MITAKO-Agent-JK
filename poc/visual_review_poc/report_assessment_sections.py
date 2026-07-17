@@ -172,6 +172,7 @@ def render_object_continuity_panel(
             '<article class="boundary-card">'
             f'<h3>{escape(subject.get("description") or subject.get("subject_id") or "未命名主体")}</h3>'
             f'<p><b>跟踪区间：</b>{escape(subject.get("tracking_start") or "-")} 至 {escape(subject.get("tracking_end") or "-")}</p>'
+            f'<p><b>首次曝光：</b>{escape(subject.get("first_exposed_timestamp") or "-")}</p>'
             f'<p><b>可见覆盖率：</b>{escape(subject.get("visibility_coverage") if subject.get("visibility_coverage") is not None else "-")}</p>'
             f'<p><b>最长离镜：</b>{escape(subject.get("longest_out_of_frame_seconds") or 0)} 秒</p>'
             f'<ul class="boundary-list">{"".join(events) or "<li>未记录离镜事件。</li>"}</ul></article>'

@@ -21,7 +21,7 @@ class ReviewStrengthPolicyTest(unittest.TestCase):
         forensic = ReviewSamplingPolicy(preset="forensic")
         custom = ReviewSamplingPolicy(preset="custom", fps=0.1)
 
-        self.assertEqual(service._sampling_fields({"sampling_policy": strong.model_dump()})["fps"], "1.0")
+        self.assertEqual(service._sampling_fields({"sampling_policy": strong.model_dump()})["fps"], "2.0")
         self.assertEqual(service._sampling_fields({"sampling_policy": strict.model_dump()})["fps"], "1.0")
         self.assertEqual(service._sampling_fields({"sampling_policy": forensic.model_dump()})["fps"], "2.0")
         self.assertEqual(service._sampling_fields({"sampling_policy": custom.model_dump()})["fps"], "0.1")
@@ -160,6 +160,65 @@ class MediaForensicsTest(unittest.TestCase):
 
 
 class ReviewJobIntegrationTest(unittest.TestCase):
+    def test_workbench_transient_503_is_retried_with_fresh_upload_stream(self) -> None:
+        class Response:
+            def __init__(self, status_code, payload=None):
+                self.status_code = status_code
+                self._payload = payload or {}
+                self.is_error = status_code >= 400
+
+            def json(self):
+                return self._payload
+
+        responses = [Response(503), Response(200, {"ok": True, "review": {}})]
+        observed_sizes = []
+
+        class Client:
+            def __init__(self, *args, **kwargs):
+                self.trust_env = kwargs.get("trust_env")
+                self.assert_internal = kwargs.get("trust_env") is False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, headers, data, files):
+                self_outer.assertFalse(self.trust_env)
+                self_outer.assertEqual(headers.get("X-MITAKO-Internal-Metrics"), "1")
+                observed_sizes.append(sum(len(item[1][1].read()) for item in files))
+                return responses.pop(0)
+
+        self_outer = self
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_dir = root / "RJ-RETRY"
+            job_dir.mkdir()
+            (job_dir / "asset.mp4").write_bytes(b"video-bytes")
+            job = {
+                "job_id": "RJ-RETRY",
+                "client_case_id": "CASE-RETRY",
+                "scenario": "product_damage",
+                "metadata": {"sampling_policy": {"preset": "adaptive"}},
+                "assets": [
+                    {
+                        "asset_id": "RA-1",
+                        "stored_name": "asset.mp4",
+                        "original_name": "asset.mp4",
+                        "mime_type": "video/mp4",
+                    }
+                ],
+            }
+            with patch.object(service, "upload_root", return_value=root), patch.object(
+                service.httpx, "Client", Client
+            ), patch.object(service.time, "sleep"):
+                payload = service._call_workbench(job)
+
+        self.assertEqual(observed_sizes, [11, 11])
+        self.assertEqual(payload["_workbench_transport"]["retry_count"], 1)
+        self.assertEqual([item["status_code"] for item in payload["_workbench_transport"]["attempts"]], [503, 200])
+
     def test_run_job_forensics_precedes_single_model_call_and_recommends_bounded_escalation(self) -> None:
         calls = []
         job = {

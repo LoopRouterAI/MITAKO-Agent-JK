@@ -170,7 +170,7 @@ class InputReadinessTest(unittest.TestCase):
         self.assertFalse(metadata.continuity_policy.force_dense_scan)
         self.assertFalse(metadata.damage_causality_policy.force_action_scan)
 
-    def test_adaptive_default_does_not_force_dense_or_specialized_calls(self):
+    def test_product_damage_adaptive_has_one_fps_quality_floor(self):
         plan = sampling_plan(
             452.5,
             543_351_335,
@@ -180,9 +180,10 @@ class InputReadinessTest(unittest.TestCase):
             {"force_dense_scan": False},
             {"force_action_scan": False},
         )
-        self.assertEqual(plan["sampling_mode"], "adaptive")
-        self.assertEqual(plan["estimated_channel_calls"]["object_continuity"], 0)
-        self.assertEqual(plan["estimated_channel_calls"]["damage_causality"], 0)
+        self.assertEqual(plan["sampling_mode"], "dense")
+        self.assertEqual(plan["fps"], 1.0)
+        self.assertGreater(plan["estimated_channel_calls"]["object_continuity"], 0)
+        self.assertGreater(plan["estimated_channel_calls"]["damage_causality"], 0)
 
     def test_sampling_frequency_is_derived_from_out_of_frame_threshold(self):
         one_fps = sampling_plan(

@@ -48,7 +48,7 @@ try {
 
     Invoke-Step "Frontend production build" { npm run build }
     Invoke-Step "Python core compilation" {
-        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py private_domain\service.py scripts\check_documentation_release.py
+        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py review_service\decision_policy.py private_domain\service.py scripts\check_documentation_release.py scripts\check_review_runtime_dependencies.py scripts\check_review_0717_four_samples.py
     }
     Invoke-Step "Documentation and OpenAPI" { & $Python scripts\check_documentation_release.py }
     Invoke-Step "Private deployment API smoke" { & $Python scripts\check_private_deployment_api.py }
@@ -56,6 +56,7 @@ try {
     Invoke-Step "Four-scenario SOP alignment" { & $Python scripts\check_review_sop_alignment.py }
     Invoke-Step "Media preprocessing and sampling" { & $Python scripts\check_review_media_preprocessing.py }
     Invoke-Step "Media upload safety" { & $Python -m unittest tests.review_service.test_media_upload_safety tests.visual_review.test_workbench_upload_safety }
+    Invoke-Step "0717 review decision and timeline regression" { & $Python -m unittest tests.review_service.test_decision_policy_0717 tests.review_service.test_review_strength_and_forensics tests.visual_review.test_global_timeline_aggregation_0717 }
     Invoke-Step "Visual workbench smoke" { & $Python scripts\check_visual_workbench_smoke.py }
     Invoke-Step "Customer Agent 0709 regression" { & $Python scripts\check_customer_agent_0709_regression.py }
     Invoke-Step "Customer Agent 0714 regression" { & $Python scripts\check_customer_agent_0714_regression.py }

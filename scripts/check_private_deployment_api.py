@@ -79,13 +79,14 @@ def main() -> int:
         "/api/v1/review/jobs/{job_id}/report",
         "/api/v1/review/jobs/{job_id}/retry",
         "/api/v1/review/metrics",
+        "/api/v1/review/readiness",
     }
     missing = sorted(required_paths - paths)
     _case(results, "OPENAPI-required-paths", code == 200 and not missing, f"paths={len(paths)} missing={missing}", t0)
 
     t0 = time.time()
     schemas = openapi.get("components", {}).get("schemas", {})
-    required_schemas = ("GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata", "ReviewSamplingPolicy", "ReviewSamplingPlanRequest", "ReviewSamplingPlanResponse", "ReviewJobResponse", "ReviewBatchResponse")
+    required_schemas = ("GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata", "ReviewClaimScope", "ReviewDecisionPolicy", "ReviewSamplingPolicy", "ReviewSamplingPlanRequest", "ReviewSamplingPlanResponse", "ReviewJobResponse", "ReviewBatchResponse")
     typed = all(name in schemas for name in required_schemas)
     _case(results, "OPENAPI-typed-schemas", typed, f"schemas={','.join(name for name in schemas if name in required_schemas)}", t0)
 
@@ -181,14 +182,15 @@ def main() -> int:
     adaptive_channels = adaptive_plan.get("estimated_channel_calls") or {}
     _case(
         results,
-        "REVIEW-adaptive-cost-boundary",
+        "REVIEW-product-damage-adaptive-quality-floor",
         code == 200
-        and adaptive_plan.get("sampling_mode") == "adaptive"
-        and adaptive_plan.get("estimated_frames_per_video") == 18
-        and adaptive_channels.get("main_review") == 1
-        and adaptive_channels.get("object_continuity") == 0
-        and adaptive_channels.get("damage_causality") == 0
-        and adaptive_plan.get("estimated_total_model_calls") == 1,
+        and adaptive_plan.get("sampling_mode") == "dense"
+        and adaptive_plan.get("fps") == 1.0
+        and adaptive_plan.get("estimated_frames_per_video", 0) >= 453
+        and adaptive_channels.get("main_review", 0) > 0
+        and adaptive_channels.get("object_continuity", 0) > 0
+        and adaptive_channels.get("damage_causality", 0) > 0
+        and adaptive_plan.get("estimated_total_model_calls") == sum(adaptive_channels.values()),
         f"plan={adaptive_plan}",
         t0,
     )

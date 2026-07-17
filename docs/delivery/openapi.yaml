@@ -475,6 +475,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewMetricsResponse'
+  /api/v1/review/readiness:
+    get:
+      tags:
+      - review-service
+      summary: Review Readiness
+      operationId: review_readiness_api_v1_review_readiness_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
   /:
     get:
       summary: Get Index
@@ -2418,6 +2430,61 @@ components:
       - size
       - sha256
       title: ReviewAsset
+    ReviewAtomicClaim:
+      properties:
+        claim_id:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Claim Id
+        role:
+          type: string
+          enum:
+          - primary
+          - additional
+          title: Role
+          default: primary
+        subject_ref:
+          type: string
+          maxLength: 160
+          title: Subject Ref
+          default: ''
+        issue_type:
+          type: string
+          maxLength: 160
+          title: Issue Type
+          default: unspecified
+        location:
+          type: string
+          maxLength: 240
+          title: Location
+          default: unspecified
+        first_asserted_at:
+          type: string
+          maxLength: 80
+          title: First Asserted At
+          default: ''
+        turn_id:
+          type: string
+          maxLength: 160
+          title: Turn Id
+          default: ''
+        evidence_asset_ids:
+          items:
+            type: string
+          type: array
+          maxItems: 80
+          title: Evidence Asset Ids
+        required_views:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Required Views
+      type: object
+      required:
+      - claim_id
+      title: ReviewAtomicClaim
     ReviewAttachment:
       properties:
         id:
@@ -2601,6 +2668,10 @@ components:
           additionalProperties: true
           type: object
           title: Source Record
+        claim_scope:
+          $ref: '#/components/schemas/ReviewClaimScope'
+        decision_policy:
+          $ref: '#/components/schemas/ReviewDecisionPolicy'
         sampling_policy:
           $ref: '#/components/schemas/ReviewSamplingPolicy'
         continuity_policy:
@@ -2613,6 +2684,80 @@ components:
       - client_case_id
       - scenario
       title: ReviewCaseMetadata
+    ReviewClaimScope:
+      properties:
+        claim_id:
+          type: string
+          maxLength: 160
+          title: Claim Id
+          default: ''
+        scope_version:
+          type: string
+          maxLength: 40
+          title: Scope Version
+          default: '1'
+        split_status:
+          type: string
+          enum:
+          - resolved
+          - single_legacy
+          - ambiguous
+          - unresolved
+          title: Split Status
+          default: unresolved
+        stage:
+          type: string
+          enum:
+          - initial
+          - supplemental
+          - appeal
+          - combined
+          title: Stage
+          default: initial
+        claim_text:
+          type: string
+          maxLength: 4000
+          title: Claim Text
+          default: ''
+        issue_types:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Issue Types
+        item_refs:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Item Refs
+        evidence_asset_names:
+          items:
+            type: string
+          type: array
+          maxItems: 80
+          title: Evidence Asset Names
+        excluded_issue_types:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Excluded Issue Types
+        active_claim_ids:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Active Claim Ids
+        claims:
+          items:
+            $ref: '#/components/schemas/ReviewAtomicClaim'
+          type: array
+          maxItems: 40
+          title: Claims
+      type: object
+      title: ReviewClaimScope
+      description: 本次审核实际覆盖的诉求，避免把后续追加问题混入当前结论。
     ReviewContinuityPolicy:
       properties:
         out_of_frame_warning_seconds:
@@ -2672,6 +2817,71 @@ components:
           default: 6
       type: object
       title: ReviewDamageCausalityPolicy
+    ReviewDecisionPolicy:
+      properties:
+        mode:
+          type: string
+          enum:
+          - conservative_review
+          - classification_recommendation
+          title: Mode
+          default: conservative_review
+        policy_ref:
+          type: string
+          maxLength: 160
+          title: Policy Ref
+          default: ''
+        opening_video_required:
+          type: boolean
+          title: Opening Video Required
+          default: false
+        missing_required_opening_video:
+          type: string
+          enum:
+          - review
+          - negative
+          title: Missing Required Opening Video
+          default: review
+        complete_video_no_claimed_damage:
+          type: string
+          enum:
+          - review
+          - negative
+          title: Complete Video No Claimed Damage
+          default: review
+        require_claim_scope:
+          type: boolean
+          title: Require Claim Scope
+          default: true
+        minimum_visibility_coverage:
+          type: number
+          maximum: 1.0
+          minimum: 0.5
+          title: Minimum Visibility Coverage
+          default: 0.85
+        minimum_confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.5
+          title: Minimum Confidence
+          default: 0.8
+        require_claimed_region_closeup:
+          type: boolean
+          title: Require Claimed Region Closeup
+          default: true
+        require_same_item_linkage:
+          type: boolean
+          title: Require Same Item Linkage
+          default: true
+        max_unobserved_seconds:
+          type: number
+          maximum: 30.0
+          minimum: 0.0
+          title: Max Unobserved Seconds
+          default: 0.0
+      type: object
+      title: ReviewDecisionPolicy
+      description: 甲方可选的规则判定策略；默认不把证据不足自动判为不支持。
     ReviewEvidenceCoverage:
       properties:
         submitted_package_refs:

@@ -239,10 +239,19 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
     alternatives = [entry for item in assessments for entry in _text_list(item.get("alternative_explanations"))]
     gaps = [str(item.get("cannot_conclude_reason")) for item in assessments if item.get("cannot_conclude_reason")]
 
+    presence_values = {item["damage_presence"] for item in assessments}
+    claim_support_values = {item["claim_support"] for item in assessments}
+    aggregate_presence = "confirmed" if "confirmed" in presence_values else (
+        "not_visible" if presence_values == {"not_visible"} else "uncertain"
+    )
+    aggregate_claim_support = best["claim_support"] if not conflicting else "insufficient"
+    if claim_support_values == {"not_supported"}:
+        aggregate_claim_support = "not_supported"
+
     return normalize_damage_causality(
         {
             **best,
-            "damage_presence": "confirmed" if any(item["damage_presence"] == "confirmed" for item in assessments) else "uncertain",
+            "damage_presence": aggregate_presence,
             "damage_timing": best.get("damage_timing") if not conflicting else "unknown",
             "pre_opening_state_visible": best["pre_opening_state_visible"],
             "opening_action_visible": best["opening_action_visible"],
@@ -256,7 +265,7 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
                     "indirect" if best["causal_evidence_level"] in {"direct", "indirect"} else "insufficient"
                 )
             ),
-            "claim_support": best["claim_support"] if not conflicting else "insufficient",
+            "claim_support": aggregate_claim_support,
             "possible_origins": possible_origins[:20],
             "alternative_explanations": list(dict.fromkeys(map(str, alternatives)))[:12],
             "cannot_conclude_reason": (str(best.get("cannot_conclude_reason") or "") if best in direct and not conflicting else "；".join(dict.fromkeys(gaps)))[:1000]

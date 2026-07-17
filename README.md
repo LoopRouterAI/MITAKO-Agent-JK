@@ -54,6 +54,7 @@ python scripts/check_review_sop_alignment.py
 python scripts/check_private_domain_agent_e2e.py
 python scripts/check_admin_ui_smoke.py
 python scripts/check_visual_workbench_smoke.py
+python scripts/check_review_runtime_dependencies.py --media D:\approved-samples\sample.mp4
 python -m playwright install chromium
 python tests/e2e/run_desk_admin_screenshot_report.py
 ```
@@ -74,6 +75,7 @@ python tests/e2e/run_desk_admin_screenshot_report.py
 | `docs/delivery/mitako-full-requirement-reaudit-20260711.html` | 全需求复核与未完成边界报告 |
 | `docs/delivery/mitako-0714-adversarial-acceptance-20260715.html` | 0714 反馈整改、真实样本与对抗式验收报告 |
 | `docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html` | 0715 评测复核、三通道审核、损伤因果、履约对账与边界报告 |
+| `甲方沟通交付文档/0717四样本审核工程整改与验收报告.html` | 四样本复测、Strong 2 FPS、全局时间轴、ffprobe、判负策略与真实 API 回归 |
 | `docs/delivery/deployment-guide.md` | 部署与上线说明 |
 | `Codex接续开发交接说明.md` | 迁移到另一台设备和 Codex 接续开发的上下文 |
 | `tests/reports/customer_chat_acceptance_20260706.html` | 用户端客服交互最后一轮验收报告 |
@@ -83,7 +85,7 @@ python tests/e2e/run_desk_admin_screenshot_report.py
 - 当前真实甲方业务接口只做 Mock 和契约说明，不伪装为已接入生产系统。
 - 本地 `mock_data.json` 只用于演示订单、物流、售后、商品、地址等流程。
 - 生产联调前必须由甲方提供测试环境、接口契约、鉴权方式、脱敏样本、人工结论和上线审批。
-- 当前为私人仓库，`.env` 可跟踪；数据库、运行时记忆、日志、测试截图、视频样本、模型文件和超大原始资料不得普通 Git 提交。
+- 真实 `.env`、数据库、运行时记忆、日志、测试截图、视频样本、模型文件和超大原始资料不得 Git 提交。内部研发 ZIP 可在打包时安全加入当前 `.env` 与数据库快照，但不得转发甲方。
 
 ## 打包交付
 

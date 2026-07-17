@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote, unquote
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -453,6 +453,32 @@ def _structured_review_ok(parsed: Dict[str, Any]) -> bool:
     return bool(parsed.get("predicted_label")) and parsed.get("confidence") not in (None, "")
 
 
+def _internal_inference_estimate(result: Dict[str, Any]) -> Dict[str, Any]:
+    """仅供受保护审核 API 和内部运维汇总，公开 HTML 不引用该对象。"""
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    cost = result.get("cost") if isinstance(result.get("cost"), dict) else {}
+    chunking = result.get("chunking") if isinstance(result.get("chunking"), dict) else {}
+    channels = chunking.get("channels") if isinstance(chunking.get("channels"), dict) else {}
+    return {
+        "input_tokens": int(usage.get("input_tokens") or 0),
+        "output_tokens": int(usage.get("output_tokens") or 0),
+        "total_tokens": int(usage.get("total_tokens") or 0),
+        "estimated_usd": round(float(cost.get("estimated_usd") or 0.0), 6),
+        "total_model_calls": int(chunking.get("total_model_calls") or 1),
+        "segment_count": int(chunking.get("segment_count") or 1),
+        "channels": {
+            key: {
+                "model_calls": int((value or {}).get("model_calls") or 0),
+                "total_tokens": int((value or {}).get("total_tokens") or 0),
+                "estimated_usd": round(float((value or {}).get("estimated_usd") or 0.0), 6),
+            }
+            for key, value in channels.items()
+            if isinstance(value, dict)
+        },
+        "boundary": "估算值用于容量与成本比较，不等同于供应商最终账单。",
+    }
+
+
 def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[str, Any]:
     status = str(result.get("status") or "")
     diagnostics_text = json.dumps(result.get("diagnostics") or {}, ensure_ascii=False)
@@ -552,6 +578,7 @@ def _agent_report_response(
     result: Dict[str, Any],
     report_stem: str,
     review_profile_label: str = "标准视觉复核",
+    include_internal_metrics: bool = False,
 ) -> Dict[str, Any]:
     parsed = result.get("parsed") or {}
     structured_ok = _structured_review_ok(parsed)
@@ -619,6 +646,8 @@ def _agent_report_response(
             "next_step": public_next_step,
         },
     }
+    if include_internal_metrics:
+        response["agent_report"]["inference_estimate"] = _internal_inference_estimate(result)
     if data.get("diagnostics"):
         response["diagnostics"] = data["diagnostics"]
     return response
@@ -710,7 +739,7 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
     }
 
 
-def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int) -> Dict[str, Any]:
+def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False) -> Dict[str, Any]:
     if model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
@@ -730,7 +759,13 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
     result = call_model_chunked(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
-    review = _agent_report_response(case, folder_dir, result, "agent_folder")
+    review = _agent_report_response(
+        case,
+        folder_dir,
+        result,
+        "agent_folder",
+        include_internal_metrics=include_internal_metrics,
+    )
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
         "source_status": "folder_ready",
@@ -855,6 +890,7 @@ def review_samples_batch(payload: Dict[str, str]) -> JSONResponse:
 
 @app.post("/api/review-folder")
 def review_folder(
+    x_mitako_internal_metrics: str = Header("", alias="X-MITAKO-Internal-Metrics"),
     scenario: str = Form("video_unboxing"),
     business_scenario: str = Form(""),
     ticket_id: str = Form(""),
@@ -872,6 +908,7 @@ def review_folder(
     sop_context: str = Form(""),
     source_case: str = Form(""),
     asset_manifest: str = Form(""),
+    claim_scope: str = Form(""),
     continuity_policy: str = Form(""),
     damage_causality_policy: str = Form(""),
     fulfillment_baseline: str = Form(""),
@@ -909,12 +946,24 @@ def review_folder(
         "sop_context": sop_context,
         "source_case": source_case,
         "asset_manifest": asset_manifest,
+        "claim_scope": claim_scope,
         "continuity_policy": continuity_policy,
         "damage_causality_policy": damage_causality_policy,
         "fulfillment_baseline": fulfillment_baseline,
         "evidence_coverage": evidence_coverage,
     }
-    response = _run_folder_agent_review(folder_dir, scenario, "gemini35", evidence_context, sampling_mode, fps, max_frames, api_frame_limit, probe_seconds)
+    response = _run_folder_agent_review(
+        folder_dir,
+        scenario,
+        "gemini35",
+        evidence_context,
+        sampling_mode,
+        fps,
+        max_frames,
+        api_frame_limit,
+        probe_seconds,
+        include_internal_metrics=x_mitako_internal_metrics == "1",
+    )
     response["ingestion"] = ingestion
     return JSONResponse(response)
 
@@ -940,6 +989,7 @@ def review(
     sop_context: str = Form(""),
     source_case: str = Form(""),
     asset_manifest: str = Form(""),
+    claim_scope: str = Form(""),
     continuity_policy: str = Form(""),
     damage_causality_policy: str = Form(""),
     fulfillment_baseline: str = Form(""),
@@ -1015,6 +1065,7 @@ def review(
         "sop_context": sop_context,
         "source_case": source_case,
         "asset_manifest": asset_manifest,
+        "claim_scope": claim_scope,
         "continuity_policy": continuity_policy,
         "damage_causality_policy": damage_causality_policy,
         "fulfillment_baseline": fulfillment_baseline,

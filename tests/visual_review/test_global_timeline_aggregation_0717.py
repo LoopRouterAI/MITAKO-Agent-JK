@@ -1,0 +1,61 @@
+# -*- coding: utf-8 -*-
+import unittest
+
+from poc.visual_review_poc.model_selection_e2e import _apply_global_timeline_summary
+
+
+class GlobalTimelineAggregation0717Test(unittest.TestCase):
+    def test_chunk_end_before_later_evidence_is_not_public_conclusion(self):
+        case = {
+            "frames": [
+                {"timestamp": "00:00.00"},
+                {"timestamp": "00:11.44"},
+                {"timestamp": "00:52.22"},
+                {"timestamp": "01:11.60"},
+            ],
+            "videos": [{"duration_seconds": 71.6}],
+        }
+        parsed = {
+            "predicted_label": "positive",
+            "system_yes_no": "YES",
+            "confidence": 0.95,
+            "object_continuity_assessment": {
+                "continuity_verdict": "long_absence",
+                "longest_out_of_frame_seconds": 12.0,
+                "tracked_subjects": [
+                    {"subject_id": "claimed_item", "first_exposed_timestamp": "00:52.22"}
+                ],
+            },
+        }
+        rows = [{"video_audit_conclusion": {"opening_integrity": "complete", "swap_risk_level": "low"}}]
+        result = _apply_global_timeline_summary(
+            case,
+            parsed,
+            rows,
+            ["视频在 00:11.44 结束，未见异常"],
+        )
+        self.assertEqual(result["predicted_label"], "review")
+        self.assertEqual(result["aggregation_warnings"][0]["code"], "chunk_end_before_later_evidence")
+        self.assertNotIn("00:11.44 结束", result["overall_audit"]["conclusion"])
+        self.assertIn("00:52.22", result["overall_audit"]["conclusion"])
+        self.assertEqual(result["global_review_summary"]["claimed_item_first_exposed_timestamp"], "00:52.22")
+
+    def test_summary_is_independent_of_high_confidence_chunk_narrative(self):
+        case = {"frames": [{"timestamp": "00:00.00"}, {"timestamp": "00:20.00"}], "videos": [{"duration_seconds": 20.0}]}
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        rows = [
+            {"video_audit_conclusion": {"opening_integrity": "complete", "swap_risk_level": "low"}},
+            {"video_audit_conclusion": {"opening_integrity": "incomplete", "swap_risk_level": "high"}},
+        ]
+        first = _apply_global_timeline_summary(case, parsed, rows, ["局部 A", "局部 B"])
+        second = _apply_global_timeline_summary(case, parsed, list(reversed(rows)), ["局部 B", "局部 A"])
+        self.assertEqual(first["overall_audit"], second["overall_audit"])
+        self.assertEqual(first["video_audit_conclusion"], second["video_audit_conclusion"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,6 +1,6 @@
 # Java 开发部署与联调指南
 
-版本：2026-07-16
+版本：2026-07-17
 
 ## 1. Java 的职责边界
 
@@ -45,6 +45,8 @@ Nginx / Java Gateway
 - 发错货：每个订单行必须有唯一标识，或商品名+规格/款式的可唯一组合，并带应发数量。
 - 漏发货：必须使用 `fulfillment_baseline` 提交版本化应发清单、商品行数量、赠品/特典声明、包裹数和包裹商品映射；使用 `evidence_coverage` 提交本次实际包裹引用/物流单号和完整展示声明。
 - 商品有伤：使用 `damage_causality_policy` 控制动作因果专项扫描；使用 `continuity_policy` 配置离镜阈值和连续性专项扫描。
+- 商品有伤多诉求：用 `claim_scope.active_claim_ids` 明确本次原子诉求。后续追加的不同商品、部位或损伤机制必须新建 claim，不得用一个工单级标签覆盖全部诉求。
+- 自动分类策略：`decision_policy` 默认 `conservative_review`。只有配置甲方批准的 `policy_ref@version` 并选择 `classification_recommendation` 后，才允许命中规则性 `negative`；该结果仍保持 `business_action_allowed=false`。
 - 甲方未提供完整基准时接口不拒绝创建任务，但 `metadata/validate` 会返回 `degraded_review`，运行结果固定降级到人工复核。
 
 ## 4. 大文件
@@ -53,6 +55,7 @@ Nginx / Java Gateway
 - 543MB 或超长视频：优先让甲方上传对象存储并转码/生成故事板。
 - 120GB 批次：按案件拆分，不创建一个超大 HTTP 请求。
 - 当前 POC 的 `/review/jobs` 为 multipart 上传；对象引用适配器需要双方在联调阶段确认 URL 签名、过期、回调和下载白名单。
+- Nginx 参考配置为 `deploy/nginx/mitako-review.conf.example`。Java 网关的单文件上限不得低于 650MiB，整请求上限不得低于 750MiB，并应关闭大请求内存缓冲。
 
 ## 5. 超时与重试
 
@@ -64,6 +67,8 @@ Nginx / Java Gateway
 | 任务查询 | 10 秒 | 可重试 |
 | 报告下载 | 30 秒 | 可重试 |
 
+主服务到内部工作台的 429/502/503/504 由 `REVIEW_WORKBENCH_RETRIES` 做有限重试，每次尝试写入 `result.workbench_transport.attempts`。Java 侧仍按同一 `job_id` 查询，不创建重复案件。
+
 任务执行本身是异步的，HTTP 上传完成不代表审核完成。
 
 ## 6. 联调验收
@@ -74,6 +79,7 @@ set E2E_BASE_URL=http://127.0.0.1:8000
 .venv\Scripts\python.exe scripts\check_review_input_isolation.py
 .venv\Scripts\python.exe scripts\check_customer_agent_0714_regression.py
 .venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_003 --run-id java-integration
+.venv\Scripts\python.exe scripts\check_review_runtime_dependencies.py --media D:\approved-samples\sample.mp4
 ```
 
 如果内部环境目录名为 `venv`，可将上述 `.venv` 替换为 `venv`。预发布脚本会自动识别两种目录。
@@ -91,6 +97,7 @@ Java 侧至少补充：
 - TLS、域名、网关超时和上传大小。
 - SSO/集成账号和最小权限。
 - 主服务到视觉服务的内网地址。
+- 主服务进程可执行的 ffprobe 路径；调用 `/api/v1/review/readiness` 必须返回 200。
 - 数据库、队列、对象存储和备份。
 - Prometheus/Grafana、日志采集和告警。
 - 密钥通过环境或密钥管理服务注入，不写配置文件和镜像。

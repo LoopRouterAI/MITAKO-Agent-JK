@@ -40,6 +40,7 @@ tests/reports/screenshots/*.png
 tests/reports/screenshots/**
 tests/reports/visual_review_ui_checks/
 tests/reports/*.json
+!tests/reports/review_0717_four_samples_20260717-final.json
 poc/visual_review_poc/reports/
 poc/visual_review_poc/uploaded_videos/
 poc/visual_review_poc/downloaded_videos/

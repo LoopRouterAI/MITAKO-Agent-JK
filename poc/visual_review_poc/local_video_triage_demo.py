@@ -370,6 +370,7 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
         "sop_context": _structured_context_value(context.get("sop_context")),
         "source_case": _structured_context_value(context.get("source_case")),
         "asset_manifest": _structured_context_value(context.get("asset_manifest")),
+        "claim_scope": _structured_context_value(context.get("claim_scope")),
         "fulfillment_baseline": _structured_context_value(context.get("fulfillment_baseline")),
         "evidence_coverage": _structured_context_value(context.get("evidence_coverage")),
     }

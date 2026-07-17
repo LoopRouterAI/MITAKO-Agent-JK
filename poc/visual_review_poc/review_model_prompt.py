@@ -53,13 +53,14 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 送入模型的补充图片清单：{json.dumps(images, ensure_ascii=False)}
 
 审核方法要求：
-1. 先拆解用户诉求：用户认为应该收到什么、实际收到什么、争议类型是什么。
+1. 先锁定本次诉求范围：只审核 claim_scope.active_claim_ids 指向的原子诉求；后续追加、已排除或没有绑定证据的诉求不得混入当前结论。未提供 claim_scope 时，只使用本次 customer_claim。
 2. 再核对业务上下文：订单商品名、SKU、规格、角色、款式、数量、随机/盲抽规则，以及仓库/商品主数据。
 3. 对所有视频按 video_index + global_frame_index + timestamp 做跨帧审查：箱子/商品是否持续在镜头内，是否离镜、跳切、遮挡、换手、剪辑或可能调包。
 4. 对补充图片做交叉验证：是否能对应视频里的同一实物，是否有 EXIF、低分辨率、AI 水印、生成痕迹、局部裁剪或过度锐化风险。
 5. 必须同时写支持证据和反证/不确定性。证据足够时要敢于输出 positive 或 negative；证据不足才输出 review。
 6. 只能引用已提供的帧编号和时间戳，不得编造不存在的时间点。
 7. 样本目录名、人工结论、expected_predicted_label 没有提供给你；你只能根据本证据包独立判断。
+8. 如果 structured_business_context.review_chunk 存在，本次只看到全视频的一个分段；分段最后一帧绝不等于视频结束，不得据此声称“视频结束于当前时间点”。
 
 请严格输出 JSON 对象，字段：
 - decision: pass / manual_review / request_more_material / fail。只表示 POC 流转，不代表业务裁决。
@@ -93,5 +94,6 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 - next_step: 后续VIP客服建议，不直接退款、拒赔、补发或定责。
 - model_limitations: 局限。
 - damage_causality_assessment: 仅商品有伤场景必填，其他场景写 null。必须包含 damage_presence(confirmed/not_visible/uncertain)、damage_type_and_location、first_visible_evidence(对象，含 video_index/global_frame_index/timestamp/asset_ref 或 image_index)、pre_opening_state_visible、opening_action_visible、damage_change_observed、damage_timing(pre_opening_visible/appears_during_opening/post_opening_only/unknown)、possible_origins(数组，每项含 origin、confidence、supporting_evidence、challenging_evidence)、most_likely_origin(manufacturing_or_original_packaging/logistics_transport/customer_opening_or_handling/mixed/indeterminate)、origin_confidence、causal_evidence_level(direct/indirect/insufficient)、claim_support(supported/not_supported/insufficient)、before_action_evidence/action_evidence/after_action_evidence(均为证据对象数组，每项含 video_index/global_frame_index/timestamp/subject/location/chain_id/fact，三段必须同对象同部位同 chain_id 且帧序递增)、alternative_explanations、cannot_conclude_reason。不得仅凭“看见有伤”或布尔自报推断损伤成因。
+- damage_observability: 仅商品有伤场景必填。包含 status(fully_observable/partial/not_observable/unknown)、same_item_linkage、claimed_region_closeup、required_view_coverage(0-1)、conflicting_evidence、missing_views。只有争议部位特写清晰、与开箱商品确认同物、必检视角全部覆盖且视频/图片不冲突时，才可写 fully_observable。
 - fulfillment_reconciliation: 仅发错货/漏发货必填，其他场景写 null。必须包含 baseline_version、expected_items、observed_items、suspected_missing_items、unexpected_items、unconfirmed_items、package_observations、package_coverage、all_packages_uploaded、all_items_displayed、evidence_timestamps、confidence、decision_boundary。每个清单项写 item_ref/SKU/名称/规格/应发数量/已识别数量/证据时间点；每个 package_observations 项写 package_ref、opening_complete、all_contents_laid_out、evidence_timestamps。缺少唯一应发基准、赠品或特典规则、分包关联，或视频未完整展示全部包裹和物品时，predicted_label 必须是 review，decision_boundary 必须明确“证据不足，人工复核”，不得直接认定发错或漏发。
 """
