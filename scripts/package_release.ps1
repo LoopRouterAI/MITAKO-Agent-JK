@@ -579,6 +579,7 @@ $RuntimeFiles = @(
     "ops_service.py",
     "partner_guard.py",
     "review_input_safety.py",
+    "review_media_safety.py",
     "runtime_paths.py",
     "sla_lock.py",
     "viking_memory.py",
@@ -818,6 +819,7 @@ $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbe
 
 $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
     "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-16.html",

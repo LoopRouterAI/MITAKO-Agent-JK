@@ -61,6 +61,7 @@ from poc.visual_review_poc.fulfillment_reconciliation import (
 )
 from poc.visual_review_poc.specialized_model_pass import run_specialized_frame_pass
 from runtime_paths import app_root
+from review_media_safety import ignored_upload_reason, valid_media_file
 
 ROOT = app_root()
 SAMPLE_ROOT = ROOT / "docs" / "三大审核场景的小量样本"
@@ -129,12 +130,20 @@ def prepare_media(items: List[Dict[str, Any]], media_dir: Path) -> List[Dict[str
 
 
 def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) -> Dict[str, Any]:
-    videos = sorted(p for p in sample_dir.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES)
+    videos = sorted(
+        p
+        for p in sample_dir.iterdir()
+        if p.is_file()
+        and p.suffix.lower() in VIDEO_SUFFIXES
+        and not ignored_upload_reason(p.name)
+        and valid_media_file(p)
+    )
     case = load_case(videos[0], args.supplemental_image_limit) if videos else load_case_from_folder(sample_dir, args.supplemental_image_limit)
     if not videos and not case.get("supplemental_images"):
         raise SystemExit(f"样本缺少可审核的视频或图片：{sample_dir}")
     frame_groups: List[List[Dict[str, Any]]] = []
     video_summaries = []
+    rejected_videos: List[Dict[str, str]] = []
     for video_index, video in enumerate(videos, start=1):
         window_metadata: Dict[str, Any] = {}
         window_sidecar = video.with_suffix(video.suffix + ".window.json")
@@ -144,15 +153,19 @@ def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) 
             except (OSError, json.JSONDecodeError):
                 window_metadata = {}
         source_offset = float(window_metadata.get("source_start_seconds") or 0.0)
-        sample = sample_video_frames(
-            video,
-            args.fps,
-            args.max_frames_per_video,
-            args.probe_seconds,
-            args.frame_width,
-            run_dir / f"video_{video_index}",
-            args.sampling_mode,
-        )
+        try:
+            sample = sample_video_frames(
+                video,
+                args.fps,
+                args.max_frames_per_video,
+                args.probe_seconds,
+                args.frame_width,
+                run_dir / f"video_{video_index}",
+                args.sampling_mode,
+            )
+        except (OSError, RuntimeError, SystemExit, ValueError):
+            rejected_videos.append({"file": video.name, "reason": "视频无法解码，已从本次审核中隔离"})
+            continue
         picked = sample["frames"]
         video_summaries.append({
             "video_index": video_index,
@@ -171,6 +184,13 @@ def load_case_bundle(sample_dir: Path, args: argparse.Namespace, run_dir: Path) 
             group.append(copied)
         frame_groups.append(group)
     case["videos"] = video_summaries
+    case["rejected_videos"] = rejected_videos
+    if video_summaries:
+        first_accepted = sample_dir / str(video_summaries[0]["file"])
+        case["video_file"] = first_accepted.name
+        case["video_path"] = str(first_accepted)
+    if not video_summaries and not case.get("supplemental_images"):
+        raise SystemExit(f"样本内的视频均无法读取，且没有可审核图片：{sample_dir}")
     case["frames"] = [dict(frame) for group in frame_groups for frame in group]
     for index, frame in enumerate(case["frames"], start=1):
         frame["global_frame_index"] = index

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MITAKO 0717 网页端视频读取问题整改与验收报告</title>
+  <style>
+    :root{--bg:#f4f6f7;--paper:#fff;--ink:#17201f;--muted:#64706d;--line:#dce2df;--green:#176b54;--lime:#d9f45f;--blue:#155d8a;--amber:#8a5a08;--red:#a73737;--soft:#edf4f1;--radius:7px}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.65;letter-spacing:0}.shell{width:min(1120px,calc(100% - 28px));margin:auto}.top{background:#17201f;color:#fff;border-bottom:5px solid var(--lime)}.top .shell{min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:750}.version{color:#cbd5d2;font-size:13px}.hero{background:var(--paper);padding:42px 0 34px;border-bottom:1px solid var(--line)}.eyebrow{margin:0 0 8px;color:var(--green);font-weight:750;font-size:13px}.hero h1{margin:0;max-width:900px;font-size:38px;line-height:1.2;letter-spacing:0}.hero p{margin:14px 0 0;max-width:880px;color:var(--muted);font-size:17px}.verdict{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:12px;margin-top:24px}.verdict article{padding:16px;border:1px solid var(--line);border-radius:var(--radius);background:#fff}.verdict strong{display:block;margin-bottom:4px}.pass strong{color:var(--green)}.boundary strong{color:var(--amber)}main{padding:32px 0 58px}.section{margin-top:30px}.section:first-child{margin-top:0}.section h2{margin:0 0 13px;font-size:23px}.section>p{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.card{padding:18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}.card h3{margin:0 0 7px;font-size:17px}.card p{margin:0;color:var(--muted)}.number{display:inline-grid;place-items:center;width:28px;height:28px;margin-bottom:10px;border-radius:5px;background:var(--lime);font-weight:800}.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.flow div{padding:14px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;text-align:center;font-size:14px}.flow b{display:block;color:var(--green);margin-bottom:4px}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:#fff}table{width:100%;border-collapse:collapse;min-width:760px}th,td{text-align:left;vertical-align:top;padding:12px 14px;border-bottom:1px solid var(--line)}th{background:#eef2f0;font-size:13px}tr:last-child td{border-bottom:0}.yes{color:var(--green);font-weight:700}.note{padding:17px 19px;border-left:5px solid var(--blue);background:#edf5fa;border-radius:4px}.warning{border-left-color:var(--amber);background:#fff7e7}.danger{border-left-color:var(--red);background:#fff0f0}.code{font-family:Consolas,monospace;font-size:13px}.steps{counter-reset:step;display:grid;gap:10px}.step{position:relative;padding:16px 16px 16px 56px;border:1px solid var(--line);border-radius:6px;background:#fff}.step:before{counter-increment:step;content:counter(step);position:absolute;left:16px;top:16px;width:27px;height:27px;display:grid;place-items:center;background:#17201f;color:#fff;border-radius:4px;font-weight:800}.footer{padding:22px 0;border-top:1px solid var(--line);color:var(--muted);font-size:13px}@media(max-width:820px){.hero h1{font-size:31px}.verdict,.grid,.flow{grid-template-columns:1fr}.top .shell{padding:10px 0;align-items:flex-start;flex-direction:column}.flow div{text-align:left}}
+  </style>
+</head>
+<body>
+  <header class="top"><div class="shell"><div class="brand">MITAKO Agent · 甲方整改报告</div><div class="version">版本 2026-07-17</div></div></header>
+  <section class="hero"><div class="shell">
+    <p class="eyebrow">WEB UPLOAD INCIDENT · CLOSED BY AUTOMATED REGRESSION</p>
+    <h1>网页端误读隐藏伪视频问题已按双层过滤、内容校验和失败隔离完成整改</h1>
+    <p>本报告回应“正式 API 可审核，但网页端文件夹上传提示视频无法读取”的反馈。整改不依赖人工删除隐藏文件，浏览器和后端均会识别系统文件；单个坏文件也不会再拖垮同一工单中的有效视频。</p>
+    <div class="verdict">
+      <article class="pass"><strong>结论：问题已复现并修复</strong><span>已使用与截图一致的 macOS 资源副本和伪视频组合完成自动回归。</span></article>
+      <article class="pass"><strong>网页与 API 使用同一规则</strong><span>隐藏文件规则与媒体内容签名校验已提取为共用模块。</span></article>
+      <article class="boundary"><strong>仍需甲方复测</strong><span>请在新 ZIP 上重跑原 3 个样本，确认部署环境和真实目录行为。</span></article>
+    </div>
+  </div></section>
+  <main class="shell">
+    <section class="section">
+      <h2>发生了什么</h2>
+      <div class="grid">
+        <article class="card"><span class="number">1</span><h3>目录内混入系统生成的伪文件</h3><p>从 macOS 或部分压缩工具复制目录时，会出现 <span class="code">__MACOSX</span>、<span class="code">._视频名.mp4</span> 等资源副本。它们扩展名像视频，实际不是视频。</p></article>
+        <article class="card"><span class="number">2</span><h3>旧网页入口只看扩展名</h3><p>旧逻辑在清洗文件名后再判断，可能把 <span class="code">._002.mp4</span> 变成看似正常的文件名并送去抽帧。</p></article>
+        <article class="card"><span class="number">3</span><h3>坏文件导致整个工单失败</h3><p>多视频按顺序读取时，只要一个伪视频无法解码，旧流程就终止，因此页面显示“视频无法读取”。</p></article>
+        <article class="card"><span class="number">4</span><h3>正式 API 原本校验更严格</h3><p>正式审核 API 已校验媒体内容，所以相同业务样本可以成功。网页端与 API 的接收规则不一致，造成表面矛盾。</p></article>
+      </div>
+    </section>
+    <section class="section">
+      <h2>整改后的处理链路</h2>
+      <div class="flow">
+        <div><b>浏览器预过滤</b>隐藏目录、资源副本、空文件不提交</div>
+        <div><b>后端再次过滤</b>不信任浏览器，重复执行系统文件规则</div>
+        <div><b>内容签名校验</b>扩展名与实际图片/视频内容必须一致</div>
+        <div><b>解码失败隔离</b>坏视频单独记录，有效视频继续审核</div>
+        <div><b>清晰回执</b>显示选择、提交、接受、跳过及原因</div>
+      </div>
+    </section>
+    <section class="section">
+      <h2>具体更新</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>更新项</th><th>旧版问题</th><th>新版本行为</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>系统文件过滤</td><td>资源副本可能被当成真实视频</td><td>过滤 <span class="code">__MACOSX</span>、<span class="code">._*</span>、点号文件及常见系统元数据</td><td class="yes">已完成</td></tr>
+          <tr><td>媒体真实性</td><td>只检查扩展名</td><td>检查 MP4/MOV/WebM/MKV/JPEG/PNG/WebP 的内容签名</td><td class="yes">已完成</td></tr>
+          <tr><td>坏视频隔离</td><td>一个坏文件导致整案终止</td><td>记录无法解码文件并继续处理同目录有效素材</td><td class="yes">已完成</td></tr>
+          <tr><td>并发隔离</td><td>同一秒请求存在目录碰撞风险</td><td>每个工单使用不可重复请求标识，20 路并发目录互不共享</td><td class="yes">已完成</td></tr>
+          <tr><td>页面反馈</td><td>只显示视频无法读取</td><td>分别显示素材接收、审核完成度和跳过原因；有跳过时显示“部分素材已跳过”</td><td class="yes">已完成</td></tr>
+          <tr><td>内置样本入口</td><td>客户包不带内部样本时按钮仍可见</td><td>运行时检查样本是否存在，不存在时自动隐藏按钮且接口返回可理解结果</td><td class="yes">已完成</td></tr>
+          <tr><td>公开报告边界</td><td>可能残留内部推理统计</td><td>甲方网页报告不显示内部调用统计；运维统计继续保留在正式服务侧</td><td class="yes">已完成</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+    <section class="section">
+      <h2>自动化验收证据</h2>
+      <div class="grid">
+        <article class="card"><h3>截图问题复现组合</h3><p>同一请求放入 1 个真实视频、<span class="code">__MACOSX/._030_008.mp4</span>、资源副本 JSON、点号隐藏视频和伪 MP4。结果：真实视频进入审核，其余 4 个被安全跳过，工作台不再报真实视频无法读取。</p></article>
+        <article class="card"><h3>媒体安全测试</h3><p>6/6 通过：系统文件识别、资源副本识别、正式 API 跳过隐藏文件、伪媒体拒绝、20 路并发隔离、坏视频与有效视频共存。</p></article>
+        <article class="card"><h3>工作台 Smoke</h3><p>工作台路由、目录上传、图片/视频报告、失败诊断、公开字段脱敏、抽帧档位和新过滤回执均通过。</p></article>
+        <article class="card"><h3>发布包验收</h3><p>最终 ZIP 必须在全新目录解压，冷启动主服务和视觉服务并通过接口门禁；提交号与证据哈希记录在包内清单。</p></article>
+      </div>
+      <div class="note warning" style="margin-top:12px"><strong>准确理解：</strong>HTTP 请求成功、素材接收成功、审核业务完成是三个不同状态。新页面已分开表达，避免把“接口返回了数据”误解为“审核结论已完成”。</div>
+    </section>
+    <section class="section">
+      <h2>甲方复测步骤</h2>
+      <div class="steps">
+        <div class="step"><strong>部署 0717 新 ZIP。</strong>不要覆盖旧目录运行，建议解压到新目录后执行一键启动脚本。</div>
+        <div class="step"><strong>使用原来的 3 个含视频样本文件夹。</strong>无需提前手工删除 <span class="code">__MACOSX</span> 或 <span class="code">._*</span> 文件。</div>
+        <div class="step"><strong>观察选择统计。</strong>页面应显示选择文件总数、有效视频/图片/文本数量及浏览器过滤数量。</div>
+        <div class="step"><strong>提交审核。</strong>结果区应展示服务端接受数、跳过数、原因；只要存在有效媒体，隐藏伪文件不应导致“视频无法读取”。</div>
+        <div class="step"><strong>对比正式 API。</strong>网页和脚本都使用同一组场景、抽帧频率、最大帧数和时间范围后再比较结论；不要用不同参数判断两条链路是否一致。</div>
+        <div class="step"><strong>保留验收证据。</strong>记录请求时间、样本编号、页面统计、审核状态、报告链接和失败诊断；如仍失败，请提供这组信息，不需要提供密钥。</div>
+      </div>
+    </section>
+    <section class="section">
+      <h2>交付边界</h2>
+      <div class="note"><strong>本次已解决：</strong>网页目录上传中的系统隐藏文件、伪媒体、单坏视频整案失败、并发目录碰撞、状态表达和客户包无效样本入口。</div>
+      <div class="note warning" style="margin-top:10px"><strong>本次不等同于：</strong>已证明全部业务样本准确率、已接入甲方生产订单/库存/客服系统，或可以自动执行退款、补发、拒赔和最终定责。审核仍输出证据、置信度与人工复核建议。</div>
+    </section>
+  </main>
+  <footer class="footer"><div class="shell">MITAKO Agent · 0717 网页端视频读取问题整改与验收报告</div></footer>
+</body>
+</html>

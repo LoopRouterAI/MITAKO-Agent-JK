@@ -55,6 +55,7 @@ try {
     Invoke-Step "Review label isolation" { & $Python scripts\check_review_input_isolation.py }
     Invoke-Step "Four-scenario SOP alignment" { & $Python scripts\check_review_sop_alignment.py }
     Invoke-Step "Media preprocessing and sampling" { & $Python scripts\check_review_media_preprocessing.py }
+    Invoke-Step "Media upload safety" { & $Python -m unittest tests.review_service.test_media_upload_safety tests.visual_review.test_workbench_upload_safety }
     Invoke-Step "Visual workbench smoke" { & $Python scripts\check_visual_workbench_smoke.py }
     Invoke-Step "Customer Agent 0709 regression" { & $Python scripts\check_customer_agent_0709_regression.py }
     Invoke-Step "Customer Agent 0714 regression" { & $Python scripts\check_customer_agent_0714_regression.py }

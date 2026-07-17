@@ -46,6 +46,13 @@ FORBIDDEN_PUBLIC_KEYS = {
     "path",
     "api_path",
     "uri",
+    "inference_estimate",
+    "estimated_usd",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "model_calls",
+    "channels",
 }
 
 
@@ -321,6 +328,28 @@ def test_workbench_api() -> None:
         assert_public_payload_clean(video_failed_data["review"])
         assert_public_payload_clean(video_failed_html.text)
 
+        hidden_files = client.post(
+            "/api/review-folder",
+            data={"scenario": "video_unboxing", "customer_claim": "用户反馈开箱视频疑似发错货"},
+            files=[
+                ("files", ("__MACOSX/._030_008.mp4", b"\x00\x05\x16\x07resource-fork", "video/mp4")),
+                ("files", ("._annotation.json", b"appledouble", "application/json")),
+                ("files", (".hidden.mp4", b"not-a-video", "video/mp4")),
+                ("files", ("fake.mp4", b"not-a-video", "video/mp4")),
+                ("files", (video_path.name, video_path.read_bytes(), "video/mp4")),
+            ],
+        )
+        assert hidden_files.status_code == 200, hidden_files.text
+        hidden_data = hidden_files.json()
+        assert hidden_data["ingestion"]["received_count"] == 5, hidden_data
+        assert hidden_data["ingestion"]["accepted_count"] == 1, hidden_data
+        assert hidden_data["ingestion"]["video_count"] == 1, hidden_data
+        assert hidden_data["ingestion"]["skipped_count"] == 4, hidden_data
+        reason_codes = {item["reason_code"] for item in hidden_data["ingestion"]["skipped_files"]}
+        assert {"system_directory", "appledouble_file", "hidden_file", "invalid_media_content"} == reason_codes, hidden_data
+        assert hidden_data["review"]["diagnostics"]["videos_received"] == 1, hidden_data
+        assert_public_payload_clean(hidden_data["review"])
+
         workbench_server.call_model_chunked = fake_unstructured
         unstructured = client.post(
             "/api/review-folder",
@@ -451,6 +480,13 @@ def test_workbench_html() -> None:
     assert "scenario=all" not in html
     assert "sampleEvalForm" in html
     assert "folderInput" in html
+    assert "function folderFileIssue(file)" in html
+    assert "function uploadableFolderFiles()" in html
+    assert "formData.delete('files')" in html
+    assert "function ingestionLines(data)" in html
+    assert "function mediaWarningLines(data)" in html
+    assert "function clientFolderIngestionSummary()" in html
+    assert "function configureBuiltInSampleControls()" in html
     assert "batchSampleBtn" in html
     assert "sample_004" in html
     for path in ("/video-unboxing", "/product-damage", "/minor-material"):

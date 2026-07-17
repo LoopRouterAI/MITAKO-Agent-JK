@@ -77,11 +77,13 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "requirements.txt",
         "internal-package-manifest.json",
         "我方内部开发文档/Java开发部署与联调指南.md",
+        "我方内部开发文档/升级日志-2026-07-17.md",
         "我方内部开发文档/升级日志-2026-07-16.md",
         "我方内部开发文档/升级日志-2026-07-15.md",
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
         "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
         "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
+        "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
         "data/admin.db",
         "data/auth.db",
         "data/handoff.db",
@@ -113,6 +115,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
         "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
         "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-16.html",
+        "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
         "甲方沟通交付文档/视觉审核下一轮测试建议-2026-07-16.md",
         "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
         "甲方沟通交付文档/README.md",
@@ -141,6 +144,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     with zipfile.ZipFile(root / "runtime" / "app_runtime.zip") as runtime:
         runtime_names = [item.filename.replace("\\", "/") for item in runtime.infolist() if not item.is_dir()]
     _assert(not any(name.endswith(".py") for name in runtime_names), "甲方运行时仍包含 Python 源码")
+    _assert(any(name.endswith("review_media_safety.pyc") for name in runtime_names), "甲方运行时缺少媒体上传安全模块")
     return {"entries": len(names), "runtime_entries": len(runtime_names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
 
 
@@ -213,6 +217,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             )
         visual_health = _wait_json(f"http://127.0.0.1:{visual_port}/api/health")
         _assert(visual_health.get("ok") is True, "甲方包视觉服务健康检查失败")
+        _assert(visual_health.get("built_in_samples_available") is False, "甲方包不应宣称附带内部审核样本")
 
         with main_log_path.open("w", encoding="utf-8") as main_log:
             main_process = subprocess.Popen(
@@ -243,6 +248,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             "auth_mode": "demo_bypass",
             "api_smoke": "14/14",
             "visual_health": True,
+            "built_in_samples_available": False,
         }
     except Exception as exc:
         main_tail = main_log_path.read_text(encoding="utf-8", errors="replace")[-3000:] if main_log_path.exists() else ""

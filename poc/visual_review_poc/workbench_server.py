@@ -6,12 +6,14 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, unquote
+from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -21,6 +23,15 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from runtime_paths import app_root
+from review_media_safety import (
+    FOLDER_SUFFIXES,
+    IMAGE_SUFFIXES,
+    MEDIA_SUFFIXES,
+    VIDEO_SUFFIXES,
+    ignored_upload_reason,
+    public_skip_reason,
+    valid_media_magic,
+)
 try:
     from poc.visual_review_poc.url_video_fetcher import (
         detect_platform,
@@ -65,6 +76,7 @@ SAMPLE_MATERIAL_DIR = (ROOT / "docs" / "三大审核场景的小量样本").reso
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
 MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
+MAX_FOLDER_FILES = max(1, int(os.getenv("VISUAL_MAX_FOLDER_FILES", "200") or 200))
 PRIVATE_REPORT_KEYS = {
     "model",
     "display_model",
@@ -92,11 +104,18 @@ PRIVATE_REPORT_KEYS = {
     "path",
     "api_path",
     "uri",
+    "inference_estimate",
+    "estimated_usd",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "model_calls",
+    "channels",
 }
-ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+ALLOWED_VIDEO_SUFFIXES = VIDEO_SUFFIXES
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/x-m4v"}
-ALLOWED_MEDIA_SUFFIXES = ALLOWED_VIDEO_SUFFIXES | {".jpg", ".jpeg", ".png", ".webp"}
-ALLOWED_FOLDER_SUFFIXES = ALLOWED_MEDIA_SUFFIXES | {".txt", ".json"}
+ALLOWED_MEDIA_SUFFIXES = MEDIA_SUFFIXES
+ALLOWED_FOLDER_SUFFIXES = FOLDER_SUFFIXES
 
 app = FastAPI(
     title="MITAKO 视觉审核工作台",
@@ -114,7 +133,10 @@ REVIEW_MODEL_PROFILES = {
 
 def _save_upload(file: UploadFile) -> Path:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "upload.mp4").suffix or ".mp4"
+    original_name = file.filename or "upload.mp4"
+    if ignored_upload_reason(original_name):
+        raise HTTPException(status_code=400, detail="所选文件是系统隐藏文件，请选择原始视频")
+    suffix = Path(original_name).suffix or ".mp4"
     suffix = suffix.lower()
     content_type = (file.content_type or "").split(";", 1)[0].lower()
     if suffix not in ALLOWED_VIDEO_SUFFIXES or (content_type and content_type not in ALLOWED_VIDEO_TYPES and not content_type.startswith("video/")):
@@ -124,16 +146,23 @@ def _save_upload(file: UploadFile) -> Path:
     case_dir.mkdir(parents=True, exist_ok=False)
     target = case_dir / f"{stem}{suffix}"
     total = 0
-    with target.open("wb") as fh:
-        while chunk := file.file.read(1024 * 1024):
-            total += len(chunk)
-            if total > MAX_UPLOAD_BYTES:
-                fh.close()
-                target.unlink(missing_ok=True)
-                raise HTTPException(status_code=413, detail="视频文件过大，请先压缩后再上传")
-            fh.write(chunk)
-    if target.stat().st_size <= 0:
-        raise HTTPException(status_code=400, detail="上传文件为空")
+    head = b""
+    try:
+        with target.open("wb") as fh:
+            while chunk := file.file.read(1024 * 1024):
+                if len(head) < 32:
+                    head = (head + chunk)[:32]
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="视频文件过大，请先压缩后再上传")
+                fh.write(chunk)
+        if total <= 0:
+            raise HTTPException(status_code=400, detail="上传文件为空")
+        if not valid_media_magic(suffix, head):
+            raise HTTPException(status_code=400, detail="视频内容无法识别，请上传原始视频而不是系统资源副本")
+    except Exception:
+        shutil.rmtree(case_dir, ignore_errors=True)
+        raise
     return target
 
 
@@ -141,43 +170,81 @@ def _safe_basename(name: str, fallback: str) -> str:
     basename = Path(str(name or fallback).replace("\\", "/")).name
     stem = re.sub(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+", "_", Path(basename).stem).strip("._-")[:60]
     suffix = Path(basename).suffix.lower()
-    return (stem or fallback) + suffix
+    stem = stem or fallback
+    reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    if stem.upper() in reserved:
+        stem = f"file_{stem}"
+    return stem + suffix
 
 
-def _save_folder_uploads(files: List[UploadFile]) -> Path:
+def _save_folder_uploads(files: List[UploadFile]) -> tuple[Path, Dict[str, Any]]:
     if not files:
         raise HTTPException(status_code=400, detail="请选择工单素材文件夹")
-    target_dir = UPLOAD_DIR / f"folder_{time.strftime('%Y%m%d_%H%M%S')}_{len(ALLOWED_REPORTS) + 1}"
-    target_dir.mkdir(parents=True, exist_ok=True)
+    if len(files) > MAX_FOLDER_FILES:
+        raise HTTPException(status_code=413, detail=f"单次最多接收 {MAX_FOLDER_FILES} 个文件，请拆分工单素材")
+    target_dir = UPLOAD_DIR / f"folder_{time.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:12]}"
+    target_dir.mkdir(parents=True, exist_ok=False)
     total = 0
-    saved = 0
+    accepted: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, str]] = []
     used_names: set[str] = set()
-    for index, file in enumerate(files, start=1):
-        suffix = Path(file.filename or "").suffix.lower()
-        if suffix not in ALLOWED_FOLDER_SUFFIXES:
-            continue
-        name = _safe_basename(file.filename or f"material_{index}{suffix}", f"material_{index}")
-        if name in used_names:
-            name = f"{index:03d}_{name}"
-        used_names.add(name)
-        target = target_dir / name
-        with target.open("wb") as fh:
-            while chunk := file.file.read(1024 * 1024):
-                total += len(chunk)
-                if total > MAX_FOLDER_BYTES:
-                    fh.close()
-                    target.unlink(missing_ok=True)
-                    raise HTTPException(status_code=413, detail="文件夹素材过大，请拆分工单或先截取关键片段")
-                fh.write(chunk)
-        if target.stat().st_size > 0:
-            saved += 1
-        else:
-            target.unlink(missing_ok=True)
-    if not saved:
-        raise HTTPException(status_code=400, detail="文件夹内没有可用视频、图片或文本材料")
-    if not any(path.suffix.lower() in ALLOWED_MEDIA_SUFFIXES for path in target_dir.iterdir() if path.is_file()):
-        raise HTTPException(status_code=400, detail="文件夹内没有可审核的视频或图片")
-    return target_dir
+    try:
+        for index, file in enumerate(files, start=1):
+            original_name = file.filename or f"material_{index}"
+            display_name = Path(original_name.replace("\\", "/")).name or f"material_{index}"
+            reason = ignored_upload_reason(original_name)
+            suffix = Path(display_name).suffix.lower()
+            if reason:
+                skipped.append({"name": display_name, "reason": reason})
+                continue
+            if suffix not in ALLOWED_FOLDER_SUFFIXES:
+                skipped.append({"name": display_name, "reason": "unsupported_suffix"})
+                continue
+            name = _safe_basename(display_name, f"material_{index}")
+            if name in used_names:
+                name = f"{index:03d}_{name}"
+            used_names.add(name)
+            target = target_dir / name
+            size = 0
+            head = b""
+            with target.open("wb") as fh:
+                while chunk := file.file.read(1024 * 1024):
+                    if len(head) < 32:
+                        head = (head + chunk)[:32]
+                    size += len(chunk)
+                    total += len(chunk)
+                    if total > MAX_FOLDER_BYTES:
+                        raise HTTPException(status_code=413, detail="文件夹素材过大，请拆分工单或先截取关键片段")
+                    fh.write(chunk)
+            if size <= 0:
+                target.unlink(missing_ok=True)
+                skipped.append({"name": display_name, "reason": "empty_file"})
+                continue
+            if suffix in ALLOWED_MEDIA_SUFFIXES and not valid_media_magic(suffix, head):
+                target.unlink(missing_ok=True)
+                skipped.append({"name": display_name, "reason": "invalid_media_content"})
+                continue
+            accepted.append({"name": name, "kind": "video" if suffix in ALLOWED_VIDEO_SUFFIXES else "image" if suffix in IMAGE_SUFFIXES else "context"})
+        if not accepted:
+            raise HTTPException(status_code=400, detail="文件夹内没有可用视频、图片或文本材料")
+        if not any(item["kind"] in {"video", "image"} for item in accepted):
+            raise HTTPException(status_code=400, detail="文件夹内没有可审核的视频或图片")
+    except Exception:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise
+    summary = {
+        "received_count": len(files),
+        "accepted_count": len(accepted),
+        "video_count": sum(item["kind"] == "video" for item in accepted),
+        "image_count": sum(item["kind"] == "image" for item in accepted),
+        "context_count": sum(item["kind"] == "context" for item in accepted),
+        "skipped_count": len(skipped),
+        "skipped_files": [
+            {"name": item["name"], "reason": public_skip_reason(item["reason"]), "reason_code": item["reason"]}
+            for item in skipped[:50]
+        ],
+    }
+    return target_dir, summary
 
 
 def _clamp_float(value: float, low: float, high: float, fallback: float) -> float:
@@ -518,6 +585,7 @@ def _agent_report_response(
         },
         "conclusion": public_conclusion,
         "agent_report": agent_report,
+        "media_warnings": case.get("rejected_videos") or [],
     }
     if failure:
         data["diagnostics"] = {
@@ -537,9 +605,13 @@ def _agent_report_response(
     response = {
         "review_label": data["review_label"],
         "summary": data["summary"],
-        "frame_strategy": f"{len(case.get('videos') or [])} 个视频合并为同一证据包，送审 {len(case.get('frames') or [])} 帧，补充图片 {len(case.get('supplemental_images') or [])} 张。",
+        "frame_strategy": (
+            f"{len(case.get('videos') or [])} 个视频合并为同一证据包，送审 {len(case.get('frames') or [])} 帧，补充图片 {len(case.get('supplemental_images') or [])} 张。"
+            + (f"另隔离 {len(case.get('rejected_videos') or [])} 个无法解码的视频。" if case.get("rejected_videos") else "")
+        ),
         "report": {"html_url": "/reports/" + report_name},
         "agent_report": data.get("agent_report") or {},
+        "media_warnings": data.get("media_warnings") or [],
         "agent_brief": {
             "conclusion": public_conclusion,
             "confidence": data["summary"].get("confidence"),
@@ -598,8 +670,17 @@ def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> D
 
 
 def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
+    sample_base = _sample_base()
+    if not sample_base.is_dir():
+        return {
+            "ok": False,
+            "source_status": "sample_not_packaged",
+            "message": "当前交付包未附带内置样本，请使用工单素材文件夹或正式审核 API 测试。",
+            "reports": [],
+            "summary": {"total": 0, "success": 0, "failed": 0},
+        }
     scenarios = _sample_scenarios()
-    sample_ids = [p.name for p in sorted(_sample_base().iterdir()) if p.is_dir() and p.name.startswith("sample_")]
+    sample_ids = [p.name for p in sorted(sample_base.iterdir()) if p.is_dir() and p.name.startswith("sample_")]
     reports = []
     for sample_id in sample_ids:
         scenario = scenarios.get(sample_id, "video_unboxing")
@@ -618,7 +699,7 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
         except HTTPException as exc:
             reports.append({"sample_id": sample_id, "scenario": scenario, "ok": False, "error": exc.detail})
     return {
-        "ok": any(item.get("ok") for item in reports),
+        "ok": bool(reports) and all(item.get("ok") for item in reports),
         "source_status": "sample_batch_ready",
         "reports": reports,
         "summary": {
@@ -679,6 +760,8 @@ def minor_material_entry() -> str:
 
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
+    sample_base = _sample_base()
+    sample_ids = [path.name for path in sample_base.glob("sample_*") if path.is_dir()] if sample_base.is_dir() else []
     return {
         "ok": True,
         "service": "visual_review_workbench",
@@ -686,6 +769,8 @@ def health() -> Dict[str, Any]:
         "source_system": "mitako_fixture",
         "integration_status": "not_connected",
         "access_control": "生产部署必须由主服务或反向代理执行租户鉴权",
+        "built_in_samples_available": bool(sample_ids),
+        "built_in_sample_count": len(sample_ids),
     }
 
 
@@ -806,7 +891,7 @@ def review_folder(
     max_frames = _clamp_int(max_frames, 1, 1800, 24)
     api_frame_limit = _clamp_int(api_frame_limit, 1, 24, 24)
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
-    folder_dir = _save_folder_uploads(files)
+    folder_dir, ingestion = _save_folder_uploads(files)
     evidence_context = {
         "business_scenario": business_scenario,
         "ticket_id": ticket_id,
@@ -829,7 +914,9 @@ def review_folder(
         "fulfillment_baseline": fulfillment_baseline,
         "evidence_coverage": evidence_coverage,
     }
-    return JSONResponse(_run_folder_agent_review(folder_dir, scenario, "gemini35", evidence_context, sampling_mode, fps, max_frames, api_frame_limit, probe_seconds))
+    response = _run_folder_agent_review(folder_dir, scenario, "gemini35", evidence_context, sampling_mode, fps, max_frames, api_frame_limit, probe_seconds)
+    response["ingestion"] = ingestion
+    return JSONResponse(response)
 
 
 @app.post("/api/review")

@@ -143,6 +143,8 @@ Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_d
 
 $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
+    "我方内部开发文档\升级日志-2026-07-17.md",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
     "我方内部开发文档\升级日志-2026-07-16.md",
@@ -182,6 +184,7 @@ $required = @(
     ".env",
     "我方内部开发文档\Java开发部署与联调指南.md",
     "我方内部开发文档\内部研发包交付说明.md",
+    "我方内部开发文档\升级日志-2026-07-17.md",
     "我方内部开发文档\升级日志-2026-07-16.md",
     "我方内部开发文档\升级日志-2026-07-15.md",
     "docs\delivery\openapi.yaml",
@@ -190,6 +193,7 @@ $required = @(
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
     "docs\delivery\客服Agent与私域Agent正式接入前人工UAT指南_20260716.md",
     "甲方沟通交付文档\视觉审核下一轮测试建议-2026-07-16.md",
+    "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
     "甲方沟通交付文档\0714反馈整改与验收说明-2026-07-15.md",
     "docs\三大审核场景的小量样本\sample_labels.json",

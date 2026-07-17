@@ -24,6 +24,7 @@ from runtime_paths import data_dir
 from poc.visual_review_poc.report_renderer import render_public_report
 from poc.visual_review_poc.local_video_triage_demo import adaptive_frame_budget
 from review_input_safety import assert_review_input_safe
+from review_media_safety import ignored_upload_reason, valid_media_magic
 
 from . import store
 from .media_forensics import inspect_job_media
@@ -65,20 +66,6 @@ def _safe_name(name: str, fallback: str) -> str:
     return stem + Path(name).suffix.lower()
 
 
-def _valid_magic(suffix: str, head: bytes) -> bool:
-    if suffix in {".jpg", ".jpeg"}:
-        return head.startswith(b"\xff\xd8\xff")
-    if suffix == ".png":
-        return head.startswith(b"\x89PNG\r\n\x1a\n")
-    if suffix == ".webp":
-        return head.startswith(b"RIFF") and head[8:12] == b"WEBP"
-    if suffix in {".mp4", ".mov", ".m4v"}:
-        return b"ftyp" in head[:32]
-    if suffix in {".webm", ".mkv"}:
-        return head.startswith(b"\x1aE\xdf\xa3")
-    return suffix in {".txt", ".json"}
-
-
 def ensure_label_isolation(value: Any) -> None:
     """评测标签只能在模型返回后离线比对，禁止进入审核输入。"""
     assert_review_input_safe(value)
@@ -90,16 +77,33 @@ def _request_hash(metadata: ReviewCaseMetadata, uploads: Sequence[UploadFile]) -
         "files": [
             {"name": item.filename or "", "content_type": item.content_type or ""}
             for item in uploads
+            if not ignored_upload_reason(item.filename or "")
         ],
     }
     raw = json.dumps(basis, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
+def _upload_ingestion_summary(uploads: Sequence[UploadFile]) -> Dict[str, Any]:
+    ignored = []
+    for item in uploads:
+        name = item.filename or ""
+        reason = ignored_upload_reason(name)
+        if reason:
+            ignored.append({"name": Path(name.replace("\\", "/")).name, "reason_code": reason})
+    return {
+        "received_count": len(uploads),
+        "accepted_count": len(uploads) - len(ignored),
+        "ignored_count": len(ignored),
+        "ignored_files": ignored[:50],
+    }
+
+
 async def _save_uploads(job_id: str, metadata: ReviewCaseMetadata, uploads: Sequence[UploadFile]) -> List[Dict[str, Any]]:
-    if not uploads:
+    accepted_uploads = [item for item in uploads if not ignored_upload_reason(item.filename or "")]
+    if not accepted_uploads:
         raise ValueError("review_assets_required")
-    if len(uploads) > int(os.getenv("REVIEW_MAX_ASSETS", "40") or 40):
+    if len(accepted_uploads) > int(os.getenv("REVIEW_MAX_ASSETS", "40") or 40):
         raise ValueError("too_many_review_assets")
 
     max_asset = _limit_bytes("REVIEW_MAX_ASSET_MB", 650)
@@ -109,7 +113,7 @@ async def _save_uploads(job_id: str, metadata: ReviewCaseMetadata, uploads: Sequ
     assets: List[Dict[str, Any]] = []
     total_case = 0
     try:
-        for index, upload in enumerate(uploads, start=1):
+        for index, upload in enumerate(accepted_uploads, start=1):
             original = Path(upload.filename or f"asset_{index}").name
             if original.lower() == "sample_labels.json":
                 raise ValueError("evaluation_label_not_allowed")
@@ -135,7 +139,7 @@ async def _save_uploads(job_id: str, metadata: ReviewCaseMetadata, uploads: Sequ
                     fh.write(chunk)
             if size <= 0:
                 raise ValueError("empty_review_asset")
-            if not _valid_magic(suffix, head):
+            if not valid_media_magic(suffix, head):
                 raise ValueError("invalid_review_asset_content")
             if suffix == ".json":
                 try:
@@ -184,6 +188,8 @@ async def create_job_from_uploads(
 
     job_id = f"RJ-{uuid4().hex[:16].upper()}"
     assets = await _save_uploads(job_id, metadata, uploads)
+    stored_metadata = metadata.model_dump(mode="json")
+    stored_metadata["ingestion"] = _upload_ingestion_summary(uploads)
     try:
         job = store.create_job(
             {
@@ -192,7 +198,7 @@ async def create_job_from_uploads(
                 "client_case_id": metadata.client_case_id,
                 "idempotency_key": idempotency_key,
                 "scenario": metadata.scenario,
-                "metadata": metadata.model_dump(mode="json"),
+                "metadata": stored_metadata,
                 "assets": assets,
             },
             request_hash,

@@ -25,6 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from runtime_paths import app_root
+from review_media_safety import ignored_upload_reason, valid_media_file
 
 ROOT = app_root()
 POC_DIR = ROOT / "poc" / "visual_review_poc"
@@ -243,7 +244,14 @@ def sample_video_frames(
 
 def find_supplemental_images_in_dir(folder: Path, limit: int, resource_fields: Dict[str, List[str]]) -> List[Dict[str, Any]]:
     image_exts = {".jpg", ".jpeg", ".png", ".webp"}
-    images = [p for p in sorted(folder.iterdir()) if p.is_file() and p.suffix.lower() in image_exts]
+    images = [
+        p
+        for p in sorted(folder.iterdir())
+        if p.is_file()
+        and p.suffix.lower() in image_exts
+        and not ignored_upload_reason(p.name)
+        and valid_media_file(p)
+    ]
     return [
         {
             "image_index": index + 1,

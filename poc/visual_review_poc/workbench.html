@@ -1690,6 +1690,43 @@
           if (shouldWriteLog) writeLog(profile.initialLog);
         }
 
+	        function ingestionLines(data) {
+	          const ingestion = (data && data.ingestion) || {};
+	          const client = (data && data.client_ingestion) || {};
+	          if (!ingestion.received_count && !client.selected_count) return [];
+	          const lines = ['素材接收：服务端有效 ' + safeText(ingestion.accepted_count || 0) + ' / 浏览器提交 ' + safeText(ingestion.received_count || client.submitted_count || 0) + ' / 用户选择 ' + safeText(client.selected_count || ingestion.received_count || 0)];
+	          if (client.skipped_count) {
+	            const clientDetails = (client.skipped_files || []).slice(0, 5).map((item) => safeText(item.name) + '（' + safeText(item.reason) + '）');
+	            lines.push('浏览器已过滤 ' + safeText(client.skipped_count) + ' 个文件' + (clientDetails.length ? '：' + clientDetails.join('、') : ''));
+	          }
+	          if (ingestion.skipped_count) {
+	            const details = (ingestion.skipped_files || []).slice(0, 5).map((item) => safeText(item.name) + '（' + safeText(item.reason) + '）');
+	            lines.push('已安全跳过 ' + safeText(ingestion.skipped_count) + ' 个文件' + (details.length ? '：' + details.join('、') : ''));
+	          }
+	          return lines;
+	        }
+
+	        function mediaWarningLines(data) {
+	          const warnings = (data && data.review && data.review.media_warnings) || [];
+	          if (!warnings.length) return [];
+	          return ['解码隔离：' + warnings.slice(0, 5).map((item) => safeText(item.file) + '（' + safeText(item.reason) + '）').join('、')];
+	        }
+
+        async function configureBuiltInSampleControls() {
+          try {
+            const response = await fetch('/api/health');
+            const data = await response.json();
+            const available = Boolean(response.ok && data.built_in_samples_available);
+            demoSampleBtn.hidden = !available;
+            batchSampleBtn.hidden = !available;
+            if (!available) sampleEvalLog.textContent = '当前交付包未附带内置样本；可导入自己的评测表，或通过工单素材文件夹测试。';
+          } catch (error) {
+            console.error(error);
+            demoSampleBtn.hidden = true;
+            batchSampleBtn.hidden = true;
+          }
+        }
+
 	        function formatReviewSummary(data) {
 	          if (!data) {
 	            return '任务未完成，请检查素材或稍后重试。';
@@ -1712,6 +1749,8 @@
           if (review.diagnostics) {
             const diagnostics = review.diagnostics;
             return [
+              ...ingestionLines(data),
+              ...mediaWarningLines(data),
               '审核未完成：' + safeText(diagnostics.failure_reason || '本轮没有拿到有效系统复核结果。'),
               '失败阶段：' + safeText(diagnostics.failure_stage || '-'),
               '取证状态：视频 ' + safeText(diagnostics.videos_received || 0) + ' 个 / 帧 ' + safeText(diagnostics.frames_sent || 0) + ' 张 / 补充图片 ' + safeText(diagnostics.supplemental_images_sent || 0) + ' 张',
@@ -1722,6 +1761,8 @@
           if (review.agent_brief) {
             const brief = review.agent_brief;
             return [
+              ...ingestionLines(data),
+              ...mediaWarningLines(data),
               '结论：' + safeText(brief.conclusion),
               '置信度：' + safeText(brief.confidence) + ' / 系统参考：' + safeText(brief.system_yes_no),
               '下一步：' + safeText(brief.next_step),
@@ -1731,6 +1772,8 @@
           }
           const summary = review.summary || {};
           const lines = [
+            ...ingestionLines(data),
+            ...mediaWarningLines(data),
             '复核摘要已生成。',
             '覆盖场景：' + (summary.cases || '-'),
             '成功复核：' + (summary.successful_reviews || 0) + '/' + (summary.total_reviews || 0),
@@ -1854,22 +1897,59 @@
 	          return Array.from((folderInput && folderInput.files) || []);
 	        }
 
+          function folderFilePath(file) {
+            return String((file && (file.webkitRelativePath || file.name)) || '').replace(/\\/g, '/');
+          }
+
+          function folderFileIssue(file) {
+            const parts = folderFilePath(file).split('/').filter(Boolean);
+            const lowered = parts.map((part) => part.toLowerCase());
+            const basename = lowered[lowered.length - 1] || '';
+            if (lowered.includes('__macosx')) return '系统目录文件';
+            if (basename.startsWith('._')) return 'macOS 资源副本';
+            if (['.ds_store', 'thumbs.db', 'desktop.ini'].includes(basename)) return '系统元数据文件';
+            if (parts.some((part) => part.startsWith('.'))) return '隐藏文件';
+            if (!isFolderMaterial(file)) return '不支持的文件格式';
+            if (!file.size) return '空文件';
+            return '';
+          }
+
+          function uploadableFolderFiles() {
+            return folderFiles().filter((file) => !folderFileIssue(file));
+          }
+
+          function clientFolderIngestionSummary() {
+            const allFiles = folderFiles();
+            const skippedFiles = allFiles
+              .map((file) => ({ name: folderFilePath(file), reason: folderFileIssue(file) }))
+              .filter((item) => item.reason)
+              .slice(0, 50);
+            return {
+              selected_count: allFiles.length,
+              submitted_count: allFiles.length - skippedFiles.length,
+              skipped_count: skippedFiles.length,
+              skipped_files: skippedFiles,
+            };
+          }
+
 	        function isFolderMaterial(file) {
 	          return /\.(mp4|mov|m4v|webm|mkv|jpg|jpeg|png|webp|txt|json)$/i.test(file.name || '');
 	        }
 
 	        function updateFolderState() {
-	          const files = folderFiles().filter(isFolderMaterial);
+	          const allFiles = folderFiles();
+	          const files = uploadableFolderFiles();
 	          folderCard.classList.remove('dragging');
 	          if (!files.length) {
-	            folderState.textContent = '尚未选择文件夹';
+	            folderState.textContent = allFiles.length ? '已选择 ' + allFiles.length + ' 个文件，但没有可审核材料' : '尚未选择文件夹';
 	            return;
 	          }
 	          const videoCount = files.filter(isVideoFile).length;
 	          const imageCount = files.filter((file) => /\.(jpg|jpeg|png|webp)$/i.test(file.name || '')).length;
 	          const textCount = files.filter((file) => /\.(txt|json)$/i.test(file.name || '')).length;
 	          const sizeMb = (files.reduce((sum, file) => sum + (file.size || 0), 0) / 1024 / 1024).toFixed(2);
-	          folderState.textContent = '视频 ' + videoCount + ' 个 / 图片 ' + imageCount + ' 张 / 文本 ' + textCount + ' 份 / ' + sizeMb + ' MB';
+	          const skipped = allFiles.length - files.length;
+	          folderState.textContent = '视频 ' + videoCount + ' 个 / 图片 ' + imageCount + ' 张 / 文本 ' + textCount + ' 份 / ' + sizeMb + ' MB' + (skipped ? ' / 已过滤 ' + skipped + ' 个系统或无效文件' : '');
 	        }
 
         function updateSampleFileState() {
@@ -1925,7 +2005,7 @@
 	              return false;
 	            }
 	          } else if (sourceType.value === 'folder') {
-	            const files = folderFiles().filter(isFolderMaterial);
+	            const files = uploadableFolderFiles();
 	            const total = files.reduce((sum, file) => sum + (file.size || 0), 0);
 	            if (!files.length) {
 	              folderState.textContent = '请先选择一个工单素材文件夹。';
@@ -1999,6 +2079,7 @@
 	        fileInput.addEventListener('change', updateFileState);
 	        folderInput.addEventListener('change', updateFolderState);
 	        sampleFile.addEventListener('change', updateSampleFileState);
+        configureBuiltInSampleControls();
         ['dragenter', 'dragover'].forEach((name) => {
           uploadCard.addEventListener(name, (event) => {
             event.preventDefault();
@@ -2190,10 +2271,17 @@
               elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
             }, 500);
 	            const reviewUrl = sourceType.value === 'folder' ? '/api/review-folder' : '/api/review';
-	            const response = await fetch(reviewUrl, { method: 'POST', body: new FormData(form) });
+            const formData = new FormData(form);
+            if (sourceType.value === 'folder') {
+              formData.delete('files');
+              uploadableFolderFiles().forEach((file) => formData.append('files', file, folderFilePath(file) || file.name));
+            }
+	            const response = await fetch(reviewUrl, { method: 'POST', body: formData });
             const data = await response.json();
+            if (sourceType.value === 'folder') data.client_ingestion = clientFolderIngestionSummary();
             writeLog(formatReviewSummary(data));
-            stage.textContent = data.ok ? messages.zhCN.done : messages.zhCN.failed;
+            const skipped = Number((data.ingestion || {}).skipped_count || 0) + Number((data.client_ingestion || {}).skipped_count || 0) + Number(((data.review || {}).media_warnings || []).length || 0);
+	            stage.textContent = data.ok ? (skipped ? '完成（部分素材已跳过）' : messages.zhCN.done) : messages.zhCN.failed;
 	            const href = data.review && data.review.report && data.review.report.html_url;
 	            if (href) {
 	              showReportLinks([{ html_url: href, confidence: data.review.summary && data.review.summary.confidence }]);
