@@ -587,6 +587,8 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\workbench_server.py",
     "poc\visual_review_poc\local_video_triage_demo.py",
     "poc\visual_review_poc\model_selection_e2e.py",
+    "poc\visual_review_poc\minor_material_model_prompt.py",
+    "poc\visual_review_poc\minor_material_pipeline.py",
     "poc\visual_review_poc\continuity_model_prompt.py",
     "poc\visual_review_poc\damage_causality.py",
     "poc\visual_review_poc\damage_causality_model_prompt.py",
@@ -819,6 +821,8 @@ $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbe
 
 $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
+    "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
     "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",

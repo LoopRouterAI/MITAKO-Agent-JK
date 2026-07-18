@@ -75,6 +75,10 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 - 视觉审核服务凭证。
 - `VISUAL_WORKBENCH_URL`：主服务调用视觉执行器的内网地址；分机部署时必须显式配置。未配置时才回退 `VISUAL_WORKBENCH_PORT`。
 - 主服务和视觉服务上传/案件大小限制。
+- `VISUAL_MAX_FOLDER_FILES`：网页单工单文件夹的文件数上限，默认 200。
+- `VISUAL_MAX_BATCH_FOLDERS`：网页批量父目录的工单数上限，默认 10、最大 20。
+- `VISUAL_MAX_BATCH_FILES`：网页批量父目录的总文件数上限，默认 400、最大 1000。
+- `VISUAL_MAX_SUPPLEMENTAL_IMAGES`：单案件进入资料审核管线的图片上限，默认 40、最大 80。
 - `REVIEW_FFPROBE_PATH`：可选固定路径；为空时从主服务进程 `PATH` 查找。
 - `REVIEW_WORKBENCH_RETRIES`：内部工作台遇到 429/502/503/504 时的有限重试次数，默认 2。
 - 数据目录和日志目录。

@@ -78,12 +78,19 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "internal-package-manifest.json",
         "我方内部开发文档/Java开发部署与联调指南.md",
         "我方内部开发文档/升级日志-2026-07-17.md",
+        "我方内部开发文档/升级日志-2026-07-17-提交模式与双包.md",
+        "我方内部开发文档/升级日志-2026-07-17-144989未成年人资料审核.md",
         "我方内部开发文档/升级日志-2026-07-16.md",
         "我方内部开发文档/升级日志-2026-07-15.md",
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
         "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
         "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
         "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
+        "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-17.html",
+        "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
+        "tests/reports/minor_refund_144989_20260717-final.json",
+        "tests/reports/review_submission_modes_20260717-final.json",
+        "tests/reports/review_submission_modes_20260717-final.html",
         "data/admin.db",
         "data/auth.db",
         "data/handoff.db",
@@ -115,6 +122,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
         "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
         "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-16.html",
+        "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-17.html",
+        "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
         "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
         "甲方沟通交付文档/视觉审核下一轮测试建议-2026-07-16.md",
         "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
@@ -145,6 +154,10 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         runtime_names = [item.filename.replace("\\", "/") for item in runtime.infolist() if not item.is_dir()]
     _assert(not any(name.endswith(".py") for name in runtime_names), "甲方运行时仍包含 Python 源码")
     _assert(any(name.endswith("review_media_safety.pyc") for name in runtime_names), "甲方运行时缺少媒体上传安全模块")
+    _assert(any(name.endswith("minor_material_pipeline.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料审核管线")
+    _assert(any(name.endswith("minor_material_model_prompt.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料识别协议")
+    workbench_html = (root / "visual_review_workbench" / "workbench.html").read_text(encoding="utf-8-sig")
+    _assert("/api/review-folders-batch" in workbench_html and "batchFolderTab" in workbench_html, "甲方工作台缺少批量工单入口")
     return {"entries": len(names), "runtime_entries": len(runtime_names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
 
 

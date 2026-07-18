@@ -78,6 +78,8 @@ MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 *
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
 MAX_SUPPLEMENTAL_IMAGES = max(1, min(int(os.getenv("VISUAL_MAX_SUPPLEMENTAL_IMAGES", "40") or 40), 80))
 MAX_FOLDER_FILES = max(1, int(os.getenv("VISUAL_MAX_FOLDER_FILES", "200") or 200))
+MAX_BATCH_FOLDERS = max(1, min(int(os.getenv("VISUAL_MAX_BATCH_FOLDERS", "10") or 10), 20))
+MAX_BATCH_FILES = max(MAX_FOLDER_FILES, min(int(os.getenv("VISUAL_MAX_BATCH_FILES", "400") or 400), 1000))
 PRIVATE_REPORT_KEYS = {
     "model",
     "display_model",
@@ -246,6 +248,46 @@ def _save_folder_uploads(files: List[UploadFile]) -> tuple[Path, Dict[str, Any]]
         ],
     }
     return target_dir, summary
+
+
+def _group_batch_folder_uploads(files: List[UploadFile]) -> Dict[str, List[UploadFile]]:
+    """把父目录上传按一级子目录拆成互相隔离的工单。"""
+    if not files:
+        raise HTTPException(status_code=400, detail="请选择包含多个工单子文件夹的父目录")
+    if len(files) > MAX_BATCH_FILES:
+        raise HTTPException(status_code=413, detail=f"批量目录最多接收 {MAX_BATCH_FILES} 个文件")
+    rows: List[tuple[UploadFile, List[str]]] = []
+    for file in files:
+        original_name = str(file.filename or "").replace("\\", "/")
+        if ignored_upload_reason(original_name):
+            continue
+        parts = [part for part in original_name.split("/") if part and part not in {".", ".."}]
+        if parts:
+            rows.append((file, parts))
+    if not rows:
+        raise HTTPException(status_code=400, detail="批量目录内没有可审核文件")
+    top_levels = {parts[0] for _, parts in rows}
+    strip_selected_root = len(top_levels) == 1 and all(len(parts) >= 2 for _, parts in rows)
+    groups: Dict[str, List[UploadFile]] = {}
+    case_ids: Dict[str, str] = {}
+    used_case_ids: set[str] = set()
+    for file, parts in rows:
+        relative = parts[1:] if strip_selected_root else parts
+        case_name = relative[0] if len(relative) >= 2 else "根目录工单"
+        if case_name not in case_ids:
+            base_case = re.sub(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+", "_", case_name).strip("._-")[:72] or "case"
+            safe_case = base_case
+            suffix = 2
+            while safe_case in used_case_ids:
+                safe_case = f"{base_case}_{suffix}"
+                suffix += 1
+            case_ids[case_name] = safe_case
+            used_case_ids.add(safe_case)
+        safe_case = case_ids[case_name]
+        groups.setdefault(safe_case, []).append(file)
+    if len(groups) > MAX_BATCH_FOLDERS:
+        raise HTTPException(status_code=413, detail=f"单批最多审核 {MAX_BATCH_FOLDERS} 个工单文件夹")
+    return groups
 
 
 def _clamp_float(value: float, low: float, high: float, fallback: float) -> float:
@@ -967,6 +1009,69 @@ def review_folder(
     )
     response["ingestion"] = ingestion
     return JSONResponse(response)
+
+
+@app.post("/api/review-folders-batch")
+def review_folders_batch(
+    scenario: str = Form("video_unboxing"),
+    customer_claim: str = Form(""),
+    product_master_data: str = Form(""),
+    conversation_history: str = Form(""),
+    sampling_mode: str = Form("adaptive"),
+    fps: float = Form(1.0),
+    max_frames: int = Form(24),
+    api_frame_limit: int = Form(24),
+    probe_seconds: int = Form(12),
+    files: List[UploadFile] = File(...),
+) -> JSONResponse:
+    if scenario not in {"video_unboxing", "product_damage", "minor_material"}:
+        raise HTTPException(status_code=400, detail="未知审核场景")
+    if sampling_mode not in {"adaptive", "dense"}:
+        raise HTTPException(status_code=400, detail="未知抽帧策略")
+    fps = _clamp_float(fps, 0.1, 2.0, 1.0)
+    max_frames = _clamp_int(max_frames, 1, 1800, 24)
+    api_frame_limit = _clamp_int(api_frame_limit, 1, 24, 24)
+    probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
+    groups = _group_batch_folder_uploads(files)
+    evidence_context = {
+        "customer_claim": customer_claim,
+        "product_master_data": product_master_data,
+        "conversation_history": conversation_history,
+    }
+    cases = []
+    for case_id, case_files in groups.items():
+        try:
+            folder_dir, ingestion = _save_folder_uploads(case_files)
+            result = _run_folder_agent_review(
+                folder_dir,
+                scenario,
+                "gemini35",
+                evidence_context,
+                sampling_mode,
+                fps,
+                max_frames,
+                api_frame_limit,
+                probe_seconds,
+            )
+            result["ingestion"] = ingestion
+            cases.append({"case_id": case_id, **result})
+        except HTTPException as exc:
+            cases.append({"case_id": case_id, "ok": False, "status": "failed", "message": str(exc.detail)})
+        except Exception:
+            cases.append({"case_id": case_id, "ok": False, "status": "failed", "message": "工单审核未完成，请单独重试"})
+    success = sum(item.get("ok") is True for item in cases)
+    reports = []
+    for item in cases:
+        report = ((item.get("review") or {}).get("report") or {})
+        if report.get("html_url"):
+            reports.append({"sample_id": item["case_id"], "html_url": report["html_url"], "confidence": ((item.get("review") or {}).get("summary") or {}).get("confidence")})
+    return JSONResponse({
+        "ok": success == len(cases),
+        "source_status": "folder_batch_ready",
+        "summary": {"total": len(cases), "success": success, "failed": len(cases) - success, "complete": True},
+        "cases": cases,
+        "reports": reports,
+    })
 
 
 @app.post("/api/review")

@@ -138,16 +138,23 @@ Copy-Path "tests\reports\customer_agent_0714_regression_latest.json"
 Copy-Path "tests\reports\review_service_batch_latest.json"
 Copy-Path "tests\reports\review_media_preprocessing_latest.json"
 Copy-Path "tests\reports\review_0717_four_samples_20260717-final.json"
+Copy-Path "tests\reports\minor_refund_144989_20260717-final.json"
+Copy-Path "tests\reports\review_submission_modes_20260717-final.json"
+Copy-Path "tests\reports\review_submission_modes_20260717-final.html"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
 Copy-LatestReport "auth_strict_*.html" "tests\reports\auth_strict_latest.html"
 Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_deployment_api_smoke_latest.json"
 
 $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
+    "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
     "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "我方内部开发文档\升级日志-2026-07-17-四样本审核.md",
     "我方内部开发文档\升级日志-2026-07-17.md",
+    "我方内部开发文档\升级日志-2026-07-17-提交模式与双包.md",
+    "我方内部开发文档\升级日志-2026-07-17-144989未成年人资料审核.md",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
     "我方内部开发文档\升级日志-2026-07-16.md",
@@ -157,6 +164,9 @@ $evidenceFiles = @(
     "tests\reports\review_service_batch_latest.json",
     "tests\reports\review_media_preprocessing_latest.json",
     "tests\reports\review_0717_four_samples_20260717-final.json",
+    "tests\reports\minor_refund_144989_20260717-final.json",
+    "tests\reports\review_submission_modes_20260717-final.json",
+    "tests\reports\review_submission_modes_20260717-final.html",
     "tests\reports\full_pipeline_latest.html",
     "tests\reports\auth_strict_latest.html",
     "tests\reports\private_deployment_api_smoke_latest.json"
@@ -189,6 +199,8 @@ $required = @(
     "我方内部开发文档\Java开发部署与联调指南.md",
     "我方内部开发文档\内部研发包交付说明.md",
     "我方内部开发文档\升级日志-2026-07-17.md",
+    "我方内部开发文档\升级日志-2026-07-17-提交模式与双包.md",
+    "我方内部开发文档\升级日志-2026-07-17-144989未成年人资料审核.md",
     "我方内部开发文档\升级日志-2026-07-17-四样本审核.md",
     "我方内部开发文档\升级日志-2026-07-16.md",
     "我方内部开发文档\升级日志-2026-07-15.md",
@@ -200,12 +212,17 @@ $required = @(
     "甲方沟通交付文档\视觉审核下一轮测试建议-2026-07-16.md",
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
+    "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
+    "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
     "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
     "甲方沟通交付文档\0714反馈整改与验收说明-2026-07-15.md",
     "docs\三大审核场景的小量样本\sample_labels.json",
     "scripts\pre_release_internal_validation.ps1",
     "data\review_service.db",
-    "tests\reports\review_0717_four_samples_20260717-final.json"
+    "tests\reports\review_0717_four_samples_20260717-final.json",
+    "tests\reports\minor_refund_144989_20260717-final.json",
+    "tests\reports\review_submission_modes_20260717-final.json",
+    "tests\reports\review_submission_modes_20260717-final.html"
 )
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {

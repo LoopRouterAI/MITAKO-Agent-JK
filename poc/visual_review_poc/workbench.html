@@ -590,7 +590,9 @@
     .url-mode .upload-box,
     .url-mode .folder-box,
     .folder-mode .upload-box,
-    .folder-mode .url-box { display: none; }
+    .folder-mode .url-box,
+    .batch-folder-mode .upload-box,
+    .batch-folder-mode .url-box { display: none; }
 
     .row {
       display: grid;
@@ -1230,6 +1232,7 @@
 	            <button type="button" id="uploadTab" class="active" role="tab" aria-selected="true" data-mode="upload" data-i18n="uploadTab">本地上传</button>
 	            <button type="button" id="urlTab" role="tab" aria-selected="false" data-mode="url" data-i18n="urlTab">视频 URL</button>
 	            <button type="button" id="folderTab" role="tab" aria-selected="false" data-mode="folder">工单文件夹</button>
+	            <button type="button" id="batchFolderTab" role="tab" aria-selected="false" data-mode="batch_folder">批量工单</button>
 	          </div>
 
           <form id="reviewForm">
@@ -1325,14 +1328,14 @@
 	                <label class="upload-card" id="folderCard" for="folderInput">
 	                  <span class="upload-icon">夹</span>
 	                  <span>
-	                    <span class="upload-title">选择一个工单素材文件夹</span>
-	                    <span class="upload-desc">自动扫描视频、图片、content.txt、manifest.json 等材料；适合客服把同一工单附件放在一个文件夹后手动审核。</span>
+	                    <span class="upload-title" id="folderUploadTitle">选择一个工单素材文件夹</span>
+	                    <span class="upload-desc" id="folderUploadDesc">自动扫描视频、图片、content.txt、manifest.json 等材料；适合客服把同一工单附件放在一个文件夹后手动审核。</span>
 	                    <span class="file-state strong" id="folderState">尚未选择文件夹</span>
 	                  </span>
 	                  <span class="upload-action">选择文件夹</span>
 	                </label>
 	              </div>
-	              <div class="source-note">后期打通订单、客服和素材接口后，这里会由系统自动组包；当前 POC 支持客服手动选择本地文件夹完成同样链路。</div>
+	              <div class="source-note" id="folderSourceNote">后期打通订单、客服和素材接口后，这里会由系统自动组包；当前版本支持客服手动选择本地文件夹完成同样链路。</div>
 	            </div>
 
             <label for="reviewModel">审核策略</label>
@@ -1493,6 +1496,7 @@
 	        const uploadTab = document.getElementById('uploadTab');
 	        const urlTab = document.getElementById('urlTab');
 	        const folderTab = document.getElementById('folderTab');
+	        const batchFolderTab = document.getElementById('batchFolderTab');
 	        const scenarioInput = document.getElementById('scenarioInput');
         const entryCards = Array.from(document.querySelectorAll('.entry-card'));
         const form = document.getElementById('reviewForm');
@@ -1507,6 +1511,9 @@
 	        const folderInput = document.getElementById('folderInput');
 	        const folderState = document.getElementById('folderState');
 	        const folderCard = document.getElementById('folderCard');
+	        const folderUploadTitle = document.getElementById('folderUploadTitle');
+	        const folderUploadDesc = document.getElementById('folderUploadDesc');
+	        const folderSourceNote = document.getElementById('folderSourceNote');
 	        const sampleEvalForm = document.getElementById('sampleEvalForm');
         const sampleFile = document.getElementById('sampleFile');
         const sampleFileState = document.getElementById('sampleFileState');
@@ -1636,11 +1643,20 @@
 	          formPanel.classList.toggle('upload-mode', mode === 'upload');
 	          formPanel.classList.toggle('url-mode', mode === 'url');
 	          formPanel.classList.toggle('folder-mode', mode === 'folder');
-	          [uploadTab, urlTab, folderTab].forEach((tab) => {
+	          formPanel.classList.toggle('batch-folder-mode', mode === 'batch_folder');
+	          [uploadTab, urlTab, folderTab, batchFolderTab].forEach((tab) => {
 	            const active = tab.dataset.mode === mode;
 	            tab.classList.toggle('active', active);
 	            tab.setAttribute('aria-selected', String(active));
 	          });
+	          const batchMode = mode === 'batch_folder';
+	          folderUploadTitle.textContent = batchMode ? '选择包含多个工单的父目录' : '选择一个工单素材文件夹';
+	          folderUploadDesc.textContent = batchMode
+	            ? '父目录下每个一级子文件夹会作为独立工单审核，并分别生成报告。'
+	            : '自动扫描视频、图片、content.txt、manifest.json 等材料；适合同一工单的完整附件。';
+	          folderSourceNote.textContent = batchMode
+	            ? '批量模式不会混合不同子文件夹的用户材料；单批最多 10 个工单。'
+	            : '后期打通订单、客服和素材接口后，这里会由系统自动组包；当前版本支持手动选择本地文件夹。';
 	        }
 
         function writeLog(payload) {
@@ -1734,11 +1750,11 @@
 	          if (Array.isArray(data.reports)) {
 	            const summary = data.summary || {};
 	            const lines = [
-	              '三份样本报告已生成。',
+	              data.source_status === 'folder_batch_ready' ? '批量工单审核已完成。' : '样本报告已生成。',
 	              '成功：' + safeText(summary.success) + ' / 总数：' + safeText(summary.total),
 	            ];
-	            data.reports.forEach((item) => {
-	              lines.push(safeText(item.sample_id) + '：' + (item.ok ? '已生成' : '未完成') + (item.conclusion ? ' / ' + item.conclusion : ''));
+	            (data.cases || data.reports).forEach((item) => {
+	              lines.push(safeText(item.case_id || item.sample_id) + '：' + (item.ok === false ? '未完成' : '已生成') + (item.conclusion ? ' / ' + item.conclusion : ''));
 	            });
 	            return lines.join('\n');
 	          }
@@ -1863,6 +1879,7 @@
 	        uploadTab.addEventListener('click', () => setMode('upload'));
 	        urlTab.addEventListener('click', () => setMode('url'));
 	        folderTab.addEventListener('click', () => setMode('folder'));
+	        batchFolderTab.addEventListener('click', () => setMode('batch_folder'));
 	        prepareReportLink(reportLink);
         entryCards.forEach((card) => {
           card.addEventListener('click', (event) => {
@@ -2004,7 +2021,7 @@
 	              writeLog('当前文件超过工作台上传上限，请先压缩、截取关键片段，或联系项目对接人处理。');
 	              return false;
 	            }
-	          } else if (sourceType.value === 'folder') {
+	          } else if (sourceType.value === 'folder' || sourceType.value === 'batch_folder') {
 	            const files = uploadableFolderFiles();
 	            const total = files.reduce((sum, file) => sum + (file.size || 0), 0);
 	            if (!files.length) {
@@ -2270,22 +2287,24 @@
             timer = setInterval(() => {
               elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
             }, 500);
-	            const reviewUrl = sourceType.value === 'folder' ? '/api/review-folder' : '/api/review';
+	            const reviewUrl = sourceType.value === 'batch_folder'
+	              ? '/api/review-folders-batch'
+	              : sourceType.value === 'folder' ? '/api/review-folder' : '/api/review';
             const formData = new FormData(form);
-            if (sourceType.value === 'folder') {
+            if (sourceType.value === 'folder' || sourceType.value === 'batch_folder') {
               formData.delete('files');
               uploadableFolderFiles().forEach((file) => formData.append('files', file, folderFilePath(file) || file.name));
             }
 	            const response = await fetch(reviewUrl, { method: 'POST', body: formData });
             const data = await response.json();
-            if (sourceType.value === 'folder') data.client_ingestion = clientFolderIngestionSummary();
+            if (sourceType.value === 'folder' || sourceType.value === 'batch_folder') data.client_ingestion = clientFolderIngestionSummary();
             writeLog(formatReviewSummary(data));
             const skipped = Number((data.ingestion || {}).skipped_count || 0) + Number((data.client_ingestion || {}).skipped_count || 0) + Number(((data.review || {}).media_warnings || []).length || 0);
 	            stage.textContent = data.ok ? (skipped ? '完成（部分素材已跳过）' : messages.zhCN.done) : messages.zhCN.failed;
 	            const href = data.review && data.review.report && data.review.report.html_url;
 	            if (href) {
 	              showReportLinks([{ html_url: href, confidence: data.review.summary && data.review.summary.confidence }]);
-	            }
+	            } else if (Array.isArray(data.reports)) showReportLinks(data.reports);
           } catch (error) {
             console.error(error);
             stage.textContent = messages.zhCN.error;

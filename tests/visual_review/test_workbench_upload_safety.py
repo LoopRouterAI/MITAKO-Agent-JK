@@ -24,6 +24,18 @@ def upload(name: str, body: bytes) -> UploadFile:
 
 
 class WorkbenchUploadSafetyTest(unittest.TestCase):
+    def test_batch_parent_folder_is_split_by_first_child_directory(self) -> None:
+        files = [
+            upload("batch/case-a/evidence.mp4", b"video-a"),
+            upload("batch/case-a/material.jpg", b"image-a"),
+            upload("batch/case-b/evidence.mp4", b"video-b"),
+            upload("batch/case-b/material.jpg", b"image-b"),
+            upload("batch/__MACOSX/._evidence.mp4", b"hidden"),
+        ]
+        groups = workbench_server._group_batch_folder_uploads(files)
+        self.assertEqual(sorted(groups), ["case-a", "case-b"])
+        self.assertEqual([len(groups[key]) for key in sorted(groups)], [2, 2])
+
     def test_concurrent_folder_uploads_use_isolated_directories(self) -> None:
         valid_body = b"\x00\x00\x00\x18ftypmp42" + b"0" * 64
         original_upload_dir = workbench_server.UPLOAD_DIR

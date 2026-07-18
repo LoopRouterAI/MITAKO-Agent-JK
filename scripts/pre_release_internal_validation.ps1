@@ -49,7 +49,7 @@ try {
 
     Invoke-Step "Frontend production build" { npm run build }
     Invoke-Step "Python core compilation" {
-        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py review_service\decision_policy.py private_domain\service.py scripts\check_documentation_release.py scripts\check_review_runtime_dependencies.py scripts\check_review_0717_four_samples.py scripts\check_minor_refund_144989.py
+        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py review_service\decision_policy.py private_domain\service.py scripts\check_documentation_release.py scripts\check_review_runtime_dependencies.py scripts\check_review_0717_four_samples.py scripts\check_minor_refund_144989.py scripts\check_review_submission_modes.py
     }
     Invoke-Step "Documentation and OpenAPI" { & $Python scripts\check_documentation_release.py }
     Invoke-Step "Private deployment API smoke" { & $Python scripts\check_private_deployment_api.py }

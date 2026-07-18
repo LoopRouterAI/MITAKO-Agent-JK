@@ -480,6 +480,9 @@ def test_workbench_html() -> None:
     assert "scenario=all" not in html
     assert "sampleEvalForm" in html
     assert "folderInput" in html
+    assert "batchFolderTab" in html
+    assert "/api/review-folders-batch" in html
+    assert "batch-folder-mode" in html
     assert "function folderFileIssue(file)" in html
     assert "function uploadableFolderFiles()" in html
     assert "formData.delete('files')" in html
