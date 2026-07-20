@@ -87,7 +87,33 @@ SAMPLE_MATERIAL_DIR = (ROOT / "docs" / "三大审核场景的小量样本").reso
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
 PUBLIC_MEDIA_INDEX: dict[str, str] = {}
 PUBLIC_MEDIA_INDEX_LOCK = threading.Lock()
-PUBLIC_MEDIA_INDEX_PATH = REPORT_DIR / "public_media_registry.json"
+PUBLIC_MEDIA_INDEX_PATH = REPORT_DIR / "internal" / "public_media_registry.json"
+LEGACY_PUBLIC_MEDIA_INDEX_PATH = REPORT_DIR / "public_media_registry.json"
+
+
+def _migrate_public_media_index() -> None:
+    if not LEGACY_PUBLIC_MEDIA_INDEX_PATH.is_file():
+        return
+    PUBLIC_MEDIA_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not PUBLIC_MEDIA_INDEX_PATH.exists():
+        os.replace(LEGACY_PUBLIC_MEDIA_INDEX_PATH, PUBLIC_MEDIA_INDEX_PATH)
+        return
+
+    merged: dict[str, str] = {}
+    for path in (PUBLIC_MEDIA_INDEX_PATH, LEGACY_PUBLIC_MEDIA_INDEX_PATH):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            merged.update({str(key): str(value) for key, value in payload.items() if isinstance(value, str)})
+    temp_path = PUBLIC_MEDIA_INDEX_PATH.with_name(f".{PUBLIC_MEDIA_INDEX_PATH.name}.{uuid4().hex}.tmp")
+    temp_path.write_text(json.dumps(merged, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    os.replace(temp_path, PUBLIC_MEDIA_INDEX_PATH)
+    LEGACY_PUBLIC_MEDIA_INDEX_PATH.unlink(missing_ok=True)
+
+
+_migrate_public_media_index()
 _configured_signing_secret = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
 REPORT_SIGNING_SECRET_CONFIGURED = bool(_configured_signing_secret)
 REPORT_SIGNING_SECRET = _configured_signing_secret.encode("utf-8") if _configured_signing_secret else secrets.token_bytes(32)
