@@ -821,16 +821,15 @@ $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbe
 
 $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",
     "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
+    "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
+    "甲方沟通交付文档\订单SKU快照接入与审核安全升级说明-2026-07-20.html",
     "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
     "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
-    "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-16.html",
-    "甲方沟通交付文档\视觉审核下一轮测试建议-2026-07-16.md",
-    "甲方沟通交付文档\0714反馈整改更新日志-2026-07-15.html",
-    "甲方沟通交付文档\0714反馈整改与验收说明-2026-07-15.md",
     "runtime\app_runtime.zip",
     "sample_data.json",
     "start-windows.bat"

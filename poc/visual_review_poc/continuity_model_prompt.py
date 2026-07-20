@@ -42,6 +42,14 @@ def build_object_continuity_prompt(case: Dict[str, Any]) -> str:
 - not_yet_exposed：主体尚未首次从不透明包装中出现，不属于离镜。
 - unknown：无法区分以上状态。宁可写 unknown，不得把外层纸箱存在误写成商品包装存在。
 
+每个目标帧还必须标注 opening_stage：
+- sealed_package：外层包裹仍保持封闭、尚未开始拆封。
+- opening_in_progress：正在拆快递包装或商品原包装。
+- item_exposed：争议商品已首次从不透明包装中出现。
+- contents_displayed：商品及本次争议相关内容已完成展示。
+- post_opening：完成展示后的后续过程。
+- unknown：本帧无法确认开箱阶段。不得用分段末帧冒充完整开箱结束。
+
 只为 role=target 的每一帧输出一条 frame_findings，数量必须与 target 帧数完全一致，按 global_frame_index 升序。role=context_only 的帧只用于确认上一时段主体身份，不输出记录。每条必须逐一列出三个 canonical subject_id，不得省略。
 
 严格输出 JSON 对象：
@@ -51,6 +59,7 @@ def build_object_continuity_prompt(case: Dict[str, Any]) -> str:
       "video_index": 1,
       "global_frame_index": 1,
       "timestamp": "00:00.00",
+      "opening_stage": "sealed_package/opening_in_progress/item_exposed/contents_displayed/post_opening/unknown",
       "visible_facts": "只写客观可见事实",
       "subject_visibility": [
         {{"subject_id": "shipping_package", "state": "visible", "reason": "可见依据"}},

@@ -19,7 +19,13 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / "tests" / "reports"
 MEDIA_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv"}
-SAFE_CONTEXT_FILES = {"content.txt", "order_items.json", "product_master.json", "warehouse_master.json"}
+SAFE_CONTEXT_FILES = {
+    "content.txt",
+    "order_items.json",
+    "order_info_snapshot.json",
+    "product_master.json",
+    "warehouse_master.json",
+}
 
 
 def parse_args() -> argparse.Namespace:

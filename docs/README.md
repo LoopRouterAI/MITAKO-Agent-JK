@@ -18,7 +18,8 @@
 | 文档系统 | 适合对象 |
 |---|---|
 | [../甲方沟通交付文档/index.html](../甲方沟通交付文档/index.html) | 甲方 CEO、客服负责人、Java 开发、项目经理 |
-| [../甲方沟通交付文档/客服Agent与视觉审核对接指南.md](../甲方沟通交付文档/客服Agent与视觉审核对接指南.md) | 甲方技术与业务团队 |
+| [review_service_api_contract_20260710.md](./review_service_api_contract_20260710.md) | 审核接口对接与自动化验收人员 |
+| [delivery/customer-integration-materials-checklist.md](./delivery/customer-integration-materials-checklist.md) | 双方联调与交付负责人 |
 | [../我方内部开发文档/index.html](../我方内部开发文档/index.html) | 我方研发、测试、实施 |
 | [../我方内部开发文档/客服Agent视觉审核系统设计指南.md](../我方内部开发文档/客服Agent视觉审核系统设计指南.md) | 我方正式开发团队 |
 
@@ -29,5 +30,5 @@
 ## 维护约定
 
 1. 可交付变更需要同步更新 `docs/delivery/` 和两套中文交付文档。
-2. 接口契约变更需要同步更新 `docs/api/rest-api-overview.md` 和甲方对接指南。
+2. 接口契约变更需要同步更新 `docs/api/rest-api-overview.md` 和审核服务 API 契约。
 3. 上线安全边界变更需要同步更新 `docs/security/production-checklist.md`。

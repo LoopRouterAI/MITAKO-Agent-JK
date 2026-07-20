@@ -56,6 +56,60 @@ class GlobalTimelineAggregation0717Test(unittest.TestCase):
         self.assertEqual(first["overall_audit"], second["overall_audit"])
         self.assertEqual(first["video_audit_conclusion"], second["video_audit_conclusion"])
 
+    def test_segment_opening_claim_is_not_presented_as_deterministic_completeness(self):
+        case = {
+            "frames": [{"timestamp": "00:00.00"}, {"timestamp": "03:31.73"}],
+            "videos": [{"duration_seconds": 211.77}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {
+                "continuity_verdict": "indeterminate",
+                "tracked_subjects": [{
+                    "subject_id": "claimed_item",
+                    "first_exposed_timestamp": "00:39.93",
+                    "visibility_coverage": 0.89,
+                    "longest_out_of_frame_seconds": 10.0,
+                }],
+            },
+        }
+        rows = [
+            {"video_audit_conclusion": {"opening_integrity": "complete", "swap_risk_level": "low"}},
+            {"video_audit_conclusion": {"opening_integrity": "complete", "swap_risk_level": "low"}},
+        ]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, ["", ""])
+
+        self.assertEqual(result["video_audit_conclusion"]["opening_integrity"], "indeterminate")
+        self.assertEqual(result["video_audit_conclusion"]["opening_integrity_source"], "model_segment_consensus")
+        self.assertEqual(result["video_audit_conclusion"]["sampling_boundary_status"], "covered")
+        self.assertEqual(result["video_audit_conclusion"]["technical_timeline_status"], "requires_media_forensics")
+        self.assertEqual(result["video_audit_conclusion"]["evidence_continuity_status"], "indeterminate")
+        self.assertEqual(result["global_review_summary"]["timeline_coverage_ratio"], 0.9998)
+
+    def test_full_timeline_opening_stages_can_establish_complete_opening(self):
+        case = {
+            "frames": [{"timestamp": "00:00.00"}, {"timestamp": "00:03.00"}],
+            "videos": [{"duration_seconds": 3.0}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.8,
+            "object_continuity_assessment": {"continuity_verdict": "continuous", "tracked_subjects": []},
+            "continuity_frame_findings": [
+                {"global_frame_index": 1, "timestamp": "00:00.00", "opening_stage": "sealed_package"},
+                {"global_frame_index": 2, "timestamp": "00:01.00", "opening_stage": "opening_in_progress"},
+                {"global_frame_index": 3, "timestamp": "00:02.00", "opening_stage": "item_exposed"},
+                {"global_frame_index": 4, "timestamp": "00:03.00", "opening_stage": "contents_displayed"},
+            ],
+        }
+
+        result = _apply_global_timeline_summary(case, parsed, [], [])
+
+        self.assertEqual(result["video_audit_conclusion"]["opening_integrity"], "complete")
+        self.assertEqual(result["video_audit_conclusion"]["opening_integrity_source"], "full_timeline_continuity")
+
 
 if __name__ == "__main__":
     unittest.main()

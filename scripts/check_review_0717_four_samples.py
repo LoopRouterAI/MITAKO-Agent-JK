@@ -22,6 +22,7 @@ REPORT_DIR = ROOT / "tests" / "reports"
 MEDIA_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 CASES = ("617341", "614176", "618205", "617911")
 FORBIDDEN_FILES = {"annotation.json", "reply.json", "manifest.json"}
+SAFE_CONTEXT_FILES = {"order_info_snapshot.json"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,7 +60,11 @@ def case_inputs(root: Path, case_id: str) -> Tuple[str, List[Path]]:
     if not claim_path.is_file():
         raise RuntimeError(f"样本 {case_id} 缺少 content.txt")
     claim = claim_path.read_text(encoding="utf-8-sig").strip()
-    assets = [path for path in sorted(folder.iterdir()) if path.is_file() and path.suffix.lower() in MEDIA_SUFFIXES]
+    assets = [
+        path
+        for path in sorted(folder.iterdir())
+        if path.is_file() and (path.suffix.lower() in MEDIA_SUFFIXES or path.name in SAFE_CONTEXT_FILES)
+    ]
     if not assets:
         raise RuntimeError(f"样本 {case_id} 没有媒体文件")
     if any(path.name in FORBIDDEN_FILES for path in assets):
@@ -75,6 +80,11 @@ def metadata(case_id: str, claim: str, preset: str, run_id: str) -> Dict[str, An
             "policy_ref": "MITAKO-PD-MISSING-OPENING@20260717.1",
             "opening_video_required": True,
             "missing_required_opening_video": "negative",
+        }
+    elif case_id == "617911":
+        policy = {
+            "mode": "classification_recommendation",
+            "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@20260720.1",
         }
     return {
         "client_case_id": f"blind-{case_id}-{preset}-{run_id}",

@@ -112,19 +112,19 @@ def submit(base_url: str, token: str, root: Path, run_id: str, timeout: int) -> 
                 "order_or_payment_proof",
                 "mobile_realname_proof",
             ],
-            "business_boundary": "材料完整仅进入人工一审，不自动退款或拒绝",
+            "business_boundary": "材料完整后继续执行视觉字段一致性初审；权威真伪验证和退款动作由甲方系统及授权人员完成",
         },
         "claim_scope": {
             "scope_version": "1",
             "split_status": "resolved",
             "stage": "combined",
-            "claim_text": "未成年人退款资料完整性审核",
+            "claim_text": "未成年人退款资料完整性与视觉字段一致性初审",
             "active_claim_ids": ["CLM-MINOR-MATERIAL"],
             "claims": [{
                 "claim_id": "CLM-MINOR-MATERIAL",
                 "role": "primary",
                 "subject_ref": "minor_refund_application",
-                "issue_type": "material_completeness",
+                "issue_type": "material_completeness_and_visual_consistency",
             }],
         },
         "decision_policy": {"mode": "conservative_review"},
@@ -200,6 +200,8 @@ def wait_job(base_url: str, token: str, submission: Dict[str, Any], timeout: int
                     **submission,
                     "status": job.get("status"),
                     "predicted_label": (review.get("summary") or {}).get("predicted_label") or parsed.get("predicted_label"),
+                    "decision": parsed.get("decision"),
+                    "system_yes_no": parsed.get("system_yes_no"),
                     "confidence": (review.get("summary") or {}).get("confidence") or parsed.get("confidence"),
                     "conclusion": ((parsed.get("overall_audit") or {}).get("conclusion") or ""),
                     "material_gaps": parsed.get("material_gaps") or [],
@@ -224,6 +226,22 @@ def evaluate(row: Dict[str, Any]) -> List[Dict[str, Any]]:
     assessment = row.get("minor_material_assessment") or {}
     checklist = assessment.get("checklist") or []
     relationship = next((item for item in checklist if item.get("requirement_id") == "relationship"), {})
+    field_consistency = assessment.get("field_consistency") or {}
+    consistency_checks = field_consistency.get("checks") or []
+    authoritative = assessment.get("authoritative_verification") or {}
+    inference_channels = (row.get("inference_estimate") or {}).get("channels") or {}
+    consistency_channel = inference_channels.get("minor_field_consistency") or {}
+    safe_gate = (
+        row.get("predicted_label") == "review"
+        and row.get("decision") == "manual_review"
+        and row.get("system_yes_no") == "REVIEW"
+        and row.get("business_action_allowed") is False
+        and (
+            assessment.get("visual_precheck_status") == "passed"
+            if field_consistency.get("verdict") == "matched"
+            else assessment.get("visual_precheck_status") in {"needs_review", "incomplete"}
+        )
+    )
     serialized = json.dumps(row, ensure_ascii=False)
     return [
         {"name": "job_succeeded", "ok": row.get("status") == "SUCCEEDED"},
@@ -232,7 +250,21 @@ def evaluate(row: Dict[str, Any]) -> List[Dict[str, Any]]:
         {"name": "five_material_groups_present", "ok": len(checklist) == 5 and all(item.get("status") == "present" for item in checklist)},
         {"name": "household_or_birth_rule", "ok": relationship.get("status") == "present" and "二选一" in str(relationship.get("rule_note") or "")},
         {"name": "no_false_missing_claim", "ok": not row.get("material_gaps") and "缺" not in str(row.get("conclusion") or "")},
-        {"name": "evidence_supports_human_first_review", "ok": row.get("predicted_label") == "positive" and assessment.get("readiness") == "ready_for_human_first_review"},
+        {
+            "name": "five_visual_consistency_checks_executed",
+            "ok": field_consistency.get("status") in {"completed", "degraded"}
+            and len(consistency_checks) == 5
+            and all(item.get("status") != "not_assessed" for item in consistency_checks),
+        },
+        {"name": "consistency_decision_gate", "ok": safe_gate},
+        {
+            "name": "authoritative_verification_boundary",
+            "ok": authoritative.get("status") == "customer_integration_required",
+        },
+        {
+            "name": "consistency_cost_accounted",
+            "ok": int(consistency_channel.get("model_calls") or 0) >= 5,
+        },
         {"name": "business_boundary_enforced", "ok": row.get("business_action_allowed") is False and row.get("human_required") is True},
         {"name": "video_forensics_completed", "ok": row.get("media_forensics_status") == "completed"},
         {"name": "report_available", "ok": row.get("report_status") == 200},
@@ -261,16 +293,34 @@ def render_html(report: Dict[str, Any]) -> str:
         "</tr>"
         for item in assessment.get("checklist") or []
     )
+    field_consistency = assessment.get("field_consistency") or {}
+    check_labels = {
+        "identity_age": "身份与年龄",
+        "guardian_relationship": "监护关系",
+        "commitment_signatures": "承诺书签署主体",
+        "order_payment": "订单与支付",
+        "mobile_realname": "手机号实名归属",
+    }
+    consistency_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(check_labels.get(str(item.get('check_id')), str(item.get('check_id') or '')))}</td>"
+        f"<td>{html.escape(str(item.get('status') or ''))}</td>"
+        f"<td>{html.escape(', '.join(str(value) for value in item.get('evidence_image_indices') or []))}</td>"
+        f"<td>{html.escape(', '.join(str(value) for value in item.get('risk_reason_codes') or []) or '无')}</td>"
+        "</tr>"
+        for item in field_consistency.get("checks") or []
+    )
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>144989 未成年人资料审核回归</title>
 <style>
 body{{margin:0;background:#f3f5f2;color:#202823;font-family:"Microsoft YaHei","Segoe UI",sans-serif}}main{{max-width:1080px;margin:auto;padding:28px 18px 60px}}section{{background:#fff;border:1px solid #dce3de;border-radius:8px;padding:20px;margin:14px 0}}h1{{margin:0 0 8px;font-size:28px}}h2{{font-size:19px}}p{{line-height:1.7}}table{{width:100%;border-collapse:collapse}}th,td{{text-align:left;padding:10px;border-bottom:1px solid #e3e8e4;vertical-align:top}}th{{background:#eef2ef}}.ok{{color:#176b43;font-weight:700}}.bad{{color:#a42d2d;font-weight:700}}.metric{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}}.metric div{{border:1px solid #dde5df;padding:12px;border-radius:6px}}small{{display:block;color:#66736b;margin-bottom:5px}}
 </style></head><body><main>
-<section><h1>144989 未成年人资料审核回归</h1><p>正式 API 盲测；未向模型发送正样本目录标签、reply.json 或人工退款结论。</p></section>
+<section><h1>144989 未成年人资料审核回归</h1><p>正式 API 盲测；未向模型发送正样本目录标签、reply.json 或人工退款结论。审核包含材料完整性与视觉字段一致性两阶段。</p></section>
 <section class="metric"><div><small>任务状态</small><b>{html.escape(str(row.get('status')))}</b></div><div><small>证据标签</small><b>{html.escape(str(row.get('predicted_label')))}</b></div><div><small>图片覆盖</small><b>{assessment.get('processed_image_count', 0)}/{assessment.get('declared_image_count', 0)}</b></div><div><small>置信度</small><b>{html.escape(str(row.get('confidence')))}</b></div></section>
-<section><h2>结论</h2><p>{html.escape(str(row.get('conclusion') or ''))}</p><p>边界：资料完整只代表可进入人工一审，不代表自动退款或终审通过。</p></section>
+<section><h2>结论</h2><p>{html.escape(str(row.get('conclusion') or ''))}</p><p>边界：视觉字段一致不等于资料具有法定真实性；身份证、运营商实名、订单和支付仍需甲方权威接口或授权人员核验。</p></section>
 <section><h2>SOP 五类材料</h2><table><thead><tr><th>材料</th><th>状态</th><th>图片编号</th><th>规则</th></tr></thead><tbody>{material_rows}</tbody></table></section>
+<section><h2>视觉字段一致性初审</h2><p>总体：{html.escape(str(field_consistency.get('verdict') or 'not_assessed'))}</p><table><thead><tr><th>检查项</th><th>状态</th><th>图片编号</th><th>风险码</th></tr></thead><tbody>{consistency_rows}</tbody></table></section>
 <section><h2>自动验收</h2><table><thead><tr><th>检查项</th><th>结果</th></tr></thead><tbody>{check_rows}</tbody></table></section>
 </main></body></html>"""
 

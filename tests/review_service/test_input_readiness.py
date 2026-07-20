@@ -3,16 +3,25 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
 from review_service.input_readiness import assess_input_readiness
 from review_service.schemas import ReviewCaseMetadata
-from review_service.service import sampling_plan
+from review_service.service import contract, sampling_plan
 from review_service.service import ensure_label_isolation
 from review_service.service import _apply_input_readiness_guard
 from review_service.service import _review_fields
 
 
 class InputReadinessTest(unittest.TestCase):
+    def test_contract_declares_supplier_neutral_inline_media_transport(self):
+        media = contract()["media_processing"]
+
+        self.assertEqual(media["model_request_transport"], "inline_base64_images")
+        self.assertIs(media["supplier_file_uri_required"], False)
+        self.assertEqual(media["detail_frame_format"], "image/jpeg")
+        self.assertEqual(media["temporal_sheet_format"], "image/webp")
+
     def test_wrong_item_accepts_unique_non_sku_baseline(self):
         result = assess_input_readiness(
             {
@@ -207,20 +216,43 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(two_fps["fps"], 2.0)
 
     def test_sampling_plan_counts_all_enabled_review_channels(self):
-        plan = sampling_plan(
-            72,
-            22_000_000,
-            1,
-            {"preset": "adaptive", "frames_per_model_call": 24},
-            "product_damage",
-            {"out_of_frame_warning_seconds": 2.0, "force_dense_scan": True},
-            {"force_action_scan": True, "dedicated_chunk_frames": 20},
-        )
+        with patch.dict("os.environ", {"REVIEW_PRODUCT_DAMAGE_MAIN_MAX_FRAMES": "48"}, clear=False):
+            plan = sampling_plan(
+                452.5,
+                543_351_335,
+                1,
+                {"preset": "adaptive", "frames_per_model_call": 24},
+                "product_damage",
+                {"out_of_frame_warning_seconds": 2.0, "force_dense_scan": True},
+                {"force_action_scan": True, "dedicated_chunk_frames": 20},
+            )
         channels = plan["estimated_channel_calls"]
-        self.assertGreater(channels["main_review"], 0)
+        self.assertEqual(plan["estimated_total_frames"], 454)
+        self.assertEqual(plan["main_review_frames"], 48)
+        self.assertEqual(channels["main_review"], 2)
         self.assertGreater(channels["object_continuity"], 0)
         self.assertGreater(channels["damage_causality"], 0)
         self.assertEqual(plan["estimated_total_model_calls"], sum(channels.values()))
+
+    def test_sampling_plan_exposes_individual_frame_continuity_for_all_transports(self):
+        with patch.dict("os.environ", {"REVIEW_CONTINUITY_FRAMES_PER_CALL": "48"}, clear=False):
+            plan = sampling_plan(
+                95,
+                20_000_000,
+                1,
+                {"preset": "strict", "frames_per_model_call": 24},
+                "product_damage",
+                {"force_dense_scan": True},
+                {"force_action_scan": False},
+            )
+
+        self.assertEqual(plan["estimated_total_frames"], 96)
+        self.assertEqual(plan["continuity_frames_per_call"], 24)
+        self.assertEqual(
+            plan["continuity_frames_per_call_by_transport"],
+            {"gemini_native_individual_frames": 24, "openai_compatible_individual_frames": 24},
+        )
+        self.assertEqual(plan["estimated_channel_calls"]["object_continuity"], 4)
 
     def test_strict_profile_automatically_enables_specialized_channels(self):
         plan = sampling_plan(

@@ -5,9 +5,13 @@ from __future__ import annotations
 from typing import FrozenSet, Optional
 
 from fastapi import Depends, HTTPException, Request, WebSocket
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from auth.jwt_utils import auth_required, decode_token, dev_auth_bypass_enabled, protected_api_auth_required
 from auth.roles import Role
+
+
+_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _extract_bearer(request: Request) -> Optional[str]:
@@ -59,7 +63,10 @@ def _synthetic_super_admin() -> dict:
 def require_roles(allowed: FrozenSet[str]):
     """返回 FastAPI Depends；后台/坐席 API 默认必须登录。"""
 
-    def _dep(request: Request) -> dict:
+    def _dep(
+        request: Request,
+        _credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    ) -> dict:
         if not protected_api_auth_required():
             # 鉴权关闭时仍优先解析 Bearer，便于 E2E 验证职责分离等身份相关逻辑
             user = get_current_user_optional(request)

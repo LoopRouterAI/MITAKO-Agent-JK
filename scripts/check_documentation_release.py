@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_FILES = (
     "README.md",
     "CHANGELOG.md",
+    "docs/README.md",
+    "docs/api/rest-api-overview.md",
     "docs/delivery/README.md",
     "docs/delivery/deployment-guide.md",
     "docs/delivery/testing-guide.md",
@@ -28,11 +30,9 @@ REQUIRED_FILES = (
     "甲方沟通交付文档/index.html",
     "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
     "甲方沟通交付文档/0717四样本审核工程整改与验收报告.html",
-    "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-16.html",
-    "甲方沟通交付文档/0714反馈整改更新日志-2026-07-15.html",
-    "甲方沟通交付文档/0714反馈整改与验收说明-2026-07-15.md",
-    "甲方沟通交付文档/视觉审核下一轮测试建议-2026-07-16.md",
-    "甲方沟通交付文档/新版本交付说明-2026-07-11.md",
+    "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
+    "甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html",
+    "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
     "我方内部开发文档/README.md",
     "我方内部开发文档/index.html",
     "我方内部开发文档/工程师入门.md",
@@ -44,6 +44,8 @@ REQUIRED_FILES = (
     "我方内部开发文档/升级日志-2026-07-16.md",
     "我方内部开发文档/升级日志-2026-07-17.md",
     "我方内部开发文档/升级日志-2026-07-17-四样本审核.md",
+    "我方内部开发文档/升级日志-2026-07-20-未成年人资料字段一致性.md",
+    "我方内部开发文档/升级日志-2026-07-20-视觉证据安全与SKU基准.md",
 )
 REQUIRED_API_PATHS = (
     "/api/v1/review/contracts",
@@ -99,6 +101,22 @@ def main() -> int:
         for route in REQUIRED_API_PATHS:
             if route not in paths:
                 errors.append(f"OpenAPI 缺少路由: {route}")
+        security_schemes = ((spec.get("components") or {}).get("securitySchemes") or {})
+        if not any((value or {}).get("scheme") == "bearer" for value in security_schemes.values()):
+            errors.append("OpenAPI 缺少 Bearer 安全方案")
+        create_job = ((paths.get("/api/v1/review/jobs") or {}).get("post") or {})
+        if not create_job.get("security"):
+            errors.append("审核创建接口未声明 Bearer 鉴权")
+        declared_responses = set((create_job.get("responses") or {}).keys())
+        missing_errors = {"400", "409", "413", "415", "422"} - declared_responses
+        if missing_errors:
+            errors.append(f"审核创建接口缺少错误响应: {sorted(missing_errors)}")
+
+    java_guide = (ROOT / "我方内部开发文档/Java开发部署与联调指南.md").read_text(encoding="utf-8")
+    if "/api/v1/review/contracts" not in java_guide:
+        errors.append("Java 联调指南缺少真实审核契约端点 /api/v1/review/contracts")
+    if re.search(r"/api/v1/review/contract(?!s)", java_guide):
+        errors.append("Java 联调指南仍包含错误端点 /api/v1/review/contract")
 
     package_script = (ROOT / "scripts/package_release.ps1").read_text(encoding="utf-8")
     if "我方内部开发文档" in package_script:

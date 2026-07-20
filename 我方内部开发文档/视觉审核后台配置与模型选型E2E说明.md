@@ -1,6 +1,6 @@
 # 视觉审核后台配置与模型选型 E2E 说明
 
-更新时间：2026-07-04
+更新时间：2026-07-20
 
 ## 当前路线
 
@@ -10,6 +10,14 @@
 - 抽帧、补充图片、用户诉求、订单/工单上下文共同组成输入证据包。
 - 报告区分 API 成功、结构化成功、人工标注命中、三连测稳定性、时间戳命中、耗时和成本。
 - 默认公开报告不暴露模型、渠道、端点、Token、成本；内部报告通过 `--internal-report` 展示。
+
+## 当前供应商媒体请求方式
+
+当前实际供应商不按 Gemini Files URI 能力设计。主链路固定为：原视频在我方服务端本地解码、抽帧并压缩为独立 JPEG；细节、连续性与成因审核都逐张以内联 Base64 图片调用供应商兼容接口。Gemini 兼容请求使用 `inline_data`，OpenAI 兼容请求使用 `data:image/...;base64`，不得生成或依赖 `file_uri`，也不得把拼图作为模型判定输入。
+
+这项约束可从视觉服务 `GET /api/health` 的 `model_media_transport` 和主服务 `GET /api/v1/review/contract` 的 `media_processing` 检查。自动化验收必须断言 `supplier_file_uri_required=false`。
+
+`REVIEW_MODEL_TIMEOUT_SECONDS`、`REVIEW_MODEL_RETRIES`、`REVIEW_CHUNK_WORKERS` 和 `REVIEW_CONTINUITY_FRAMES_PER_CALL` 分别控制单次供应商请求时限、软失败重试、分段并发和连续性分段大小。它们适用于网页单文件、网页文件夹和正式审核 API 的共享执行链路。
 
 ## 推荐命令
 

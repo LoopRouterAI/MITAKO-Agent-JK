@@ -6,6 +6,7 @@ from typing import Any, Dict
 from poc.visual_review_poc.continuity_model_prompt import build_object_continuity_prompt
 from poc.visual_review_poc.damage_causality_model_prompt import build_damage_causality_prompt
 from poc.visual_review_poc.minor_material_model_prompt import (
+    build_minor_material_consistency_prompt,
     build_minor_material_inventory_prompt,
     build_minor_material_video_prompt,
 )
@@ -19,6 +20,8 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
         return build_minor_material_inventory_prompt(safe_case)
     if analysis_mode == "minor_material_process_video":
         return build_minor_material_video_prompt(safe_case)
+    if analysis_mode == "minor_material_consistency":
+        return build_minor_material_consistency_prompt(safe_case)
     if analysis_mode == "object_continuity_only":
         return build_object_continuity_prompt(safe_case)
     if analysis_mode == "damage_causality_only":
@@ -70,6 +73,7 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 6. 只能引用已提供的帧编号和时间戳，不得编造不存在的时间点。
 7. 样本目录名、人工结论、expected_predicted_label 没有提供给你；你只能根据本证据包独立判断。
 8. 如果 structured_business_context.review_chunk 存在，本次只看到全视频的一个分段；分段最后一帧绝不等于视频结束，不得据此声称“视频结束于当前时间点”。
+9. 不得把抽帧首尾覆盖写成“视频文件/时间轴完整”；抽帧只能说明送审首尾边界，容器、码流、时间戳和剪辑风险必须引用独立媒体取证结果。
 
 请严格输出 JSON 对象，字段：
 - decision: pass / manual_review / request_more_material / fail。只表示 POC 流转，不代表业务裁决。
@@ -87,7 +91,7 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 - actual_received_item: 实际收到的商品/角色/SKU/规格/数量或破损事实。
 - audit_methods: 实际使用的审核方法数组。
 - frame_findings: 每帧一句客观观察，必须含 video_index、global_frame_index、timestamp、visible_facts、risk、subject_visibility。subject_visibility 必须逐帧列出 shipping_package、product_package、claimed_item 三个 canonical subject_id 及其 state(visible/partial/occluded/out_of_frame/not_yet_exposed/unknown)；不知道时写 unknown，不得省略。
-- adopted_evidence: 模型采信的关键证据数组，每项必须含 source_type、video_index、global_frame_index 或 image_index、timestamp、asset_ref、fact、why_it_matters、confidence；必须能回链到上方帧清单或补充图片清单。
+- adopted_evidence: 模型采信的关键证据数组，每项必须含 source_type、video_index、global_frame_index 或 image_index、timestamp、asset_ref、fact、why_it_matters、confidence；必须能回链到上方帧清单或补充图片清单。仅补充图片证据填写 same_item_linkage 和 temporal_linkage 两个布尔字段：前者表示已确认与主视频争议商品同物，后者表示已通过视频过程建立补图与开箱阶段的时间关联；无法确认时必须写 false，不得省略。
 - supporting_evidence: 支持用户诉求的证据数组。
 - challenging_evidence: 反证或风险数组。
 - continuity_assessment: 多视频整体连续性、调包/剪辑风险。

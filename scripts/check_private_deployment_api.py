@@ -155,8 +155,10 @@ def main() -> int:
         code == 200
         and sampling_plan.get("fps") == 1.0
         and sampling_plan.get("estimated_frames_per_video", 0) >= 453
-        and sampling_plan.get("estimated_model_segments") == 19
-        and channel_calls.get("main_review") == 19
+        and sampling_plan.get("main_review_frames") == 48
+        and sampling_plan.get("main_review_strategy") == "uniform_representative"
+        and sampling_plan.get("estimated_model_segments") == 2
+        and channel_calls.get("main_review") == 2
         and channel_calls.get("object_continuity", 0) > 0
         and channel_calls.get("damage_causality", 0) > 0
         and sampling_plan.get("estimated_total_model_calls") == sum(channel_calls.values())

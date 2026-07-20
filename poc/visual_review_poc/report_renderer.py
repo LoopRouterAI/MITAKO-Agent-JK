@@ -90,6 +90,44 @@ def _public_yes_no(parsed: Dict[str, Any]) -> str:
     return "REVIEW"
 
 
+def _decision_policy_panel(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return ""
+    labels = {
+        "opening_complete": "开箱过程未被确认完整",
+        "sampling_boundary_covered": "抽帧未覆盖源视频首尾边界",
+        "continuity_gate": "主体连续性未达到当前策略要求",
+        "damage_not_visible": "主视频尚不能明确支持“未见主诉损伤”",
+        "claim_not_supported": "主视频尚不能明确判定诉求不受支持",
+        "visibility_coverage": "争议商品可见覆盖率低于策略阈值",
+        "model_confidence": "审核置信度低于策略阈值",
+        "claimed_item_absence_within_limit": "争议商品离镜时间超过策略阈值",
+        "damage_observability": "主诉部位可观察性未达到策略阈值",
+        "media_forensics": "非 AI 媒体取证未完成或风险超过阈值",
+        "supplemental_evidence_resolved": "补充证据关联尚未解决，不能忽略或自动判负",
+    }
+    failed = [
+        labels.get(str(code), str(code))
+        for code in value.get("failed_conditions") or []
+    ]
+    failed_html = "".join(f"<li>{_h(item)}</li>" for item in failed) or "<li>本轮规则已命中或未声明失败条件。</li>"
+    gate = value.get("evidence_gate") or {}
+    threshold_text = (
+        f"争议商品最长离镜 {_h(gate.get('claimed_item_longest_out_of_frame_seconds') if gate.get('claimed_item_longest_out_of_frame_seconds') is not None else '-')} 秒；"
+        f"策略上限 {_h(gate.get('max_unobserved_seconds') if gate.get('max_unobserved_seconds') is not None else '-')} 秒；"
+        f"媒体取证 {_h(gate.get('media_forensics_status') or '未提供')}。"
+    )
+    return f"""
+  <section class="panel boundary-panel">
+    <div class="section-head"><h2>版本化规则判定说明</h2><p>规则只生成分类建议，不自动拒绝、退款、补发、换货或定责。</p></div>
+    <div class="boundary-grid">
+      <article class="boundary-card"><h3>策略与结果</h3><p><b>{_h(value.get("policy_ref") or "未提供策略版本")}</b></p><p>{_h("已命中规则" if value.get("applied") else "未命中规则，保持复核")}</p><p>{_h(value.get("reason") or "")}</p></article>
+      <article class="boundary-card"><h3>未通过的门槛</h3><ul class="boundary-list">{failed_html}</ul></article>
+    </div>
+    <p><b>关键阈值：</b>{threshold_text}</p>
+  </section>"""
+
+
 def _usage_label(result: Dict[str, Any]) -> str:
     usage = result.get("usage") or {}
     return " / ".join(_h(usage.get(key) or "-") for key in ("input_tokens", "output_tokens", "total_tokens"))
@@ -236,21 +274,37 @@ def _evidence_items(
         return '<p class="muted">审核Agent没有给出可采信证据，建议客服查看原始素材。</p>'
     media_gallery = media_gallery or {}
     frame_map: Dict[str, Dict[str, Any]] = {}
+    video_frame_map: Dict[str, Dict[str, Any]] = {}
+    frame_candidates: Dict[str, List[Dict[str, Any]]] = {}
     timestamp_map: Dict[str, Dict[str, Any]] = {}
+    timestamp_candidates: Dict[str, List[Dict[str, Any]]] = {}
     video_timestamp_map: Dict[str, Dict[str, Any]] = {}
     file_map: Dict[str, Dict[str, Any]] = {}
     for frame in media_gallery.get("frames") or []:
         for key in (frame.get("global_frame_index"), frame.get("frame_index")):
             if key is not None:
-                frame_map[str(key)] = frame
+                frame_candidates.setdefault(str(key), []).append(frame)
+                if frame.get("video_index") is not None:
+                    video_frame_map[f"{frame.get('video_index')}:{key}"] = frame
+    frame_map = {
+        key: values[0]
+        for key, values in frame_candidates.items()
+        if len(values) == 1
+    }
+    for frame in media_gallery.get("frames") or []:
         timestamp_key = _timestamp_key(frame.get("timestamp"))
         if timestamp_key:
-            timestamp_map.setdefault(timestamp_key, frame)
+            timestamp_candidates.setdefault(timestamp_key, []).append(frame)
             if frame.get("video_index") is not None:
                 video_timestamp_map[f"{frame.get('video_index')}:{timestamp_key}"] = frame
         file_key = _file_key(frame.get("file_name") or frame.get("file"))
         if file_key:
             file_map[file_key] = frame
+    timestamp_map = {
+        key: values[0]
+        for key, values in timestamp_candidates.items()
+        if len(values) == 1
+    }
     image_map = {
         str(item.get("image_index")): item
         for item in media_gallery.get("images") or []
@@ -266,7 +320,12 @@ def _evidence_items(
         if frame_key is None:
             frame_key = item.get("frame_index")
         image_key = item.get("image_index")
-        media = frame_map.get(str(frame_key)) if frame_key is not None else None
+        video_frame_key = (
+            f"{item.get('video_index')}:{frame_key}"
+            if item.get("video_index") is not None and frame_key is not None
+            else ""
+        )
+        media = video_frame_map.get(video_frame_key) or (frame_map.get(str(frame_key)) if frame_key is not None else None)
         media_label = "查看视频时间点"
         if media is None and image_key is not None:
             media = image_map.get(str(image_key))
@@ -396,7 +455,14 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     video = parsed.get("video_audit_conclusion") or parsed.get("continuity_assessment") or {}
     runtime = report.get("runtime") or {}
     inference = report.get("inference_estimate") or {}
-    channel_labels = {"main_review": "主审核", "object_continuity": "主体连续性", "damage_causality": "损伤因果"}
+    channel_labels = {
+        "main_review": "主审核",
+        "object_continuity": "主体连续性",
+        "damage_causality": "损伤因果",
+        "minor_material_inventory": "未成年人材料识别",
+        "minor_process_video": "未成年人过程视频",
+        "minor_field_consistency": "未成年人字段一致性",
+    }
     channel_cards = "".join(
         '<article class="boundary-card">'
         f'<h3>{_h(channel_labels.get(key, key))}</h3>'
@@ -438,9 +504,27 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     fulfillment_panel = render_fulfillment_reconciliation_panel(parsed.get("fulfillment_reconciliation"), _h)
     minor_material_panel = render_minor_material_panel(parsed.get("minor_material_assessment"), _h)
     confidence_components_panel = render_confidence_components_panel(parsed.get("confidence_components"), _h)
+    decision_policy_panel = _decision_policy_panel(parsed.get("decision_policy_audit") or data.get("decision_policy_audit"))
     yes_no = "REVIEW" if failed else _public_yes_no(parsed)
     latency = runtime.get("latency_seconds") or "-"
     video_count = len(evidence_package.get("videos") or [])
+    def effective_sample_fps(item: Dict[str, Any]) -> Any:
+        if item.get("effective_sample_fps") not in (None, ""):
+            return item["effective_sample_fps"]
+        duration = float(item.get("duration_seconds") or 0)
+        return round(float(item.get("sampled_frames") or 0) / duration, 4) if duration > 0 else "-"
+
+    sampling_rows = "".join(
+        "<tr>"
+        f"<td>视频 {_h(item.get('video_index') or '-')}</td>"
+        f"<td>{_h(item.get('duration_seconds') or '-')}s</td>"
+        f"<td>{_h(item.get('native_fps') or '-')}</td>"
+        f"<td>{_h(item.get('fps_requested') or '-')}</td>"
+        f"<td>{_h(item.get('sampled_frames') or '-')}</td>"
+        f"<td>{_h(effective_sample_fps(item))}</td>"
+        "</tr>"
+        for item in evidence_package.get("videos") or []
+    )
     diagnostic_panel = ""
     if failed:
         diagnostic_panel = (
@@ -493,9 +577,13 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 		    <div class="metric"><small>报告属性</small><b>VIP客服复核参考</b></div>
 		  </section>
 		  <section class="panel inference-channels-panel">
-		    <div class="section-head"><h2>三通道调用统计</h2><p>墙钟耗时与累计模型耗时分开统计；成本与 Token 包含所有模型调用。</p></div>
+			    <div class="section-head"><h2>分通道调用统计</h2><p>墙钟耗时与累计模型耗时分开统计；成本与 Token 包含所有模型调用。</p></div>
 		    <p><b>墙钟耗时：</b>{_h(runtime.get("latency_seconds") or "-")} 秒；<b>累计模型耗时：</b>{_h(runtime.get("model_latency_seconds_sum") or "-")} 秒。</p>
 		    <div class="boundary-grid">{channel_cards or '<p class="muted">本轮没有分通道统计。</p>'}</div>
+		  </section>
+		  <section class="panel">
+		    <div class="section-head"><h2>视频抽帧强度</h2><p>请求 FPS 是审核策略；有效抽样 FPS 按实际帧数/源视频时长计算。</p></div>
+		    <div class="table-wrap"><table><thead><tr><th>视频</th><th>时长</th><th>原生 FPS</th><th>请求 FPS</th><th>实际帧数</th><th>有效抽样 FPS</th></tr></thead><tbody>{sampling_rows or '<tr><td colspan="6">本轮没有视频。</td></tr>'}</tbody></table></div>
 		  </section>
 	  {diagnostic_panel}
 
@@ -519,9 +607,16 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 
   <section class="panel proof">
     <h2>视频审核论证</h2>
+    <div class="causality-grid">
+      <article><small>抽帧首尾覆盖</small><b>{_h({"covered": "已覆盖", "incomplete": "未完整覆盖", "unknown": "未知"}.get(video.get("sampling_boundary_status"), video.get("sampling_boundary_status") or "未知"))}</b></article>
+      <article><small>媒体技术取证</small><b>{_h((parsed.get("decision_policy_audit") or data.get("decision_policy_audit") or {}).get("evidence_gate", {}).get("media_forensics_status") or video.get("technical_timeline_status") or "未提供")}</b></article>
+      <article><small>开箱过程完整性</small><b>{_h({"complete": "完整", "incomplete": "不完整", "indeterminate": "不确定"}.get(video.get("opening_integrity"), video.get("opening_integrity") or "未知"))}</b></article>
+      <article><small>商品证据连续性</small><b>{_h({"continuous": "连续", "brief_occlusion": "短暂遮挡", "long_absence": "较长离镜", "indeterminate": "不确定"}.get(video.get("evidence_continuity_status"), video.get("evidence_continuity_status") or "未知"))}</b></article>
+    </div>
     <p><b>连续性：</b>{_h(video.get("continuity_reason") or video.get("reason") or "本轮没有输出明确连续性理由。")}</p>
     <p><b>剪辑/调包风险：</b>{_h(video.get("edit_or_cut_risk") or "-")} / {_h(video.get("swap_risk_level") or "-")}</p>
   </section>
+  {decision_policy_panel}
 
 	  <section class="panel boundary-panel">
 	    <div class="section-head"><h2>置信度与已知边界</h2><p>帮助VIP客服理解分数依据、缺失材料和本轮视觉判断无法覆盖的范围。</p></div>

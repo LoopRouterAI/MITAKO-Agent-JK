@@ -18,11 +18,15 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             customer_claim="商品弯曲",
         ).model_dump(mode="json")
         result = apply_review_decision_policy(
-            {"scenario": "product_damage", "metadata": metadata, "assets": []},
+            {"tenant_id": "mitako", "scenario": "product_damage", "metadata": metadata, "assets": []},
             review(),
         )
         self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertFalse(result["decision_policy_audit"]["applied"])
+        self.assertEqual(
+            result["agent_report"]["parsed"]["decision_policy_audit"]["reason"],
+            "未启用商品有伤规则分类建议。",
+        )
 
     def test_617341_explicit_versioned_policy_can_recommend_negative(self):
         metadata = ReviewCaseMetadata.model_validate(
@@ -37,14 +41,14 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 },
                 "decision_policy": {
                     "mode": "classification_recommendation",
-                    "policy_ref": "MITAKO-PD-20260717@1",
+                    "policy_ref": "MITAKO-PD-MISSING-OPENING@20260717.1",
                     "opening_video_required": True,
                     "missing_required_opening_video": "negative",
                 },
             }
         ).model_dump(mode="json")
         result = apply_review_decision_policy(
-            {"scenario": "product_damage", "metadata": metadata, "assets": []},
+            {"tenant_id": "mitako", "scenario": "product_damage", "metadata": metadata, "assets": []},
             review(),
         )
         parsed = result["agent_report"]["parsed"]
@@ -69,7 +73,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 },
                 "decision_policy": {
                     "mode": "classification_recommendation",
-                    "policy_ref": "MITAKO-PD-20260717@1",
+                    "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST",
                     "complete_video_no_claimed_damage": "negative",
                 },
             }
@@ -99,9 +103,304 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "assets": [{"mime_type": "video/mp4"}],
             },
             review(parsed),
+            approved_policies={
+                "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST": metadata["decision_policy"],
+            },
         )
         self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertFalse(result["decision_policy_audit"]["applied"])
+        self.assertIn("damage_observability", result["agent_report"]["parsed"]["decision_policy_audit"]["failed_conditions"])
+
+    def test_unresolved_supplemental_image_linkage_blocks_negative_recommendation(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-supplement-unresolved",
+                "scenario": "product_damage",
+                "customer_claim": "商品有明显折痕",
+                "claim_scope": {
+                    "split_status": "resolved",
+                    "active_claim_ids": ["CLM-1"],
+                    "claims": [{"claim_id": "CLM-1", "issue_type": "visible_damage", "location": "商品本体"}],
+                },
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST",
+                    "complete_video_no_claimed_damage": "negative",
+                    "require_continuity_complete": False,
+                    "require_fully_observable": False,
+                    "require_claimed_region_closeup": False,
+                    "minimum_required_view_coverage": 0.8,
+                    "max_unobserved_seconds": 12.0,
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.9,
+            "damage_causality_assessment": {
+                "damage_presence": "not_visible",
+                "claim_support": "not_supported",
+                "evidence_source_summary": {
+                    "supplemental_images": {"provided_count": 1, "linkage_status": "unresolved"},
+                },
+            },
+            "damage_observability": {
+                "status": "partial",
+                "same_item_linkage": True,
+                "claimed_region_closeup": False,
+                "required_view_coverage": 0.8,
+                "conflicting_evidence": False,
+            },
+            "object_continuity_assessment": {
+                "continuity_verdict": "indeterminate",
+                "tracked_subjects": [{
+                    "subject_id": "claimed_item",
+                    "visibility_coverage": 0.9,
+                    "longest_out_of_frame_seconds": 1.0,
+                }],
+            },
+            "video_audit_conclusion": {
+                "opening_integrity": "complete",
+                "sampling_boundary_status": "covered",
+            },
+        }
+        result = apply_review_decision_policy(
+            {"scenario": "product_damage", "metadata": metadata, "assets": [{"mime_type": "video/mp4"}]},
+            review(parsed),
+            media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
+            approved_policies={
+                "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST": metadata["decision_policy"],
+            },
+        )
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertIn(
+            "supplemental_evidence_resolved",
+            result["agent_report"]["parsed"]["decision_policy_audit"]["failed_conditions"],
+        )
+
+    def test_617911_only_strict_full_timeline_policy_can_recommend_negative(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-617911-policy-v2",
+                "scenario": "product_damage",
+                "customer_claim": "商品有明显折痕",
+                "claim_scope": {
+                    "split_status": "resolved",
+                    "active_claim_ids": ["CLM-1"],
+                    "claims": [{"claim_id": "CLM-1", "issue_type": "visible_damage", "location": "商品本体"}],
+                },
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST",
+                    "complete_video_no_claimed_damage": "negative",
+                    "minimum_visibility_coverage": 0.85,
+                    "minimum_required_view_coverage": 1.0,
+                    "minimum_confidence": 0.8,
+                    "require_continuity_complete": True,
+                    "require_fully_observable": True,
+                    "require_claimed_region_closeup": True,
+                    "max_unobserved_seconds": 0.0,
+                    "require_media_forensics": True,
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.9,
+            "damage_causality_assessment": {
+                "damage_presence": "not_visible",
+                "claim_support": "not_supported",
+                "evidence_source_summary": {
+                    "supplemental_images": {
+                        "provided_count": 5,
+                        "referenced_count": 5,
+                        "linkage_status": "not_linked",
+                    },
+                },
+            },
+            "damage_observability": {
+                "status": "fully_observable",
+                "same_item_linkage": True,
+                "claimed_region_closeup": True,
+                "required_view_coverage": 1.0,
+                "conflicting_evidence": False,
+            },
+            "object_continuity_assessment": {
+                "continuity_verdict": "continuous",
+                "tracked_subjects": [{
+                    "subject_id": "claimed_item",
+                    "visibility_coverage": 1.0,
+                    "longest_out_of_frame_seconds": 0.0,
+                }],
+            },
+            "video_audit_conclusion": {
+                "opening_integrity": "complete",
+                "opening_integrity_source": "full_timeline_continuity",
+                "sampling_boundary_status": "covered",
+            },
+        }
+        forensics = {"status": "completed", "summary": {"risk_level": "low"}}
+
+        result = apply_review_decision_policy(
+            {"scenario": "product_damage", "metadata": metadata, "assets": [{"mime_type": "video/mp4"}]},
+            review(parsed),
+            media_forensics=forensics,
+            approved_policies={
+                "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST": metadata["decision_policy"],
+            },
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-COMPLETE-NO-CLAIMED-DAMAGE")
+        self.assertEqual(result["decision_policy_audit"]["evidence_gate"]["media_forensics_status"], "completed")
+        self.assertFalse(result["agent_report"]["parsed"]["business_action_allowed"])
+
+    def test_partial_pass_or_aggregation_warning_blocks_negative(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-degraded-policy",
+                "scenario": "product_damage",
+                "customer_claim": "商品有明显折痕",
+                "claim_scope": {
+                    "split_status": "resolved",
+                    "active_claim_ids": ["CLM-1"],
+                    "claims": [{"claim_id": "CLM-1", "issue_type": "visible_damage"}],
+                },
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST",
+                    "complete_video_no_claimed_damage": "negative",
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.9,
+            "specialized_pass_guard_reason": "主审核存在失败",
+            "aggregation_warnings": [{"code": "chunk_conflict"}],
+            "damage_causality_assessment": {"damage_presence": "not_visible", "claim_support": "not_supported"},
+            "damage_observability": {
+                "status": "fully_observable",
+                "same_item_linkage": True,
+                "claimed_region_closeup": True,
+                "required_view_coverage": 1.0,
+                "conflicting_evidence": False,
+            },
+            "object_continuity_assessment": {
+                "continuity_verdict": "continuous",
+                "tracked_subjects": [{"subject_id": "claimed_item", "visibility_coverage": 1.0, "longest_out_of_frame_seconds": 0.0}],
+            },
+            "video_audit_conclusion": {
+                "opening_integrity": "complete",
+                "opening_integrity_source": "full_timeline_continuity",
+                "sampling_boundary_status": "covered",
+            },
+        }
+        result = apply_review_decision_policy(
+            {"scenario": "product_damage", "metadata": metadata, "assets": [{"mime_type": "video/mp4"}]},
+            review(parsed),
+            media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
+            approved_policies={"MITAKO-PD-COMPLETE-NO-DAMAGE@TEST": metadata["decision_policy"]},
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertIn("pass_integrity", result["decision_policy_audit"]["failed_conditions"])
+
+    def test_partial_supplemental_review_cannot_be_treated_as_all_not_linked(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-partial-supplement",
+                "scenario": "product_damage",
+                "customer_claim": "商品有明显折痕",
+                "claim_scope": {
+                    "split_status": "resolved",
+                    "active_claim_ids": ["CLM-1"],
+                    "claims": [{"claim_id": "CLM-1", "issue_type": "visible_damage"}],
+                },
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST",
+                    "complete_video_no_claimed_damage": "negative",
+                    "require_continuity_complete": False,
+                    "require_fully_observable": False,
+                    "require_claimed_region_closeup": False,
+                    "minimum_required_view_coverage": 0.8,
+                    "max_unobserved_seconds": 12.0,
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.9,
+            "damage_causality_assessment": {
+                "damage_presence": "not_visible",
+                "claim_support": "not_supported",
+                "evidence_source_summary": {
+                    "supplemental_images": {
+                        "provided_count": 5,
+                        "referenced_count": 2,
+                        "linkage_status": "not_linked",
+                    }
+                },
+            },
+            "damage_observability": {
+                "status": "partial",
+                "same_item_linkage": True,
+                "claimed_region_closeup": False,
+                "required_view_coverage": 0.8,
+                "conflicting_evidence": False,
+            },
+            "object_continuity_assessment": {
+                "continuity_verdict": "indeterminate",
+                "tracked_subjects": [{
+                    "subject_id": "claimed_item",
+                    "visibility_coverage": 0.9,
+                    "longest_out_of_frame_seconds": 1.0,
+                }],
+            },
+            "video_audit_conclusion": {
+                "opening_integrity": "complete",
+                "sampling_boundary_status": "covered",
+            },
+        }
+        result = apply_review_decision_policy(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "video/mp4"}],
+            },
+            review(parsed),
+            media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
+            approved_policies={
+                "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST": metadata["decision_policy"],
+            },
+        )
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertIn("supplemental_evidence_resolved", result["decision_policy_audit"]["failed_conditions"])
+
+    def test_production_policy_is_tenant_scoped(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-tenant-policy",
+                "scenario": "product_damage",
+                "customer_claim": "商品有明显折痕",
+                "claim_scope": {
+                    "split_status": "resolved",
+                    "active_claim_ids": ["CLM-1"],
+                    "claims": [{"claim_id": "CLM-1", "issue_type": "visible_damage"}],
+                },
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@20260720.1",
+                },
+            }
+        ).model_dump(mode="json")
+        result = apply_review_decision_policy(
+            {"tenant_id": "other-tenant", "scenario": "product_damage", "metadata": metadata, "assets": []},
+            review(),
+        )
+        self.assertEqual(result["decision_policy_audit"]["policy_source"], "not_approved")
 
     def test_resolved_claim_scope_is_required_for_rule_classification(self):
         metadata = ReviewCaseMetadata.model_validate(
@@ -112,18 +411,46 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "claim_scope": {"split_status": "ambiguous"},
                 "decision_policy": {
                     "mode": "classification_recommendation",
-                    "policy_ref": "MITAKO-PD-20260717@1",
+                    "policy_ref": "MITAKO-PD-MISSING-OPENING@20260717.1",
                     "opening_video_required": True,
                     "missing_required_opening_video": "negative",
                 },
             }
         ).model_dump(mode="json")
         result = apply_review_decision_policy(
-            {"scenario": "product_damage", "metadata": metadata, "assets": []},
+            {"tenant_id": "mitako", "scenario": "product_damage", "metadata": metadata, "assets": []},
             review(),
         )
         self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertIn("诉求范围", result["decision_policy_audit"]["reason"])
+
+    def test_request_cannot_activate_unapproved_or_weakened_policy(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-attacker-policy",
+                "scenario": "product_damage",
+                "customer_claim": "商品有伤",
+                "claim_scope": {
+                    "split_status": "resolved",
+                    "active_claim_ids": ["CLM-1"],
+                    "claims": [{"claim_id": "CLM-1", "issue_type": "visible_damage"}],
+                },
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": "ATTACKER-SUPPLIED",
+                    "complete_video_no_claimed_damage": "negative",
+                    "require_continuity_complete": False,
+                    "require_media_forensics": False,
+                },
+            }
+        ).model_dump(mode="json")
+        result = apply_review_decision_policy(
+            {"scenario": "product_damage", "metadata": metadata, "assets": [{"mime_type": "video/mp4"}]},
+            review({"predicted_label": "review", "confidence": 0.99}),
+        )
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["policy_source"], "not_approved")
+        self.assertIn("未在服务端批准", result["decision_policy_audit"]["reason"])
 
 
 if __name__ == "__main__":

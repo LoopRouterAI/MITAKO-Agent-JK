@@ -287,12 +287,46 @@ def estimate_model_cost(cfg: Dict[str, Any], usage: Dict[str, Any]) -> Dict[str,
     }
 
 
+def _cost_observability(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    unknown = 0
+    estimated = 0
+    not_incurred = 0
+    for item in items:
+        explicit = str(item.get("cost_status") or "")
+        if explicit == "not_incurred":
+            not_incurred += 1
+            continue
+        usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
+        cost = item.get("cost") if isinstance(item.get("cost"), dict) else {}
+        usage_reported = any(value not in (None, "") for value in usage.values())
+        cost_reported = "estimated_usd" in cost
+        if explicit == "estimated" or usage_reported or cost_reported:
+            estimated += 1
+        else:
+            unknown += 1
+    if unknown and estimated:
+        status = "partial_unknown"
+    elif unknown:
+        status = "unknown"
+    elif estimated:
+        status = "estimated"
+    else:
+        status = "not_incurred"
+    return {
+        "cost_status": status,
+        "unknown_cost_calls": unknown,
+        "estimated_cost_calls": estimated,
+        "not_incurred_calls": not_incurred,
+    }
+
+
 def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
     last: Dict[str, Any] = {}
     for attempt in range(1, retries + 2):
         started = time.time()
         try:
-            with httpx.Client(timeout=timeout) as client:
+            request_timeout = httpx.Timeout(float(timeout), connect=min(10.0, float(timeout)))
+            with httpx.Client(timeout=request_timeout) as client:
                 response = client.post(endpoint, headers=headers, json=payload)
             latency = round(time.time() - started, 2)
             if response.status_code < 400:
@@ -366,7 +400,7 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
     if cfg["provider"] == "gemini_native":
         options = gemini_request_options(cfg)
         if not options:
-            return {"status": "skipped", "error": "missing_api_key"}
+            return {"status": "skipped", "error": "missing_api_key", "cost_status": "not_incurred"}
         payload = gemini_payload(system_prompt, user_prompt, case)
         response: Dict[str, Any] = {}
         failures: List[Dict[str, Any]] = []
@@ -376,13 +410,13 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
                 break
             failures.append({key: response.get(key) for key in ("status_code", "latency_seconds", "error_type", "attempt")})
         if not response.get("ok"):
-            return {"status": "failed", **response, "attempts": failures}
+            return {"status": "failed", **response, "attempts": failures, "cost_status": "unknown"}
         text = "\n".join(p.get("text", "") for p in (((response["data"].get("candidates") or [{}])[0].get("content") or {}).get("parts") or []) if isinstance(p, dict))
         usage = extract_usage(response["data"])
     else:
         key = os.getenv(cfg["key_env"])
         if not key:
-            return {"status": "skipped", "error": f"missing_{cfg['key_env']}"}
+            return {"status": "skipped", "error": f"missing_{cfg['key_env']}", "cost_status": "not_incurred"}
         payload = {
             "model": cfg["model"],
             "messages": openai_messages(system_prompt, user_prompt, case),
@@ -392,7 +426,7 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
         }
         response = post_with_retries(cfg["endpoint"], {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, payload, timeout, retries)
         if not response.get("ok"):
-            return {"status": "failed", **response}
+            return {"status": "failed", **response, "cost_status": "unknown"}
         text = extract_openai_text(response["data"])
         raw_usage = response["data"].get("usage") or {}
         usage = {
@@ -433,6 +467,7 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
         "latency_seconds": response.get("latency_seconds"),
         "usage": usage,
         "cost": estimate_model_cost(cfg, usage),
+        "cost_status": "estimated",
         "raw_text": text,
         "raw_response": compact_response(response.get("data") or {}),
         "parsed_before_boundary": parsed_before_boundary,
@@ -491,6 +526,79 @@ def _aggregate_damage_observability(rows: List[Dict[str, Any]]) -> Dict[str, Any
     }
 
 
+def _damage_key_evidence(
+    rows: List[Dict[str, Any]],
+    valid_frame_keys: Optional[set[Tuple[int, int]]] = None,
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    findings = [
+        dict(item)
+        for row in rows
+        for item in row.get("frame_findings") or []
+        if isinstance(item, dict)
+        and item.get("global_frame_index") is not None
+        and (
+            valid_frame_keys is None
+            or (int(item.get("video_index") or 0), int(item["global_frame_index"])) in valid_frame_keys
+        )
+    ]
+    by_key = {
+        (int(item.get("video_index") or 0), int(item["global_frame_index"])): item
+        for item in findings
+    }
+    ordered = [by_key[key] for key in sorted(by_key)]
+    priority = [
+        item for item in ordered
+        if str(item.get("damage_state") or "") in {"visible", "uncertain"}
+        or str(item.get("action") or "none") != "none"
+    ]
+    if ordered:
+        positions = {0, len(ordered) - 1, len(ordered) // 4, len(ordered) // 2, len(ordered) * 3 // 4}
+        priority.extend(ordered[index] for index in sorted(positions))
+    selected = list({
+        (int(item.get("video_index") or 0), int(item["global_frame_index"])): item
+        for item in priority
+    }.values())[:limit]
+    return [
+        {
+            "source_type": "video_frame",
+            "video_index": item.get("video_index"),
+            "global_frame_index": item.get("global_frame_index"),
+            "timestamp": item.get("timestamp"),
+            "fact": item.get("visible_facts") or "该关键帧未形成可读描述。",
+            "why_it_matters": item.get("why_it_matters") or "用于复核主视频是否支持本次损伤诉求。",
+        }
+        for item in selected
+    ]
+
+
+OPENING_STAGE_ORDER = (
+    "sealed_package",
+    "opening_in_progress",
+    "item_exposed",
+    "contents_displayed",
+)
+
+
+def _opening_integrity_from_continuity(
+    findings: List[Dict[str, Any]],
+    sampling_boundary_status: str,
+) -> tuple[str, str]:
+    stages = [str(item.get("opening_stage") or "unknown") for item in findings if isinstance(item, dict)]
+    if not stages:
+        return "indeterminate", "model_segment_consensus"
+    if sampling_boundary_status != "covered" or "unknown" in stages:
+        return "indeterminate", "full_timeline_continuity"
+    positions = []
+    for stage in OPENING_STAGE_ORDER:
+        try:
+            start = positions[-1] + 1 if positions else 0
+            positions.append(stages.index(stage, start))
+        except ValueError:
+            return "indeterminate", "full_timeline_continuity"
+    return "complete", "full_timeline_continuity"
+
+
 def _apply_global_timeline_summary(
     case: Dict[str, Any],
     parsed: Dict[str, Any],
@@ -510,6 +618,21 @@ def _apply_global_timeline_summary(
         if item.get("duration_seconds") not in (None, "")
     ]
     source_duration = max(source_durations) if source_durations else None
+    timeline_coverage_ratio = (
+        round(max(0.0, min(sampled_end / source_duration, 1.0)), 4)
+        if sampled_end is not None and source_duration and source_duration > 0
+        else None
+    )
+    timeline_tolerance = max(0.5, (source_duration or 0.0) * 0.01)
+    sampling_boundary_status = (
+        "covered"
+        if sampled_start is not None
+        and sampled_start <= timeline_tolerance
+        and sampled_end is not None
+        and source_duration is not None
+        and sampled_end >= source_duration - timeline_tolerance
+        else "incomplete" if sampled_end is not None and source_duration is not None else "unknown"
+    )
     continuity = output.get("object_continuity_assessment") or {}
     claimed_subjects = [
         item for item in continuity.get("tracked_subjects") or []
@@ -537,16 +660,15 @@ def _apply_global_timeline_summary(
                     }
                 )
 
-    opening_values = {
+    opening_values = sorted({
         str((item.get("video_audit_conclusion") or {}).get("opening_integrity") or "").strip().lower()
         for item in parsed_rows
-    }
-    if continuity.get("continuity_verdict") in {"long_absence", "indeterminate"}:
-        opening_integrity = "incomplete" if continuity.get("continuity_verdict") == "long_absence" else "indeterminate"
-    elif opening_values and opening_values.issubset({"complete", "完整", "完整开箱", "complete_opening"}):
-        opening_integrity = "complete"
-    else:
-        opening_integrity = "indeterminate"
+        if str((item.get("video_audit_conclusion") or {}).get("opening_integrity") or "").strip()
+    })
+    opening_integrity, opening_integrity_source = _opening_integrity_from_continuity(
+        list(output.get("continuity_frame_findings") or []),
+        sampling_boundary_status,
+    )
     risk_rank = {"low": 0, "medium": 1, "high": 2}
     swap_risk = max(
         (str((item.get("video_audit_conclusion") or {}).get("swap_risk_level") or "low").lower() for item in parsed_rows),
@@ -581,7 +703,12 @@ def _apply_global_timeline_summary(
         "swap_risk_level": swap_risk,
         "edit_or_cut_risk": "需结合媒体取证与连续性时间轴判断",
         "opening_integrity": opening_integrity,
-        "source": "deterministic_global_timeline",
+        "opening_integrity_source": opening_integrity_source,
+        "segment_opening_claims": opening_values,
+        "sampling_boundary_status": sampling_boundary_status,
+        "technical_timeline_status": "requires_media_forensics",
+        "evidence_continuity_status": continuity.get("continuity_verdict") or "indeterminate",
+        "source": "global_timeline_aggregation",
     }
     output["overall_audit"] = {
         "conclusion": f"{label_text}。{continuity_reason}",
@@ -595,7 +722,11 @@ def _apply_global_timeline_summary(
         "source_duration_seconds": source_duration,
         "claimed_item_first_exposed_timestamp": first_exposed or None,
         "opening_integrity": opening_integrity,
+        "opening_integrity_source": opening_integrity_source,
         "continuity_verdict": continuity.get("continuity_verdict") or "indeterminate",
+        "sampling_boundary_status": sampling_boundary_status,
+        "technical_timeline_status": "requires_media_forensics",
+        "timeline_coverage_ratio": timeline_coverage_ratio,
         "chunk_narratives_excluded_from_public_conclusion": True,
     }
     output["aggregation_warnings"] = contradictions
@@ -605,19 +736,28 @@ def _apply_global_timeline_summary(
 def _aggregate_chunk_results(
     case: Dict[str, Any],
     results: List[Dict[str, Any]],
+    main_failures: Optional[List[Dict[str, Any]]] = None,
     continuity_results: Optional[List[Dict[str, Any]]] = None,
     continuity_failures: Optional[List[Dict[str, Any]]] = None,
     causality_results: Optional[List[Dict[str, Any]]] = None,
     causality_failures: Optional[List[Dict[str, Any]]] = None,
+    main_review_frame_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     def channel_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        representations = sorted({str(item.get("input_representation")) for item in items if item.get("input_representation")})
+        repair_calls = sum(int(item.get("repair_calls") or 0) for item in items)
         return {
-            "model_calls": len(items),
+            "model_calls": len(items) + repair_calls,
+            "segment_calls": len(items),
+            "repair_calls": repair_calls,
+            "input_representations": representations,
+            "model_images": sum(int(item.get("model_image_count") or 0) for item in items),
             "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in items), 2),
             "input_tokens": sum(int((item.get("usage") or {}).get("input_tokens") or 0) for item in items),
             "output_tokens": sum(int((item.get("usage") or {}).get("output_tokens") or 0) for item in items),
             "total_tokens": sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in items),
             "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in items), 6),
+            **_cost_observability(items),
         }
 
     parsed_rows = [item.get("parsed") or {} for item in results]
@@ -637,8 +777,81 @@ def _aggregate_chunk_results(
     causality_complete = bool(causality_results) and not causality_failures
     causality_rows = [item.get("parsed") or {} for item in (causality_results or [])] if causality_complete else []
     if business_scenario == "product_damage":
-        parsed["damage_causality_assessment"] = aggregate_damage_causality(causality_rows or parsed_rows)
-        parsed["damage_observability"] = _aggregate_damage_observability(causality_rows or parsed_rows)
+        damage_rows = causality_rows or parsed_rows
+        damage_assessment = aggregate_damage_causality(damage_rows)
+        supplemental_evidence = [
+            dict(entry)
+            for row in parsed_rows
+            for key in ("adopted_evidence", "supporting_evidence", "challenging_evidence")
+            for entry in row.get(key) or []
+            if isinstance(entry, dict)
+            and str(entry.get("source_type") or "").lower() in {
+                "supplementary_image", "supplemental_image", "image",
+            }
+        ]
+        referenced_indices = sorted({
+            int(item["image_index"])
+            for item in supplemental_evidence
+            if str(item.get("image_index") or "").isdigit()
+        })
+        linkage_verified = any(
+            item.get("same_item_linkage") is True and item.get("temporal_linkage") is True
+            for item in supplemental_evidence
+        )
+        provided_count = len(case.get("supplemental_images") or [])
+        linkage_explicitly_rejected = (
+            provided_count > 0
+            and len(referenced_indices) == provided_count
+            and bool(supplemental_evidence)
+            and all(
+            isinstance(item.get("same_item_linkage"), bool)
+            and isinstance(item.get("temporal_linkage"), bool)
+            and not (item.get("same_item_linkage") is True and item.get("temporal_linkage") is True)
+            for item in supplemental_evidence
+            )
+        )
+        linkage_status = "verified" if linkage_verified else "not_linked" if linkage_explicitly_rejected else "unresolved"
+        supplemental_findings = []
+        seen_supplemental = set()
+        for item in supplemental_evidence:
+            key = (item.get("image_index"), str(item.get("fact") or item.get("description") or ""))
+            if key in seen_supplemental:
+                continue
+            seen_supplemental.add(key)
+            supplemental_findings.append({
+                "source_type": "supplementary_image",
+                "image_index": item.get("image_index"),
+                "fact": item.get("fact") or item.get("description") or "补充图片已被模型引用，但没有形成可公开的事实描述。",
+                "why_it_matters": item.get("why_it_matters") or "用于核对补充图片是否支持主诉，以及能否与主视频建立同物、同部位和过程关联。",
+                "same_item_linkage": item.get("same_item_linkage"),
+                "temporal_linkage": item.get("temporal_linkage"),
+            })
+        damage_assessment["evidence_source_summary"] = {
+            "primary_video": {
+                "scope": "sampled_opening_video",
+                "damage_presence": damage_assessment.get("damage_presence"),
+                "claim_support": damage_assessment.get("claim_support"),
+            },
+            "supplemental_images": {
+                "provided_count": provided_count,
+                "referenced_count": len(referenced_indices),
+                "referenced_image_indices": referenced_indices,
+                "unreferenced_image_indices": [
+                    index for index in range(1, provided_count + 1) if index not in referenced_indices
+                ],
+                "linkage_status": linkage_status,
+                "evidence_findings": supplemental_findings[:12],
+            },
+            "decision_boundary": "补充特写图未建立同物、同部位和过程关联时，不能单独推翻主视频结论。",
+        }
+        valid_frame_keys = {
+            (int(item.get("video_index") or 0), int(item["global_frame_index"]))
+            for item in case.get("frames") or []
+            if item.get("global_frame_index") is not None
+        }
+        damage_assessment["key_evidence"] = _damage_key_evidence(damage_rows, valid_frame_keys)
+        parsed["damage_causality_assessment"] = damage_assessment
+        parsed["damage_observability"] = _aggregate_damage_observability(parsed_rows + causality_rows)
         if causality_rows:
             parsed["causality_frame_findings"] = [
                 finding
@@ -647,6 +860,28 @@ def _aggregate_chunk_results(
             ][:2400]
     continuity_complete = bool(continuity_results) and not continuity_failures
     continuity_rows = [item.get("parsed") or {} for item in (continuity_results or [])] if continuity_complete else []
+    continuity_coverage_gaps = [
+        {
+            "chunk_index": index + 1,
+            "missing_target_frame_indices": item.get("missing_target_frame_indices") or [],
+            "missing_target_frame_count": len(item.get("missing_target_frame_indices") or []),
+            "reason": item.get("coverage_gap_reason") or "frame_findings_missing",
+            "assessment_status": item.get("assessment_status") or "",
+        }
+        for index, item in enumerate(continuity_results or [])
+        if item.get("coverage_status") == "partial_unknown"
+    ]
+    causality_coverage_gaps = [
+        {
+            "chunk_index": index + 1,
+            "missing_target_frame_indices": item.get("missing_target_frame_indices") or [],
+            "missing_target_frame_count": len(item.get("missing_target_frame_indices") or []),
+            "reason": item.get("coverage_gap_reason") or "frame_findings_missing",
+            "assessment_status": item.get("assessment_status") or "",
+        }
+        for index, item in enumerate(causality_results or [])
+        if item.get("coverage_status") == "partial_unknown"
+    ]
     if case.get("videos") or case.get("frames"):
         parsed["object_continuity_assessment"] = aggregate_object_continuity(
             continuity_rows or parsed_rows,
@@ -679,12 +914,25 @@ def _aggregate_chunk_results(
             for index, item in enumerate(parsed_rows, start=1)
         ],
     })
-    billed_results = results + (continuity_results or []) + (causality_results or [])
+    billed_results = (
+        results
+        + (main_failures or [])
+        + (continuity_results or [])
+        + (causality_results or [])
+        + (continuity_failures or [])
+        + (causality_failures or [])
+    )
     usage = {
         key: sum(int((item.get("usage") or {}).get(key) or 0) for item in billed_results)
         for key in ("input_tokens", "output_tokens", "total_tokens")
     }
     estimated_usd = round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in billed_results), 6)
+    cost_observability = _cost_observability(billed_results)
+    total_model_calls = sum(
+        1 + int(item.get("repair_calls") or 0)
+        for item in billed_results
+        if item.get("cost_status") != "not_incurred"
+    )
     label = load_report_label(case["case_id"])
     parsed = apply_damage_causality_guard(enforce_boundary(parsed), business_scenario, case.get("frames") or [])
     parsed = apply_object_continuity_guard(
@@ -694,8 +942,14 @@ def _aggregate_chunk_results(
         (case.get("structured_business_context") or {}).get("continuity_policy"),
     )
     parsed = apply_fulfillment_guard(parsed, business_scenario)
-    specialized_failures = (continuity_failures or []) + (causality_failures or [])
-    if specialized_failures:
+    incomplete_passes = (
+        (main_failures or [])
+        + (continuity_failures or [])
+        + (causality_failures or [])
+        + continuity_coverage_gaps
+        + causality_coverage_gaps
+    )
+    if incomplete_passes:
         parsed.update({
             "predicted_label": "review",
             "system_yes_no": "REVIEW",
@@ -703,8 +957,11 @@ def _aggregate_chunk_results(
             "confidence": min(float(parsed.get("confidence") or 0.5), 0.69),
             "business_action_allowed": False,
             "human_required": True,
-            "specialized_pass_guard_reason": "专项审核存在失败、漏帧或结构不完整，不能使用部分结果形成确定结论。",
+            "specialized_pass_guard_reason": "主审核或专项审核存在失败（硬失败）、模型输出缺口或结构不完整；已返回的有效证据和缺失帧清单予以保留，但不能使用部分结果形成确定结论。",
+            "pass_integrity_status": "degraded",
         })
+    else:
+        parsed["pass_integrity_status"] = "complete"
     parsed = _apply_global_timeline_summary(case, parsed, parsed_rows, conclusions)
     damage_assessment = parsed.get("damage_causality_assessment") or {}
     fulfillment_assessment = parsed.get("fulfillment_reconciliation") or {}
@@ -733,31 +990,54 @@ def _aggregate_chunk_results(
         "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in billed_results), 2),
         "usage": usage,
         "cost": {"estimated_usd": estimated_usd},
+        **cost_observability,
         "parsed": parsed,
         "evaluation": evaluate(parsed, label),
         "policy_decision": policy_decision(parsed),
         "chunking": {
-            "segment_count": len(results),
+            "segment_count": len(results) + len(main_failures or []),
             "frames_per_segment": case.get("model_frames_per_call"),
             "total_frames": len(case.get("frames") or []),
-            "total_model_calls": len(billed_results),
+            "main_review_frames": (
+                int(main_review_frame_count)
+                if main_review_frame_count is not None
+                else len(case.get("frames") or [])
+            ),
+            "total_model_calls": total_model_calls,
             "channels": {
-                "main_review": channel_summary(results),
-                "object_continuity": channel_summary(continuity_results or []),
-                "damage_causality": channel_summary(causality_results or []),
+                "main_review": channel_summary(results + (main_failures or [])),
+                "object_continuity": channel_summary((continuity_results or []) + (continuity_failures or [])),
+                "damage_causality": channel_summary((causality_results or []) + (causality_failures or [])),
+            },
+            "main_review_pass": {
+                "status": "degraded" if main_failures else "completed",
+                "successful_segment_count": len(results),
+                "failures": main_failures or [],
             },
             "continuity_pass": {
-                "status": "completed" if continuity_complete else ("degraded" if continuity_failures else "disabled"),
+                "status": "degraded" if continuity_failures or continuity_coverage_gaps else ("completed" if continuity_complete else "disabled"),
                 "segment_count": len(continuity_results or []),
                 "failures": continuity_failures or [],
+                "coverage_gaps": continuity_coverage_gaps,
             },
             "damage_causality_pass": {
-                "status": "completed" if causality_complete else ("degraded" if causality_failures else "disabled"),
+                "status": "degraded" if causality_failures or causality_coverage_gaps else ("completed" if causality_complete else "disabled"),
                 "segment_count": len(causality_results or []),
                 "failures": causality_failures or [],
+                "coverage_gaps": causality_coverage_gaps,
             },
         },
     }
+
+
+def _representative_frames(frames: List[Dict[str, Any]], max_frames: int) -> List[Dict[str, Any]]:
+    if max_frames <= 0 or len(frames) <= max_frames:
+        return list(frames)
+    if max_frames == 1:
+        return [frames[0]]
+    last_index = len(frames) - 1
+    indices = [round(position * last_index / (max_frames - 1)) for position in range(max_frames)]
+    return [frames[index] for index in indices]
 
 
 def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
@@ -765,6 +1045,8 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     frames = case.get("frames") or []
     limit = max(1, min(int(case.get("model_frames_per_call") or 24), 24))
     scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or case.get("scenario") or "")
+    policy = (case.get("structured_business_context") or {}).get("continuity_policy") or {}
+    causality_policy = (case.get("structured_business_context") or {}).get("damage_causality_policy") or {}
     if scenario in {"minor_material", "minor_refund"}:
         workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4))
         output = run_minor_material_pipeline(
@@ -778,11 +1060,27 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         return output
     if not frames:
         result = call_model(cfg, case, timeout, retries)
-        result["chunking"] = {"segment_count": 1, "frames_per_segment": limit, "total_frames": 0}
+        result["chunking"] = {
+            "segment_count": 1,
+            "frames_per_segment": limit,
+            "total_frames": 0,
+            "main_review_frames": 0,
+        }
         result["model_latency_seconds_sum"] = result.get("latency_seconds")
         result["latency_seconds"] = round(time.time() - wall_started, 2)
         return result
-    chunks = [frames[index:index + limit] for index in range(0, len(frames), limit)]
+    main_frames = frames
+    if (
+        scenario == "product_damage"
+        and policy.get("force_dense_scan")
+        and causality_policy.get("force_action_scan")
+    ):
+        main_frame_limit = max(
+            24,
+            min(int(os.getenv("REVIEW_PRODUCT_DAMAGE_MAIN_MAX_FRAMES", "48") or 48), 96),
+        )
+        main_frames = _representative_frames(frames, main_frame_limit)
+    chunks = [main_frames[index:index + limit] for index in range(0, len(main_frames), limit)]
     workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4, len(chunks)))
 
     def review_chunk(index: int, chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -795,6 +1093,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             "total": len(chunks),
             "is_final_chunk": index + 1 == len(chunks),
             "global_video_frame_count": len(frames),
+            "main_review_frame_count": len(main_frames),
             "instruction": "本段最后一帧只代表本分段观察截止点；除非 is_final_chunk=true 且有全局媒体时长佐证，不得表述为视频结束。",
         }
         chunk_case["structured_business_context"] = structured
@@ -810,23 +1109,77 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             except Exception as exc:
                 results[index] = {"status": "failed", "error": str(exc)[:500]}
     completed = [item or {"status": "failed", "error": "empty_chunk_result"} for item in results]
-    failures = [{"chunk_index": index + 1, "error": item.get("error") or item.get("status")} for index, item in enumerate(completed) if item.get("status") != "success"]
-    if failures:
-        return {"status": "failed", "error": "chunk_review_failed", "chunk_failures": failures, "chunking": {"segment_count": len(chunks), "total_frames": len(frames)}}
-    policy = (case.get("structured_business_context") or {}).get("continuity_policy") or {}
-    causality_policy = (case.get("structured_business_context") or {}).get("damage_causality_policy") or {}
+    failures = [
+        {
+            "chunk_index": index + 1,
+            "status": item.get("status") or "failed",
+            "error": item.get("error") or item.get("status"),
+            "error_type": item.get("error_type") or "",
+            "status_code": item.get("status_code"),
+            "usage": item.get("usage") or {},
+            "cost": item.get("cost") or {},
+            "cost_status": item.get("cost_status") or "",
+            "latency_seconds": item.get("latency_seconds") or 0,
+        }
+        for index, item in enumerate(completed)
+        if item.get("status") != "success"
+    ]
+    successful = [item for item in completed if item.get("status") == "success"]
+    if failures and not successful:
+        all_skipped = all(item.get("status") == "skipped" for item in completed)
+        incurred_calls = sum(
+            1 for item in completed if item.get("cost_status") != "not_incurred"
+        )
+        usage = {
+            key: sum(int((item.get("usage") or {}).get(key) or 0) for item in completed)
+            for key in ("input_tokens", "output_tokens", "total_tokens")
+        }
+        return {
+            "status": "skipped" if all_skipped else "failed",
+            "error": failures[0].get("error") if all_skipped else "chunk_review_failed",
+            "error_type": (
+                failures[0].get("error_type")
+                if failures and len({item.get("error_type") for item in failures}) == 1
+                else ""
+            ),
+            "status_code": next((item.get("status_code") for item in failures if item.get("status_code")), None),
+            "chunk_failures": failures,
+            "usage": usage,
+            "cost": {
+                "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in completed), 6)
+            },
+            **_cost_observability(completed),
+            "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in completed), 2),
+            "latency_seconds": round(time.time() - wall_started, 2),
+            "chunking": {
+                "segment_count": len(chunks),
+                "total_frames": len(frames),
+                "main_review_frames": len(main_frames),
+                "total_model_calls": incurred_calls,
+                "channels": {"main_review": {
+                    "model_calls": incurred_calls,
+                    "total_tokens": usage["total_tokens"],
+                    "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in completed), 6),
+                }},
+            },
+        }
     continuity_results: List[Dict[str, Any]] = []
     continuity_failures: List[Dict[str, Any]] = []
     if policy.get("force_dense_scan") and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}:
-        continuity_limit = max(4, min(int(policy.get("dedicated_chunk_frames") or 12), 16))
+        configured_continuity_limit = max(
+            12,
+            min(int(os.getenv("REVIEW_CONTINUITY_FRAMES_PER_CALL", "24") or 24), 24),
+        )
         continuity_results, continuity_failures = run_specialized_frame_pass(
             case,
             mode="object_continuity_only",
             target_index_key="continuity_target_frame_indices",
-            chunk_size=continuity_limit,
+            chunk_size=configured_continuity_limit,
             context_frame_count=3,
             workers=workers,
             invoke=lambda pass_case: call_model(cfg, pass_case, timeout, retries),
+            repair_attempts=1,
+            preserve_partial_coverage=True,
         )
     causality_results: List[Dict[str, Any]] = []
     causality_failures: List[Dict[str, Any]] = []
@@ -839,14 +1192,18 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             context_frame_count=max(2, min(int(causality_policy.get("context_frames") or 6), 8)),
             workers=workers,
             invoke=lambda pass_case: call_model(cfg, pass_case, timeout, retries),
+            repair_attempts=1,
+            preserve_partial_coverage=True,
         )
     aggregated = _aggregate_chunk_results(
         case,
-        completed,
+        successful,
+        failures,
         continuity_results,
         continuity_failures,
         causality_results,
         causality_failures,
+        len(main_frames),
     )
     aggregated["latency_seconds"] = round(time.time() - wall_started, 2)
     return aggregated

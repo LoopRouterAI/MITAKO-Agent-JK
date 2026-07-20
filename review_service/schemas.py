@@ -80,9 +80,14 @@ class ReviewDecisionPolicy(BaseModel):
     complete_video_no_claimed_damage: Literal["review", "negative"] = "review"
     require_claim_scope: bool = True
     minimum_visibility_coverage: float = Field(default=0.85, ge=0.5, le=1.0)
+    minimum_required_view_coverage: float = Field(default=1.0, ge=0.5, le=1.0)
     minimum_confidence: float = Field(default=0.8, ge=0.5, le=1.0)
+    require_continuity_complete: bool = True
+    require_fully_observable: bool = True
     require_claimed_region_closeup: bool = True
     require_same_item_linkage: bool = True
+    require_media_forensics: bool = True
+    maximum_forensic_risk: Literal["none", "low", "medium"] = "low"
     max_unobserved_seconds: float = Field(default=0.0, ge=0.0, le=30.0)
 
 
@@ -212,6 +217,10 @@ class ReviewJobResponse(BaseModel):
     ok: bool = True
     created: bool = False
     job: ReviewJob
+
+
+class ReviewErrorResponse(BaseModel):
+    detail: Any
 
 
 class ReviewJobListResponse(BaseModel):

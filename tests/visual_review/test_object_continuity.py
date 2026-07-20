@@ -117,7 +117,7 @@ class ObjectContinuityTest(unittest.TestCase):
         self.assertEqual(subject["longest_out_of_frame_seconds"], 4.0)
         self.assertEqual(combined["longest_out_of_frame_seconds"], 4.0)
 
-    def test_brief_absence_below_policy_threshold_does_not_force_review(self):
+    def test_return_after_absence_without_identity_proof_forces_review(self):
         findings = [
             {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00", "subject_visibility": [{"subject_id": "product_package", "state": "visible"}]},
             {"video_index": 1, "global_frame_index": 2, "timestamp": "00:00.50", "subject_visibility": [{"subject_id": "product_package", "state": "out_of_frame"}]},
@@ -135,9 +135,25 @@ class ObjectContinuityTest(unittest.TestCase):
             True,
             {"out_of_frame_warning_seconds": 2.0},
         )
-        self.assertEqual(combined["continuity_verdict"], "brief_occlusion")
+        self.assertEqual(combined["continuity_verdict"], "indeterminate")
         self.assertEqual(combined["out_of_frame_events"][0]["start_timestamp"], "00:20.50")
-        self.assertEqual(guarded["predicted_label"], "positive")
+        self.assertFalse(combined["out_of_frame_events"][0]["identity_reestablished"])
+        self.assertEqual(guarded["predicted_label"], "review")
+
+    def test_unknown_frames_reduce_visibility_coverage(self):
+        findings = [
+            {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00", "subject_visibility": [{"subject_id": "claimed_item", "state": "visible"}]},
+            {"video_index": 1, "global_frame_index": 2, "timestamp": "00:01.00", "subject_visibility": [{"subject_id": "claimed_item", "state": "unknown"}]},
+        ]
+        frames = [
+            {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+            {"video_index": 1, "global_frame_index": 2, "timestamp": "00:01.00"},
+        ]
+
+        combined = aggregate_object_continuity([{"frame_findings": findings}], frames)
+        subject = next(item for item in combined["tracked_subjects"] if item["subject_id"] == "claimed_item")
+
+        self.assertEqual(subject["visibility_coverage"], 0.5)
 
     def test_timelines_do_not_merge_across_videos_with_same_timestamps(self):
         rows = [

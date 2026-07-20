@@ -1,0 +1,57 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from poc.visual_review_poc.local_video_triage_demo import load_case_from_folder, order_info_context
+
+
+class OrderInfoAdapterTest(unittest.TestCase):
+    def test_customer_snapshot_becomes_minimized_order_and_fulfillment_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "617911"
+            folder.mkdir()
+            (folder / "content.txt").write_text("商品有伤", encoding="utf-8")
+            snapshot = {
+                "user": "不应进入模型",
+                "user_address": "不应进入模型",
+                "express_fee": 6,
+                "goods_list": [{
+                    "id": 245606,
+                    "number": "SKU-001",
+                    "name": "测试商品",
+                    "des": "红色款",
+                    "intro": "93x67mm",
+                    "goods_num": 2,
+                    "main_img": "images/products/sku-001.png",
+                    "price_fen": 350,
+                }],
+            }
+            path = folder / "order_info_snapshot.json"
+            path.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
+
+            context = order_info_context(path)
+            case = load_case_from_folder(folder, supplemental_limit=10)
+            serialized = json.dumps(case["structured_business_context"], ensure_ascii=False)
+
+        self.assertEqual(context["order_items"][0]["sku"], "SKU-001")
+        self.assertEqual(context["order_items"][0]["expected_quantity"], 2)
+        self.assertEqual(context["order_items"][0]["product_image_ref"], "images/products/sku-001.png")
+        self.assertEqual(
+            case["structured_business_context"]["fulfillment_baseline"]["source"],
+            "customer_order_info_snapshot",
+        )
+        self.assertEqual(
+            case["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]["expected_items"][0]["sku"],
+            "SKU-001",
+        )
+        self.assertNotIn("不应进入模型", serialized)
+        self.assertNotIn("user_address", serialized)
+        self.assertNotIn("price_fen", serialized)
+
+
+if __name__ == "__main__":
+    unittest.main()

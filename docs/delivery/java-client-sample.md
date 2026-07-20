@@ -115,7 +115,7 @@ public Mono<JsonNode> samplingPlan(WebClient client, String token) {
 
 采样规划返回 `estimated_channel_calls.main_review/object_continuity/damage_causality` 和 `estimated_total_model_calls`。Java 侧应使用总调用数做容量与成本预估，不要只读取旧字段 `estimated_model_segments`。
 
-`adaptive` 默认只执行主审核；`strong/strict/forensic` 会自动启用连续性专项，商品有伤还会自动启用损伤因果专项。请求中的显式策略可以进一步收紧，但不能关闭强度档位要求的专项保护。
+`adaptive` 默认只执行主审核；`strong/strict/forensic` 会自动启用连续性专项，商品有伤还会自动启用损伤因果专项。采样与连续性参数可以在契约范围内进一步收紧，但不能关闭强度档位要求的专项保护。自动分类的 `decision_policy` 不接受调用方自定义门槛：请求只能选择服务端已批准的 `policy_ref`，未批准版本保持人工复核。
 
 ## 5. 多文件案件提交
 
@@ -151,6 +151,8 @@ public Mono<JsonNode> createReviewJob(
 ```
 
 注意：使用流式 `Resource`/`DataBuffer`，不要 `Files.readAllBytes()` 读取 543MB 视频。
+
+如案件有甲方离线订单快照，可把 `order_info_snapshot.json` 作为同一 multipart 的一个 `files` 项上传。服务只提取 `goods_list` 中的 SKU、名称、规格、应发数量和商品图引用，不把 `user`、`user_address`、价格或人工标签送入模型。生产正式接入时，优先在 `metadata.order_items`、`metadata.fulfillment_baseline` 和 `metadata.product_master_data` 传递同等结构化数据；离线快照只用于本轮评测和联调。
 
 ## 6. 查询任务
 

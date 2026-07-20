@@ -17,6 +17,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/contracts:
     get:
       tags:
@@ -30,6 +32,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ContractsResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/demo/load:
     post:
       tags:
@@ -43,6 +47,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DemoLoadResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/demo/clear:
     post:
       tags:
@@ -56,6 +62,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DemoClearResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/group-message:
     post:
       tags:
@@ -81,6 +89,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/product-event:
     post:
       tags:
@@ -106,6 +116,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/review-tasks:
     post:
       tags:
@@ -214,12 +226,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewContractResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/review/batches/{batch_id}:
     get:
       tags:
       - review-service
       summary: Batch Detail
       operationId: batch_detail_api_v1_review_batches__batch_id__get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: batch_id
         in: path
@@ -282,6 +298,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/review/sampling-plan:
     post:
       tags:
@@ -307,12 +325,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/review/jobs:
     post:
       tags:
       - review-service
       summary: Create Job
       operationId: create_job_api_v1_review_jobs_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: Idempotency-Key
         in: header
@@ -334,17 +356,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewJobResponse'
-        '422':
-          description: Validation Error
+        '400':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Bad Request
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Conflict
+        '413':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Request Entity Too Large
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Unsupported Media Type
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Unprocessable Entity
     get:
       tags:
       - review-service
       summary: List Jobs
       operationId: list_jobs_api_v1_review_jobs_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: status
         in: query
@@ -390,6 +438,8 @@ paths:
       - review-service
       summary: Job Detail
       operationId: job_detail_api_v1_review_jobs__job_id__get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: job_id
         in: path
@@ -416,6 +466,8 @@ paths:
       - review-service
       summary: Job Report
       operationId: job_report_api_v1_review_jobs__job_id__report_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: job_id
         in: path
@@ -442,6 +494,8 @@ paths:
       - review-service
       summary: Retry Job
       operationId: retry_job_api_v1_review_jobs__job_id__retry_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: job_id
         in: path
@@ -475,6 +529,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewMetricsResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/review/readiness:
     get:
       tags:
@@ -487,6 +543,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /:
     get:
       summary: Get Index
@@ -714,6 +772,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/auth/status:
     get:
       summary: Auth Status
@@ -734,6 +794,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
     post:
       summary: Admin Upsert Agent
       operationId: admin_upsert_agent_api_v1_admin_agents_post
@@ -755,10 +817,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/admin/agents/{agent_id}:
     delete:
       summary: Admin Delete Agent
       operationId: admin_delete_agent_api_v1_admin_agents__agent_id__delete
+      security:
+      - HTTPBearer: []
       parameters:
       - name: agent_id
         in: path
@@ -788,6 +854,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/admin/demo/status:
     get:
       summary: Admin Demo Status
@@ -798,6 +866,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/admin/demo/load:
     post:
       summary: Admin Demo Load
@@ -808,6 +878,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/admin/demo/clear:
     post:
       summary: Admin Demo Clear
@@ -818,10 +890,14 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/admin/queue/{session_id}/reassign:
     post:
       summary: Admin Reassign
       operationId: admin_reassign_api_v1_admin_queue__session_id__reassign_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -851,6 +927,8 @@ paths:
     get:
       summary: Admin Audit Events
       operationId: admin_audit_events_api_v1_admin_audit_events_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: limit
         in: query
@@ -882,6 +960,8 @@ paths:
     get:
       summary: Admin Transcript
       operationId: admin_transcript_api_v1_admin_audit_sessions__session_id__transcript_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -905,6 +985,8 @@ paths:
     get:
       summary: Admin Observer Qc
       operationId: admin_observer_qc_api_v1_admin_qc_observer_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: flagged_only
         in: query
@@ -929,6 +1011,8 @@ paths:
     get:
       summary: Admin List Approvals
       operationId: admin_list_approvals_api_v1_admin_approvals_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: status
         in: query
@@ -952,6 +1036,8 @@ paths:
     post:
       summary: Admin Create Approval
       operationId: admin_create_approval_api_v1_admin_approvals_post
+      security:
+      - HTTPBearer: []
       requestBody:
         required: true
         content:
@@ -974,6 +1060,8 @@ paths:
     post:
       summary: Admin Decide Approval
       operationId: admin_decide_approval_api_v1_admin_approvals__approval_id__decide_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: approval_id
         in: path
@@ -1003,6 +1091,8 @@ paths:
     get:
       summary: Admin Reports Summary
       operationId: admin_reports_summary_api_v1_admin_reports_summary_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: days
         in: query
@@ -1027,6 +1117,8 @@ paths:
     get:
       summary: Admin Reports Export
       operationId: admin_reports_export_api_v1_admin_reports_export_csv_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: days
         in: query
@@ -1051,6 +1143,8 @@ paths:
     post:
       summary: Handoff Close
       operationId: handoff_close_api_v1_handoff_close_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: query
@@ -1087,6 +1181,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /metrics/prometheus:
     get:
       summary: Metrics Prometheus
@@ -1098,6 +1194,8 @@ paths:
             text/plain:
               schema:
                 type: string
+      security:
+      - HTTPBearer: []
   /api/v1/models:
     get:
       summary: Get Models
@@ -1278,6 +1376,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
     put:
       summary: Admin Update Routing
       operationId: admin_update_routing_api_v1_admin_handoff_routing_put
@@ -1301,6 +1401,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /admin:
     get:
       summary: Get Admin
@@ -1374,10 +1476,14 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/desk/sessions:
     get:
       summary: Desk Sessions
       operationId: desk_sessions_api_v1_desk_sessions_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: scope
         in: query
@@ -1402,6 +1508,8 @@ paths:
     get:
       summary: Desk Session Detail
       operationId: desk_session_detail_api_v1_desk_session__session_id__get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1425,6 +1533,8 @@ paths:
     post:
       summary: Desk Session Reply
       operationId: desk_session_reply_api_v1_desk_session__session_id__reply_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1454,6 +1564,8 @@ paths:
     post:
       summary: Desk Session Accept
       operationId: desk_session_accept_api_v1_desk_session__session_id__accept_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1483,6 +1595,8 @@ paths:
     post:
       summary: Desk Session Escalate
       operationId: desk_session_escalate_api_v1_desk_session__session_id__escalate_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1512,6 +1626,8 @@ paths:
     post:
       summary: Desk Session Transfer
       operationId: desk_session_transfer_api_v1_desk_session__session_id__transfer_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -2859,12 +2975,26 @@ components:
           minimum: 0.5
           title: Minimum Visibility Coverage
           default: 0.85
+        minimum_required_view_coverage:
+          type: number
+          maximum: 1.0
+          minimum: 0.5
+          title: Minimum Required View Coverage
+          default: 1.0
         minimum_confidence:
           type: number
           maximum: 1.0
           minimum: 0.5
           title: Minimum Confidence
           default: 0.8
+        require_continuity_complete:
+          type: boolean
+          title: Require Continuity Complete
+          default: true
+        require_fully_observable:
+          type: boolean
+          title: Require Fully Observable
+          default: true
         require_claimed_region_closeup:
           type: boolean
           title: Require Claimed Region Closeup
@@ -2873,6 +3003,18 @@ components:
           type: boolean
           title: Require Same Item Linkage
           default: true
+        require_media_forensics:
+          type: boolean
+          title: Require Media Forensics
+          default: true
+        maximum_forensic_risk:
+          type: string
+          enum:
+          - none
+          - low
+          - medium
+          title: Maximum Forensic Risk
+          default: low
         max_unobserved_seconds:
           type: number
           maximum: 30.0
@@ -2882,6 +3024,14 @@ components:
       type: object
       title: ReviewDecisionPolicy
       description: 甲方可选的规则判定策略；默认不把证据不足自动判为不支持。
+    ReviewErrorResponse:
+      properties:
+        detail:
+          title: Detail
+      type: object
+      required:
+      - detail
+      title: ReviewErrorResponse
     ReviewEvidenceCoverage:
       properties:
         submitted_package_refs:
@@ -3443,3 +3593,7 @@ components:
       - msg
       - type
       title: ValidationError
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer

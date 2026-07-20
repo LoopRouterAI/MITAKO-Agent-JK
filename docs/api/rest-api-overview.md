@@ -50,8 +50,10 @@ Base URL：`http://<host>:8000`
 
 视觉审核 POC 当前由独立工作台服务承载，默认本地地址为 `http://127.0.0.1:7861/`。它面向三类独立审核入口：开箱视频审核、商品有伤审核、未成年人资料审核。真实接入甲方业务系统时，建议通过“创建审核任务、上传材料、查询状态、回写人工结论”的对接契约完成，详见：
 
-- `甲方沟通交付文档/客服Agent与视觉审核对接指南.md`
-- `我方内部开发文档/客服Agent视觉审核系统设计指南.md`
+- [审核服务 API 契约与自动化验收](../review_service_api_contract_20260710.md)
+- [OpenAPI 定义](../delivery/openapi.yaml)
+- [测试与验收指南](../delivery/testing-guide.md)
+- [甲方对接物料与接口清单](../delivery/customer-integration-materials-checklist.md)
 
 ## 观测
 

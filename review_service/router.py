@@ -17,6 +17,7 @@ from .schemas import (
     ReviewCaseMetadata,
     ReviewBatchResponse,
     ReviewContractResponse,
+    ReviewErrorResponse,
     ReviewJobListResponse,
     ReviewJobResponse,
     ReviewMetadataValidationResponse,
@@ -88,7 +89,15 @@ async def plan_sampling(payload: ReviewSamplingPlanRequest, user=_integration_us
     }
 
 
-@router.post("/jobs", response_model=ReviewJobResponse, status_code=202)
+@router.post(
+    "/jobs",
+    response_model=ReviewJobResponse,
+    status_code=202,
+    responses={
+        status: {"model": ReviewErrorResponse}
+        for status in (400, 409, 413, 415, 422)
+    },
+)
 async def create_job(
     metadata: str = Form(...),
     files: List[UploadFile] = File(...),

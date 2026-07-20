@@ -81,9 +81,18 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 - `VISUAL_MAX_SUPPLEMENTAL_IMAGES`：单案件进入资料审核管线的图片上限，默认 40、最大 80。
 - `REVIEW_FFPROBE_PATH`：可选固定路径；为空时从主服务进程 `PATH` 查找。
 - `REVIEW_WORKBENCH_RETRIES`：内部工作台遇到 429/502/503/504 时的有限重试次数，默认 2。
+- `REVIEW_MODEL_TIMEOUT_SECONDS`：单次供应商请求超时，网页和正式审核 API 共用，默认 180 秒。
+- `REVIEW_MODEL_RETRIES`：单次供应商软失败重试次数，默认 1。
+- `REVIEW_CHUNK_WORKERS`：单案件分段并发数，必须按供应商限流压测后配置。
+- `REVIEW_CONTINUITY_FRAMES_PER_CALL`：连续性通道每次独立帧输入上限，当前最大为 24。模型逐张接收带帧序号与时间戳的 JPEG，不使用拼图作为审核证据；HTML 报告中的缩略图仅用于人工浏览。
+- `VISUAL_REPORT_SIGNING_SECRET`：生产必须由 Secret 管理器注入固定高熵密钥。
+- `VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1`：生产必须开启；缺少固定签名密钥时视觉健康检查与主服务 readiness 失败。
+- `VISUAL_REPORT_URL_TTL_SECONDS`：报告与媒体签名 URL 的有效期，默认 900 秒。
 - 数据目录和日志目录。
 
 真实 `.env` 不进入 Git、镜像和客户 ZIP。生产使用密钥管理服务或部署平台 Secret。
+
+视觉服务不依赖供应商 Files API 或文件 URI。原视频在我方服务端解码，模型请求仅包含内联 Base64 的 JPEG 独立帧；可通过视觉健康检查的 `model_media_transport` 和审核契约的 `media_processing` 复核。
 
 ## 6. 健康检查
 
@@ -96,7 +105,7 @@ GET http://127.0.0.1:7861/api/health
 GET /api/v1/review/readiness
 ```
 
-主服务需要一个可用的集成账号 Token 才能读取受保护指标和审核 readiness。`readiness` 同时检查 ffprobe、上传目录写权限、至少三倍案件上限的磁盘余量和视觉工作台连通性；任一失败返回 503，生产编排不得继续导入新案件。
+主服务需要一个可用的集成账号 Token 才能读取受保护指标和审核 readiness。`readiness` 同时检查 ffprobe、上传目录写权限、至少三倍案件上限的磁盘余量、视觉工作台连通性，以及生产模式下的持久报告签名密钥；任一失败返回 503，生产编排不得继续导入新案件。
 
 ## 7. 大文件与 120GB 批次
 

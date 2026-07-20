@@ -209,8 +209,8 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
                     "before_evidence": before,
                     "out_of_frame_evidence": start,
                     "after_evidence": item,
-                    "identity_reestablished": True,
-                    "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                    "identity_reestablished": False,
+                    "reason": "逐帧状态只能确认主体重新入镜，不能自动证明仍为离镜前同一物件。",
                     "source": "deterministic_frame_timeline",
                 }
             )
@@ -234,7 +234,6 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
                 "source": "deterministic_frame_timeline",
             }
         )
-    known = [item for item in tracked if item["state"] != "unknown"]
     visible = [item for item in tracked if item["state"] in {"visible", "partial"}]
     return {
         "subject_id": subject_id,
@@ -247,7 +246,8 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
         "tracking_start": tracked[0]["timestamp_label"],
         "tracking_end": tracked[-1]["timestamp_label"],
         "first_exposed_timestamp": tracked[0]["timestamp_label"],
-        "visibility_coverage": round(len(visible) / max(len(known), 1), 4),
+        "visibility_coverage": round(len(visible) / max(len(tracked), 1), 4),
+        "unknown_frame_count": sum(item["state"] == "unknown" for item in tracked),
         "out_of_frame_events": events,
         "longest_out_of_frame_seconds": max((item["duration_seconds"] for item in events), default=0.0),
         "timeline_source": "frame_findings.subject_visibility",
@@ -276,7 +276,7 @@ def aggregate_object_continuity(
         event.get("identity_reestablished") is False
         for subject in subjects
         for event in subject.get("out_of_frame_events") or []
-    )
+    ) or any(int(subject.get("unknown_frame_count") or 0) > 0 for subject in subjects)
     if unresolved:
         verdict = "indeterminate"
     elif longest > warning_seconds:

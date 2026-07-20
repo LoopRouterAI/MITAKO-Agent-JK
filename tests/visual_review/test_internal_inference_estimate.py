@@ -10,21 +10,36 @@ class InternalInferenceEstimateTest(unittest.TestCase):
             {
                 "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
                 "cost": {"estimated_usd": 0.0012344},
+                "cost_status": "partial_unknown",
+                "unknown_cost_calls": 1,
                 "chunking": {
                     "segment_count": 3,
+                    "total_frames": 213,
+                    "main_review_frames": 48,
                     "total_model_calls": 7,
                     "channels": {
                         "main_review": {"model_calls": 3, "total_tokens": 60, "estimated_usd": 0.0006},
-                        "object_continuity": {"model_calls": 2, "total_tokens": 30, "estimated_usd": 0.0003},
+                        "object_continuity": {"model_calls": 2, "repair_calls": 1, "total_tokens": 30, "estimated_usd": 0.0003},
                         "damage_causality": {"model_calls": 2, "total_tokens": 30, "estimated_usd": 0.0003344},
+                    },
+                    "main_review_pass": {
+                        "status": "degraded",
+                        "failures": [{"chunk_index": 2, "error": "provider_timeout", "latency_seconds": 180}],
                     },
                 },
             }
         )
         self.assertEqual(estimate["total_tokens"], 120)
         self.assertEqual(estimate["total_model_calls"], 7)
+        self.assertEqual(estimate["total_frames"], 213)
+        self.assertEqual(estimate["main_review_frames"], 48)
         self.assertEqual(estimate["channels"]["main_review"]["model_calls"], 3)
+        self.assertEqual(estimate["channels"]["object_continuity"]["repair_calls"], 1)
         self.assertEqual(estimate["estimated_usd"], 0.001234)
+        self.assertEqual(estimate["cost_status"], "partial_unknown")
+        self.assertEqual(estimate["unknown_cost_calls"], 1)
+        self.assertEqual(estimate["degraded_passes"]["main_review"]["failures"][0]["chunk_index"], 2)
+        self.assertEqual(estimate["degraded_passes"]["main_review"]["failures"][0]["error"], "provider_timeout")
         self.assertNotIn("provider", estimate)
         self.assertNotIn("model_name", estimate)
 

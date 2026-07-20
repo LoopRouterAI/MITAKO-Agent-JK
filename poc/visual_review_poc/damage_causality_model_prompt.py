@@ -18,7 +18,7 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
         }
         for frame in case.get("frames") or []
     ]
-    return f"""你正在执行商品有伤场景的独立动作因果复核。本轮只判断损伤是否存在、何时出现以及可能由什么阶段造成，不作退款、拒赔或责任裁决。
+    return f"""你正在执行商品有伤场景的独立动作因果复核。本轮只判断主视频中的损伤是否存在、何时出现以及可能由什么阶段造成，不作退款、拒赔或责任裁决。补充图片由主审核通道独立记录，本专项结果不得声称补充图片不存在。
 
 用户诉求：{case.get("customer_claim") or "未提供"}
 清洗后的用户消息：{json.dumps(frontdesk.get("conversation_history") or {}, ensure_ascii=False)}
@@ -32,6 +32,7 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
 4. 若损伤在动作前已可见，不能归因于该动作；若前态被遮挡或分辨率不足，只能 indirect/insufficient。
 5. role=context_only 只提供前序上下文；frame_findings 只输出 role=target 的帧，逐帧且不得省略。
 6. 样本标签、人工答案和最终处置没有提供给你，不得猜测或迎合。
+7. 必须区分“视频文件/时间轴完整”“开箱过程完整”和“争议商品持续可观察”；三者不能互相替代。
 
 严格输出 JSON 对象：
 {{
@@ -66,6 +67,14 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
     "after_action_evidence": [{{"video_index": 1, "global_frame_index": 3, "timestamp": "00:02.00", "subject": "对象", "location": "具体部位", "chain_id": "chain-1", "fact": "动作后状态"}}],
     "alternative_explanations": [],
     "cannot_conclude_reason": "无法闭环时明确缺口"
+  }},
+  "damage_observability": {{
+    "status": "fully_observable/partial/not_observable/unknown",
+    "same_item_linkage": false,
+    "claimed_region_closeup": false,
+    "required_view_coverage": 0.0,
+    "conflicting_evidence": false,
+    "missing_views": []
   }}
 }}
 """

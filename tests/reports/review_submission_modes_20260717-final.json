@@ -1,14 +1,14 @@
 {
-  "generated_at": "2026-07-17 23:20:50",
+  "generated_at": "2026-07-20 22:55:41",
   "blind_input_boundary": "未读取或上传 reply.json、人工标签和标准答案",
-  "batch_id": "submission-modes-20260717-231940",
+  "batch_id": "submission-modes-20260720-independent-frames-final",
   "api_jobs": {
-    "single": "RJ-A697678C4D5945B2",
-    "folder": "RJ-796C95774DE04104"
+    "single": "RJ-E3DC6D2C1F234546",
+    "folder": "RJ-E143C54D6E8B4501"
   },
   "api_statuses": {
-    "RJ-796C95774DE04104": "SUCCEEDED",
-    "RJ-A697678C4D5945B2": "SUCCEEDED"
+    "RJ-E3DC6D2C1F234546": "SUCCEEDED",
+    "RJ-E143C54D6E8B4501": "SUCCEEDED"
   },
   "batch_summary": {
     "total": 2,
@@ -17,8 +17,8 @@
     "statuses": {
       "SUCCEEDED": 2
     },
-    "inference_total_tokens": 19426,
-    "inference_estimated_usd": 0.052636,
+    "inference_total_tokens": 7271,
+    "inference_estimated_usd": 0.00055,
     "returned": 2,
     "offset": 0
   },
@@ -52,17 +52,17 @@
     {
       "name": "API-single-asset",
       "ok": true,
-      "detail": "job=RJ-A697678C4D5945B2 status=SUCCEEDED"
+      "detail": "job=RJ-E3DC6D2C1F234546 status=SUCCEEDED"
     },
     {
       "name": "API-folder-multi-asset",
       "ok": true,
-      "detail": "job=RJ-796C95774DE04104 status=SUCCEEDED assets=2"
+      "detail": "job=RJ-E143C54D6E8B4501 status=SUCCEEDED assets=2"
     },
     {
       "name": "API-batch-query",
       "ok": true,
-      "detail": "batch=submission-modes-20260717-231940 total=2 complete=True"
+      "detail": "batch=submission-modes-20260720-independent-frames-final total=2 complete=True"
     },
     {
       "name": "Web-single-file",

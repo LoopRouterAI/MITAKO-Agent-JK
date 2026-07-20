@@ -17,6 +17,22 @@ DOCUMENT_TYPES = (
     "other",
 )
 
+CONSISTENCY_FIELDS = {
+    "identity_age": ["guardian_identity", "minor_identity", "age_eligibility"],
+    "guardian_relationship": ["guardian_identity", "minor_identity", "relationship_link"],
+    "commitment_signatures": ["guardian_signer", "minor_signer", "signature_presence"],
+    "order_payment": ["order_reference", "payer_identity", "amount", "transaction_scope"],
+    "mobile_realname": ["subscriber_identity", "account_mobile", "invoice_identity"],
+}
+
+CONSISTENCY_LABELS = {
+    "identity_age": "身份与年龄",
+    "guardian_relationship": "监护关系",
+    "commitment_signatures": "承诺书签署主体",
+    "order_payment": "订单与支付",
+    "mobile_realname": "手机号实名归属",
+}
+
 
 def build_minor_material_inventory_prompt(case: Dict[str, Any]) -> str:
     context = case.get("structured_business_context") or {}
@@ -109,5 +125,69 @@ def build_minor_material_video_prompt(case: Dict[str, Any]) -> str:
   ],
   "process_summary": "不包含个人信息的过程摘要",
   "limitations": []
+}}
+"""
+
+
+def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
+    context = case.get("structured_business_context") or {}
+    check = context.get("minor_consistency_check") or {}
+    check_id = str(check.get("check_id") or "")
+    fields = CONSISTENCY_FIELDS.get(check_id) or []
+    label = CONSISTENCY_LABELS.get(check_id) or check_id
+    field_rows = [
+        {
+            "field_name": field_name,
+            "status": "matched|mismatched|uncertain|not_assessed",
+            "visibility": "complete|partial|masked|unreadable",
+            "evidence_image_indices": [],
+        }
+        for field_name in fields
+    ]
+    images = [
+        {
+            "image_index": item.get("image_index"),
+            "asset_ref": f"supplemental_image_{item.get('image_index')}",
+        }
+        for item in case.get("supplemental_images") or []
+    ]
+    return f"""你正在执行未成年人退款资料的跨材料视觉字段一致性初审。
+
+检查项：{label}（{check_id}）
+必须检查的字段类型：{json.dumps(fields, ensure_ascii=False)}
+本次图片：{json.dumps(images, ensure_ascii=False)}
+预期图片编号：{json.dumps(check.get("expected_image_indices") or [], ensure_ascii=False)}
+
+审核方法：
+1. 比较图片中可见字段是否彼此一致，逐项返回 matched、mismatched、uncertain 或 not_assessed。
+   必须原样返回全部字段类型，不能改名、缩写或遗漏：{json.dumps(fields, ensure_ascii=False)}。
+   matched 表示所给图片中的该字段彼此一致；mismatched 表示存在明确冲突；uncertain 表示看不清或证据不足；not_assessed 只用于图片不包含该字段。
+   matched 可用于至少两张图片中足够的可见字段片段一致，即使 SOP 允许的证件号中段已打码；但完全遮盖、手写难辨或缺字段必须输出 uncertain。
+   mismatched 仅允许用于至少两张图片中的同一字段均完整清晰可见且明确不同；部分遮盖、打码、裁切或主副卡关系不明时不得输出 mismatched。
+2. 身份与年龄：比较监护人、未成年人主体及年龄是否满足未成年人申请条件。
+3. 监护关系：比较身份证明与户口本或出生证明中的双方主体及关系链。
+4. 承诺书：比较监护人与未成年人签署主体标注及双方签字是否存在；不得声称签名具有法律真实性。
+5. 订单与支付：比较订单引用、付款主体、金额和交易范围在所给凭证中是否一致；不得声称平台订单或支付记录真实。
+6. 手机号实名：比较运营商材料中的实名主体、账号绑定手机号和发票抬头/备注是否与其他材料一致；不得声称运营商实名状态真实有效。
+   主副卡并存、号码部分遮盖、发票备注不完整或无法建立主副卡关系时必须输出 uncertain，不得输出 mismatched。
+7. 同时检查明显裁切、拼接、涂改、遮挡或字段冲突风险。疑似编辑只能标风险，不能直接认定造假。
+
+隐私与业务边界：
+- 模型可以在本次推理中读取字段用于比较，但不得输出任何字段原值、部分值、尾号、姓名、号码、金额、地址、OCR原文或哈希。
+- 输出不得包含自由文本说明，只能使用下面的枚举和图片编号。
+- 本检查只表示视觉字段一致性；身份证、运营商实名、平台订单和支付真实性仍为 customer_integration_required。
+- 不执行退款、通过、拒绝或定责。
+
+只输出 JSON：
+{{
+  "schema_version": "minor_consistency_v1",
+  "coverage_ack": {{"expected_image_indices": [], "observed_image_indices": []}},
+  "consistency_check": {{
+    "check_id": "{check_id}",
+    "field_results": {json.dumps(field_rows, ensure_ascii=False)},
+    "tamper_risk": "low|medium|high|uncertain",
+    "risk_reason_codes": ["no_obvious_risk|suspected_editing|unreadable_fields|incomplete_document|conflicting_fields|evidence_gap"]
+  }},
+  "authoritative_verification": "customer_integration_required"
 }}
 """

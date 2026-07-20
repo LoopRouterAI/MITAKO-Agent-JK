@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>未成年人资料审核升级说明</title>
+  <style>
+    :root{color-scheme:light;--bg:#f3f6f7;--surface:#fff;--ink:#15242b;--muted:#607078;--line:#d7e0e3;--navy:#183b4b;--green:#17735a;--green-soft:#e8f5ef;--amber:#8a5a0a;--amber-soft:#fff5dc;--radius:6px}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei","Segoe UI",sans-serif;line-height:1.72;letter-spacing:0}.shell{width:min(1120px,calc(100% - 32px));margin:auto}.top{background:var(--navy);color:#fff}.top .shell{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700}.version{color:#c7d8df;font-size:13px}.hero{padding:50px 0 38px;background:#fff;border-bottom:1px solid var(--line)}.eyebrow{margin:0 0 10px;color:var(--green);font-weight:700;font-size:13px}.hero h1{max-width:850px;margin:0;font-size:40px;line-height:1.2;letter-spacing:0;text-wrap:balance}.hero p{max-width:850px;margin:15px 0 0;color:var(--muted);font-size:17px;text-wrap:pretty}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:26px}.summary article{padding:16px;border:1px solid var(--line);border-radius:var(--radius);background:#fff}.summary small{display:block;color:var(--muted);margin-bottom:5px}.summary b{font-size:19px}.good b{color:var(--green)}.warn b{color:var(--amber)}main{padding:34px 0 64px}.panel{margin:14px 0;padding:22px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}h2{margin:0 0 14px;font-size:23px;letter-spacing:0}h3{margin:0 0 8px;font-size:17px}p{margin:8px 0}.lead{font-size:19px}.matrix{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.level{padding:18px;border:1px solid var(--line);border-radius:var(--radius);background:#fbfcfc}.level b{display:block;margin-bottom:7px}.level .state{display:inline-block;margin-top:10px;padding:4px 8px;border-radius:4px;font-size:12px;font-weight:700}.done{background:var(--green-soft);color:var(--green)}.partial{background:var(--amber-soft);color:var(--amber)}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:11px;border-bottom:1px solid var(--line);vertical-align:top}th{background:#eef3f4;font-size:13px}td:first-child{font-weight:700}.status{font-weight:700}.matched{color:var(--green)}.uncertain{color:var(--amber)}.callout{padding:16px 18px;border:1px solid #e5c88f;border-radius:var(--radius);background:var(--amber-soft);color:#65430b}.result{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.metric{padding:14px;border:1px solid var(--line);border-radius:var(--radius);background:#fbfcfc}.metric small{display:block;color:var(--muted)}.metric b{font-size:20px}.steps{counter-reset:item;display:grid;gap:10px;padding:0;list-style:none}.steps li{counter-increment:item;padding:14px 16px 14px 52px;position:relative;border:1px solid var(--line);border-radius:var(--radius);background:#fff}.steps li:before{content:counter(item);position:absolute;left:15px;top:14px;width:25px;height:25px;display:grid;place-items:center;border-radius:50%;background:var(--navy);color:#fff;font-size:12px;font-weight:700}.footer{padding:22px 0;border-top:1px solid var(--line);color:var(--muted);font-size:13px}@media(max-width:760px){.shell{width:min(100% - 22px,1120px)}.top .shell{padding:10px 0;align-items:flex-start;flex-direction:column}.hero{padding:34px 0 28px}.hero h1{font-size:30px}.summary,.matrix,.result{grid-template-columns:1fr}.panel{padding:17px;overflow-x:auto}th,td{min-width:130px}}
+  </style>
+</head>
+<body>
+  <header class="top"><div class="shell"><div class="brand">MITAKO Agent · 甲方更新说明</div><div class="version">2026-07-20 · 未成年人退款资料审核</div></div></header>
+  <section class="hero"><div class="shell">
+    <p class="eyebrow">0718 反馈整改 · API 与网页共用</p>
+    <h1>从“资料交齐了吗”升级到“资料之间对得上吗”</h1>
+    <p>甲方判断正确：0718 版本主要确认五类资料是否存在，没有真正核对资料中的主体、关系、订单、付款和手机号信息。新版本增加第二阶段视觉字段一致性初审，并把权威真伪验证明确留给甲方业务接口和授权人员。</p>
+    <div class="summary"><article class="good"><small>材料完整性</small><b>已保留并加强</b></article><article class="good"><small>视觉字段一致性</small><b>已新增五项检查</b></article><article class="warn"><small>权威真伪验证</small><b>待甲方接口联调</b></article></div>
+  </div></section>
+  <main class="shell">
+    <section class="panel"><h2>一句话结论</h2><p class="lead">Agent 现在会先确认材料是否齐全，再比较不同材料中的可见字段是否一致；但不会把“看起来一致”写成“资料真实”，也不会自动退款、自动通过或自动拒绝。</p></section>
+    <section class="panel"><h2>三层能力边界</h2><div class="matrix">
+      <article class="level"><h3>第一层：材料完整性</h3><p>检查身份证明、监护关系、承诺书、订单支付、手机号实名五类材料是否出现、可读、全部处理。</p><span class="state done">已实现</span></article>
+      <article class="level"><h3>第二层：视觉字段一致性</h3><p>比较所给图片中的主体、年龄、关系、签署人、订单付款和手机号实名信息是否相互支持。</p><span class="state done">本轮新增</span></article>
+      <article class="level"><h3>第三层：权威真伪验证</h3><p>核验身份证、运营商实名、平台订单、支付记录是否真实有效，需要甲方权威系统或授权人员。</p><span class="state partial">待联调</span></article>
+    </div></section>
+    <section class="panel"><h2>新增的五项检查</h2><table><thead><tr><th>检查项</th><th>Agent 会检查什么</th><th>不会越界声称什么</th></tr></thead><tbody>
+      <tr><td>身份与年龄</td><td>监护人、未成年人主体和未成年人申请条件是否相互支持。</td><td>身份证真实有效或不存在冒用。</td></tr><tr><td>监护关系</td><td>身份证明与户口本或出生证明中的双方主体和关系链。</td><td>监护关系具有最终法律效力。</td></tr><tr><td>承诺书签署主体</td><td>双方签字是否存在，签署主体标注是否与身份证明对应。</td><td>签名一定由本人书写或具有法律真实性。</td></tr><tr><td>订单与支付</td><td>订单引用、付款主体、金额和申请范围在所给凭证中是否一致。</td><td>订单真实存在、支付已到账或金额可退。</td></tr><tr><td>手机号实名归属</td><td>运营商材料、账号手机号、发票抬头或备注中的可见信息是否对应。</td><td>运营商实名状态已经权威验证。</td></tr>
+    </tbody></table></section>
+    <section class="panel"><h2>错误结论如何被阻断</h2><div class="callout">材料齐全但没有完成字段一致性时，不再输出高置信 positive。字段冲突、看不清、被遮盖、材料裁切、证据不足或模型调用失败，统一进入 review，并给出对应检查项和图片编号。</div><p>特别规则：SOP 允许的部分打码不会自动判为冲突。可见部分足以对上时可以标记 matched；只有至少两张图片中的同一字段完整清晰可见且明确不同，才允许标记 mismatched。</p></section>
+    <section class="panel"><h2>144989 真实盲测结果</h2><p>输入仅包含用户诉求和媒体，没有把正样本目录标签、reply.json、人工退款结论或标准答案发送给模型。</p><div class="result"><div class="metric"><small>正式任务</small><b>SUCCEEDED</b></div><div class="metric"><small>图片覆盖</small><b>20 / 20</b></div><div class="metric"><small>自动验收</small><b>14 / 14</b></div><div class="metric"><small>最终流转</small><b>review</b></div></div>
+      <table><thead><tr><th>检查项</th><th>结果</th><th>原因</th></tr></thead><tbody><tr><td>身份与年龄</td><td class="status matched">matched</td><td>可见字段足以支持双方身份及年龄关系。</td></tr><tr><td>监护关系</td><td class="status matched">matched</td><td>身份证明与关系材料未发现明显矛盾。</td></tr><tr><td>承诺书签署主体</td><td class="status uncertain">uncertain</td><td>图片存在裁切、角度和手写可读性限制。</td></tr><tr><td>订单与支付</td><td class="status uncertain">uncertain</td><td>截图之间缺少足够的完整主体关联。</td></tr><tr><td>手机号实名归属</td><td class="status uncertain">uncertain</td><td>存在主副卡和部分遮盖信息，不能据此判定冲突或通过。</td></tr></tbody></table>
+      <p>该结果与人工最终退款并不矛盾：人工可以结合内部订单、账号、运营商信息和客服流程完成终审；Agent 在没有这些权威信息时保持 review 是正确边界。</p>
+    </section>
+    <section class="panel"><h2>接口与网页是否都支持</h2><p>支持。正式异步 API、网页单文件、网页单工单文件夹和网页批量工单都复用同一审核实现。本轮真实提交模式回归为 7/7：API 单资产、API 多资产、API 批次查询、网页单文件、网页文件夹、网页批量文件夹和页面路由绑定全部通过。</p></section>
+    <section class="panel"><h2>仍需甲方提供的对接</h2><table><thead><tr><th>接口或数据</th><th>用途</th><th>未接入时的状态</th></tr></thead><tbody><tr><td>身份核验能力</td><td>确认身份证明真实有效及主体状态。</td><td>customer_integration_required</td></tr><tr><td>订单与支付系统</td><td>确认订单存在、付款主体、金额、交易范围和可退金额。</td><td>customer_integration_required</td></tr><tr><td>账号与运营商实名能力</td><td>确认账号绑定关系、主副卡关系和实名状态。</td><td>customer_integration_required</td></tr></tbody></table></section>
+    <section class="panel"><h2>建议甲方复测</h2><ol class="steps"><li>准备一组资料完整且字段一致的样本，确认五项检查都实际执行，而不是只看最终标签。</li><li>准备一组字段明确冲突的样本，冲突字段必须完整清晰可见；核对报告能否回链图片编号。</li><li>准备一组打码、裁切、主副卡关系不明的样本，系统应输出 uncertain，而不是误报 mismatched。</li><li>分别从正式 API、网页单工单文件夹和网页批量工单提交，核对检查项、边界和报告结构一致。</li></ol></section>
+    <section class="panel"><h2>安全说明</h2><p>模型推理时可以读取图片中的字段用于比较，但持久化结果和公开报告只保存状态、受控风险码和图片编号，不返回姓名、手机号、证件号、订单号、金额原值或 OCR 原文。报告和媒体地址使用路径绑定、带有效期的签名，未签名、被篡改或过期的地址会被拒绝。生产部署仍必须通过甲方网关或反向代理执行租户鉴权，视觉服务端口不得直接暴露到公网。</p></section>
+  </main>
+  <footer class="footer"><div class="shell">MITAKO Agent · 未成年人资料字段一致性审核升级说明 · 2026-07-20</div></footer>
+</body>
+</html>

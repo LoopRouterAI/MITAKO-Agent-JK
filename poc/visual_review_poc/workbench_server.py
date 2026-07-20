@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import math
 import os
 import re
+import secrets
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -21,6 +25,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from dotenv import load_dotenv
+
+load_dotenv(
+    dotenv_path=Path(os.getenv("MITAKO_ENV_FILE") or PROJECT_ROOT / ".env"),
+    override=False,
+)
 
 from runtime_paths import app_root
 from review_media_safety import (
@@ -74,6 +85,19 @@ RUNTIME_MEDIA_DIR = (ROOT / "tmp" / "visual_review_workbench").resolve()
 INDEX_HTML = WORKBENCH_DIR / "workbench.html"
 SAMPLE_MATERIAL_DIR = (ROOT / "docs" / "三大审核场景的小量样本").resolve()
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
+PUBLIC_MEDIA_INDEX: dict[str, str] = {}
+PUBLIC_MEDIA_INDEX_LOCK = threading.Lock()
+PUBLIC_MEDIA_INDEX_PATH = REPORT_DIR / "public_media_registry.json"
+_configured_signing_secret = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
+REPORT_SIGNING_SECRET_CONFIGURED = bool(_configured_signing_secret)
+REPORT_SIGNING_SECRET = _configured_signing_secret.encode("utf-8") if _configured_signing_secret else secrets.token_bytes(32)
+REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET = os.getenv(
+    "VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET", "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+try:
+    REPORT_URL_TTL_SECONDS = max(1, int(os.getenv("VISUAL_REPORT_URL_TTL_SECONDS", "900") or 900))
+except ValueError:
+    REPORT_URL_TTL_SECONDS = 900
 MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
 MAX_SUPPLEMENTAL_IMAGES = max(1, min(int(os.getenv("VISUAL_MAX_SUPPLEMENTAL_IMAGES", "40") or 40), 80))
@@ -341,6 +365,270 @@ def _strip_private_report_fields(value: Any) -> Any:
     return value
 
 
+_MINOR_PUBLIC_PARSED_SCHEMA = {
+    "decision": True,
+    "predicted_label": True,
+    "system_yes_no": True,
+    "confidence": True,
+    "overall_audit": {
+        "conclusion": True,
+        "confidence": True,
+        "core_reason": True,
+        "business_follow_up_suggestion": True,
+    },
+    "visual_evidence_verdict": True,
+    "visual_qc_conclusion": {"verdict": True, "confidence": True, "core_reason": True},
+    "confidence_reason": True,
+    "minor_material_assessment": {
+        "sop_version": True,
+        "readiness": True,
+        "visual_precheck_status": True,
+        "declared_image_count": True,
+        "accepted_image_count": True,
+        "processed_image_count": True,
+        "processed_image_indices": [True],
+        "unclassified_image_indices": [True],
+        "coverage_ratio": True,
+        "coverage_complete": True,
+        "ingestion_complete": True,
+        "checklist": [{
+            "requirement_id": True,
+            "label": True,
+            "status": True,
+            "quality_status": True,
+            "evidence_refs": [True],
+            "evidence_image_indices": [True],
+            "rule_note": True,
+            "validation_status": True,
+        }],
+        "field_consistency": {
+            "schema_version": True,
+            "status": True,
+            "verdict": True,
+            "message": True,
+            "checks": [{
+                "check_id": True,
+                "status": True,
+                "message": True,
+                "field_results": [{
+                    "field_name": True,
+                    "status": True,
+                    "visibility": True,
+                    "evidence_image_indices": [True],
+                }],
+                "tamper_risk": True,
+                "risk_reason_codes": [True],
+                "evidence_image_indices": [True],
+                "coverage_complete": True,
+                "segment_count": True,
+            }],
+        },
+        "authoritative_verification": {
+            "status": True,
+            "checks": [{"verification_id": True, "integration_status": True}],
+            "boundary": True,
+        },
+        "process_evidence": [{
+            "video_index": True,
+            "global_frame_index": True,
+            "timestamp": True,
+            "asset_ref": True,
+            "process_type": True,
+            "evidence_quality": True,
+        }],
+        "privacy_boundary": True,
+        "business_boundary": True,
+    },
+    "supporting_evidence": [{
+        "source_type": True,
+        "image_index": True,
+        "asset_ref": True,
+        "description": True,
+        "confidence": True,
+    }],
+    "adopted_evidence": [{
+        "source_type": True,
+        "image_index": True,
+        "asset_ref": True,
+        "description": True,
+        "confidence": True,
+    }],
+    "challenging_evidence": [{
+        "source_type": True,
+        "image_index": True,
+        "asset_ref": True,
+        "description": True,
+        "confidence": True,
+    }],
+    "material_gaps": [True],
+    "audit_methods": [True],
+    "business_action_allowed": True,
+    "human_required": True,
+    "business_follow_up_reason": True,
+    "next_step": True,
+    "model_limitations": [True],
+    "confidence_components": {
+        "material_image_coverage": True,
+        "required_category_completeness": True,
+        "final_decision": True,
+        "calibration_status": True,
+        "interpretation": True,
+    },
+}
+_MINOR_IDENTIFIER_PATTERNS = (
+    re.compile(r"(?<!\d)\d{17}[\dXx](?![\dXx])"),
+    re.compile(r"(?<!\d)\d{15}(?!\d)"),
+    re.compile(r"(?<!\d)1[3-9](?:[ -]?\d){9}(?!\d)"),
+    re.compile(r"(?<![A-Za-z0-9])[A-Za-z]\d{7,9}(?![A-Za-z0-9])"),
+)
+_LABELED_NAME_PATTERN = re.compile(
+    r"((?:申请人姓名|监护人姓名|收件人姓名|申请人|监护人|收件人|姓名)\s*[：:]\s*)[\u4e00-\u9fff·]{2,12}"
+)
+_LABELED_ADDRESS_PATTERN = re.compile(
+    r"((?:收货地址|家庭住址|联系地址|住址|地址)\s*[：:]\s*)[^，,。；;\n]{4,120}"
+)
+
+# 所有场景只公开报告实际消费的受控字段；未知模型字段一律丢弃。
+_PUBLIC_PARSED_FIELD_NAMES = {
+    "decision", "predicted_label", "system_yes_no", "confidence", "overall_audit", "conclusion",
+    "core_reason", "business_follow_up_suggestion", "visual_evidence_verdict", "visual_qc_conclusion",
+    "verdict", "confidence_reason", "video_audit_conclusion", "continuity_score", "continuity_reason",
+    "swap_risk_level", "edit_or_cut_risk", "opening_integrity", "opening_integrity_source", "sampling_boundary_status",
+    "technical_timeline_status", "evidence_continuity_status", "object_continuity_assessment",
+    "tracked_subjects", "subject_id", "description", "tracking_start", "tracking_end",
+    "first_exposed_timestamp", "visibility_coverage", "out_of_frame_events", "start_timestamp",
+    "end_timestamp", "duration_seconds", "visibility", "before_evidence", "out_of_frame_evidence",
+    "after_evidence", "identity_reestablished", "reason", "continuity_verdict",
+    "longest_out_of_frame_seconds", "total_unobserved_seconds", "critical_events", "policy",
+    "out_of_frame_warning_seconds", "customer_claim_parse", "expected_item", "claimed_received_item",
+    "claimed_mismatch_type", "expected_order_item", "actual_received_item", "audit_methods",
+    "frame_findings", "video_index", "global_frame_index", "frame_index", "timestamp", "visible_facts",
+    "risk", "subject_visibility", "state", "adopted_evidence", "supporting_evidence",
+    "challenging_evidence", "source_type", "image_index", "asset_ref", "fact", "why_it_matters",
+    "same_item_linkage", "temporal_linkage", "authenticity_assessment", "size_sku_assessment",
+    "issue_timestamps", "skeptical_questions", "material_gaps", "conclusion_argument", "support",
+    "challenge", "why_not_final_business_decision", "business_action_allowed", "human_required",
+    "human_required_for_business_action", "business_follow_up_reason", "next_step", "model_limitations",
+    "damage_causality_assessment", "damage_presence", "damage_type_and_location", "first_visible_evidence",
+    "pre_opening_state_visible", "opening_action_visible", "damage_change_observed", "damage_timing",
+    "possible_origins", "origin", "most_likely_origin", "origin_confidence", "causal_evidence_level",
+    "claim_support", "before_action_evidence", "action_evidence", "after_action_evidence", "subject",
+    "location", "chain_id", "alternative_explanations", "cannot_conclude_reason", "damage_observability",
+    "status", "claimed_region_closeup", "required_view_coverage", "conflicting_evidence", "missing_views",
+    "evidence_source_summary", "primary_video", "scope", "supplemental_images", "provided_count",
+    "referenced_count", "referenced_image_indices", "unreferenced_image_indices", "linkage_status", "evidence_findings",
+    "decision_boundary", "key_evidence", "fulfillment_reconciliation", "baseline_version", "expected_items",
+    "observed_items", "suspected_missing_items", "unexpected_items", "unconfirmed_items",
+    "package_observations", "package_coverage", "all_packages_uploaded", "all_items_displayed",
+    "evidence_timestamps", "item_ref", "sku", "product_name", "specification", "expected_quantity",
+    "observed_quantity", "package_ref", "opening_complete", "all_contents_laid_out",
+    "confidence_components", "main_segment_mean", "damage_origin", "continuity_visibility_coverage",
+    "final_decision", "calibration_status", "interpretation", "decision_policy_audit", "version", "mode",
+    "policy_ref", "policy_source", "requested_overrides_ignored", "applied", "rule_id", "claim_scope",
+    "stage", "issue_types", "excluded_issue_types", "active_claim_ids", "split_status", "ready",
+    "evidence_gate", "video_present", "model_confidence", "media_forensics_status",
+    "media_forensics_risk_level", "supplemental_linkage_status", "business_boundary", "failed_conditions",
+    "minimum_visibility_coverage", "minimum_confidence", "minimum_required_view_coverage", "fully_observable",
+    "max_unobserved_seconds", "claimed_item_longest_out_of_frame_seconds", "maximum_forensic_risk",
+    "pass_integrity_status", "specialized_pass_guard_reason",
+    "aggregation_warnings", "code", "chunk_index", "alleged_end", "later_sampled_evidence_seconds",
+    "global_review_summary", "sampled_start_seconds", "sampled_end_seconds", "source_duration_seconds",
+    "claimed_item_first_exposed_timestamp", "timeline_coverage_ratio",
+    "chunk_narratives_excluded_from_public_conclusion", "quality_issues", "tamper_risk", "risk_reason_codes",
+}
+
+
+def _redact_minor_identifiers(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _redact_minor_identifiers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_minor_identifiers(item) for item in value]
+    if isinstance(value, str):
+        for pattern in _MINOR_IDENTIFIER_PATTERNS:
+            value = pattern.sub("[已脱敏]", value)
+        value = _LABELED_NAME_PATTERN.sub(r"\1[已脱敏]", value)
+        value = _LABELED_ADDRESS_PATTERN.sub(r"\1[已脱敏]", value)
+    return value
+
+
+def _project_public_parsed_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _project_public_parsed_fields(item)
+            for key, item in value.items()
+            if str(key) in _PUBLIC_PARSED_FIELD_NAMES
+        }
+    if isinstance(value, list):
+        return [_project_public_parsed_fields(item) for item in value]
+    return _redact_minor_identifiers(value)
+
+
+def _project_public_dto(value: Any, schema: Any) -> Any:
+    if schema is True:
+        return _redact_minor_identifiers(value)
+    if isinstance(schema, list):
+        return [_project_public_dto(item, schema[0]) for item in value] if isinstance(value, list) else []
+    if isinstance(schema, dict):
+        if not isinstance(value, dict):
+            return {}
+        return {
+            key: _project_public_dto(value[key], child_schema)
+            for key, child_schema in schema.items()
+            if key in value
+        }
+    return None
+
+
+def _public_minor_material_parsed(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    return _project_public_dto(parsed, _MINOR_PUBLIC_PARSED_SCHEMA)
+
+
+def _public_parsed(parsed: Dict[str, Any], scenario: str) -> Dict[str, Any]:
+    if scenario == "minor_material":
+        return _public_minor_material_parsed(parsed)
+    return _project_public_parsed_fields(parsed)
+
+
+def _public_url_signature(path: str, expires: int) -> str:
+    message = f"{path}\n{expires}".encode("utf-8")
+    return hmac.new(REPORT_SIGNING_SECRET, message, hashlib.sha256).hexdigest()
+
+
+def _sign_public_url(path: str, *, expires: Optional[int] = None) -> str:
+    split = urlsplit(path)
+    expires_at = int(expires if expires is not None else time.time() + REPORT_URL_TTL_SECONDS)
+    signed = f"{split.path}?expires={expires_at}&sig={_public_url_signature(split.path, expires_at)}"
+    return signed + (f"#{split.fragment}" if split.fragment else "")
+
+
+def _require_public_signature(path: str, expires: str, sig: str) -> None:
+    try:
+        expires_at = int(expires)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail="forbidden") from exc
+    expected = _public_url_signature(path, expires_at)
+    if expires_at < int(time.time()) or not sig or not hmac.compare_digest(sig, expected):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
+def _refresh_signed_urls(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _refresh_signed_urls(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_refresh_signed_urls(item) for item in value]
+    if isinstance(value, str) and urlsplit(value).path.startswith(("/reports/", "/media/", "/media-item/")):
+        return _sign_public_url(value)
+    return value
+
+
+def _sanitize_public_report_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    public = _strip_private_report_fields(data)
+    agent_report = public.get("agent_report") if isinstance(public.get("agent_report"), dict) else {}
+    scenario = str(agent_report.get("scenario") or "")
+    agent_report["parsed"] = _public_parsed(agent_report.get("parsed") or {}, scenario)
+    return _refresh_signed_urls(_redact_minor_identifiers(public))
+
+
 def _public_agent_report_payload(
     *,
     case: Dict[str, Any],
@@ -354,11 +642,25 @@ def _public_agent_report_payload(
     usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
     cost = result.get("cost") if isinstance(result.get("cost"), dict) else {}
     chunking = result.get("chunking") if isinstance(result.get("chunking"), dict) else {}
+    public_videos = []
+    for item in case.get("videos") or []:
+        video = {
+            key: item.get(key)
+            for key in ("video_index", "duration_seconds", "native_fps", "fps_requested", "sampled_frames")
+            if item.get(key) not in (None, "")
+        }
+        duration = float(item.get("duration_seconds") or 0)
+        if duration > 0 and item.get("sampled_frames") not in (None, ""):
+            video["effective_sample_fps"] = round(float(item["sampled_frames"]) / duration, 4)
+        public_videos.append(video)
     evidence_package = {
-        "videos": case.get("videos") or [],
+        "videos": public_videos,
         "frames_sent": len(case.get("frames") or []),
         "supplemental_images_sent": len(case.get("supplemental_images") or []),
     }
+    parsed = _public_parsed(parsed, str(case.get("scenario") or ""))
+    public_conclusion = _redact_minor_identifiers(public_conclusion)
+    public_next_step = _redact_minor_identifiers(public_next_step)
     payload = {
         "case_id": case.get("case_id") or sample_dir.name,
         "scenario": case["scenario"],
@@ -408,7 +710,33 @@ def _media_url(path_value: Any) -> str:
     if not any(path == base or base in path.parents for base in allowed_roots):
         return ""
     rel = path.relative_to(ROOT.resolve()).as_posix()
-    return "/media/" + quote(rel)
+    media_id = hmac.new(
+        REPORT_SIGNING_SECRET,
+        f"media\n{rel}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+    with PUBLIC_MEDIA_INDEX_LOCK:
+        PUBLIC_MEDIA_INDEX[media_id] = rel
+        PUBLIC_MEDIA_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = PUBLIC_MEDIA_INDEX_PATH.with_name(
+            f".{PUBLIC_MEDIA_INDEX_PATH.name}.{uuid4().hex}.tmp"
+        )
+        try:
+            temp_path.write_text(
+                json.dumps(PUBLIC_MEDIA_INDEX, ensure_ascii=False, sort_keys=True),
+                encoding="utf-8",
+            )
+            for attempt in range(1, 6):
+                try:
+                    os.replace(temp_path, PUBLIC_MEDIA_INDEX_PATH)
+                    break
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.05 * attempt)
+        finally:
+            temp_path.unlink(missing_ok=True)
+    return _sign_public_url(f"/media-item/{media_id}")
 
 
 def _media_gallery(case: Dict[str, Any], sample_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -420,8 +748,6 @@ def _media_gallery(case: Dict[str, Any], sample_dir: Optional[Path] = None) -> D
             "image_index",
             "timestamp",
             "timestamp_seconds",
-            "file",
-            "video_file",
             "width",
             "height",
             "bytes",
@@ -496,28 +822,167 @@ def _structured_review_ok(parsed: Dict[str, Any]) -> bool:
     return bool(parsed.get("predicted_label")) and parsed.get("confidence") not in (None, "")
 
 
+def _model_key_from_identifier(identifier: str) -> Optional[str]:
+    normalized = str(identifier or "").strip().lower()
+    for key, config in MODEL_CONFIGS.items():
+        aliases = {
+            str(key).lower(),
+            str(config.get("model") or "").lower(),
+            str(config.get("display_model") or "").lower(),
+        }
+        if normalized in aliases:
+            return key
+    return None
+
+
+def _configured_model_keys(requested_model_key: str) -> List[str]:
+    if requested_model_key != "auto":
+        resolved = _model_key_from_identifier(requested_model_key)
+        return [resolved] if resolved else []
+    identifiers = [os.getenv("VISUAL_REVIEW_PRIMARY_MODEL", "gemini-3.5-flash")]
+    identifiers.extend(
+        item.strip()
+        for item in os.getenv("VISUAL_REVIEW_FALLBACK_MODELS", "").split(",")
+        if item.strip()
+    )
+    keys: List[str] = []
+    for identifier in identifiers:
+        key = _model_key_from_identifier(identifier)
+        if key and key not in keys:
+            keys.append(key)
+    return keys or ["gemini35"]
+
+
+def _call_model_chunked_with_fallback(
+    requested_model_key: str,
+    case: Dict[str, Any],
+    timeout: int,
+    retries: int,
+) -> Dict[str, Any]:
+    model_keys = _configured_model_keys(requested_model_key)
+    if not model_keys:
+        return {"status": "skipped", "error": "unknown_review_model", "cost_status": "not_incurred"}
+    wall_started = time.time()
+    attempts: List[Dict[str, Any]] = []
+    prior_unknown_calls = 0
+    prior_model_calls = 0
+    prior_model_latency = 0.0
+    blocked_providers = set()
+    last_result: Dict[str, Any] = {"status": "skipped", "error": "no_available_review_model"}
+    for route_index, model_key in enumerate(model_keys, start=1):
+        config = MODEL_CONFIGS[model_key]
+        if config.get("provider") in blocked_providers:
+            attempts.append({"route_index": route_index, "status": "skipped", "reason": "transport_circuit_open"})
+            continue
+        current = call_model_chunked(config, case, timeout=timeout, retries=retries)
+        current_chunking = current.get("chunking") if isinstance(current.get("chunking"), dict) else {}
+        current_calls = int(current_chunking.get("total_model_calls") or 0)
+        current_unknown = int(current.get("unknown_cost_calls") or 0)
+        attempts.append({
+            "route_index": route_index,
+            "status": str(current.get("status") or "failed"),
+            "status_code": current.get("status_code"),
+            "error_type": str(current.get("error_type") or ""),
+            "model_calls": current_calls,
+        })
+        if current.get("status") == "success":
+            result = dict(current)
+            chunking = dict(current_chunking)
+            chunking["total_model_calls"] = current_calls + prior_model_calls
+            result["chunking"] = chunking
+            result["unknown_cost_calls"] = int(result.get("unknown_cost_calls") or 0) + prior_unknown_calls
+            if prior_unknown_calls:
+                result["cost_status"] = "partial_unknown"
+            result["model_latency_seconds_sum"] = round(
+                float(result.get("model_latency_seconds_sum") or 0) + prior_model_latency,
+                2,
+            )
+            result["latency_seconds"] = round(time.time() - wall_started, 2)
+            result["route_fallback_count"] = sum(1 for item in attempts[:-1] if item.get("status") != "skipped")
+            result["route_attempts"] = attempts
+            return result
+        last_result = current
+        prior_model_calls += current_calls
+        prior_unknown_calls += current_unknown
+        prior_model_latency += float(current.get("model_latency_seconds_sum") or current.get("latency_seconds") or 0)
+        if current.get("status_code") is None and current.get("error_type") == "hard":
+            blocked_providers.add(config.get("provider"))
+    result = dict(last_result)
+    chunking = dict(result.get("chunking") or {})
+    chunking["total_model_calls"] = prior_model_calls
+    result["chunking"] = chunking
+    result["unknown_cost_calls"] = prior_unknown_calls
+    result["cost_status"] = "unknown" if prior_unknown_calls else str(result.get("cost_status") or "not_incurred")
+    result["model_latency_seconds_sum"] = round(prior_model_latency, 2)
+    result["latency_seconds"] = round(time.time() - wall_started, 2)
+    result["route_fallback_count"] = max(0, sum(1 for item in attempts if item.get("status") != "skipped") - 1)
+    result["route_attempts"] = attempts
+    return result
+
+
 def _internal_inference_estimate(result: Dict[str, Any]) -> Dict[str, Any]:
     """仅供受保护审核 API 和内部运维汇总，公开 HTML 不引用该对象。"""
     usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
     cost = result.get("cost") if isinstance(result.get("cost"), dict) else {}
     chunking = result.get("chunking") if isinstance(result.get("chunking"), dict) else {}
     channels = chunking.get("channels") if isinstance(chunking.get("channels"), dict) else {}
+    degraded_passes: Dict[str, Any] = {}
+    for output_name, source_name in (
+        ("main_review", "main_review_pass"),
+        ("object_continuity", "continuity_pass"),
+        ("damage_causality", "damage_causality_pass"),
+    ):
+        pass_data = chunking.get(source_name) if isinstance(chunking.get(source_name), dict) else {}
+        failures = pass_data.get("failures") if isinstance(pass_data.get("failures"), list) else []
+        coverage_gaps = pass_data.get("coverage_gaps") if isinstance(pass_data.get("coverage_gaps"), list) else []
+        if failures or coverage_gaps:
+            degraded_passes[output_name] = {
+                "status": str(pass_data.get("status") or "degraded"),
+                "failures": [
+                    {
+                        key: item.get(key)
+                        for key in ("chunk_index", "error", "latency_seconds", "cost_status")
+                        if item.get(key) not in (None, "")
+                    }
+                    for item in failures
+                    if isinstance(item, dict)
+                ],
+                "coverage_gaps": [
+                    {
+                        "chunk_index": item.get("chunk_index"),
+                        "missing_target_frame_count": int(item.get("missing_target_frame_count") or 0),
+                        "missing_target_frame_indices": item.get("missing_target_frame_indices") or [],
+                        "reason": str(item.get("reason") or ""),
+                        "assessment_status": str(item.get("assessment_status") or ""),
+                    }
+                    for item in coverage_gaps
+                    if isinstance(item, dict)
+                ],
+            }
     return {
         "input_tokens": int(usage.get("input_tokens") or 0),
         "output_tokens": int(usage.get("output_tokens") or 0),
         "total_tokens": int(usage.get("total_tokens") or 0),
         "estimated_usd": round(float(cost.get("estimated_usd") or 0.0), 6),
+        "cost_status": str(result.get("cost_status") or "unknown"),
+        "unknown_cost_calls": int(result.get("unknown_cost_calls") or 0),
+        "route_fallback_count": int(result.get("route_fallback_count") or 0),
+        "route_attempts": result.get("route_attempts") if isinstance(result.get("route_attempts"), list) else [],
+        "total_frames": int(chunking.get("total_frames") or 0),
+        "main_review_frames": int(chunking.get("main_review_frames") or 0),
         "total_model_calls": int(chunking.get("total_model_calls") or 1),
         "segment_count": int(chunking.get("segment_count") or 1),
         "channels": {
             key: {
                 "model_calls": int((value or {}).get("model_calls") or 0),
+                "repair_calls": int((value or {}).get("repair_calls") or 0),
                 "total_tokens": int((value or {}).get("total_tokens") or 0),
                 "estimated_usd": round(float((value or {}).get("estimated_usd") or 0.0), 6),
             }
             for key, value in channels.items()
             if isinstance(value, dict)
         },
+        "degraded_passes": degraded_passes,
         "boundary": "估算值用于容量与成本比较，不等同于供应商最终账单。",
     }
 
@@ -601,7 +1066,14 @@ def _run_review(
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
-    result = call_model_chunked(MODEL_CONFIGS["gemini35"], case, timeout=300, retries=2)
+    model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
+    model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
+    result = _call_model_chunked_with_fallback(
+        "auto",
+        case,
+        timeout=model_timeout,
+        retries=model_retries,
+    )
     review = _agent_report_response(case, video.parent, result, "agent_single", profile["label"])
     review["sampling"] = {
         "profile": review_model,
@@ -630,6 +1102,9 @@ def _agent_report_response(
     failure = {} if ok else _public_failure_reason(result, structured_ok)
     public_conclusion = _safe_agent_conclusion(parsed, case["scenario_label"]) if ok else f"审核未完成：{failure.get('message')}"
     public_next_step = _safe_agent_next_step((parsed.get("overall_audit") or {}).get("business_follow_up_suggestion") or parsed.get("next_step")) if ok else failure.get("operator_hint", "请VIP客服结合订单、售后规则和原始素材处理。")
+    if case.get("scenario") == "minor_material":
+        public_conclusion = _redact_minor_identifiers(public_conclusion)
+        public_next_step = _redact_minor_identifiers(public_next_step)
     report_name = f"{report_stem}_{int(time.time())}_{len(ALLOWED_REPORTS) + 1}.html"
     agent_report = _public_agent_report_payload(
         case=case,
@@ -668,7 +1143,7 @@ def _agent_report_response(
             "videos_received": len(case.get("videos") or []),
         }
         agent_report["diagnostics"] = data["diagnostics"]
-    data = _strip_private_report_fields(data)
+    data = _sanitize_public_report_data(data)
     ALLOWED_REPORTS[report_name] = data
     PUBLIC_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
     (PUBLIC_SUMMARY_DIR / _report_data_name(report_name)).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -679,7 +1154,7 @@ def _agent_report_response(
             f"{len(case.get('videos') or [])} 个视频合并为同一证据包，送审 {len(case.get('frames') or [])} 帧，补充图片 {len(case.get('supplemental_images') or [])} 张。"
             + (f"另隔离 {len(case.get('rejected_videos') or [])} 个无法解码的视频。" if case.get("rejected_videos") else "")
         ),
-        "report": {"html_url": "/reports/" + report_name},
+        "report": {"html_url": _sign_public_url("/reports/" + quote(report_name, safe=""))},
         "agent_report": data.get("agent_report") or {},
         "media_warnings": data.get("media_warnings") or [],
         "agent_brief": {
@@ -716,7 +1191,7 @@ def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> D
         raise HTTPException(status_code=404, detail="样本不存在")
     if scenario not in {"video_unboxing", "product_damage", "minor_material"}:
         raise HTTPException(status_code=400, detail="未知审核场景")
-    if model_key not in MODEL_CONFIGS:
+    if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
     args = SimpleNamespace(
@@ -732,7 +1207,9 @@ def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> D
     case = load_case_bundle(sample_dir, args, run_dir, scenario_override=scenario)
     case["scenario"] = scenario
     case["scenario_label"] = {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "资料审核"}[scenario]
-    result = call_model_chunked(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
+    model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
+    model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
+    result = _call_model_chunked_with_fallback(model_key, case, timeout=model_timeout, retries=model_retries)
     review = _agent_report_response(case, sample_dir, result, f"agent_{sample_id}")
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
@@ -783,7 +1260,7 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
 
 
 def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False) -> Dict[str, Any]:
-    if model_key not in MODEL_CONFIGS:
+    if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
     args = SimpleNamespace(
@@ -801,7 +1278,14 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
-    result = call_model_chunked(MODEL_CONFIGS[model_key], case, timeout=300, retries=2)
+    model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
+    model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
+    result = _call_model_chunked_with_fallback(
+        model_key,
+        case,
+        timeout=model_timeout,
+        retries=model_retries,
+    )
     review = _agent_report_response(
         case,
         folder_dir,
@@ -840,13 +1324,22 @@ def minor_material_entry() -> str:
 def health() -> Dict[str, Any]:
     sample_base = _sample_base()
     sample_ids = [path.name for path in sample_base.glob("sample_*") if path.is_dir()] if sample_base.is_dir() else []
+    signing_ready = REPORT_SIGNING_SECRET_CONFIGURED or not REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET
     return {
-        "ok": True,
+        "ok": signing_ready,
         "service": "visual_review_workbench",
         "data_mode": "demo",
         "source_system": "mitako_fixture",
         "integration_status": "not_connected",
         "access_control": "生产部署必须由主服务或反向代理执行租户鉴权",
+        "report_signing_secret_configured": REPORT_SIGNING_SECRET_CONFIGURED,
+        "persistent_report_signing_required": REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET,
+        "model_media_transport": {
+            "mode": "inline_base64_images",
+            "supplier_file_uri_required": False,
+            "accepted_model_media_types": ["image/jpeg", "image/webp"],
+            "strategy": "服务端本地抽帧、压缩和分段并发；原视频不直接发送给多模态供应商",
+        },
         "built_in_samples_available": bool(sample_ids),
         "built_in_sample_count": len(sample_ids),
     }
@@ -858,7 +1351,8 @@ def favicon() -> Response:
 
 
 @app.get("/reports/{name}", response_class=HTMLResponse)
-def public_report(name: str) -> str:
+def public_report(name: str, expires: str = "", sig: str = "") -> str:
+    _require_public_signature("/reports/" + quote(name, safe=""), expires, sig)
     data = ALLOWED_REPORTS.get(name)
     if not data:
         path = (PUBLIC_SUMMARY_DIR / _report_data_name(name)).resolve()
@@ -866,12 +1360,12 @@ def public_report(name: str) -> str:
         if base in path.parents and path.exists() and path.suffix == ".json":
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                data = _strip_private_report_fields(data)
+                data = _sanitize_public_report_data(data)
             except json.JSONDecodeError:
                 data = None
     if not data:
         raise HTTPException(status_code=404, detail="not_found")
-    return _render_public_report(_strip_private_report_fields(data))
+    return _render_public_report(_sanitize_public_report_data(data))
 
 
 @app.get("/ppt-assets/{name}")
@@ -884,9 +1378,10 @@ def ppt_asset(name: str) -> FileResponse:
 
 
 @app.get("/media/{rel_path:path}")
-def media_asset(rel_path: str) -> FileResponse:
+def media_asset(rel_path: str, expires: str = "", sig: str = "") -> FileResponse:
     try:
         rel = unquote(rel_path).replace("\\", "/")
+        _require_public_signature("/media/" + quote(rel), expires, sig)
         path = (ROOT / rel).resolve()
     except OSError as exc:
         raise HTTPException(status_code=404, detail="素材不存在") from exc
@@ -894,6 +1389,41 @@ def media_asset(rel_path: str) -> FileResponse:
     if not any(path == base or base in path.parents for base in allowed_roots):
         raise HTTPException(status_code=404, detail="素材不存在")
     if not path.exists() or path.suffix.lower() not in ALLOWED_MEDIA_SUFFIXES:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    return FileResponse(path)
+
+
+@app.get("/media-item/{media_id}")
+def opaque_media_asset(media_id: str, expires: str = "", sig: str = "") -> FileResponse:
+    if not re.fullmatch(r"[a-f0-9]{32}", media_id):
+        raise HTTPException(status_code=404, detail="素材不存在")
+    _require_public_signature(f"/media-item/{media_id}", expires, sig)
+    with PUBLIC_MEDIA_INDEX_LOCK:
+        rel = PUBLIC_MEDIA_INDEX.get(media_id)
+        if not rel and PUBLIC_MEDIA_INDEX_PATH.is_file():
+            try:
+                stored = json.loads(PUBLIC_MEDIA_INDEX_PATH.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                stored = {}
+            if isinstance(stored, dict):
+                PUBLIC_MEDIA_INDEX.update(
+                    {
+                        str(key): str(value)
+                        for key, value in stored.items()
+                        if re.fullmatch(r"[a-f0-9]{32}", str(key)) and isinstance(value, str)
+                    }
+                )
+            rel = PUBLIC_MEDIA_INDEX.get(media_id)
+    if not rel:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    try:
+        path = (ROOT / rel).resolve()
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="素材不存在") from exc
+    allowed_roots = [WORKBENCH_DIR.resolve(), SAMPLE_MATERIAL_DIR, RUNTIME_MEDIA_DIR]
+    if not any(path == base or base in path.parents for base in allowed_roots):
+        raise HTTPException(status_code=404, detail="素材不存在")
+    if not path.is_file() or path.suffix.lower() not in ALLOWED_MEDIA_SUFFIXES:
         raise HTTPException(status_code=404, detail="素材不存在")
     return FileResponse(path)
 
@@ -922,13 +1452,13 @@ def review_sample(payload: Dict[str, str]) -> JSONResponse:
     return JSONResponse(_run_sample_agent_review(
         payload.get("sample_id", "sample_003"),
         payload.get("scenario", "product_damage"),
-        payload.get("model_key", "gemini35"),
+        payload.get("model_key", "auto"),
     ))
 
 
 @app.post("/api/review-samples-batch")
 def review_samples_batch(payload: Dict[str, str]) -> JSONResponse:
-    return JSONResponse(_run_sample_batch_agent_review(payload.get("model_key", "gemini35")))
+    return JSONResponse(_run_sample_batch_agent_review(payload.get("model_key", "auto")))
 
 
 @app.post("/api/review-folder")
@@ -998,7 +1528,7 @@ def review_folder(
     response = _run_folder_agent_review(
         folder_dir,
         scenario,
-        "gemini35",
+        "auto",
         evidence_context,
         sampling_mode,
         fps,
@@ -1045,7 +1575,7 @@ def review_folders_batch(
             result = _run_folder_agent_review(
                 folder_dir,
                 scenario,
-                "gemini35",
+                "auto",
                 evidence_context,
                 sampling_mode,
                 fps,

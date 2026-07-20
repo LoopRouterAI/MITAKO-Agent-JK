@@ -322,17 +322,30 @@ def sampling_plan(
         else adaptive_frame_budget(duration_seconds, source_bytes, max_frames)
     )
     total_frames = frames_per_video * video_count
-    segments = max(1, math.ceil(total_frames / frames_per_call))
     effective_continuity, effective_causality = _effective_review_policies({
         "sampling_policy": policy,
         "scenario": scenario or "",
         "continuity_policy": continuity_policy or {},
         "damage_causality_policy": damage_causality_policy or {},
     })
+    representative_main_enabled = (
+        scenario == "product_damage"
+        and effective_continuity.get("force_dense_scan") is True
+        and effective_causality.get("force_action_scan") is True
+    )
+    main_review_frame_limit = max(
+        24,
+        min(int(os.getenv("REVIEW_PRODUCT_DAMAGE_MAIN_MAX_FRAMES", "48") or 48), 96),
+    )
+    main_review_frames = min(total_frames, main_review_frame_limit) if representative_main_enabled else total_frames
+    segments = max(1, math.ceil(main_review_frames / frames_per_call))
     continuity_enabled = effective_continuity.get("force_dense_scan") is True and scenario in {
         "wrong_item", "missing_item", "product_damage"
     }
-    continuity_chunk_frames = max(4, min(int(effective_continuity.get("dedicated_chunk_frames") or 12), 16))
+    continuity_chunk_frames = max(
+        12,
+        min(int(os.getenv("REVIEW_CONTINUITY_FRAMES_PER_CALL", "24") or 24), 24),
+    )
     continuity_segments = math.ceil(total_frames / continuity_chunk_frames) if continuity_enabled else 0
     causality_enabled = scenario == "product_damage" and effective_causality.get("force_action_scan") is True
     causality_chunk_frames = max(8, min(int(effective_causality.get("dedicated_chunk_frames") or 20), 24))
@@ -345,7 +358,14 @@ def sampling_plan(
         "fps": fps,
         "estimated_frames_per_video": frames_per_video,
         "estimated_total_frames": total_frames,
+        "main_review_frames": main_review_frames,
+        "main_review_strategy": "uniform_representative" if representative_main_enabled else "all_sampled_frames",
         "frames_per_model_call": frames_per_call,
+        "continuity_frames_per_call": continuity_chunk_frames,
+        "continuity_frames_per_call_by_transport": {
+            "gemini_native_individual_frames": continuity_chunk_frames,
+            "openai_compatible_individual_frames": continuity_chunk_frames,
+        },
         "estimated_model_segments": segments,
         "estimated_channel_calls": {
             "main_review": segments,
@@ -689,7 +709,7 @@ def run_job(job_id: str) -> Dict[str, Any]:
         workbench_transport = payload.pop("_workbench_transport", {})
         review = dict(payload.get("review")) if isinstance(payload.get("review"), dict) else {}
         review = _apply_input_readiness_guard(review, readiness)
-        review = apply_review_decision_policy(job, review)
+        review = apply_review_decision_policy(job, review, media_forensics=forensics)
         review.pop("report", None)
         review["report"] = {"html_url": f"/api/v1/review/jobs/{job_id}/report"}
         diagnostics = review.get("diagnostics") or payload.get("diagnostics") or {}
@@ -848,7 +868,11 @@ def contract() -> Dict[str, Any]:
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",
         "media_processing": {
-            "model_input": "服务端对全时轴抽帧并压缩为 JPEG，原视频不直接发送给多模态模型。",
+            "model_input": "服务端本地完成全时轴抽帧、压缩和分段；细节、连续性与成因通道均逐张发送带帧号和时间戳的 JPEG 独立帧。原视频和拼图均不作为模型审核输入。",
+            "model_request_transport": "inline_base64_images",
+            "supplier_file_uri_required": False,
+            "detail_frame_format": "image/jpeg",
+            "temporal_sheet_format": "image/webp",
             "single_asset_limit_mb": _limit_bytes("REVIEW_MAX_ASSET_MB", 650) // (1024 * 1024),
             "case_limit_mb": _limit_bytes("REVIEW_MAX_CASE_MB", 750) // (1024 * 1024),
             "large_batch": "120GB 级生产批次应由对象存储直传、云转码/故事板服务和案件引用适配层承接；当前未伪装为已接入。",

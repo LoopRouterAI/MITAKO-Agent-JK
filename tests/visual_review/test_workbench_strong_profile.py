@@ -10,6 +10,92 @@ from poc.visual_review_poc import workbench_server
 
 
 class WorkbenchStrongProfileTest(unittest.TestCase):
+    def test_auto_model_route_uses_configured_fallback_after_primary_transport_failure(self) -> None:
+        failed = {
+            "status": "failed",
+            "error_type": "hard",
+            "status_code": None,
+            "latency_seconds": 10.0,
+            "model_latency_seconds_sum": 20.0,
+            "cost_status": "unknown",
+            "unknown_cost_calls": 2,
+            "chunking": {"total_model_calls": 2},
+        }
+        succeeded = {
+            "status": "success",
+            "latency_seconds": 30.0,
+            "model_latency_seconds_sum": 50.0,
+            "cost_status": "estimated",
+            "unknown_cost_calls": 0,
+            "chunking": {"total_model_calls": 5},
+            "parsed": {"predicted_label": "review"},
+        }
+        with patch.dict(
+            "os.environ",
+            {
+                "VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash",
+                "VISUAL_REVIEW_FALLBACK_MODELS": "qwen3.5-flash",
+            },
+            clear=False,
+        ), patch.object(
+            workbench_server,
+            "call_model_chunked",
+            side_effect=[failed, succeeded],
+        ) as model:
+            result = workbench_server._call_model_chunked_with_fallback(
+                "auto", {"case_id": "CASE-ROUTE"}, timeout=180, retries=0
+            )
+
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual(model.call_args_list[0].args[0]["model"], "gemini-3.5-flash")
+        self.assertEqual(model.call_args_list[1].args[0]["model"], "qwen3.5-flash")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["route_fallback_count"], 1)
+        self.assertEqual(result["cost_status"], "partial_unknown")
+        self.assertEqual(result["unknown_cost_calls"], 2)
+        self.assertEqual(result["chunking"]["total_model_calls"], 7)
+
+    def test_folder_review_uses_configured_model_timeout_and_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            case = {
+                "case_id": "CASE-FOLDER-CONFIG",
+                "scenario": "product_damage",
+                "scenario_label": "商品有伤审核",
+                "videos": [],
+                "frames": [],
+                "supplemental_images": [],
+            }
+            with patch.dict(
+                "os.environ",
+                {"REVIEW_MODEL_TIMEOUT_SECONDS": "181", "REVIEW_MODEL_RETRIES": "1"},
+                clear=False,
+            ), patch.object(workbench_server, "load_visual_env"), patch.object(
+                workbench_server, "load_case_bundle", return_value=case
+            ), patch.object(
+                workbench_server, "apply_frontdesk_context", side_effect=lambda current, *_: current
+            ), patch.object(
+                workbench_server, "call_model_chunked", return_value={"status": "failed"}
+            ) as model, patch.object(
+                workbench_server,
+                "_agent_report_response",
+                return_value={"summary": {"review_status": "failed"}},
+            ):
+                workbench_server._run_folder_agent_review(
+                    folder,
+                    "product_damage",
+                    "gemini35",
+                    {},
+                    "dense",
+                    1.0,
+                    1200,
+                    24,
+                    12,
+                )
+
+        self.assertEqual(model.call_args.kwargs["timeout"], 181)
+        self.assertEqual(model.call_args.kwargs["retries"], 1)
+
     def test_single_upload_uses_dense_chunked_engine_for_strong_profile(self) -> None:
         observed = {}
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import html
 import json
 import math
@@ -270,6 +271,53 @@ def find_supplemental_images(video: Path, limit: int, resource_fields: Dict[str,
     return find_supplemental_images_in_dir(video.parent, limit, resource_fields)
 
 
+def order_info_context(path: Path) -> Dict[str, Any]:
+    """把甲方订单快照转换为最小化的 SKU/应发基准，不带用户和地址字段。"""
+    snapshot = read_json(path)
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("goods_list"), list):
+        return {}
+    order_items = []
+    product_master = {}
+    for index, item in enumerate(snapshot["goods_list"], start=1):
+        if not isinstance(item, dict):
+            continue
+        sku = str(item.get("number") or item.get("id") or "").strip()
+        name = str(item.get("name") or item.get("des") or "").strip()
+        try:
+            quantity = int(item.get("goods_num") or 0)
+        except (TypeError, ValueError):
+            quantity = 0
+        if not sku or not name or quantity <= 0:
+            continue
+        item_ref = f"ORDER-LINE-{index:03d}"
+        order_item = {
+            "item_ref": item_ref,
+            "sku": sku,
+            "product_name": name,
+            "specification": str(item.get("intro") or item.get("des") or "").strip(),
+            "expected_quantity": quantity,
+            "product_image_ref": str(item.get("main_img") or "").strip(),
+        }
+        order_items.append(order_item)
+        product_master[item_ref] = {
+            "sku": sku,
+            "product_name": name,
+            "specification": order_item["specification"],
+            "product_image_ref": order_item["product_image_ref"],
+        }
+    if not order_items:
+        return {}
+    return {
+        "order_items": order_items,
+        "product_master_data": product_master,
+        "fulfillment_baseline": {
+            "baseline_version": f"order_info_snapshot:{hashlib.sha256(path.read_bytes()).hexdigest()[:16]}",
+            "expected_items": order_items,
+            "source": "customer_order_info_snapshot",
+        },
+    }
+
+
 def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional[Path] = None) -> Dict[str, Any]:
     claim = read_text(folder / "content.txt")
     manifest = {}
@@ -288,11 +336,18 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
     ]
     resource_fields = {str(item.get("local_file")): item.get("fields") or [] for item in (manifest.get("resources") or []) if item.get("local_file")}
     scenario = infer_scenario("\n".join((claim, str(manifest.get("tag") or ""))))
+    order_snapshot = order_info_context(folder / "order_info_snapshot.json")
     structured_business_context = {
-        "order_items": read_json(folder / "order_items.json") or manifest.get("order_items") or [],
-        "product_master_data": read_json(folder / "product_master.json") or manifest.get("product_master_data") or {},
+        "order_items": read_json(folder / "order_items.json") or order_snapshot.get("order_items") or manifest.get("order_items") or [],
+        "product_master_data": read_json(folder / "product_master.json") or order_snapshot.get("product_master_data") or manifest.get("product_master_data") or {},
         "warehouse_master_data": read_json(folder / "warehouse_master.json") or manifest.get("warehouse_master_data") or {},
         "sku_master_data": read_json(folder / "sku_master.json") or manifest.get("sku_master_data") or {},
+        "fulfillment_baseline": order_snapshot.get("fulfillment_baseline") or {},
+        "frontdesk_evidence_package": {
+            "order_item": order_snapshot.get("order_items") or [],
+            "product_master_data": order_snapshot.get("product_master_data") or {},
+            "fulfillment_baseline": order_snapshot.get("fulfillment_baseline") or {},
+        } if order_snapshot else {},
     }
     return {
         "case_id": folder.name,
@@ -374,7 +429,13 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
         "fulfillment_baseline": _structured_context_value(context.get("fulfillment_baseline")),
         "evidence_coverage": _structured_context_value(context.get("evidence_coverage")),
     }
-    structured["frontdesk_evidence_package"] = {key: value for key, value in frontdesk_fields.items() if value}
+    existing_frontdesk = structured.get("frontdesk_evidence_package")
+    if not isinstance(existing_frontdesk, dict):
+        existing_frontdesk = {}
+    structured["frontdesk_evidence_package"] = {
+        **existing_frontdesk,
+        **{key: value for key, value in frontdesk_fields.items() if value},
+    }
     continuity_policy = _structured_context_value(context.get("continuity_policy"))
     if isinstance(continuity_policy, dict):
         structured["continuity_policy"] = continuity_policy

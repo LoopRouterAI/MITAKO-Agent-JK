@@ -78,6 +78,30 @@ def render_damage_causality_panel(
         )
     alternatives = _text_items(assessment.get("alternative_explanations"))
     alternatives_html = "".join(f"<li>{escape(item)}</li>" for item in alternatives[:8]) or "<li>本轮没有列出其他解释。</li>"
+    source_summary = assessment.get("evidence_source_summary") or {}
+    primary_video = source_summary.get("primary_video") or {}
+    supplemental = source_summary.get("supplemental_images") or {}
+    supplemental_status = {
+        "verified": "已建立关联，必须与主视频共同复核",
+        "not_linked": "已明确未建立同物或过程关联",
+        "unresolved": "同物、同部位和过程关联尚未解决，不能忽略该证据",
+    }.get(supplemental.get("linkage_status"), "未提供或未完成关联分析")
+    supplemental_findings = supplemental.get("evidence_findings") or []
+    supplemental_findings_html = (
+        '<h3>补充图片所见与关联判断</h3><div class="evidence-grid">'
+        + evidence_renderer(supplemental_findings, media_gallery, "补充证据")
+        + "</div>"
+        if supplemental_findings
+        else '<h3>补充图片所见与关联判断</h3><p class="muted">本轮没有形成可回链的补充图片事实，不能据此忽略补充证据。</p>'
+    )
+    key_evidence = assessment.get("key_evidence") or []
+    key_evidence_html = (
+        '<h3>关键帧审查链</h3><div class="evidence-grid">'
+        + evidence_renderer(key_evidence, media_gallery, "关键审查帧")
+        + "</div>"
+        if key_evidence
+        else '<h3>关键帧审查链</h3><p class="muted">本轮没有形成可回链的关键帧；因此不能声称已逐步证明结论。</p>'
+    )
 
     def chain_cards(key: str, title: str, empty: str) -> str:
         items = []
@@ -107,6 +131,14 @@ def render_damage_causality_panel(
     </div>
     <p><b>损伤位置与类型：</b>{escape(assessment.get("damage_type_and_location") or "本轮未明确描述。")}</p>
     <p><b>过程锚点：</b>操作前状态 {escape("可见" if assessment.get("pre_opening_state_visible") else "不可见")}；拆封/操作动作 {escape("可见" if assessment.get("opening_action_visible") else "不可见")}；损伤变化 {escape("已观察到" if assessment.get("damage_change_observed") else "未形成直接观察")}</p>
+    <h3>主视频与补充证据分层</h3>
+    <div class="boundary-grid">
+      <article class="boundary-card"><h3>主视频</h3><p>范围：{escape(primary_video.get("scope") or "未完成主视频审查")}</p><p>损伤存在性：{escape(_label(primary_video.get("damage_presence")))}</p><p>诉求支持度：{escape(_label(primary_video.get("claim_support")))}</p></article>
+      <article class="boundary-card"><h3>用户补充证据</h3><p>补充图片 {escape(supplemental.get("provided_count") or 0)} 张；报告引用 {escape(supplemental.get("referenced_count") or 0)} 张。</p><p>{escape(supplemental_status)}</p></article>
+    </div>
+    <p><b>证据权重边界：</b>{escape(source_summary.get("decision_boundary") or "补充图片与主视频必须分别说明证据作用。")}</p>
+    {supplemental_findings_html}
+    {key_evidence_html}
     {chain_cards("before_action_evidence", "动作前证据", "未形成同一对象同一部位的动作前证据。")}
     {chain_cards("action_evidence", "动作证据", "未形成可能致损动作的可回链证据。")}
     {chain_cards("after_action_evidence", "动作后证据", "未形成同一对象同一部位的动作后变化证据。")}
@@ -269,7 +301,17 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         "needs_manual_consistency_check": "需人工核对主体与一致性",
         "needs_business_system_check": "需业务系统核对金额与订单",
         "confirmed_by_visual_category": "视觉类别已确认",
+        "visual_consistency_matched": "视觉字段未发现明显矛盾",
+        "visual_consistency_mismatched": "视觉字段存在冲突",
+        "visual_consistency_uncertain": "视觉字段仍不确定",
+        "matched": "一致",
+        "mismatched": "存在冲突",
+        "uncertain": "不确定",
+        "not_assessed": "未完成",
         "not_validated": "尚未验证",
+        "usable": "清晰度满足视觉初审",
+        "needs_manual_quality_check": "已提交，清晰度或完整页待确认",
+        "not_observed": "未观察到",
     }
     checklist_cards = []
     for item in (value.get("checklist") or [])[:10]:
@@ -280,6 +322,7 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
             '<article class="boundary-card">'
             f'<h3>{escape(item.get("label") or item.get("requirement_id") or "未命名材料")}</h3>'
             f'<p><b>材料状态：</b>{escape(status_labels.get(item.get("status"), item.get("status") or "未知"))}</p>'
+            f'<p><b>材料质量：</b>{escape(status_labels.get(item.get("quality_status"), item.get("quality_status") or "未知"))}</p>'
             f'<p><b>验证状态：</b>{escape(status_labels.get(item.get("validation_status"), item.get("validation_status") or "未知"))}</p>'
             f'<p><b>证据图片：</b>{escape(image_indices)}</p>'
             f'<p>{escape(item.get("rule_note") or "")}</p></article>'
@@ -294,6 +337,49 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
             f'质量 {escape(item.get("evidence_quality") or "-")}</li>'
         )
     unclassified = "、".join(str(index) for index in value.get("unclassified_image_indices") or []) or "无"
+    check_labels = {
+        "identity_age": "身份与年龄",
+        "guardian_relationship": "监护关系",
+        "commitment_signatures": "承诺书签署主体",
+        "order_payment": "订单与支付",
+        "mobile_realname": "手机号实名归属",
+    }
+    risk_labels = {
+        "no_obvious_risk": "未发现明显编辑风险",
+        "suspected_editing": "疑似编辑",
+        "unreadable_fields": "字段不可读",
+        "incomplete_document": "材料页面不完整",
+        "conflicting_fields": "字段冲突",
+        "evidence_gap": "证据不足",
+    }
+    consistency = value.get("field_consistency") or {}
+    consistency_cards = []
+    for item in consistency.get("checks") or []:
+        if not isinstance(item, dict):
+            continue
+        evidence = "、".join(str(index) for index in item.get("evidence_image_indices") or []) or "无"
+        risks = "、".join(
+            risk_labels.get(str(code), str(code)) for code in item.get("risk_reason_codes") or []
+        ) or "无"
+        consistency_cards.append(
+            '<article class="boundary-card">'
+            f'<h3>{escape(check_labels.get(item.get("check_id"), item.get("check_id") or "未命名检查"))}</h3>'
+            f'<p><b>初审状态：</b>{escape(status_labels.get(item.get("status"), item.get("status") or "未知"))}</p>'
+            f'<p><b>证据图片：</b>{escape(evidence)}</p>'
+            f'<p><b>风险提示：</b>{escape(risks)}</p>'
+            f'<p>{escape(item.get("message") or "")}</p></article>'
+        )
+    authoritative = value.get("authoritative_verification") or {}
+    authoritative_text = (
+        "待甲方权威接口联调"
+        if authoritative.get("status") == "customer_integration_required"
+        else str(authoritative.get("status") or "未配置")
+    )
+    precheck_text = {
+        "passed": "通过（仍需权威校验）",
+        "needs_review": "发现冲突或不确定，需复核",
+        "incomplete": "证据处理未完成",
+    }.get(value.get("visual_precheck_status"), "未完成")
     return f"""
   <section class="panel minor-material-panel">
     <div class="section-head"><h2>未成年人退款五类材料核对</h2><p>材料存在性、字段一致性和最终退款裁决分开表达；报告不展示任何个人号码或OCR原文。</p></div>
@@ -303,10 +389,16 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
       <article><small>已处理图片</small><b>{escape(value.get("processed_image_count") or 0)}</b></article>
       <article><small>覆盖率</small><b>{escape(value.get("coverage_ratio") or 0)}</b></article>
       <article><small>覆盖是否完整</small><b>{escape("是" if value.get("coverage_complete") else "否")}</b></article>
-      <article><small>流程准备度</small><b>{escape(value.get("readiness") or "-")}</b></article>
+      <article><small>视觉初审结论</small><b>{escape(precheck_text)}</b></article>
     </div>
     <p><b>未分类图片编号：</b>{escape(unclassified)}</p>
     <div class="boundary-grid">{"".join(checklist_cards) or '<p class="muted">本轮未形成材料清单。</p>'}</div>
+    <div class="section-head"><h2>视觉字段一致性初审</h2><p>只比较所提供图片中的可见字段，不代表证件、实名、订单或支付已经权威验真。</p></div>
+    <p><b>总体状态：</b>{escape(status_labels.get(consistency.get("verdict"), consistency.get("verdict") or "未完成"))}</p>
+    <div class="boundary-grid">{"".join(consistency_cards) or '<p class="muted">本轮未完成字段一致性初审。</p>'}</div>
+    <div class="boundary-grid">
+      <article class="boundary-card"><h3>权威真伪验证</h3><p><b>{escape(authoritative_text)}</b></p><p>{escape(authoritative.get("boundary") or "视觉一致性不等于法定真实性，最终核验由甲方权威系统和授权人员完成。")}</p></article>
+    </div>
     <h3>过程视频证据</h3><ul class="boundary-list">{"".join(process_items) or '<li>本轮没有形成可回链的过程视频证据。</li>'}</ul>
     <div class="boundary-grid">
       <article class="boundary-card"><h3>隐私边界</h3><p>{escape(value.get("privacy_boundary") or "公开报告不展示个人敏感信息。")}</p></article>
