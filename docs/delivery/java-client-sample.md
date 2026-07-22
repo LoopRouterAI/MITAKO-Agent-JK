@@ -58,11 +58,26 @@ public Mono<JsonNode> validateMetadata(WebClient client, String token, Map<Strin
   "batch_id": "BATCH-20260711-001",
   "customer_claim": "用户称收到的角色与订单不一致",
   "order_items": [{"sku": "SKU-001", "product_name": "角色拍立得", "specification": "A款", "quantity": 1}],
-  "product_master_data": {"items": [{"sku": "SKU-001", "product_name": "角色拍立得", "specification": "A款"}]},
+  "fulfillment_baseline": {
+    "baseline_version": "ORDER-001@2026-07-22T10:00:00+08:00",
+    "expected_items": [{
+      "item_ref": "LINE-1",
+      "sku": "SKU-001",
+      "product_name": "角色拍立得",
+      "specification": "A款",
+      "expected_quantity": 1,
+      "master_image_urls": ["https://approved-cdn.example/products/SKU-001.png"]
+    }]
+  },
+  "product_master_data": {"LINE-1": {"sku": "SKU-001", "product_name": "角色拍立得", "specification": "A款"}},
   "sampling_policy": {"preset": "strict", "frames_per_model_call": 24},
   "continuity_policy": {"out_of_frame_warning_seconds": 2.0, "force_dense_scan": true}
 }
 ```
+
+`master_image_urls` 是官方商品基准图，不是用户证据。服务只读取当前案件 `expected_items` 引用的有限图片，去重、校验并缓存后以内联图片发送给模型；不会下载整个商品库。无法读取时任务继续使用 SKU/名称/规格/数量文字基线，报告明确显示降级状态。
+
+不要仅凭一个物流单号自行生成 `packages[].expected_item_refs`。只有甲方订单/仓储接口明确提供分包与商品映射时才填写；否则留空并让漏发货审核保持 `degraded_review`。
 
 漏发货案件不能只传订单号。以下字段是自动形成确定结论的最低结构；任一缺失时服务仍可审核视频连续性，但最终强制返回 `review`：
 
@@ -152,7 +167,7 @@ public Mono<JsonNode> createReviewJob(
 
 注意：使用流式 `Resource`/`DataBuffer`，不要 `Files.readAllBytes()` 读取 543MB 视频。
 
-如案件有甲方离线订单快照，可把 `order_info_snapshot.json` 作为同一 multipart 的一个 `files` 项上传。服务只提取 `goods_list` 中的 SKU、名称、规格、应发数量和商品图引用，不把 `user`、`user_address`、价格或人工标签送入模型。生产正式接入时，优先在 `metadata.order_items`、`metadata.fulfillment_baseline` 和 `metadata.product_master_data` 传递同等结构化数据；离线快照只用于本轮评测和联调。
+如案件有甲方离线订单快照，可把 `order_info_snapshot.json` 作为同一 multipart 的一个 `files` 项上传。服务会合并重复 SKU 数量，只提取本单 SKU、名称、规格、应发数量、物流引用、与本单相关的抽赏规则和商品主图，不把 `user`、`user_address`、价格、`all_goods` 整表或人工标签送入模型。快照只有物流单号但没有分包-SKU 映射时，系统不会猜测包裹内容。生产正式接入时，优先在 `metadata.order_items`、`metadata.fulfillment_baseline` 和 `metadata.product_master_data` 传递同等结构化数据；离线快照只用于本轮评测和联调。
 
 ## 6. 查询任务
 

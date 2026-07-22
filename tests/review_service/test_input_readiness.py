@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from review_service.input_readiness import assess_input_readiness
 from review_service.schemas import ReviewCaseMetadata
-from review_service.service import contract, sampling_plan
+from review_service.service import _public_media_urls, contract, sampling_plan
 from review_service.service import ensure_label_isolation
 from review_service.service import _apply_input_readiness_guard
 from review_service.service import _review_fields
@@ -21,6 +21,20 @@ class InputReadinessTest(unittest.TestCase):
         self.assertIs(media["supplier_file_uri_required"], False)
         self.assertEqual(media["detail_frame_format"], "image/jpeg")
         self.assertEqual(media["temporal_sheet_format"], "image/webp")
+        self.assertEqual(media["official_product_references"]["mode"], "per_review_on_demand")
+        self.assertFalse(media["official_product_references"]["bulk_download_enabled"])
+        self.assertIn("fulfillment_baseline", contract()["business_fields"])
+        self.assertIn("sampling_policy", contract()["business_fields"])
+
+    def test_public_report_refreshes_signed_workbench_media_urls(self):
+        with patch.dict("os.environ", {
+            "VISUAL_REPORT_SIGNING_SECRET": "test-signing-secret",
+            "VISUAL_WORKBENCH_PUBLIC_URL": "https://review.example.test",
+        }):
+            url = _public_media_urls("/media-item/opaque-id?expires=1&sig=expired")
+        self.assertTrue(url.startswith("https://review.example.test/media-item/opaque-id?expires="))
+        self.assertIn("&sig=", url)
+        self.assertNotIn("expired", url)
 
     def test_wrong_item_accepts_unique_non_sku_baseline(self):
         result = assess_input_readiness(
@@ -61,6 +75,19 @@ class InputReadinessTest(unittest.TestCase):
         self.assertTrue(result["full_review_ready"])
         self.assertIn("product_master_data", result["missing_recommended"])
         self.assertTrue(result["capabilities"]["visible_damage_detection"])
+
+    def test_wrong_item_with_incomplete_lottery_rules_is_not_ready_for_definite_decision(self):
+        result = assess_input_readiness({
+            "scenario": "wrong_item",
+            "fulfillment_baseline": {
+                "baseline_version": "V1",
+                "expected_items": [{"item_ref": "LINE-1", "sku": "SKU-1", "expected_quantity": 1}],
+                "selection_rules": [{"rule_ref": "LOTTERY-1", "item_refs": ["LINE-1"]}],
+                "selection_rules_complete": False,
+            },
+        })
+        self.assertFalse(result["full_review_ready"])
+        self.assertIn("fulfillment_baseline.selection_rules_complete", result["missing_required"])
 
     def test_missing_item_requires_order_quantity(self):
         result = assess_input_readiness(
@@ -278,7 +305,12 @@ class InputReadinessTest(unittest.TestCase):
                 "fulfillment_baseline": {
                     "baseline_version": "ORDER-1@V1",
                     "expected_items": [
-                        {"item_ref": "LINE-1", "sku": "SKU-1", "expected_quantity": 1}
+                        {
+                            "item_ref": "LINE-1",
+                            "sku": "SKU-1",
+                            "expected_quantity": 1,
+                            "master_image_urls": ["https://cdn-qiniu.danhaotuan.com/sku-1.png"],
+                        }
                     ],
                     "packages": [{"package_ref": "PKG-1", "expected_item_refs": ["LINE-1"]}],
                 },
@@ -301,6 +333,10 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(
             json.loads(fields["fulfillment_baseline"])["expected_items"][0]["sku"],
             "SKU-1",
+        )
+        self.assertEqual(
+            json.loads(fields["fulfillment_baseline"])["expected_items"][0]["master_image_urls"],
+            ["https://cdn-qiniu.danhaotuan.com/sku-1.png"],
         )
         self.assertEqual(json.loads(fields["evidence_coverage"])["submitted_package_refs"], ["PKG-1"])
 

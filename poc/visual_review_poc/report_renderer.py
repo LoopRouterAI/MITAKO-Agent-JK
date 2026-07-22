@@ -314,12 +314,18 @@ def _evidence_items(
         file_key = _file_key(image.get("file_name") or image.get("file"))
         if file_key:
             file_map[file_key] = image
+    reference_map = {
+        str(item.get("reference_index")): item
+        for item in media_gallery.get("official_references") or []
+        if item.get("reference_index") is not None
+    }
 
     def media_preview(item: Dict[str, Any]) -> str:
         frame_key = item.get("global_frame_index")
         if frame_key is None:
             frame_key = item.get("frame_index")
         image_key = item.get("image_index")
+        reference_key = item.get("reference_index")
         video_frame_key = (
             f"{item.get('video_index')}:{frame_key}"
             if item.get("video_index") is not None and frame_key is not None
@@ -330,6 +336,9 @@ def _evidence_items(
         if media is None and image_key is not None:
             media = image_map.get(str(image_key))
             media_label = "查看补充图片"
+        if media is None and reference_key is not None:
+            media = reference_map.get(str(reference_key))
+            media_label = "查看官方参考图"
         timestamp_key = _timestamp_key(item.get("timestamp"))
         if media is None and timestamp_key:
             video_key = f"{item.get('video_index')}:{timestamp_key}" if item.get("video_index") is not None else ""
@@ -338,6 +347,8 @@ def _evidence_items(
             media = file_map.get(_file_key(item.get("file_name") or item.get("file")))
         if media in (media_gallery.get("images") or []):
             media_label = "查看补充图片"
+        if media in (media_gallery.get("official_references") or []):
+            media_label = "查看官方参考图"
         if not media or not media.get("url"):
             return ""
         video_link = ""
@@ -475,6 +486,30 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     quality = report.get("quality") or {}
     media_gallery = report.get("media_gallery") or {}
     evidence_package = report.get("evidence_package") or {}
+    official_reference_status = evidence_package.get("official_reference_status") or {}
+    order_baseline = evidence_package.get("order_baseline") or {}
+    order_rows = "".join(
+        "<tr>"
+        f"<td>{_h(item.get('item_ref') or '-')}</td>"
+        f"<td>{_h(item.get('sku') or '-')}</td>"
+        f"<td>{_h(item.get('product_name') or '-')}</td>"
+        f"<td>{_h(item.get('specification') or '-')}</td>"
+        f"<td>{_h(item.get('expected_quantity') or '-')}</td>"
+        "</tr>"
+        for item in order_baseline.get("expected_items") or []
+        if isinstance(item, dict)
+    )
+    official_status_label = {
+        "available": "可用",
+        "partial": "部分可用",
+        "unavailable": "不可用",
+        "not_requested": "本单未提供",
+    }.get(str(official_reference_status.get("status") or ""), "未提供")
+    official_fallback = (
+        "已回退到文字订单基线"
+        if official_reference_status.get("fallback") == "text_order_baseline"
+        else "无需降级"
+    )
     scenario_label = report.get("scenario_label") or str(data.get("review_label") or "当前审核").split("/", 1)[0].strip()
     public_brief = report.get("public_brief") or {}
     conclusion = public_brief.get("conclusion") or safe_agent_conclusion(parsed, scenario_label)
@@ -571,6 +606,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    <div class="metric"><small>送审视频</small><b>{_h(video_count or "-")}</b></div>
 	    <div class="metric"><small>送审帧数</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
 	    <div class="metric"><small>补充图片</small><b>{_h(evidence_package.get("supplemental_images_sent") or "-")}</b></div>
+	    <div class="metric"><small>官方参考图</small><b>{_h(evidence_package.get("official_reference_images_sent") or "-")}</b></div>
 	    <div class="metric"><small>估算 Token</small><b>{_h(inference.get("total_tokens") or "-")}</b></div>
 	    <div class="metric"><small>估算成本</small><b>{_h((f"${inference.get('estimated_usd')}" if inference.get("estimated_usd") not in (None, "") else "-"))}</b></div>
 		    <div class="metric"><small>模型调用</small><b>{_h(inference.get("segment_count") or 1)}</b></div>
@@ -632,6 +668,19 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     {damage_causality_panel}
   {object_continuity_panel}
   {fulfillment_panel}
+
+  <section class="panel">
+    <div class="section-head"><h2>系统订单基线</h2><p>这里展示服务实际送审的受信任订单字段，不依赖模型复述。</p></div>
+    <p><b>基线版本：</b>{_h(order_baseline.get("baseline_version") or "未提供")}；<b>承运商：</b>{_h(order_baseline.get("carrier") or "未提供")}；<b>物流引用：</b>{_h(order_baseline.get("tracking_ref") or "未提供")}</p>
+    <p><b>抽赏规则：</b>{_h("完整" if order_baseline.get("selection_rules_complete") else "不完整或待确认")}；<b>赠品/特典规则：</b>{_h("完整" if order_baseline.get("benefit_rules_complete") else "不完整或待确认")}；<b>分包映射：</b>{_h(order_baseline.get("package_mapping_status") or "未提供")}</p>
+    <div class="table-wrap"><table><thead><tr><th>行项目</th><th>SKU</th><th>商品</th><th>规格</th><th>应发数量</th></tr></thead><tbody>{order_rows or '<tr><td colspan="5">本轮未提供订单商品基线。</td></tr>'}</tbody></table></div>
+  </section>
+
+  <section class="panel boundary-panel">
+    <div class="section-head"><h2>官方商品参考图</h2><p>仅作为订单商品标准外观基准，不属于用户提交证据，也不能单独证明实际收货、漏发或损伤。</p></div>
+    <p><b>读取状态：</b>{_h(official_status_label)}；请求 {_h(official_reference_status.get("requested_count") or 0)} 张，可用 {_h(official_reference_status.get("available_count") or 0)} 张，失败 {_h(official_reference_status.get("failed_count") or 0)} 张；{_h(official_fallback)}。</p>
+    <div class="media-grid">{_gallery_items(media_gallery.get("official_references") or [], "官方商品参考图")}</div>
+  </section>
 
 			  <section class="panel">
     <div class="section-head"><h2>送审证据画廊</h2><p>用于快速复核审核Agent看到的帧图和用户补充图片。</p></div>

@@ -125,8 +125,8 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
             missing_recommended.append("product_master_data")
         if not fulfillment["baseline_versioned"]:
             missing_recommended.append("fulfillment_baseline.baseline_version")
-        if not fulfillment["selection_rules_complete"]:
-            missing_recommended.append("fulfillment_baseline.selection_rules_complete")
+        if (metadata.get("fulfillment_baseline") or {}).get("selection_rules") and not fulfillment["selection_rules_complete"]:
+            missing_required.append("fulfillment_baseline.selection_rules_complete")
         alternatives.append("SKU/条码/包装编码任一唯一标识，或商品名+规格/款式/角色/数量的可唯一组合")
         warnings.append("缺少订单商品基准时仍可审核开箱连续性，但不能可靠判断是否发错货。")
     elif scenario == "missing_item":
@@ -140,6 +140,8 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
             missing_required.append("package_item_mapping")
         if not fulfillment["benefit_rules_complete"]:
             missing_required.append("benefit_rules_declaration")
+        if (metadata.get("fulfillment_baseline") or {}).get("selection_rules") and not fulfillment["selection_rules_complete"]:
+            missing_required.append("selection_rules_declaration")
         if not fulfillment["submitted_package_mapping_complete"]:
             missing_required.append("submitted_package_mapping")
         if not fulfillment["all_packages_uploaded"] or not fulfillment["all_items_displayed"]:

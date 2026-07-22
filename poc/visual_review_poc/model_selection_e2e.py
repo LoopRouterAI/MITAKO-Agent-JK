@@ -63,6 +63,7 @@ from poc.visual_review_poc.specialized_model_pass import run_specialized_frame_p
 from poc.visual_review_poc.minor_material_pipeline import run_minor_material_pipeline
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
+from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
 
 ROOT = app_root()
 SAMPLE_ROOT = ROOT / "docs" / "三大审核场景的小量样本"
@@ -225,6 +226,10 @@ def load_case_bundle(
         max_edge=1920 if minor_material else 1280,
         quality=88 if minor_material else 82,
     )
+    prepare_official_reference_images(
+        case,
+        ROOT / "tmp" / "visual_review_product_refs",
+    )
     return case
 
 
@@ -237,6 +242,10 @@ def gemini_payload(system_prompt: str, user_prompt: str, case: Dict[str, Any]) -
     for image in case["supplemental_images"]:
         path = Path(image["api_path"])
         parts.append({"text": f"补充图片 {image['image_index']} / asset_ref=supplemental_image_{image['image_index']}"})
+        parts.append({"inline_data": {"mime_type": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
+    for image in case.get("official_reference_images") or []:
+        path = Path(image["api_path"])
+        parts.append({"text": f"官方商品参考图 {image['reference_index']} / SKU={image.get('sku') or '未提供'} / asset_ref=official_product_reference_{image['reference_index']}。仅用于核对订单商品标准外观，不能作为用户开箱证据。"})
         parts.append({"inline_data": {"mime_type": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     return {
         "system_instruction": {"parts": [{"text": system_prompt}]},
@@ -254,6 +263,10 @@ def openai_messages(system_prompt: str, user_prompt: str, case: Dict[str, Any]) 
     for image in case["supplemental_images"]:
         path = Path(image["api_path"])
         content.append({"type": "text", "text": f"补充图片 {image['image_index']} / asset_ref=supplemental_image_{image['image_index']}"})
+        content.append({"type": "image_url", "image_url": {"url": data_url(path, image["api_mime_type"])}})
+    for image in case.get("official_reference_images") or []:
+        path = Path(image["api_path"])
+        content.append({"type": "text", "text": f"官方商品参考图 {image['reference_index']} / SKU={image.get('sku') or '未提供'} / asset_ref=official_product_reference_{image['reference_index']}。仅用于核对订单商品标准外观，不能作为用户开箱证据。"})
         content.append({"type": "image_url", "image_url": {"url": data_url(path, image["api_mime_type"])}})
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}]
 
@@ -1082,11 +1095,19 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         main_frames = _representative_frames(frames, main_frame_limit)
     chunks = [main_frames[index:index + limit] for index in range(0, len(main_frames), limit)]
     workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4, len(chunks)))
+    reference_segment_limit = max(1, min(int(os.getenv("REVIEW_PRODUCT_IMAGE_MAX_SEGMENTS", "3") or 3), 3, len(chunks)))
+    reference_segment_indices = {
+        round(position * (len(chunks) - 1) / max(reference_segment_limit - 1, 1))
+        for position in range(reference_segment_limit)
+    }
 
     def review_chunk(index: int, chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
         chunk_case = dict(case)
         chunk_case["frames"] = chunk
         chunk_case["supplemental_images"] = (case.get("supplemental_images") or [])[:4]
+        chunk_case["official_reference_images"] = (
+            case.get("official_reference_images") or []
+        ) if index in reference_segment_indices else []
         structured = dict(case.get("structured_business_context") or {})
         structured["review_chunk"] = {
             "index": index + 1,
@@ -1095,6 +1116,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             "global_video_frame_count": len(frames),
             "main_review_frame_count": len(main_frames),
             "instruction": "本段最后一帧只代表本分段观察截止点；除非 is_final_chunk=true 且有全局媒体时长佐证，不得表述为视频结束。",
+            "official_reference_images_attached": len(chunk_case["official_reference_images"]),
         }
         chunk_case["structured_business_context"] = structured
         return call_model(cfg, chunk_case, timeout, retries)
@@ -1204,6 +1226,11 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         causality_results,
         causality_failures,
         len(main_frames),
+    )
+    chunking = aggregated.setdefault("chunking", {})
+    chunking["official_reference_segments"] = len(reference_segment_indices)
+    chunking["official_reference_model_sends"] = (
+        len(case.get("official_reference_images") or []) * len(reference_segment_indices)
     )
     aggregated["latency_seconds"] = round(time.time() - wall_started, 2)
     return aggregated

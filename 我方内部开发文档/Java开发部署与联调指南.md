@@ -1,6 +1,6 @@
 # Java 开发部署与联调指南
 
-版本：2026-07-20
+版本：2026-07-22
 
 ## 1. Java 的职责边界
 
@@ -43,7 +43,9 @@ Nginx / Java Gateway
 场景基准：
 
 - 发错货：每个订单行必须有唯一标识，或商品名+规格/款式的可唯一组合，并带应发数量。
+- 官方商品图：在 `fulfillment_baseline.expected_items[].master_image_urls` 提交本单商品主图；服务端按任务限量读取和缓存，不要由 Java 预先批量下载，也不要提交整份商品库。
 - 漏发货：必须使用 `fulfillment_baseline` 提交版本化应发清单、商品行数量、赠品/特典声明、包裹数和包裹商品映射；使用 `evidence_coverage` 提交本次实际包裹引用/物流单号和完整展示声明。
+- 分包映射：一个物流单号不能自动证明所有 SKU 都属于同一包裹；没有权威包裹-SKU 关系时必须留空并接受降级复核。
 - 商品有伤：使用 `damage_causality_policy` 控制动作因果专项扫描；使用 `continuity_policy` 配置离镜阈值和连续性专项扫描。
 - 商品有伤多诉求：用 `claim_scope.active_claim_ids` 明确本次原子诉求。后续追加的不同商品、部位或损伤机制必须新建 claim，不得用一个工单级标签覆盖全部诉求。
 - 自动分类策略：`decision_policy` 默认 `conservative_review`。只有配置甲方批准的 `policy_ref@version` 并选择 `classification_recommendation` 后，才允许命中规则性 `negative`；该结果仍保持 `business_action_allowed=false`。
@@ -81,6 +83,7 @@ Java 网关不调用模型供应商，也不需要实现 Gemini Files URI：
 2. 主服务将原媒体流式转发到内网视觉服务。
 3. 视觉服务本地抽帧和压缩，细节、连续性与成因审核均逐张使用带帧号和时间戳的 JPEG 独立帧；拼图只可用于报告浏览，不得进入模型判定请求。
 4. 视觉服务以内联 Base64 图片请求供应商；原始 MP4 不进入模型请求。
+5. 官方商品图由视觉服务按本单白名单 URL 读取、校验、压缩和缓存，同样以内联图片发送；失败时保留文字订单基线并在报告中标记降级。
 
 联调时调用 `/api/v1/review/contracts`，应看到 `media_processing.model_request_transport=inline_base64_images` 且 `supplier_file_uri_required=false`。视觉服务 `/api/health` 应返回同一口径。
 

@@ -106,6 +106,7 @@ def run_specialized_frame_pass(
         pass_case = dict(case)
         pass_case["frames"] = frames[max(0, start - context_frame_count):start] + target
         pass_case["supplemental_images"] = []
+        pass_case["official_reference_images"] = []
         structured = dict(case.get("structured_business_context") or {})
         structured.update(
             {

@@ -596,6 +596,8 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\model_catalog.py",
     "poc\visual_review_poc\model_result_scoring.py",
     "poc\visual_review_poc\object_continuity.py",
+    "poc\visual_review_poc\official_reference_images.py",
+    "poc\visual_review_poc\order_info_adapter.py",
     "poc\visual_review_poc\report_assessment_sections.py",
     "poc\visual_review_poc\report_renderer.py",
     "poc\visual_review_poc\review_model_prompt.py",
@@ -650,7 +652,7 @@ setlocal
 cd /d "%~dp0"
 
 if exist venv\Scripts\python.exe (
-  venv\Scripts\python.exe -c "mods=['fastapi','uvicorn','httpx','jwt','multipart','sse_starlette','pydantic','dotenv','cv2','yt_dlp','redis','jinja2','websockets','celery',''.join(('lang','graph')),''.join(('lang','chain_core')),''.join(('lang','chain_','op','en','ai'))]; [__import__(m) for m in mods]" >nul 2>nul
+  venv\Scripts\python.exe -c "mods=['fastapi','uvicorn','httpx','jwt','multipart','sse_starlette','pydantic','dotenv','cv2','PIL','yt_dlp','redis','jinja2','websockets','celery',''.join(('lang','graph')),''.join(('lang','chain_core')),''.join(('lang','chain_','op','en','ai'))]; [__import__(m) for m in mods]" >nul 2>nul
   if not errorlevel 1 exit /b 0
   echo [INFO] Existing runtime is incomplete; repairing dependencies...
 )
@@ -680,7 +682,7 @@ set "WG=graph"
 set "LC=langchain"
 set "OC=op"
 set "AI=enai"
-venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple fastapi uvicorn sse-starlette python-multipart pydantic httpx PyJWT python-dotenv %LG%%WG% %LC%-core %LC%-%OC%%AI% pyahocorasick redis jinja2 websockets celery opencv-python yt-dlp
+venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple fastapi uvicorn sse-starlette python-multipart pydantic httpx PyJWT python-dotenv %LG%%WG% %LC%-core %LC%-%OC%%AI% pyahocorasick redis jinja2 websockets celery opencv-python Pillow yt-dlp
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
 echo [OK] Runtime is ready.
@@ -825,6 +827,7 @@ $customerEvidenceFiles = @(
     "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
     "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
     "甲方沟通交付文档\订单SKU快照接入与审核安全升级说明-2026-07-20.html",
+    "甲方沟通交付文档\0722订单资料与官方商品图按需接入说明.html",
     "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
     "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",

@@ -1,6 +1,6 @@
 # 部署指南
 
-版本：2026-07-17
+版本：2026-07-22
 
 ## 1. 组件
 
@@ -85,6 +85,15 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 - `REVIEW_MODEL_RETRIES`：单次供应商软失败重试次数，默认 1。
 - `REVIEW_CHUNK_WORKERS`：单案件分段并发数，必须按供应商限流压测后配置。
 - `REVIEW_CONTINUITY_FRAMES_PER_CALL`：连续性通道每次独立帧输入上限，当前最大为 24。模型逐张接收带帧序号与时间戳的 JPEG，不使用拼图作为审核证据；HTML 报告中的缩略图仅用于人工浏览。
+- `REVIEW_PRODUCT_IMAGE_BASE_URL`：甲方订单快照中相对商品主图路径的 HTTPS 基地址。
+- `REVIEW_PRODUCT_IMAGE_ALLOWED_HOSTS`：官方商品图主机白名单，多个主机用逗号分隔；禁止加入本机或内网主机。
+- `REVIEW_PRODUCT_IMAGE_LIMIT`：单审核任务最多读取的官方商品图，默认 6、硬上限 12；盘点、启动和批次查询均不会触发全量下载。
+- `REVIEW_PRODUCT_IMAGE_MAX_BYTES`：单张官方图下载上限，默认 8MiB；超限、重定向、伪图片或非白名单资源均降级为文字订单基线。
+- `REVIEW_PRODUCT_IMAGE_MAX_PIXELS`：解码前像素上限，默认 2000 万，防止小体积超大像素图片耗尽内存。
+- `REVIEW_PRODUCT_IMAGE_MAX_EDGE` / `REVIEW_PRODUCT_IMAGE_JPEG_QUALITY`：送模前压缩边长和 JPEG 质量，默认 1280 / 82。
+- `REVIEW_PRODUCT_IMAGE_MAX_SEGMENTS`：同一案件中附带官方图的主审核分段上限，默认且最大为 3（首/中/末），避免长视频重复发送导致成本失控。
+- `REVIEW_PRODUCT_IMAGE_DNS_TIMEOUT_SECONDS`：官方图主机解析等待上限，默认 3 秒。
+- `REVIEW_PRODUCT_IMAGE_CACHE_TTL_SECONDS` / `REVIEW_PRODUCT_IMAGE_CACHE_MAX_MB`：缓存时效与容量，默认 7 天 / 512MiB；超限按最旧文件淘汰。
 - `VISUAL_REPORT_SIGNING_SECRET`：生产必须由 Secret 管理器注入固定高熵密钥。
 - `VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1`：生产必须开启；缺少固定签名密钥时视觉健康检查与主服务 readiness 失败。
 - `VISUAL_REPORT_URL_TTL_SECONDS`：报告与媒体签名 URL 的有效期，默认 900 秒。
@@ -93,6 +102,8 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 真实 `.env` 不进入 Git、镜像和客户 ZIP。生产使用密钥管理服务或部署平台 Secret。
 
 视觉服务不依赖供应商 Files API 或文件 URI。原视频在我方服务端解码，模型请求仅包含内联 Base64 的 JPEG 独立帧；可通过视觉健康检查的 `model_media_transport` 和审核契约的 `media_processing` 复核。
+
+官方商品图同样不依赖供应商文件 URI：视觉服务只在当前案件需要时从白名单 CDN 读取有限图片，校验 HTTPS、主机、DNS、重定向、大小、MIME、文件特征和解码结果，压缩后以内联图片发送。相同 URL 命中本地缓存；下载失败不会伪装成已核验，报告会显示“部分可用/不可用”并保留 SKU 与应发清单文字基线。
 
 ## 6. 健康检查
 

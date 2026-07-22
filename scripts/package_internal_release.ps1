@@ -145,6 +145,9 @@ Copy-LatestReport "review_0717_four_samples_20260720-617911-independent24-*.json
 Copy-LatestReport "review_0717_four_samples_20260720-617911-independent24-*.html" "tests\reports\review_617911_individual24_20260720-latest.html"
 Copy-Path "tests\reports\customer_order_info_sync_verify_20260720.json"
 Copy-Path "tests\reports\customer_order_info_integration_20260720.json"
+Copy-Path "tests\reports\customer_order_info_0722_applied.json"
+Copy-Path "tests\reports\customer_order_info_0722_post_apply_verify.json"
+Copy-Path "tests\reports\order_reference_integration_617341_20260722.json"
 Copy-Path "tests\reports\review_submission_modes_20260717-final.json"
 Copy-Path "tests\reports\review_submission_modes_20260717-final.html"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
@@ -157,6 +160,7 @@ $evidenceFiles = @(
     "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",
     "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
     "甲方沟通交付文档\订单SKU快照接入与审核安全升级说明-2026-07-20.html",
+    "甲方沟通交付文档\0722订单资料与官方商品图按需接入说明.html",
     "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
     "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
@@ -166,6 +170,7 @@ $evidenceFiles = @(
     "我方内部开发文档\升级日志-2026-07-17-144989未成年人资料审核.md",
     "我方内部开发文档\升级日志-2026-07-20-未成年人资料字段一致性.md",
     "我方内部开发文档\升级日志-2026-07-20-视觉证据安全与SKU基准.md",
+    "我方内部开发文档\升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
     "我方内部开发文档\升级日志-2026-07-16.md",
@@ -178,6 +183,9 @@ $evidenceFiles = @(
     "tests\reports\minor_refund_144989_20260720-latest.html",
     "tests\reports\customer_order_info_sync_verify_20260720.json",
     "tests\reports\customer_order_info_integration_20260720.json",
+    "tests\reports\customer_order_info_0722_applied.json",
+    "tests\reports\customer_order_info_0722_post_apply_verify.json",
+    "tests\reports\order_reference_integration_617341_20260722.json",
     "tests\reports\review_submission_modes_20260717-final.json",
     "tests\reports\review_submission_modes_20260717-final.html",
     "tests\reports\full_pipeline_latest.html",
@@ -216,6 +224,7 @@ $required = @(
     "我方内部开发文档\升级日志-2026-07-17-144989未成年人资料审核.md",
     "我方内部开发文档\升级日志-2026-07-20-未成年人资料字段一致性.md",
     "我方内部开发文档\升级日志-2026-07-20-视觉证据安全与SKU基准.md",
+    "我方内部开发文档\升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
     "我方内部开发文档\升级日志-2026-07-17-四样本审核.md",
     "我方内部开发文档\升级日志-2026-07-16.md",
     "我方内部开发文档\升级日志-2026-07-15.md",
@@ -230,6 +239,7 @@ $required = @(
     "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
     "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
     "甲方沟通交付文档\订单SKU快照接入与审核安全升级说明-2026-07-20.html",
+    "甲方沟通交付文档\0722订单资料与官方商品图按需接入说明.html",
     "docs\三大审核场景的小量样本\sample_labels.json",
     "scripts\pre_release_internal_validation.ps1",
     "data\review_service.db",

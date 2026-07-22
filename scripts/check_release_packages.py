@@ -83,6 +83,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "我方内部开发文档/升级日志-2026-07-20-未成年人资料字段一致性.md",
         "我方内部开发文档/升级日志-2026-07-20-视觉证据安全与SKU基准.md",
         "我方内部开发文档/升级日志-2026-07-20-独立逐帧审核与资料质量分层.md",
+        "我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
         "我方内部开发文档/升级日志-2026-07-16.md",
         "我方内部开发文档/升级日志-2026-07-15.md",
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
@@ -93,6 +94,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html",
         "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
         "甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html",
+        "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
         "tests/reports/minor_refund_144989_20260717-final.json",
         "tests/reports/minor_refund_144989_20260720-latest.json",
         "tests/reports/minor_refund_144989_20260720-latest.html",
@@ -100,6 +102,9 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "tests/reports/review_617911_individual24_20260720-latest.html",
         "tests/reports/review_submission_modes_20260717-final.json",
         "tests/reports/review_submission_modes_20260717-final.html",
+        "tests/reports/customer_order_info_0722_applied.json",
+        "tests/reports/customer_order_info_0722_post_apply_verify.json",
+        "tests/reports/order_reference_integration_617341_20260722.json",
         "data/admin.db",
         "data/auth.db",
         "data/handoff.db",
@@ -134,6 +139,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html",
         "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
         "甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html",
+        "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
         "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
         "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
         "甲方沟通交付文档/README.md",
@@ -165,6 +171,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(any(name.endswith("review_media_safety.pyc") for name in runtime_names), "甲方运行时缺少媒体上传安全模块")
     _assert(any(name.endswith("minor_material_pipeline.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料审核管线")
     _assert(any(name.endswith("minor_material_model_prompt.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料识别协议")
+    _assert(any(name.endswith("official_reference_images.pyc") for name in runtime_names), "甲方运行时缺少官方商品图按需读取模块")
+    _assert(any(name.endswith("order_info_adapter.pyc") for name in runtime_names), "甲方运行时缺少订单快照适配模块")
     workbench_html = (root / "visual_review_workbench" / "workbench.html").read_text(encoding="utf-8-sig")
     _assert("/api/review-folders-batch" in workbench_html and "batchFolderTab" in workbench_html, "甲方工作台缺少批量工单入口")
     return {"entries": len(names), "runtime_entries": len(runtime_names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}

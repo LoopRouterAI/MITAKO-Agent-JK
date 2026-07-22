@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -28,6 +29,7 @@ FORBIDDEN_EVALUATION_MARKERS = (
     "expected_label",
     "ground_truth",
 )
+NON_CASE_DIRECTORY_MARKERS = ("按订单id", "对应的订单信息", "help_ticket_order_info")
 
 
 def classify_path(path: Path) -> tuple[str, str]:
@@ -40,9 +42,25 @@ def classify_path(path: Path) -> tuple[str, str]:
         label = "negative"
     elif "正样本" in text or "合格" in text:
         label = "positive"
+    elif "不确定样本" in text or "补证" in text or "继续核实" in text:
+        label = "uncertain"
     else:
         label = "unknown"
     return scenario, label
+
+
+def classify_batch(path: Path) -> str:
+    text = "/".join(path.parts)
+    if "第一批" in text:
+        return "batch_1"
+    if "第二批" in text:
+        return "batch_2"
+    return "unknown"
+
+
+def normalize_ticket_id(value: str) -> str:
+    match = re.fullmatch(r"(?:ticket_)?(\d+)", str(value or "").strip(), flags=re.IGNORECASE)
+    return match.group(1) if match else ""
 
 
 def sha256(path: Path) -> str:
@@ -97,27 +115,61 @@ def validate_snapshot(path: Path) -> tuple[bool, list[str], dict[str, Any]]:
 
 def plan_sync(root: Path, source_root: Path) -> dict[str, Any]:
     source_files = sorted(source_root.rglob("order_info_snapshot.json"))
+    source_ticket_dirs = sorted(
+        path for path in source_root.rglob("ticket_*")
+        if path.is_dir()
+    )
+    missing_snapshot_rows = []
+    for path in source_ticket_dirs:
+        if (path / "order_info_snapshot.json").is_file():
+            continue
+        scenario, _ = classify_path(path.relative_to(source_root))
+        missing_snapshot_rows.append({
+            "ticket_id": normalize_ticket_id(path.name),
+            "source": str(path),
+            "source_scenario": scenario,
+            "source_batch": classify_batch(path.relative_to(source_root)),
+            "status": "source_snapshot_missing",
+        })
     target_dirs: dict[str, list[Path]] = {}
     for path in root.rglob("*"):
-        if not path.is_dir() or not path.name.isdigit() or source_root == path or source_root in path.parents:
+        if not path.is_dir() or path.is_symlink() or not path.name.isdigit() or source_root == path or source_root in path.parents:
+            continue
+        relative = path.relative_to(root)
+        relative_text = "/".join(relative.parts).lower()
+        if any(marker.lower() in relative_text for marker in NON_CASE_DIRECTORY_MARKERS):
+            continue
+        scenario, label = classify_path(relative)
+        if scenario == "unknown" or label == "unknown":
             continue
         target_dirs.setdefault(path.name, []).append(path)
 
     rows: list[dict[str, Any]] = []
     for source in source_files:
-        ticket_id = source.parent.name
+        ticket_id = normalize_ticket_id(source.parent.name)
         source_scenario, source_label = classify_path(source.relative_to(source_root))
+        source_batch = classify_batch(source.relative_to(source_root))
         candidates = list(target_dirs.get(ticket_id) or [])
-        scenario_matches = [path for path in candidates if classify_path(path.relative_to(root))[0] == source_scenario]
-        label_matches = [path for path in scenario_matches if classify_path(path.relative_to(root))[1] == source_label]
-        filtered = label_matches
+        batch_matches = [
+            path for path in candidates
+            if source_batch == "unknown" or classify_batch(path.relative_to(root)) == source_batch
+        ]
+        scenario_matches = [path for path in batch_matches if classify_path(path.relative_to(root))[0] == source_scenario]
+        filtered = [
+            path for path in scenario_matches
+            if source_label == "unknown" or classify_path(path.relative_to(root))[1] == source_label
+        ]
         valid, errors, content_summary = validate_snapshot(source)
         status = "ready"
         target: Path | None = filtered[0] if len(filtered) == 1 else None
         if not valid:
             status = "invalid_source"
+        elif not ticket_id:
+            status = "invalid_ticket_id"
         elif not candidates:
             status = "target_missing"
+        elif not batch_matches:
+            status = "batch_mismatch"
         elif not filtered:
             status = "scenario_or_label_mismatch"
         elif len(filtered) > 1:
@@ -131,9 +183,10 @@ def plan_sync(root: Path, source_root: Path) -> dict[str, Any]:
             "source": str(source),
             "source_scenario": source_scenario,
             "source_label": source_label,
+            "source_batch": source_batch,
             "source_sha256": source_hash,
             "target": str(target_file) if target_file else "",
-            "candidate_targets": [str(path) for path in filtered or candidates],
+            "candidate_targets": [str(path) for path in filtered or scenario_matches or batch_matches or candidates],
             "status": status,
             "validation_errors": errors,
             "content_summary": content_summary,
@@ -154,6 +207,12 @@ def plan_sync(root: Path, source_root: Path) -> dict[str, Any]:
         "root": str(root),
         "source_root": str(source_root),
         "source_snapshots": len(source_files),
+        "source_inventory": {
+            "ticket_directories": len(source_ticket_dirs),
+            "snapshots": len(source_files),
+            "missing_snapshots": len(missing_snapshot_rows),
+        },
+        "missing_snapshot_rows": missing_snapshot_rows,
         "status_counts": counts,
         "rows": rows,
     }
@@ -178,7 +237,12 @@ def main() -> int:
                 continue
             source = Path(row["source"])
             target = Path(row["target"])
-            if target.parent.resolve() == source_root or source_root in target.parent.resolve().parents:
+            resolved_target_parent = target.parent.resolve()
+            if resolved_target_parent != root and root not in resolved_target_parent.parents:
+                raise RuntimeError(f"拒绝写入样本根目录之外：{target}")
+            if target.parent.is_symlink():
+                raise RuntimeError(f"拒绝写入符号链接目录：{target.parent}")
+            if resolved_target_parent == source_root or source_root in resolved_target_parent.parents:
                 raise RuntimeError(f"拒绝写回补充数据源目录：{target}")
             shutil.copy2(source, target)
             if sha256(target) != row["source_sha256"]:
@@ -201,6 +265,7 @@ def main() -> int:
         "applied": report["applied"],
         "copied": report["copied"],
         "source_snapshots": report["source_snapshots"],
+        "source_inventory": report["source_inventory"],
         "status_counts": report["status_counts"],
         "report": str(args.report.resolve()),
     }, ensure_ascii=False, indent=2))

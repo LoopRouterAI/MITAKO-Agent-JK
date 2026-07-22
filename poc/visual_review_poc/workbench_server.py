@@ -56,6 +56,7 @@ except ImportError:
 try:
     from poc.visual_review_poc.model_selection_e2e import MODEL_CONFIGS, call_model_chunked, load_case_bundle, score_result
     from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
+    from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
     from poc.visual_review_poc.report_renderer import (
         render_public_report as _render_public_report,
         safe_agent_conclusion as _safe_agent_conclusion,
@@ -65,6 +66,7 @@ try:
 except ImportError:
     from model_selection_e2e import MODEL_CONFIGS, call_model_chunked, load_case_bundle, score_result
     from local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
+    from official_reference_images import prepare_official_reference_images
     from report_renderer import (
         render_public_report as _render_public_report,
         safe_agent_conclusion as _safe_agent_conclusion,
@@ -530,7 +532,7 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "claimed_mismatch_type", "expected_order_item", "actual_received_item", "audit_methods",
     "frame_findings", "video_index", "global_frame_index", "frame_index", "timestamp", "visible_facts",
     "risk", "subject_visibility", "state", "adopted_evidence", "supporting_evidence",
-    "challenging_evidence", "source_type", "image_index", "asset_ref", "fact", "why_it_matters",
+    "challenging_evidence", "source_type", "image_index", "reference_index", "reference_id", "asset_ref", "fact", "why_it_matters",
     "same_item_linkage", "temporal_linkage", "authenticity_assessment", "size_sku_assessment",
     "issue_timestamps", "skeptical_questions", "material_gaps", "conclusion_argument", "support",
     "challenge", "why_not_final_business_decision", "business_action_allowed", "human_required",
@@ -679,10 +681,40 @@ def _public_agent_report_payload(
         if duration > 0 and item.get("sampled_frames") not in (None, ""):
             video["effective_sample_fps"] = round(float(item["sampled_frames"]) / duration, 4)
         public_videos.append(video)
+    structured = case.get("structured_business_context") or {}
+    frontdesk = structured.get("frontdesk_evidence_package") if isinstance(structured, dict) else {}
+    source = frontdesk if isinstance(frontdesk, dict) and frontdesk.get("fulfillment_baseline") else structured
+    fulfillment = source.get("fulfillment_baseline") if isinstance(source, dict) else {}
+    fulfillment = fulfillment if isinstance(fulfillment, dict) else {}
+    expected_items = []
+    for item in fulfillment.get("expected_items") or []:
+        if not isinstance(item, dict):
+            continue
+        expected_items.append({
+            key: item.get(key)
+            for key in ("item_ref", "sku", "product_name", "specification", "expected_quantity", "item_type")
+            if item.get(key) not in (None, "")
+        })
+    logistics = source.get("logistics") if isinstance(source, dict) else {}
+    if not logistics and isinstance(structured, dict):
+        logistics = structured.get("logistics")
+    logistics = logistics if isinstance(logistics, dict) else {}
+    order_baseline = {
+        "baseline_version": fulfillment.get("baseline_version") or "",
+        "expected_items": expected_items[:100],
+        "selection_rules_complete": fulfillment.get("selection_rules_complete") is True,
+        "benefit_rules_complete": fulfillment.get("benefit_rules_complete") is True,
+        "package_mapping_status": fulfillment.get("package_mapping_status") or "",
+        "carrier": logistics.get("carrier") or "",
+        "tracking_ref": logistics.get("tracking_ref") or "",
+    }
     evidence_package = {
         "videos": public_videos,
         "frames_sent": len(case.get("frames") or []),
         "supplemental_images_sent": len(case.get("supplemental_images") or []),
+        "official_reference_images_sent": len(case.get("official_reference_images") or []),
+        "official_reference_status": case.get("official_reference_status") or {},
+        "order_baseline": order_baseline,
     }
     parsed = _public_parsed(parsed, str(case.get("scenario") or ""))
     public_conclusion = _redact_minor_identifiers(public_conclusion)
@@ -800,7 +832,22 @@ def _media_gallery(case: Dict[str, Any], sample_dir: Optional[Path] = None) -> D
         public_media_item(item, _media_url(item.get("api_path") or item.get("path")))
         for item in case.get("supplemental_images") or []
     ]
-    return {"videos": videos, "frames": frames, "images": images}
+    official_references = [
+        public_media_item(
+            item,
+            _media_url(item.get("api_path")),
+            {
+                "reference_index": item.get("reference_index"),
+                "reference_id": item.get("reference_id"),
+                "item_ref": item.get("item_ref"),
+                "sku": item.get("sku"),
+                "product_name": item.get("product_name"),
+                "evidence_role": "official_product_reference",
+            },
+        )
+        for item in case.get("official_reference_images") or []
+    ]
+    return {"videos": videos, "frames": frames, "images": images, "official_references": official_references}
 
 
 def _public_metadata(url: str, meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -1092,6 +1139,7 @@ def _run_review(
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
+    prepare_official_reference_images(case, ROOT / "tmp" / "visual_review_product_refs")
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
     result = _call_model_chunked_with_fallback(
@@ -1304,6 +1352,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
+    prepare_official_reference_images(case, ROOT / "tmp" / "visual_review_product_refs")
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
     result = _call_model_chunked_with_fallback(
@@ -1365,6 +1414,14 @@ def health() -> Dict[str, Any]:
             "supplier_file_uri_required": False,
             "accepted_model_media_types": ["image/jpeg", "image/webp"],
             "strategy": "服务端本地抽帧、压缩和分段并发；原视频不直接发送给多模态供应商",
+        },
+        "official_product_references": {
+            "mode": "per_review_on_demand",
+            "bulk_download_enabled": False,
+            "model_transport": "compressed_inline_image",
+            "cache_enabled": True,
+            "per_review_limit": _clamp_int(os.getenv("REVIEW_PRODUCT_IMAGE_LIMIT", "6"), 0, 12, 6),
+            "failure_policy": "保留文字订单基线并报告降级，不伪造图片已核验",
         },
         "built_in_samples_available": bool(sample_ids),
         "built_in_sample_count": len(sample_ids),

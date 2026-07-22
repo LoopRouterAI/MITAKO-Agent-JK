@@ -45,6 +45,18 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
         }
         for image in safe_case["supplemental_images"]
     ]
+    official_references = [
+        {
+            "reference_index": image.get("reference_index"),
+            "reference_id": image.get("reference_id"),
+            "item_ref": image.get("item_ref"),
+            "sku": image.get("sku"),
+            "product_name": image.get("product_name"),
+            "asset_ref": f"official_product_reference_{image.get('reference_index')}",
+            "evidence_role": "official_product_reference",
+        }
+        for image in safe_case.get("official_reference_images") or []
+    ]
     videos = [
         {
             key: video.get(key)
@@ -63,12 +75,14 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 视频清单：{json.dumps(videos, ensure_ascii=False)}
 送入模型的视频帧清单：{json.dumps(frames, ensure_ascii=False)}
 送入模型的补充图片清单：{json.dumps(images, ensure_ascii=False)}
+送入模型的官方商品参考图清单：{json.dumps(official_references, ensure_ascii=False)}
 
 审核方法要求：
 1. 先锁定本次诉求范围：只审核 claim_scope.active_claim_ids 指向的原子诉求；后续追加、已排除或没有绑定证据的诉求不得混入当前结论。未提供 claim_scope 时，只使用本次 customer_claim。
 2. 再核对业务上下文：订单商品名、SKU、规格、角色、款式、数量、随机/盲抽规则，以及仓库/商品主数据。
 3. 对所有视频按 video_index + global_frame_index + timestamp 做跨帧审查：箱子/商品是否持续在镜头内，是否离镜、跳切、遮挡、换手、剪辑或可能调包。
 4. 对补充图片做交叉验证：是否能对应视频里的同一实物，是否有 EXIF、低分辨率、AI 水印、生成痕迹、局部裁剪或过度锐化风险。
+4.1 官方商品参考图只用于核对订单 SKU、款式、正常外观和包装标识，不能作为用户开箱证据，不能单独证明用户实际收到、漏收或损伤的事实。
 5. 必须同时写支持证据和反证/不确定性。证据足够时要敢于输出 positive 或 negative；证据不足才输出 review。
 6. 只能引用已提供的帧编号和时间戳，不得编造不存在的时间点。
 7. 样本目录名、人工结论、expected_predicted_label 没有提供给你；你只能根据本证据包独立判断。
@@ -91,7 +105,7 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 - actual_received_item: 实际收到的商品/角色/SKU/规格/数量或破损事实。
 - audit_methods: 实际使用的审核方法数组。
 - frame_findings: 每帧一句客观观察，必须含 video_index、global_frame_index、timestamp、visible_facts、risk、subject_visibility。subject_visibility 必须逐帧列出 shipping_package、product_package、claimed_item 三个 canonical subject_id 及其 state(visible/partial/occluded/out_of_frame/not_yet_exposed/unknown)；不知道时写 unknown，不得省略。
-- adopted_evidence: 模型采信的关键证据数组，每项必须含 source_type、video_index、global_frame_index 或 image_index、timestamp、asset_ref、fact、why_it_matters、confidence；必须能回链到上方帧清单或补充图片清单。仅补充图片证据填写 same_item_linkage 和 temporal_linkage 两个布尔字段：前者表示已确认与主视频争议商品同物，后者表示已通过视频过程建立补图与开箱阶段的时间关联；无法确认时必须写 false，不得省略。
+- adopted_evidence: 模型采信的关键证据数组，每项必须含 source_type、asset_ref、fact、why_it_matters、confidence，并按来源填写 video_index/global_frame_index、image_index 或 reference_index/reference_id；必须能回链到上方清单。仅补充图片证据填写 same_item_linkage 和 temporal_linkage；官方参考图的 source_type 必须是 official_product_reference，且不得表述为用户证据。
 - supporting_evidence: 支持用户诉求的证据数组。
 - challenging_evidence: 反证或风险数组。
 - continuity_assessment: 多视频整体连续性、调包/剪辑风险。

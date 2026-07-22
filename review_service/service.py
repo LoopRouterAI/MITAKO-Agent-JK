@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
 import mimetypes
@@ -16,6 +17,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import UploadFile
@@ -239,8 +241,20 @@ def _public_media_urls(value: Any) -> Any:
         return {key: _public_media_urls(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_public_media_urls(item) for item in value]
-    if isinstance(value, str) and value.startswith("/media/"):
-        return _public_workbench_url() + value
+    if isinstance(value, str):
+        split = urlsplit(value)
+        if split.path.startswith(("/media/", "/media-item/")):
+            secret = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
+            if secret:
+                expires = int(time.time()) + max(
+                    60,
+                    int(os.getenv("VISUAL_REPORT_URL_TTL_SECONDS", "900") or 900),
+                )
+                message = f"{split.path}\n{expires}".encode("utf-8")
+                signature = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+                fragment = f"#{split.fragment}" if split.fragment else ""
+                return f"{_public_workbench_url()}{split.path}?expires={expires}&sig={signature}{fragment}"
+            return _public_workbench_url() + value
     return value
 
 
@@ -863,7 +877,8 @@ def contract() -> Dict[str, Any]:
             "ticket_id", "user_id", "order_no", "customer_claim", "order_items",
             "product_master_data", "warehouse_master_data", "logistics",
             "conversation_history", "sop_context", "asset_fields", "batch_id", "source_record",
-            "claim_scope", "decision_policy",
+            "claim_scope", "decision_policy", "fulfillment_baseline", "evidence_coverage",
+            "sampling_policy", "continuity_policy", "damage_causality_policy",
         ],
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",
@@ -873,6 +888,12 @@ def contract() -> Dict[str, Any]:
             "supplier_file_uri_required": False,
             "detail_frame_format": "image/jpeg",
             "temporal_sheet_format": "image/webp",
+            "official_product_references": {
+                "mode": "per_review_on_demand",
+                "bulk_download_enabled": False,
+                "transport": "服务端白名单下载、校验、压缩后以内联图片发送，不依赖供应商文件 URI。",
+                "failure_policy": "下载失败时保留 SKU/应发清单文字基线并输出降级状态。",
+            },
             "single_asset_limit_mb": _limit_bytes("REVIEW_MAX_ASSET_MB", 650) // (1024 * 1024),
             "case_limit_mb": _limit_bytes("REVIEW_MAX_CASE_MB", 750) // (1024 * 1024),
             "large_batch": "120GB 级生产批次应由对象存储直传、云转码/故事板服务和案件引用适配层承接；当前未伪装为已接入。",

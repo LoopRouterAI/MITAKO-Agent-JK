@@ -49,7 +49,7 @@ try {
 
     Invoke-Step "Frontend production build" { npm run build }
     Invoke-Step "Python core compilation" {
-        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py review_service\decision_policy.py private_domain\service.py scripts\check_documentation_release.py scripts\check_review_runtime_dependencies.py scripts\check_review_0717_four_samples.py scripts\check_minor_refund_144989.py scripts\check_review_submission_modes.py
+        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py review_service\decision_policy.py private_domain\service.py poc\visual_review_poc\order_info_adapter.py poc\visual_review_poc\official_reference_images.py scripts\sync_customer_order_info.py scripts\check_order_reference_integration.py scripts\check_documentation_release.py scripts\check_review_runtime_dependencies.py scripts\check_review_0717_four_samples.py scripts\check_minor_refund_144989.py scripts\check_review_submission_modes.py
     }
     Invoke-Step "Documentation and OpenAPI" { & $Python scripts\check_documentation_release.py }
     Invoke-Step "Private deployment API smoke" { & $Python scripts\check_private_deployment_api.py }
@@ -59,6 +59,7 @@ try {
     Invoke-Step "Media upload safety" { & $Python -m unittest tests.review_service.test_media_upload_safety tests.visual_review.test_workbench_upload_safety }
     Invoke-Step "0717 review decision and timeline regression" { & $Python -m unittest tests.review_service.test_decision_policy_0717 tests.review_service.test_review_strength_and_forensics tests.visual_review.test_global_timeline_aggregation_0717 }
     Invoke-Step "Minor refund material coverage and privacy regression" { & $Python -m unittest tests.visual_review.test_minor_material_pipeline tests.visual_review.test_model_request_isolation tests.visual_review.test_report_evidence_rendering }
+    Invoke-Step "Order baseline and on-demand official image regression" { & $Python -m unittest tests.visual_review.test_order_info_sync tests.visual_review.test_order_info_reconcile tests.visual_review.test_order_info_adapter tests.visual_review.test_official_reference_images tests.review_service.test_input_readiness }
     Invoke-Step "Visual workbench smoke" { & $Python scripts\check_visual_workbench_smoke.py }
     Invoke-Step "Customer Agent 0709 regression" { & $Python scripts\check_customer_agent_0709_regression.py }
     Invoke-Step "Customer Agent 0714 regression" { & $Python scripts\check_customer_agent_0714_regression.py }

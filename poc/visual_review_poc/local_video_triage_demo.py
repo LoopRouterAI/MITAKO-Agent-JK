@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import html
 import json
 import math
@@ -27,6 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
+from poc.visual_review_poc.order_info_adapter import build_order_info_context
 
 ROOT = app_root()
 POC_DIR = ROOT / "poc" / "visual_review_poc"
@@ -273,49 +273,7 @@ def find_supplemental_images(video: Path, limit: int, resource_fields: Dict[str,
 
 def order_info_context(path: Path) -> Dict[str, Any]:
     """把甲方订单快照转换为最小化的 SKU/应发基准，不带用户和地址字段。"""
-    snapshot = read_json(path)
-    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("goods_list"), list):
-        return {}
-    order_items = []
-    product_master = {}
-    for index, item in enumerate(snapshot["goods_list"], start=1):
-        if not isinstance(item, dict):
-            continue
-        sku = str(item.get("number") or item.get("id") or "").strip()
-        name = str(item.get("name") or item.get("des") or "").strip()
-        try:
-            quantity = int(item.get("goods_num") or 0)
-        except (TypeError, ValueError):
-            quantity = 0
-        if not sku or not name or quantity <= 0:
-            continue
-        item_ref = f"ORDER-LINE-{index:03d}"
-        order_item = {
-            "item_ref": item_ref,
-            "sku": sku,
-            "product_name": name,
-            "specification": str(item.get("intro") or item.get("des") or "").strip(),
-            "expected_quantity": quantity,
-            "product_image_ref": str(item.get("main_img") or "").strip(),
-        }
-        order_items.append(order_item)
-        product_master[item_ref] = {
-            "sku": sku,
-            "product_name": name,
-            "specification": order_item["specification"],
-            "product_image_ref": order_item["product_image_ref"],
-        }
-    if not order_items:
-        return {}
-    return {
-        "order_items": order_items,
-        "product_master_data": product_master,
-        "fulfillment_baseline": {
-            "baseline_version": f"order_info_snapshot:{hashlib.sha256(path.read_bytes()).hexdigest()[:16]}",
-            "expected_items": order_items,
-            "source": "customer_order_info_snapshot",
-        },
-    }
+    return build_order_info_context(path)
 
 
 def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional[Path] = None) -> Dict[str, Any]:
@@ -343,10 +301,12 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
         "warehouse_master_data": read_json(folder / "warehouse_master.json") or manifest.get("warehouse_master_data") or {},
         "sku_master_data": read_json(folder / "sku_master.json") or manifest.get("sku_master_data") or {},
         "fulfillment_baseline": order_snapshot.get("fulfillment_baseline") or {},
+        "logistics": order_snapshot.get("logistics") or {},
         "frontdesk_evidence_package": {
             "order_item": order_snapshot.get("order_items") or [],
             "product_master_data": order_snapshot.get("product_master_data") or {},
             "fulfillment_baseline": order_snapshot.get("fulfillment_baseline") or {},
+            "logistics": order_snapshot.get("logistics") or {},
         } if order_snapshot else {},
     }
     return {

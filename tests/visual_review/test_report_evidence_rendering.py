@@ -333,6 +333,50 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertNotIn('/media/video-1-frame-7.jpg', ambiguous_timestamp)
         self.assertNotIn('/media/video-2-frame-7.jpg', ambiguous_timestamp)
 
+    def test_report_separates_official_reference_images_from_customer_evidence(self):
+        data = _report_data()
+        data["agent_report"]["evidence_package"]["official_reference_images_sent"] = 1
+        data["agent_report"]["evidence_package"]["order_baseline"] = {
+            "baseline_version": "order_info_snapshot:abc123",
+            "expected_items": [{
+                "item_ref": "ORDER-LINE-001",
+                "sku": "SKU-001",
+                "product_name": "官方商品",
+                "specification": "红色款",
+                "expected_quantity": 2,
+            }],
+            "selection_rules_complete": False,
+            "benefit_rules_complete": False,
+            "package_mapping_status": "not_declared_in_snapshot",
+        }
+        data["agent_report"]["evidence_package"]["official_reference_status"] = {
+            "status": "partial",
+            "requested_count": 2,
+            "available_count": 1,
+            "failed_count": 1,
+            "fallback": "text_order_baseline",
+        }
+        data["agent_report"]["media_gallery"]["official_references"] = [{
+            "reference_index": 1,
+            "reference_id": "ref-001",
+            "item_ref": "ORDER-LINE-001",
+            "sku": "SKU-001",
+            "product_name": "官方商品",
+            "url": "/media/official-reference.jpg",
+        }]
+
+        report_html = render_public_report(data)
+
+        self.assertIn("官方商品参考图", report_html)
+        self.assertIn("仅作为订单商品标准外观基准", report_html)
+        self.assertIn("部分可用", report_html)
+        self.assertIn("已回退到文字订单基线", report_html)
+        self.assertIn('src="/media/official-reference.jpg"', report_html)
+        self.assertIn("系统订单基线", report_html)
+        self.assertIn("order_info_snapshot:abc123", report_html)
+        self.assertIn("SKU-001", report_html)
+        self.assertIn("不完整或待确认", report_html)
+
 
 if __name__ == "__main__":
     unittest.main()

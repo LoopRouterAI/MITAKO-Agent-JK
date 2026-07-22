@@ -26,6 +26,8 @@ def case(expected_quantity: int = 2, packages=None, coverage=None):
                     "expected_package_count": len(packages),
                     "packages": packages,
                     "split_shipment": len(packages) > 1,
+                    "benefit_rules_complete": True,
+                    "selection_rules_complete": True,
                 },
                 "evidence_coverage": coverage,
             }
@@ -107,6 +109,15 @@ class FulfillmentReconciliationTest(unittest.TestCase):
         )
         self.assertEqual(result["verdict"], "indeterminate")
         self.assertEqual(result["unknown_package_refs"], ["PKG-X"])
+
+    def test_incomplete_applicable_selection_rules_force_review(self):
+        current = case()
+        baseline = current["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]
+        baseline["selection_rules"] = [{"rule_ref": "LOTTERY-1", "item_refs": ["LINE-1"]}]
+        baseline["selection_rules_complete"] = False
+        result = aggregate_fulfillment_reconciliation([row(2)], current, "wrong_item")
+        self.assertEqual(result["verdict"], "indeterminate")
+        self.assertFalse(result["selection_rules_complete"])
 
 
 if __name__ == "__main__":

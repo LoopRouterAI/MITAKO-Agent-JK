@@ -55,6 +55,7 @@ python scripts/check_private_domain_agent_e2e.py
 python scripts/check_admin_ui_smoke.py
 python scripts/check_visual_workbench_smoke.py
 python scripts/check_review_runtime_dependencies.py --media D:\approved-samples\sample.mp4
+python scripts/check_order_reference_integration.py --snapshot D:\approved-samples\case\order_info_snapshot.json --report tests\reports\order-reference.json --limit 2
 python -m playwright install chromium
 python tests/e2e/run_desk_admin_screenshot_report.py
 ```
@@ -63,6 +64,8 @@ python tests/e2e/run_desk_admin_screenshot_report.py
 
 | 文档 | 用途 |
 |---|---|
+| `甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html` | 1,422 个资料目录盘点、1,127 份快照同步、官方图按任务读取和仍待甲方确认项 |
+| `我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md` | 路径映射、最小化适配、CDN 安全、缓存、API/报告链路和回归命令 |
 | `甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html` | 禁止拼图判定、617911 独立帧、144989 资料质量分层和 API/网页提交模式实测 |
 | `我方内部开发文档/升级日志-2026-07-20-独立逐帧审核与资料质量分层.md` | 独立 JPEG 传输、24 帧分段、公开 DTO、测试命令与真实任务证据 |
 | `甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html` | 订单快照匹配结果、API/网页接入、数据缺口、隐私边界与审核安全升级 |

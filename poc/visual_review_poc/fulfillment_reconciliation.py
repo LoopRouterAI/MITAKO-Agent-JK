@@ -125,10 +125,15 @@ def aggregate_fulfillment_reconciliation(
         and submitted_mapping_complete
     )
     baseline_ready = bool(baseline.get("baseline_version") and expected and expected_packages)
+    selection_rules_applicable = bool(baseline.get("selection_rules"))
+    selection_rules_ready = not selection_rules_applicable or baseline.get("selection_rules_complete") is True
+    benefit_rules_ready = scenario != "missing_item" or baseline.get("benefit_rules_complete") is True
     evidence_sufficient = (
         baseline_ready
         and input_complete
         and coverage_verified
+        and selection_rules_ready
+        and benefit_rules_ready
         and not unconfirmed
         and not unknown_package_refs
     )
@@ -138,7 +143,7 @@ def aggregate_fulfillment_reconciliation(
     boundary = (
         "已完成版本化应发基准、全部包裹开箱和全部内容展示的视觉对账。"
         if evidence_sufficient
-        else "应发基准、包裹覆盖、全部内容展示或未确认项不完整，只能判为证据不足并人工复核。"
+        else "应发基准、抽赏/赠品规则、包裹覆盖、全部内容展示或未确认项不完整，只能判为证据不足并人工复核。"
     )
     return {
         "baseline_version": baseline.get("baseline_version") or "",
@@ -153,6 +158,8 @@ def aggregate_fulfillment_reconciliation(
         "all_items_displayed": coverage.get("all_items_displayed") is True,
         "visual_coverage_verified": coverage_verified,
         "submitted_package_mapping_complete": submitted_mapping_complete,
+        "selection_rules_complete": selection_rules_ready,
+        "benefit_rules_complete": benefit_rules_ready,
         "unknown_package_refs": unknown_package_refs,
         "evidence_sufficiency": "sufficient" if evidence_sufficient else "insufficient",
         "verdict": verdict,

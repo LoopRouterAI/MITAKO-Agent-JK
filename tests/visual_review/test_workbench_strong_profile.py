@@ -10,6 +10,55 @@ from poc.visual_review_poc import workbench_server
 
 
 class WorkbenchStrongProfileTest(unittest.TestCase):
+    def test_folder_review_prepares_official_references_after_frontdesk_context_merge(self) -> None:
+        observed = {}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            case = {
+                "case_id": "CASE-OFFICIAL-REF",
+                "scenario": "video_unboxing",
+                "scenario_label": "发错货审核",
+                "videos": [],
+                "frames": [],
+                "supplemental_images": [],
+            }
+
+            def merge_context(current, *_):
+                current["structured_business_context"] = {
+                    "frontdesk_evidence_package": {
+                        "fulfillment_baseline": {"expected_items": [{"item_ref": "LINE-1", "sku": "SKU-1"}]},
+                    }
+                }
+                return current
+
+            def prepare(current, *_):
+                self.assertIn("frontdesk_evidence_package", current["structured_business_context"])
+                current["official_reference_images"] = [{"reference_index": 1}]
+                return current
+
+            def model_result(_cfg, current, **_kwargs):
+                observed["official_count"] = len(current.get("official_reference_images") or [])
+                return {"status": "success", "parsed": {"predicted_label": "review", "confidence": 0.6}}
+
+            with patch.object(workbench_server, "load_visual_env"), patch.object(
+                workbench_server, "load_case_bundle", return_value=case
+            ), patch.object(
+                workbench_server, "apply_frontdesk_context", side_effect=merge_context
+            ), patch.object(
+                workbench_server, "prepare_official_reference_images", side_effect=prepare
+            ), patch.object(
+                workbench_server, "call_model_chunked", side_effect=model_result
+            ), patch.object(
+                workbench_server,
+                "_agent_report_response",
+                return_value={"summary": {"review_status": "completed"}},
+            ):
+                workbench_server._run_folder_agent_review(
+                    folder, "video_unboxing", "gemini35", {}, "adaptive", 1.0, 24, 24, 12
+                )
+
+        self.assertEqual(observed["official_count"], 1)
+
     def test_auto_model_route_uses_configured_fallback_after_primary_transport_failure(self) -> None:
         failed = {
             "status": "failed",

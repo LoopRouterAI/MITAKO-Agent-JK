@@ -2,21 +2,19 @@
 from __future__ import annotations
 
 import io
-import shutil
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
+import numpy as np
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 
 from poc.visual_review_poc import workbench_server
 from poc.visual_review_poc.model_selection_e2e import load_case_bundle
-
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 def upload(name: str, body: bytes) -> UploadFile:
@@ -54,14 +52,18 @@ class WorkbenchUploadSafetyTest(unittest.TestCase):
         self.assertEqual(len({folder.name for folder in folders}), 20)
 
     def test_undecodable_video_is_isolated_when_valid_video_exists(self) -> None:
-        source = ROOT / "docs" / "三大审核场景的小量样本" / "sample_004" / "minor_material_review.mp4"
-        self.assertTrue(source.is_file(), source)
         with tempfile.TemporaryDirectory() as temp_dir:
             case_dir = Path(temp_dir) / "case"
             run_dir = Path(temp_dir) / "run"
             case_dir.mkdir()
             (case_dir / "000_bad.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"broken" * 8)
-            shutil.copy2(source, case_dir / "001_valid.mp4")
+            valid_video = case_dir / "001_valid.mp4"
+            writer = cv2.VideoWriter(str(valid_video), cv2.VideoWriter_fourcc(*"mp4v"), 5.0, (64, 48))
+            self.assertTrue(writer.isOpened())
+            for level in (32, 96, 160, 224):
+                writer.write(np.full((48, 64, 3), level, dtype=np.uint8))
+            writer.release()
+            self.assertTrue(valid_video.is_file())
             case = load_case_bundle(
                 case_dir,
                 SimpleNamespace(

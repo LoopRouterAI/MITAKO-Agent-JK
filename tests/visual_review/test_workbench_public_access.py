@@ -71,7 +71,29 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                 "videos": [{"video_index": 1, "file": "evidence.mp4"}],
                 "frames": [],
                 "supplemental_images": [],
+                "official_reference_images": [{
+                    "reference_index": 1,
+                    "reference_id": "ref-001",
+                    "item_ref": "ORDER-LINE-001",
+                    "sku": "SKU-001",
+                    "product_name": "官方商品",
+                    "api_path": str(sample_dir / "official.jpg"),
+                }],
+                "official_reference_status": {"status": "available", "available_count": 1},
+                "structured_business_context": {
+                    "fulfillment_baseline": {
+                        "baseline_version": "order_info_snapshot:test",
+                        "expected_items": [{
+                            "item_ref": "ORDER-LINE-001",
+                            "sku": "SKU-001",
+                            "product_name": "官方商品",
+                            "expected_quantity": 1,
+                        }],
+                    },
+                    "logistics": {"carrier": "测试快递", "tracking_ref": "sha256:test"},
+                },
             }
+            (sample_dir / "official.jpg").write_bytes(b"official")
             result = {
                 "status": "success",
                 "parsed": {
@@ -87,6 +109,10 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
 
             self._assert_signed(response["report"]["html_url"])
             self._assert_signed(response["agent_report"]["media_gallery"]["videos"][0]["url"])
+            self._assert_signed(response["agent_report"]["media_gallery"]["official_references"][0]["url"])
+            baseline = response["agent_report"]["evidence_package"]["order_baseline"]
+            self.assertEqual(baseline["expected_items"][0]["sku"], "SKU-001")
+            self.assertEqual(baseline["tracking_ref"], "sha256:test")
 
     def test_public_media_url_is_opaque_and_survives_registry_reload(self) -> None:
         workbench_server.RUNTIME_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
@@ -301,6 +327,14 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertIs(payload["report_signing_secret_configured"], False)
         self.assertIs(payload["ok"], False)
         self.assertNotIn(workbench_server.REPORT_SIGNING_SECRET.hex(), serialized)
+
+    def test_health_declares_on_demand_product_reference_boundary(self) -> None:
+        payload = workbench_server.health()
+        capability = payload["official_product_references"]
+
+        self.assertEqual(capability["mode"], "per_review_on_demand")
+        self.assertIs(capability["bulk_download_enabled"], False)
+        self.assertEqual(capability["model_transport"], "compressed_inline_image")
 
 
 if __name__ == "__main__":

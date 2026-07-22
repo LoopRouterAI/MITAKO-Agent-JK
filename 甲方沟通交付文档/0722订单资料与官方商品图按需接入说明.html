@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>订单资料与官方商品图按需接入说明</title>
+  <style>
+    :root{--ink:#17202a;--muted:#667085;--line:#dfe5e7;--paper:#f7faf8;--white:#fff;--lime:#c7f436;--cyan:#16b8ae;--orange:#ff8a34;--rose:#e95d87;--yellow:#ffd85a;--shadow:0 16px 42px rgba(23,32,42,.10);font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;color:var(--ink)}
+    *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#fff 0,#f4f8f6 100%)}main{width:min(1160px,calc(100% - 28px));margin:auto;padding:24px 0 56px}.hero{position:relative;overflow:hidden;padding:34px;border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:var(--shadow)}.hero:after{content:"";position:absolute;left:0;right:0;bottom:0;height:8px;background:linear-gradient(90deg,var(--lime),var(--yellow),var(--orange),var(--rose),var(--cyan))}.tag{display:inline-block;padding:6px 10px;border:1px solid var(--ink);background:var(--lime);font-size:12px;font-weight:900}h1{max-width:900px;margin:16px 0 10px;font-size:44px;line-height:1.08;letter-spacing:0}h2{margin:0 0 14px;font-size:24px}h3{margin:0 0 8px;font-size:17px}p,li{line-height:1.75}.lead{max-width:900px;color:#344054;font-size:17px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:16px}.metric,.panel,.card{border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:var(--shadow)}.metric{min-height:118px;padding:17px}.metric small{display:block;color:var(--muted)}.metric b{display:block;margin-top:9px;font-size:31px}.metric.good{background:#f4ffd4}.metric.warn{background:#fff5e8}.panel{margin-top:16px;padding:24px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:18px;box-shadow:none}.card.done{border-top:5px solid var(--cyan)}.card.wait{border-top:5px solid var(--orange)}.card.boundary{border-top:5px solid var(--rose)}.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;align-items:stretch}.step{padding:14px;border:1px solid var(--line);background:var(--paper);border-radius:8px}.step b{display:block;margin-bottom:6px}.status{display:inline-block;padding:4px 8px;border-radius:999px;background:#edf1f2;color:#344054;font-size:12px;font-weight:800}.status.ok{background:#dff7d8}.status.no{background:#ffe8d8}.table{width:100%;border-collapse:collapse}.table th,.table td{padding:12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.table th{background:#f0f5f3}.notice{padding:16px;border-left:5px solid var(--orange);background:#fff7ec}.evidence{font-family:Consolas,"Microsoft YaHei UI",monospace;font-size:13px;color:#344054;overflow-wrap:anywhere}.footer{margin-top:18px;color:var(--muted);font-size:13px}@media(max-width:840px){h1{font-size:34px}.metrics,.grid{grid-template-columns:1fr 1fr}.flow{grid-template-columns:1fr}.hero,.panel{padding:18px}}@media(max-width:560px){main{width:calc(100% - 18px)}h1{font-size:29px}.metrics,.grid{grid-template-columns:1fr}.table{display:block;overflow-x:auto}}
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <span class="tag">2026-07-22 更新说明</span>
+    <h1>订单资料已经进入审核链路，商品原图改为按案件读取</h1>
+    <p class="lead">这次不是把甲方商品图库全部下载到我方服务器，而是让每个审核 Case 带上自己的订单基准。审核开始时，系统只读取该订单真正涉及的少量官方商品图，压缩后与用户视频、图片一起审核。</p>
+  </section>
+
+  <section class="metrics">
+    <article class="metric"><small>资料工单目录</small><b>1,422</b></article>
+    <article class="metric"><small>含订单快照</small><b>1,129</b></article>
+    <article class="metric good"><small>已唯一关联并复验</small><b>1,127</b></article>
+    <article class="metric warn"><small>隔离待确认</small><b>2</b></article>
+  </section>
+
+  <section class="panel">
+    <h2>现在审核多拿到了什么</h2>
+    <div class="grid">
+      <article class="card done"><h3>订单应发基准</h3><p>当前订单的 SKU、商品名、规格、应发数量会进入审核。重复 SKU 会合并数量，不再把同一商品拆成大量重复行。</p></article>
+      <article class="card done"><h3>官方商品参考图</h3><p>用于核对款式、角色、正常纹理、包装标识和标准外观。它与用户提交图片分开标记，不能冒充用户开箱证据。</p></article>
+      <article class="card done"><h3>物流与抽赏信息</h3><p>保留承运商、不可逆物流引用和与本单商品有关的抽赏规则；完整物流单号、整份商品库、用户地址和价格不会送给模型。</p></article>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>一单审核时实际怎么走</h2>
+    <div class="flow">
+      <div class="step"><b>1. 接收 Case</b><span>API 或网页文件夹</span></div>
+      <div class="step"><b>2. 读取本单快照</b><span>只取当前 SKU 与应发数量</span></div>
+      <div class="step"><b>3. 按需取图</b><span>争议 SKU 优先，默认最多 6 张</span></div>
+      <div class="step"><b>4. 安全压缩送审</b><span>校验后转 JPEG 内联图片</span></div>
+      <div class="step"><b>5. 输出报告</b><span>订单基准、用户证据、官方图分区展示</span></div>
+    </div>
+    <p class="notice"><b>读取失败不会假装成功。</b>某张官方图超时、失效或格式错误时，报告会显示“部分可用/不可用”，并继续使用 SKU、名称、规格和数量文字基线。</p>
+  </section>
+
+  <section class="panel">
+    <h2>网页端与 API 是否都支持</h2>
+    <table class="table">
+      <thead><tr><th>入口</th><th>当前能力</th><th>订单资料方式</th></tr></thead>
+      <tbody>
+        <tr><td>网页单工单文件夹</td><td><span class="status ok">已支持</span></td><td>Case 文件夹中放入 `order_info_snapshot.json`，与视频/图片一起提交。</td></tr>
+        <tr><td>网页批量父目录</td><td><span class="status ok">已支持</span></td><td>每个子 Case 保留自己的快照；系统逐案隔离审核，不共用别单资料。</td></tr>
+        <tr><td>正式审核 API</td><td><span class="status ok">已支持</span></td><td>可上传快照，或在 `fulfillment_baseline.expected_items[].master_image_urls` 直接传本单官方图引用。</td></tr>
+        <tr><td>120GB 生产批次</td><td><span class="status no">待生产联调</span></td><td>按案件并发创建异步任务；对象存储、回调和生产 CDN 权限仍需双方联调。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>已经完成的工程验证</h2>
+    <div class="grid">
+      <article class="card done"><h3>真实资料同步</h3><p>1,127 份快照已写入对应 Case，复制后逐文件 SHA-256 一致；再次 dry-run 全部显示 `already_synced`。</p></article>
+      <article class="card done"><h3>真实 CDN 读取</h3><p>617341 实际读取 1 张官方图，压缩后 45,753 bytes；第二次审核命中缓存，没有重复下载。</p></article>
+      <article class="card done"><h3>自动化回归</h3><p>视觉审核 113/113，通过；正式审核服务 46/46，通过；人工标签和隐私字段送模命中 0。</p></article>
+    </div>
+    <p class="evidence">证据：tests/reports/customer_order_info_0722_applied.json · customer_order_info_0722_post_apply_verify.json · order_reference_integration_617341_20260722.json</p>
+  </section>
+
+  <section class="panel">
+    <h2>仍需要甲方确认或提供</h2>
+    <div class="grid">
+      <article class="card wait"><h3>两个映射异常</h3><p>`114145` 在样本目录中有两个副本；`604382_row374` 不是标准数字工单号。系统已隔离，没有猜测关联。</p></article>
+      <article class="card wait"><h3>293 个无快照目录</h3><p>这些目录没有 `order_info_snapshot.json`。是否必须补齐要按场景判断，发错货和漏发货优先级最高。</p></article>
+      <article class="card boundary"><h3>漏发货关键数据</h3><p>一个物流单号不能证明所有 SKU 都在同一包裹。生产自动判断仍需分包-SKU 映射、赠品/特典完整声明和全部包裹展示状态。</p></article>
+      <article class="card boundary"><h3>生产 CDN 规则</h3><p>需确认鉴权、URL 有效期、并发限制、出口白名单和缓存更新规则；当前已验证公开测试 URL 的读取链路。</p></article>
+      <article class="card boundary"><h3>抽赏规则完整度</h3><p>存在随机款、端盒、赠品或特典但规则未完整声明时，系统只输出人工复核，不会自动给出确定性正负结论。</p></article>
+      <article class="card boundary"><h3>业务最终动作</h3><p>本系统给出证据结论、置信度和客服建议，不自动退款、补发、换货、拒绝或定责。</p></article>
+      <article class="card boundary"><h3>准确率验收</h3><p>SKU 和官方图能提高证据充分度，但 1 个 Case 的成功不等于总体准确率。仍应使用冻结标签的盲测集比较接入前后效果。</p></article>
+    </div>
+  </section>
+
+  <p class="footer">本说明面向甲方负责人、客服、测试与技术人员。接口字段以随包 OpenAPI 和 Java 接入样例为准。</p>
+</main>
+</body>
+</html>
