@@ -1139,7 +1139,7 @@ def _run_review(
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
-    prepare_official_reference_images(case, ROOT / "tmp" / "visual_review_product_refs")
+    prepare_official_reference_images(case)
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
     result = _call_model_chunked_with_fallback(
@@ -1352,7 +1352,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
-    prepare_official_reference_images(case, ROOT / "tmp" / "visual_review_product_refs")
+    prepare_official_reference_images(case)
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
     result = _call_model_chunked_with_fallback(

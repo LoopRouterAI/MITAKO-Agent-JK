@@ -24,6 +24,7 @@ from poc.visual_review_poc.order_info_adapter import (
     DEFAULT_PRODUCT_IMAGE_BASE_URL,
     product_image_url,
 )
+from runtime_paths import data_dir
 from review_media_safety import valid_media_magic
 
 
@@ -33,6 +34,11 @@ ALLOWED_IMAGE_MIME = {
     "image/webp": ".webp",
 }
 _CACHE_HOUSEKEEPING_LOCK = threading.Lock()
+
+
+def official_reference_cache_dir() -> Path:
+    configured = os.getenv("REVIEW_PRODUCT_IMAGE_CACHE_DIR", "").strip()
+    return Path(configured).resolve() if configured else (data_dir() / "visual_review_product_refs").resolve()
 
 
 def _bounded_int(name: str, default: int, low: int, high: int) -> int:
@@ -300,11 +306,12 @@ def _download_uncached(
 
 def prepare_official_reference_images(
     case: Dict[str, Any],
-    cache_dir: Path,
+    cache_dir: Optional[Path] = None,
     *,
     client: Optional[httpx.Client] = None,
     limit: Optional[int] = None,
 ) -> Dict[str, Any]:
+    cache_dir = Path(cache_dir).resolve() if cache_dir else official_reference_cache_dir()
     references = collect_official_image_references(case)
     reference_fingerprint = hashlib.sha256(
         "\n".join(item["url"] for item in references).encode("utf-8")

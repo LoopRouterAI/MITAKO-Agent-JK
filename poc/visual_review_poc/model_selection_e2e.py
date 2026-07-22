@@ -226,10 +226,7 @@ def load_case_bundle(
         max_edge=1920 if minor_material else 1280,
         quality=88 if minor_material else 82,
     )
-    prepare_official_reference_images(
-        case,
-        ROOT / "tmp" / "visual_review_product_refs",
-    )
+    prepare_official_reference_images(case)
     return case
 
 

@@ -43,6 +43,7 @@
       <div class="step"><b>5. 输出报告</b><span>订单基准、用户证据、官方图分区展示</span></div>
     </div>
     <p class="notice"><b>读取失败不会假装成功。</b>某张官方图超时、失效或格式错误时，报告会显示“部分可用/不可用”，并继续使用 SKU、名称、规格和数量文字基线。</p>
+    <p class="notice"><b>部署路径不绑定我方电脑。</b>上传文件、数据库和官方图缓存均使用甲方部署时的数据目录；Windows 盘符、Linux 挂载点或容器卷都可以不同。</p>
   </section>
 
   <section class="panel">
@@ -63,7 +64,7 @@
     <div class="grid">
       <article class="card done"><h3>真实资料同步</h3><p>1,127 份快照已写入对应 Case，复制后逐文件 SHA-256 一致；再次 dry-run 全部显示 `already_synced`。</p></article>
       <article class="card done"><h3>真实 CDN 读取</h3><p>617341 实际读取 1 张官方图，压缩后 45,753 bytes；第二次审核命中缓存，没有重复下载。</p></article>
-      <article class="card done"><h3>自动化回归</h3><p>视觉审核 113/113，通过；正式审核服务 46/46，通过；人工标签和隐私字段送模命中 0。</p></article>
+      <article class="card done"><h3>自动化回归</h3><p>视觉审核 114/114，通过；正式审核服务 46/46，通过；人工标签和隐私字段送模命中 0。</p></article>
     </div>
     <p class="evidence">证据：tests/reports/customer_order_info_0722_applied.json · customer_order_info_0722_post_apply_verify.json · order_reference_integration_617341_20260722.json</p>
   </section>

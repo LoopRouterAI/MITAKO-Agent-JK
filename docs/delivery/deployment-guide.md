@@ -88,6 +88,7 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 - `REVIEW_PRODUCT_IMAGE_BASE_URL`：甲方订单快照中相对商品主图路径的 HTTPS 基地址。
 - `REVIEW_PRODUCT_IMAGE_ALLOWED_HOSTS`：官方商品图主机白名单，多个主机用逗号分隔；禁止加入本机或内网主机。
 - `REVIEW_PRODUCT_IMAGE_LIMIT`：单审核任务最多读取的官方商品图，默认 6、硬上限 12；盘点、启动和批次查询均不会触发全量下载。
+- `REVIEW_PRODUCT_IMAGE_CACHE_DIR`：可选官方图缓存目录；未配置时使用 `MITAKO_DATA_DIR/visual_review_product_refs`，适配不同盘符、容器挂载和独立数据盘。
 - `REVIEW_PRODUCT_IMAGE_MAX_BYTES`：单张官方图下载上限，默认 8MiB；超限、重定向、伪图片或非白名单资源均降级为文字订单基线。
 - `REVIEW_PRODUCT_IMAGE_MAX_PIXELS`：解码前像素上限，默认 2000 万，防止小体积超大像素图片耗尽内存。
 - `REVIEW_PRODUCT_IMAGE_MAX_EDGE` / `REVIEW_PRODUCT_IMAGE_JPEG_QUALITY`：送模前压缩边长和 JPEG 质量，默认 1280 / 82。

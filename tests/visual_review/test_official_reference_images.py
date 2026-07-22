@@ -16,6 +16,7 @@ from PIL import Image
 
 from poc.visual_review_poc.official_reference_images import (
     collect_official_image_references,
+    official_reference_cache_dir,
     prepare_official_reference_images,
 )
 
@@ -53,6 +54,14 @@ def case_with_urls(*urls: str) -> dict:
 class OfficialReferenceImagesTest(unittest.TestCase):
     def _public_dns(self):
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    def test_cache_path_follows_runtime_data_dir_and_allows_explicit_override(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict("os.environ", {"MITAKO_DATA_DIR": str(root / "data"), "REVIEW_PRODUCT_IMAGE_CACHE_DIR": ""}):
+                self.assertEqual(official_reference_cache_dir(), (root / "data" / "visual_review_product_refs").resolve())
+            with patch.dict("os.environ", {"REVIEW_PRODUCT_IMAGE_CACHE_DIR": str(root / "cache")}):
+                self.assertEqual(official_reference_cache_dir(), (root / "cache").resolve())
 
     def test_fetches_only_deduplicated_current_order_images_and_reuses_cache(self) -> None:
         calls = 0

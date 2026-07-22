@@ -29,11 +29,7 @@ def run(snapshot: Path, report_path: Path, limit: int) -> dict:
     assert_review_input_safe(context)
     leaked = [marker for marker in FORBIDDEN_KEYS if marker.lower() in serialized.lower()]
     case = {"structured_business_context": context}
-    prepare_official_reference_images(
-        case,
-        PROJECT_ROOT / "tmp" / "visual_review_product_refs",
-        limit=limit,
-    )
+    prepare_official_reference_images(case, limit=limit)
     status = case.get("official_reference_status") or {}
     result = {
         "ok": not leaked and status.get("available_count", 0) > 0,
