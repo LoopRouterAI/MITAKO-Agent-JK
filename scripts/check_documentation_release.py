@@ -157,6 +157,10 @@ def main() -> int:
             errors.append(f"审核建议 API 文档缺少关键字段: {term}")
 
     package_script = (ROOT / "scripts/package_release.ps1").read_text(encoding="utf-8")
+    if "param(" not in package_script or "[string]$BaseUrl" not in package_script or "[string]$VisualUrl" not in package_script:
+        errors.append("甲方打包脚本必须支持显式传入主服务和视觉服务验收地址")
+    if "-BaseUrl $BaseUrl -VisualUrl $VisualUrl" not in package_script:
+        errors.append("甲方打包脚本没有把验收地址传给内部预发布门禁")
     if "我方内部开发文档" in package_script:
         errors.append("打包脚本出现内部文档明文，请确认未复制到客户包")
     if "$obsoleteCustomerDocs" not in package_script or "[System.IO.File]::Delete($obsoletePath)" not in package_script:

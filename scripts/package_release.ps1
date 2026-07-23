@@ -1,4 +1,10 @@
-﻿$ErrorActionPreference = "Stop"
+﻿[CmdletBinding()]
+param(
+    [string]$BaseUrl = $(if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }),
+    [string]$VisualUrl = $(if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" })
+)
+
+$ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -15,9 +21,7 @@ if ($TrackedChanges.Count -gt 0) {
     throw "Working tree contains tracked or untracked changes. Commit them before creating an auditable customer package."
 }
 
-$InternalBaseUrl = if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }
-$InternalVisualUrl = if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }
-& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $InternalBaseUrl -VisualUrl $InternalVisualUrl
+& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl
 $TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=normal)
 if ($TrackedChangesAfterValidation.Count -gt 0) {
     throw "Release validation changed tracked files. Review and commit them before customer packaging."
