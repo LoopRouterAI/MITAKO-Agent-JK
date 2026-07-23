@@ -246,6 +246,46 @@ def _report_data():
 
 
 class ReportEvidenceRenderingTest(unittest.TestCase):
+    def test_report_renders_advisory_assessment_and_business_boundary(self):
+        data = _report_data()
+        data["agent_report"]["advisory_assessment"] = {
+            "assessment": {
+                "conclusion": "当前视觉证据支持商品存在可见损伤。",
+                "confidence": 0.88,
+                "confidence_level": "high",
+                "calibration_status": "uncalibrated_evidence_score",
+            },
+            "human_review": {
+                "level": "optional",
+                "reason_codes": ["non_blocking_risk_signal"],
+                "recommendation": "存在非阻断风险信号，甲方可按风险偏好抽检。",
+            },
+            "workflow_recommendation": "continue_by_customer_policy",
+            "signals": [
+                {
+                    "code": "short_out_of_frame",
+                    "severity": "warning",
+                    "duration_seconds": 1.4,
+                    "effect": "短暂离镜仅降低证据强度，不单独强制人工复审。",
+                }
+            ],
+            "policy": {
+                "policy_ref": "MITAKO-ADVISORY-20260723@1",
+                "advisory_only": True,
+                "business_action_allowed": False,
+                "boundary": "本服务不直接决定退款、补发、换货、拒绝或最终定责。",
+            },
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("审核建议与使用边界", report_html)
+        self.assertIn("建议抽检", report_html)
+        self.assertIn("按甲方规则继续", report_html)
+        self.assertIn("短暂离镜仅降低证据强度", report_html)
+        self.assertIn("不是客观正确率", report_html)
+        self.assertIn("本服务不直接决定退款、补发、换货、拒绝或最终定责", report_html)
+
     def test_report_renders_evidence_boundaries_and_links_gallery_media(self):
         report_html = render_public_report(_report_data())
 

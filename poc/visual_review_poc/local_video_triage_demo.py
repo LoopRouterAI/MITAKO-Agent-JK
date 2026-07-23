@@ -402,6 +402,9 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
     damage_causality_policy = _structured_context_value(context.get("damage_causality_policy"))
     if isinstance(damage_causality_policy, dict):
         structured["damage_causality_policy"] = damage_causality_policy
+    review_routing_policy = _structured_context_value(context.get("review_routing_policy"))
+    if isinstance(review_routing_policy, dict):
+        structured["review_routing_policy"] = review_routing_policy
     return case
 
 

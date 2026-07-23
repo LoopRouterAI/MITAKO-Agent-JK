@@ -32,6 +32,7 @@ from . import store
 from .media_forensics import inspect_job_media, resolve_ffprobe
 from .input_readiness import assess_input_readiness
 from .decision_policy import apply_review_decision_policy
+from .advisory_assessment import attach_advisory_assessment, html_report_requested
 from .schemas import ReviewCaseMetadata
 
 
@@ -261,6 +262,7 @@ def _public_media_urls(value: Any) -> Any:
 def _effective_review_policies(metadata: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
     continuity = dict(metadata.get("continuity_policy") or {})
     causality = dict(metadata.get("damage_causality_policy") or {})
+    continuity.setdefault("out_of_frame_warning_seconds", 3.0)
     preset = str((metadata.get("sampling_policy") or {}).get("preset") or "adaptive")
     scenario = str(metadata.get("scenario") or "")
     if preset == "adaptive" and scenario == "product_damage":
@@ -291,7 +293,7 @@ def _sampling_fields(metadata: Dict[str, Any]) -> Dict[str, str]:
     scenario = str(metadata.get("scenario") or "")
     continuity, causality = _effective_review_policies(metadata)
     if scenario in {"product_damage", "wrong_item", "missing_item"} and continuity.get("force_dense_scan") is True:
-        warning_seconds = max(0.5, min(float(continuity.get("out_of_frame_warning_seconds") or 2.0), 30.0))
+        warning_seconds = max(0.5, min(float(continuity.get("out_of_frame_warning_seconds") or 3.0), 30.0))
         required_fps = continuity.get("scan_fps")
         if required_fps in (None, ""):
             required_fps = min(2.0, max(0.2, 2.0 / warning_seconds))
@@ -431,6 +433,8 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         "claim_scope": json.dumps(metadata.get("claim_scope") or {}, ensure_ascii=False),
         "continuity_policy": json.dumps(continuity_policy, ensure_ascii=False),
         "damage_causality_policy": json.dumps(damage_causality_policy, ensure_ascii=False),
+        "review_routing_policy": json.dumps(metadata.get("review_routing_policy") or {}, ensure_ascii=False),
+        "include_html_report": str(html_report_requested(metadata)).lower(),
         **_sampling_fields(metadata),
         "probe_seconds": os.getenv("REVIEW_PROBE_SECONDS", "12"),
     }
@@ -516,141 +520,62 @@ def _media_forensics(job: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
-def _first_number(values: Sequence[Any]) -> Optional[float]:
-    for value in values:
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(number):
-            return number / 100.0 if number > 1.0 and number <= 100.0 else number
-    return None
-
-
-def _material_gaps(review: Dict[str, Any]) -> List[str]:
-    agent_report = review.get("agent_report") if isinstance(review.get("agent_report"), dict) else {}
-    parsed = agent_report.get("parsed") if isinstance(agent_report.get("parsed"), dict) else {}
-    raw = parsed.get("material_gaps", review.get("material_gaps"))
-    if isinstance(raw, list):
-        return [str(item).strip() for item in raw if str(item).strip()]
-    if isinstance(raw, dict):
-        return [f"{key}: {value}" for key, value in raw.items() if value is not None and value != "" and value != [] and value != {}]
-    return [str(raw).strip()] if raw not in {None, ""} else []
-
-
 def _recommended_escalation(
     job: Dict[str, Any],
     review: Dict[str, Any],
     forensics: Dict[str, Any],
 ) -> Dict[str, Any]:
     metadata = job.get("metadata") or {}
-    policy = metadata.get("sampling_policy") or {}
-    preset = str(policy.get("preset") or "adaptive")
-    try:
-        threshold = float(policy.get("confidence_threshold") if policy.get("confidence_threshold") is not None else 0.75)
-    except (TypeError, ValueError):
-        threshold = 0.75
-    threshold = max(0.0, min(threshold, 1.0))
-
-    summary = review.get("summary") if isinstance(review.get("summary"), dict) else {}
-    agent_report = review.get("agent_report") if isinstance(review.get("agent_report"), dict) else {}
-    parsed = agent_report.get("parsed") if isinstance(agent_report.get("parsed"), dict) else {}
-    overall = parsed.get("overall_audit") if isinstance(parsed.get("overall_audit"), dict) else {}
-    confidence = _first_number(
-        [
-            summary.get("confidence"),
-            parsed.get("confidence"),
-            overall.get("confidence"),
-            review.get("confidence"),
-        ]
-    )
-    predicted_label = str(
-        summary.get("predicted_label")
-        or parsed.get("predicted_label")
-        or review.get("predicted_label")
-        or ""
-    ).strip().lower()
-    decision = str(parsed.get("decision") or review.get("decision") or "").strip().lower()
-    gaps = _material_gaps(review)
-    forensic_summary = forensics.get("summary") if isinstance(forensics.get("summary"), dict) else {}
-    forensic_risk = str(forensic_summary.get("risk_level") or "none").lower()
-    forensic_signals = int(forensic_summary.get("risk_signal_count") or 0)
-
-    reasons: List[Dict[str, Any]] = []
-    if confidence is None or confidence < threshold:
-        reasons.append(
-            {
-                "code": "low_confidence",
-                "message": "审核置信度未达到策略阈值。",
-                "observed": confidence,
-                "threshold": threshold,
-            }
-        )
-    if predicted_label == "review" or decision in {"manual_review", "request_more_material", "review"}:
-        reasons.append(
-            {
-                "code": "review_conclusion",
-                "message": "当前结论为复核或补充材料，尚不适合直接进入业务动作。",
-                "observed": predicted_label or decision,
-            }
-        )
-    if gaps:
-        reasons.append(
-            {
-                "code": "material_gaps",
-                "message": "现有材料存在缺口，增加抽帧强度不能替代缺失的业务证据。",
-                "items": gaps[:12],
-            }
-        )
-    if forensic_signals > 0:
-        reasons.append(
-            {
-                "code": "forensic_risk",
-                "message": "非 AI 媒体取证发现需复核的风险信号；信号不是已证实的剪辑结论。",
-                "risk_level": forensic_risk,
-                "signal_count": forensic_signals,
-            }
-        )
-
+    sampling_policy = metadata.get("sampling_policy") or {}
+    preset = str(sampling_policy.get("preset") or "adaptive")
     current_fps = float(_sampling_fields(metadata)["fps"])
-    if preset == "adaptive":
-        target_preset, target_fps = "strong", 1.0
-    elif preset in {"strong", "strict"}:
-        target_preset, target_fps = "forensic", 2.0
-    elif preset == "custom" and current_fps < 1.0:
-        target_preset, target_fps = "strong", 1.0
-    else:
-        target_preset, target_fps = "forensic", 2.0
+    advisory = review.get("advisory_assessment") if isinstance(review.get("advisory_assessment"), dict) else {}
+    human_review = advisory.get("human_review") if isinstance(advisory.get("human_review"), dict) else {}
+    workflow = str(advisory.get("workflow_recommendation") or "human_review")
+    level = str(human_review.get("level") or "required")
+    reason_codes = [str(item) for item in human_review.get("reason_codes") or []]
+    signals = [item for item in advisory.get("signals") or [] if isinstance(item, dict)]
+    reasons = [{"code": code, "message": str(human_review.get("recommendation") or "")} for code in reason_codes]
+    reasons.extend(
+        {"code": str(item.get("code") or "risk_signal"), "message": str(item.get("effect") or "")}
+        for item in signals
+        if str(item.get("code") or "") not in reason_codes
+    )
 
     actions: List[Dict[str, Any]] = []
-    if reasons:
+    if workflow == "request_more_material":
+        actions.append({
+            "type": "request_more_material",
+            "description": "按缺口清单补充业务证据；增加抽帧强度不能替代缺失材料。",
+        })
+    elif workflow == "human_review":
+        actions.append({
+            "type": "human_evidence_review",
+            "description": "由授权人员核对原始证据，业务动作仍由甲方规则决定。",
+        })
+    elif level == "optional":
+        actions.append({
+            "type": "optional_quality_sampling",
+            "description": "甲方可按风险偏好抽检，不要求每单人工复审。",
+        })
+
+    visual_signal_codes = {"short_out_of_frame", "identity_reestablishment_unresolved", "media_forensic_risk"}
+    if workflow != "request_more_material" and any(str(item.get("code") or "") in visual_signal_codes for item in signals):
+        target_preset, target_fps = ("strong", 1.0) if preset == "adaptive" else ("forensic", 2.0)
         if target_fps > current_fps or preset == "adaptive":
-            actions.append(
-                {
-                    "type": "increase_sampling_strength",
-                    "target_preset": target_preset,
-                    "target_fps": target_fps,
-                    "bounded": True,
-                }
-            )
-        actions.append(
-            {
-                "type": "enhanced_visual_review",
-                "description": "可在人工确认后使用更高能力的视觉审核配置复核疑点片段。",
-            }
-        )
-        if gaps or forensic_signals:
-            actions.append(
-                {
-                    "type": "human_evidence_review",
-                    "description": "核对原始文件、材料缺口和风险信号后再进行业务判断。",
-                }
-            )
+            actions.append({
+                "type": "increase_sampling_strength",
+                "target_preset": target_preset,
+                "target_fps": target_fps,
+                "bounded": True,
+                "description": "仅在疑点可能通过更密抽帧获得新证据时建议强化，不因材料缺口重复烧模型。",
+            })
 
     return {
-        "recommended": bool(reasons),
-        "policy_auto_escalate": bool(policy.get("auto_escalate")),
+        "recommended": bool(actions),
+        "policy_auto_escalate": bool(sampling_policy.get("auto_escalate")),
         "execution_mode": "recommendation_only",
+        "source": "advisory_assessment",
         "automatic_model_retries": 0,
         "current": {"preset": preset, "fps": current_fps},
         "reasons": reasons,
@@ -674,10 +599,10 @@ def _apply_input_readiness_guard(review: Dict[str, Any], readiness: Dict[str, An
         {
             "predicted_label": "review",
             "system_yes_no": "REVIEW",
-            "decision": "manual_review",
+            "decision": "request_more_material",
             "confidence": confidence,
             "business_action_allowed": False,
-            "human_required": True,
+            "human_required": False,
             "input_readiness_guard": {
                 "applied": True,
                 "missing_required": missing,
@@ -724,8 +649,22 @@ def run_job(job_id: str) -> Dict[str, Any]:
         review = dict(payload.get("review")) if isinstance(payload.get("review"), dict) else {}
         review = _apply_input_readiness_guard(review, readiness)
         review = apply_review_decision_policy(job, review, media_forensics=forensics)
+        review = attach_advisory_assessment(
+            review,
+            job.get("metadata") or {},
+            readiness=readiness,
+            media_forensics=forensics,
+            succeeded=payload.get("ok") is True,
+        )
         review.pop("report", None)
-        review["report"] = {"html_url": f"/api/v1/review/jobs/{job_id}/report"}
+        if html_report_requested(job):
+            review["report"] = {
+                "requested": True,
+                "status": "ready",
+                "html_url": f"/api/v1/review/jobs/{job_id}/report",
+            }
+        else:
+            review["report"] = {"requested": False, "status": "not_requested", "html_url": None}
         diagnostics = review.get("diagnostics") or payload.get("diagnostics") or {}
         result = {
             **base_result,
@@ -744,7 +683,24 @@ def run_job(job_id: str) -> Dict[str, Any]:
         }
     except Exception as exc:
         diagnostics = {"error_type": exc.__class__.__name__, "message": str(exc)[:1200]}
-    base_result["recommended_escalation"] = _recommended_escalation(job, {}, forensics)
+    failed_review = attach_advisory_assessment(
+        {
+            "summary": {"review_status": "failed", "predicted_label": "review"},
+            "agent_brief": {"conclusion": "审核服务本轮未完成，不能形成事实判断。"},
+            "agent_report": {"parsed": {"predicted_label": "review"}},
+            "diagnostics": diagnostics,
+        },
+        job.get("metadata") or {},
+        readiness=readiness,
+        media_forensics=forensics,
+        succeeded=False,
+    )
+    if html_report_requested(job):
+        failed_review["report"] = {"requested": True, "status": "unavailable", "html_url": None}
+    else:
+        failed_review["report"] = {"requested": False, "status": "not_requested", "html_url": None}
+    base_result["review"] = failed_review
+    base_result["recommended_escalation"] = _recommended_escalation(job, failed_review, forensics)
     return store.finish_job(job_id, status="FAILED", result=base_result, diagnostics=diagnostics)
 
 
@@ -879,6 +835,7 @@ def contract() -> Dict[str, Any]:
             "conversation_history", "sop_context", "asset_fields", "batch_id", "source_record",
             "claim_scope", "decision_policy", "fulfillment_baseline", "evidence_coverage",
             "sampling_policy", "continuity_policy", "damage_causality_policy",
+            "output_options", "review_routing_policy",
         ],
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",
@@ -911,10 +868,18 @@ def contract() -> Dict[str, Any]:
             "forensic_checks": "可选的容器完整性、流一致性、帧率、包时间轴和编辑器元数据检查列表。",
         },
         "continuity_policy_fields": {
-            "out_of_frame_warning_seconds": "0.5-30 秒，默认 2 秒；超过后转人工复核，不自动拒绝。",
+            "out_of_frame_warning_seconds": "0.5-30 秒，默认 3 秒；达到后建议补充连续原视频，不自动拒绝，也不单独强制人工复核。",
             "require_identity_reestablishment": "主体重新入镜后要求核验是否仍为同一物件。",
             "force_dense_scan": "开启时按离镜阈值反推最低时间分辨率，避免稀疏抽帧声称全程连续。",
             "scan_fps": "可选 0.2-2 FPS；为空时自动使用 min(2, max(0.2, 2/离镜阈值秒数))。",
+        },
+        "output_options": {
+            "include_html_report": "默认 true；设为 false 时只返回结构化 JSON，报告路由返回 review_report_not_requested。",
+        },
+        "review_routing_policy": {
+            "required_below_confidence": "低于该证据分数时建议必须人工复审，默认 0.5。",
+            "optional_below_confidence": "低于该证据分数时建议抽检，默认 0.8。",
+            "out_of_frame_resubmit_seconds": "连续离镜达到该秒数时建议补充材料，默认 3 秒；离镜本身不等于剪辑、调包或欺诈。",
         },
         "decision_policy_fields": {
             "mode": "默认 conservative_review；只有甲方显式选择 classification_recommendation 才评估规则判负。",
@@ -927,7 +892,14 @@ def contract() -> Dict[str, Any]:
         "statuses": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "RETRYING"],
         "result_fields": [
             "predicted_label", "confidence", "agent_report", "agent_brief", "media_forensics",
-            "recommended_escalation", "input_readiness", "diagnostics", "boundary",
+            "advisory_assessment", "report", "recommended_escalation", "input_readiness", "diagnostics", "boundary",
         ],
+        "primary_result_contract": {
+            "assessment": "事实结论、证据分数和未校准口径。",
+            "human_review": "required、optional、not_required 三级建议。",
+            "workflow_recommendation": "human_review、request_more_material、continue_by_customer_policy。",
+            "signals": "离镜、证据冲突、材料缺口和媒体取证等可追溯信号。",
+            "business_boundary": "所有输出均为建议；不直接执行退款、补发、换货、拒绝或最终定责。",
+        },
         "boundary": "不自动退款、补发、换货、拒绝或最终定责。",
     }

@@ -157,11 +157,19 @@ async def job_detail(job_id: str, user=_integration_user()):
     return {"ok": True, "created": False, "job": job}
 
 
-@router.get("/jobs/{job_id}/report", response_class=HTMLResponse)
+@router.get(
+    "/jobs/{job_id}/report",
+    response_class=HTMLResponse,
+    responses={404: {"model": ReviewErrorResponse}, 409: {"model": ReviewErrorResponse}},
+)
 async def job_report(job_id: str, user=_integration_user()):
     job = store.get_job(job_id)
     if not job or job.get("tenant_id") != (user.get("tenant_id") or "mitako"):
         raise HTTPException(status_code=404, detail="review_job_not_found")
+    if not service.html_report_requested(job):
+        raise HTTPException(status_code=409, detail="review_report_not_requested")
+    if job.get("status") != "SUCCEEDED":
+        raise HTTPException(status_code=409, detail="review_report_not_ready")
     return HTMLResponse(service.render_job_report(job))
 
 

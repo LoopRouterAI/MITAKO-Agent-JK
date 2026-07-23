@@ -86,7 +86,13 @@ def main() -> int:
 
     t0 = time.time()
     schemas = openapi.get("components", {}).get("schemas", {})
-    required_schemas = ("GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata", "ReviewClaimScope", "ReviewDecisionPolicy", "ReviewSamplingPolicy", "ReviewSamplingPlanRequest", "ReviewSamplingPlanResponse", "ReviewJobResponse", "ReviewBatchResponse")
+    required_schemas = (
+        "GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata",
+        "ReviewClaimScope", "ReviewDecisionPolicy", "ReviewSamplingPolicy", "ReviewSamplingPlanRequest",
+        "ReviewSamplingPlanResponse", "ReviewJobResponse", "ReviewBatchResponse",
+        "ReviewAdvisoryAssessment", "ReviewHumanReviewAdvice", "ReviewAdvisorySignal",
+        "ReviewAdvisoryPolicy", "ReviewReportReference",
+    )
     typed = all(name in schemas for name in required_schemas)
     _case(results, "OPENAPI-typed-schemas", typed, f"schemas={','.join(name for name in schemas if name in required_schemas)}", t0)
 

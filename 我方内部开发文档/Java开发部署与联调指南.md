@@ -1,6 +1,6 @@
 # Java 开发部署与联调指南
 
-版本：2026-07-22
+版本：2026-07-23
 
 ## 1. Java 的职责边界
 
@@ -13,7 +13,7 @@
 3. 对大视频调用 `/api/v1/review/sampling-plan` 获取抽帧和转码建议。
 4. 使用 `multipart/form-data` 提交 `/api/v1/review/jobs`。
 5. 保存 `job_id` 与 `batch_id`，轮询状态或由后续回调适配层通知。
-6. 读取公开报告并由人工客服做最终业务处理。
+6. 优先读取 `advisory_assessment`；仅在 `report.requested=true` 时读取公开 HTML。
 
 完整代码见 `docs/delivery/java-client-sample.md`。
 
@@ -47,9 +47,11 @@ Nginx / Java Gateway
 - 漏发货：必须使用 `fulfillment_baseline` 提交版本化应发清单、商品行数量、赠品/特典声明、包裹数和包裹商品映射；使用 `evidence_coverage` 提交本次实际包裹引用/物流单号和完整展示声明。
 - 分包映射：一个物流单号不能自动证明所有 SKU 都属于同一包裹；没有权威包裹-SKU 关系时必须留空并接受降级复核。
 - 商品有伤：使用 `damage_causality_policy` 控制动作因果专项扫描；使用 `continuity_policy` 配置离镜阈值和连续性专项扫描。
+- 人工复审分级：使用 `review_routing_policy` 配置必须复审、建议抽检和 3 秒离镜补件阈值；离镜阈值不得解释为自动拒绝或已证实调包。
+- 报告输出：网页默认生成 HTML；系统批量可用 `output_options.include_html_report=false` 只保留结构化 JSON。
 - 商品有伤多诉求：用 `claim_scope.active_claim_ids` 明确本次原子诉求。后续追加的不同商品、部位或损伤机制必须新建 claim，不得用一个工单级标签覆盖全部诉求。
 - 自动分类策略：`decision_policy` 默认 `conservative_review`。只有配置甲方批准的 `policy_ref@version` 并选择 `classification_recommendation` 后，才允许命中规则性 `negative`；该结果仍保持 `business_action_allowed=false`。
-- 甲方未提供完整基准时接口不拒绝创建任务，但 `metadata/validate` 会返回 `degraded_review`，运行结果固定降级到人工复核。
+- 甲方未提供完整基准时接口不拒绝创建任务，但 `metadata/validate` 会返回 `degraded_review`。运行结果优先建议补材料，不再仅因材料缺口强制占用人工席位。
 
 ## 4. 大文件
 
@@ -107,6 +109,10 @@ Java 侧至少补充：
 - 文件过大 413、格式错误 415、标签输入 422。
 - 批次分页时 summary 仍是全批次统计。
 - 服务重启后未完成任务可恢复或重试。
+- `required/optional/not_required` 三种复审分级和 `request_more_material` 流程建议。
+- JSON-only 任务不生成 HTML，报告路由返回 409 `review_report_not_requested`。
+
+字段级说明见 `docs/delivery/review-advisory-api.md`。
 
 ## 8. 上线前配置
 

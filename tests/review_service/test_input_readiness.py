@@ -191,6 +191,8 @@ class InputReadinessTest(unittest.TestCase):
         parsed = guarded["agent_report"]["parsed"]
         self.assertEqual(parsed["predicted_label"], "review")
         self.assertEqual(parsed["system_yes_no"], "REVIEW")
+        self.assertEqual(parsed["decision"], "request_more_material")
+        self.assertFalse(parsed["human_required"])
         self.assertFalse(parsed["business_action_allowed"])
         self.assertIn("complete_evidence_coverage", parsed["material_gaps"])
 
@@ -220,6 +222,22 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(plan["fps"], 1.0)
         self.assertGreater(plan["estimated_channel_calls"]["object_continuity"], 0)
         self.assertGreater(plan["estimated_channel_calls"]["damage_causality"], 0)
+
+    def test_sampling_plan_uses_three_second_default_out_of_frame_policy(self):
+        plan = sampling_plan(
+            60,
+            12_000_000,
+            1,
+            {"preset": "adaptive"},
+            "product_damage",
+            {},
+            {},
+        )
+
+        self.assertEqual(
+            plan["effective_review_policies"]["continuity_policy"]["out_of_frame_warning_seconds"],
+            3.0,
+        )
 
     def test_sampling_frequency_is_derived_from_out_of_frame_threshold(self):
         one_fps = sampling_plan(
@@ -339,6 +357,32 @@ class InputReadinessTest(unittest.TestCase):
             ["https://cdn-qiniu.danhaotuan.com/sku-1.png"],
         )
         self.assertEqual(json.loads(fields["evidence_coverage"])["submitted_package_refs"], ["PKG-1"])
+
+    def test_formal_job_propagates_output_and_review_routing_options(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "CASE-OUTPUT-PROPAGATION",
+                "scenario": "product_damage",
+                "output_options": {"include_html_report": False},
+                "review_routing_policy": {
+                    "required_below_confidence": 0.48,
+                    "optional_below_confidence": 0.82,
+                    "out_of_frame_resubmit_seconds": 3.0,
+                },
+            }
+        ).model_dump(mode="json")
+
+        fields = _review_fields(
+            {
+                "scenario": "product_damage",
+                "client_case_id": "CASE-OUTPUT-PROPAGATION",
+                "metadata": metadata,
+                "assets": [],
+            }
+        )
+
+        self.assertEqual(fields["include_html_report"], "false")
+        self.assertEqual(json.loads(fields["review_routing_policy"])["optional_below_confidence"], 0.82)
 
     def test_chinese_human_annotation_is_rejected_from_runtime_input(self):
         with self.assertRaisesRegex(ValueError, "evaluation_label_not_allowed"):

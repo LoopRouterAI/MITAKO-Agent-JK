@@ -2,6 +2,16 @@
 
 本文记录对外可说明的关键变更。真实交付、部署与验收以 `docs/delivery/`、`甲方沟通交付文档/`、`我方内部开发文档/` 为准。
 
+## 2026-07-23 审核建议契约、三级复审与可选 HTML
+
+- 新增统一 `advisory_assessment`：事实结论、未校准证据分数、三级人工复审、流程建议、风险信号和业务边界。
+- 材料缺口改为优先 `request_more_material`，不再仅因缺材料强制占用人工席位。
+- 连续离镜默认 3 秒只建议补连续原视频；短暂遮挡作为抽检信号，离镜本身不等于剪辑、调包或欺诈。
+- 网页默认生成 HTML；正式 API 可通过 `output_options.include_html_report=false` 只返回 JSON。
+- JSON-only 任务不写报告文件、不返回虚假 URL，报告路由明确返回 409 `review_report_not_requested`。
+- HTML 报告首屏新增事实结论、证据分数、复审级别、流程建议、风险信号和禁止自动业务动作说明。
+- 新增 API 使用说明、Java 字段映射、甲方非技术 HTML 和内部升级日志，并纳入双 ZIP 发布门禁。
+
 ## 2026-07-22 订单资料与官方商品图按需接入
 
 - 官方图缓存不再写入源码目录，默认跟随 `MITAKO_DATA_DIR`，并允许用 `REVIEW_PRODUCT_IMAGE_CACHE_DIR` 指向独立磁盘或容器卷。

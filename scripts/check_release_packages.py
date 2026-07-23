@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import urllib.error
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -77,6 +79,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "requirements.txt",
         "internal-package-manifest.json",
         "我方内部开发文档/Java开发部署与联调指南.md",
+        "我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md",
         "我方内部开发文档/升级日志-2026-07-17.md",
         "我方内部开发文档/升级日志-2026-07-17-提交模式与双包.md",
         "我方内部开发文档/升级日志-2026-07-17-144989未成年人资料审核.md",
@@ -95,6 +98,8 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
         "甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html",
         "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
+        "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
+        "docs/delivery/review-advisory-api.md",
         "tests/reports/minor_refund_144989_20260717-final.json",
         "tests/reports/minor_refund_144989_20260720-latest.json",
         "tests/reports/minor_refund_144989_20260720-latest.html",
@@ -133,6 +138,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "runtime/app_runtime.zip",
         "customer-package-manifest.json",
         "docs/delivery/openapi.yaml",
+        "docs/delivery/review-advisory-api.md",
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
         "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
         "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-17.html",
@@ -140,6 +146,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
         "甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html",
         "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
+        "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
         "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
         "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
         "甲方沟通交付文档/README.md",
@@ -173,6 +180,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(any(name.endswith("minor_material_model_prompt.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料识别协议")
     _assert(any(name.endswith("official_reference_images.pyc") for name in runtime_names), "甲方运行时缺少官方商品图按需读取模块")
     _assert(any(name.endswith("order_info_adapter.pyc") for name in runtime_names), "甲方运行时缺少订单快照适配模块")
+    _assert(any(name.endswith("advisory_assessment.pyc") for name in runtime_names), "甲方运行时缺少统一审核建议模块")
     workbench_html = (root / "visual_review_workbench" / "workbench.html").read_text(encoding="utf-8-sig")
     _assert("/api/review-folders-batch" in workbench_html and "batchFolderTab" in workbench_html, "甲方工作台缺少批量工单入口")
     return {"entries": len(names), "runtime_entries": len(runtime_names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
@@ -195,6 +203,39 @@ def _wait_json(url: str, timeout: float = 60.0) -> dict[str, Any]:
             last_error = f"{type(exc).__name__}: {exc}"
             time.sleep(0.5)
     raise RuntimeError(f"服务未就绪：{url}；最后错误：{last_error}")
+
+
+def _request_json(
+    url: str,
+    *,
+    method: str = "GET",
+    data: bytes | None = None,
+    headers: dict[str, str] | None = None,
+    expected_status: int = 200,
+) -> dict[str, Any]:
+    request = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            status = response.status
+            payload = response.read()
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        payload = exc.read()
+    _assert(status == expected_status, f"HTTP 状态不符：{url}，expected={expected_status}, actual={status}")
+    return json.loads(payload.decode("utf-8-sig")) if payload else {}
+
+
+def _multipart_review_job(metadata: dict[str, Any]) -> tuple[bytes, str]:
+    boundary = "----MITAKOReleaseContractBoundary"
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+    parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\n\r\n".encode("utf-8"),
+        json.dumps(metadata, ensure_ascii=False).encode("utf-8"),
+        f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"contract.png\"\r\nContent-Type: image/png\r\n\r\n".encode("utf-8"),
+        png,
+        f"\r\n--{boundary}--\r\n".encode("utf-8"),
+    ]
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
 def _terminate(process: subprocess.Popen[Any] | None) -> None:
@@ -261,6 +302,69 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
         auth_status = _wait_json(f"http://127.0.0.1:{main_port}/api/v1/auth/status")
         _assert(auth_status.get("ok") is True, "甲方包主服务健康检查失败")
 
+        runtime_contract = subprocess.run(
+            [
+                str(python),
+                "-c",
+                (
+                    "from review_service.advisory_assessment import attach_advisory_assessment;"
+                    "r=attach_advisory_assessment({'summary':{'predicted_label':'positive','confidence':0.91},"
+                    "'agent_report':{'parsed':{'predicted_label':'positive','confidence':0.91}}},"
+                    "{'scenario':'product_damage'},readiness={'full_review_ready':True,'missing_required':[]});"
+                    "a=r['advisory_assessment'];"
+                    "assert a['human_review']['level']=='not_required';"
+                    "assert a['policy']['business_action_allowed'] is False;"
+                    "assert r['agent_report']['parsed']['human_required'] is False"
+                ),
+            ],
+            cwd=customer_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        _assert(runtime_contract.returncode == 0, f"甲方编译运行时审核契约失败：{runtime_contract.stderr[-2000:]}")
+
+        metadata = {
+            "client_case_id": "RELEASE-CONTRACT-JSON-ONLY",
+            "scenario": "product_damage",
+            "output_options": {"include_html_report": False},
+            "review_routing_policy": {
+                "required_below_confidence": 0.5,
+                "optional_below_confidence": 0.8,
+                "out_of_frame_resubmit_seconds": 3.0,
+            },
+        }
+        validated = _request_json(
+            f"http://127.0.0.1:{main_port}/api/v1/review/metadata/validate",
+            method="POST",
+            data=json.dumps(metadata).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        _assert(validated["metadata"]["output_options"]["include_html_report"] is False, "JSON-only 配置未生效")
+        invalid = {**metadata, "review_routing_policy": {"required_below_confidence": 0.9, "optional_below_confidence": 0.2}}
+        _request_json(
+            f"http://127.0.0.1:{main_port}/api/v1/review/metadata/validate",
+            method="POST",
+            data=json.dumps(invalid).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            expected_status=422,
+        )
+        body, content_type = _multipart_review_job(metadata)
+        created = _request_json(
+            f"http://127.0.0.1:{main_port}/api/v1/review/jobs",
+            method="POST",
+            data=body,
+            headers={"Content-Type": content_type, "Idempotency-Key": "release-contract-json-only"},
+            expected_status=202,
+        )
+        job_id = created["job"]["job_id"]
+        report_error = _request_json(
+            f"http://127.0.0.1:{main_port}/api/v1/review/jobs/{job_id}/report",
+            expected_status=409,
+        )
+        _assert(report_error.get("detail") == "review_report_not_requested", "JSON-only 报告路由未返回预期错误")
+
         smoke_env = env.copy()
         smoke_env["E2E_BASE_URL"] = f"http://127.0.0.1:{main_port}"
         smoke = subprocess.run(
@@ -277,6 +381,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             "visual_port": visual_port,
             "auth_mode": "demo_bypass",
             "api_smoke": "14/14",
+            "advisory_contract": "compiled runtime + metadata validation + JSON-only report 409",
             "visual_health": True,
             "built_in_samples_available": False,
         }

@@ -1,6 +1,6 @@
 # Java / Spring Boot 接入样例
 
-版本：2026-07-16
+版本：2026-07-23
 推荐：Spring Boot 3、WebClient、Jackson。
 
 Java 系统只调用 FastAPI 主服务。内部视觉服务、模型凭证和数据库不对 Java 网关暴露。
@@ -71,7 +71,13 @@ public Mono<JsonNode> validateMetadata(WebClient client, String token, Map<Strin
   },
   "product_master_data": {"LINE-1": {"sku": "SKU-001", "product_name": "角色拍立得", "specification": "A款"}},
   "sampling_policy": {"preset": "strict", "frames_per_model_call": 24},
-  "continuity_policy": {"out_of_frame_warning_seconds": 2.0, "force_dense_scan": true}
+  "continuity_policy": {"out_of_frame_warning_seconds": 3.0, "force_dense_scan": true},
+  "output_options": {"include_html_report": false},
+  "review_routing_policy": {
+    "required_below_confidence": 0.5,
+    "optional_below_confidence": 0.8,
+    "out_of_frame_resubmit_seconds": 3.0
+  }
 }
 ```
 
@@ -121,7 +127,7 @@ public Mono<JsonNode> samplingPlan(WebClient client, String token) {
           "video_count", 1,
           "scenario", "product_damage",
           "sampling_policy", Map.of("preset", "strict", "frames_per_model_call", 24),
-          "continuity_policy", Map.of("out_of_frame_warning_seconds", 2.0, "force_dense_scan", true),
+          "continuity_policy", Map.of("out_of_frame_warning_seconds", 3.0, "force_dense_scan", true),
           "damage_causality_policy", Map.of("force_action_scan", true, "dedicated_chunk_frames", 20)))
       .retrieve()
       .bodyToMono(JsonNode.class);
@@ -183,6 +189,16 @@ public Mono<JsonNode> getJob(WebClient client, String token, String jobId) {
 
 轮询终态：`SUCCEEDED` 或 `FAILED`。建议从 2 秒开始退避，单次查询超时 10 秒。
 
+新接入优先读取 `job.result.review.advisory_assessment`：
+
+- `assessment.conclusion/confidence/calibration_status`：事实结论、证据分数和未校准口径。
+- `human_review.level`：`required`、`optional`、`not_required`。
+- `workflow_recommendation`：`human_review`、`request_more_material`、`continue_by_customer_policy`。
+- `signals[]`：离框、证据冲突、材料缺口和媒体取证信号。
+- `policy.business_action_allowed`：恒为 `false`。
+
+当 `output_options.include_html_report=false` 时，`review.report.status=not_requested` 且 `html_url=null`；不要继续请求报告路由。完整说明见 [审核建议结果 API 使用说明](./review-advisory-api.md)。
+
 ## 7. 查询批次
 
 ```java
@@ -219,6 +235,7 @@ public Mono<JsonNode> retryJob(WebClient client, String token, String jobId) {
 |---:|---|
 | 401/403 | 刷新凭证或检查角色/租户，不自动无限重试 |
 | 409 | 幂等键与请求内容冲突，停止并报警 |
+| 409 `review_report_not_requested` | 当前任务选择了 JSON-only，不应再次请求 HTML |
 | 413 | 文件/案件过大，改走对象存储转码方案 |
 | 415 | 文件类型、扩展名、MIME 或内容无效 |
 | 422 | metadata 或标签隔离校验失败 |

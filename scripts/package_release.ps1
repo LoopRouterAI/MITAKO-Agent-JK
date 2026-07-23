@@ -10,15 +10,15 @@ $ZipPath = Join-Path (Split-Path -Parent $Root) $ZipName
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_customer_stage_$Date"
 $CompileStage = Join-Path $env:TEMP "mitako_runtime_compile_$Date"
 $GitCommit = (git rev-parse HEAD).Trim()
-$TrackedChanges = @(git status --porcelain --untracked-files=no)
+$TrackedChanges = @(git status --porcelain --untracked-files=normal)
 if ($TrackedChanges.Count -gt 0) {
-    throw "Tracked files contain uncommitted changes. Commit them before creating an auditable customer package."
+    throw "Working tree contains tracked or untracked changes. Commit them before creating an auditable customer package."
 }
 
 $InternalBaseUrl = if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }
 $InternalVisualUrl = if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }
 & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $InternalBaseUrl -VisualUrl $InternalVisualUrl
-$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=no)
+$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=normal)
 if ($TrackedChangesAfterValidation.Count -gt 0) {
     throw "Release validation changed tracked files. Review and commit them before customer packaging."
 }
@@ -516,7 +516,6 @@ $visualConfig = @{
         shipping_label_visible_before_open = $true
         damage_visible = $true
         minor_material_desensitized = $true
-        manual_review_confidence_lt = 0.8
     }
     report = @{
         show_backend_config = $false
@@ -823,6 +822,8 @@ $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbe
 
 $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "docs\delivery\review-advisory-api.md",
+    "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
     "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",
     "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
     "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",

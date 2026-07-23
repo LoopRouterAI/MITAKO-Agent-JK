@@ -21,6 +21,7 @@ REQUIRED_FILES = (
     "docs/delivery/testing-guide.md",
     "docs/delivery/acceptance-checklist-v1.md",
     "docs/delivery/java-client-sample.md",
+    "docs/delivery/review-advisory-api.md",
     "docs/delivery/openapi.yaml",
     "docs/delivery/mitako-full-requirement-reaudit-20260711.html",
     "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
@@ -34,6 +35,7 @@ REQUIRED_FILES = (
     "甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html",
     "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
     "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
+    "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
     "我方内部开发文档/README.md",
     "我方内部开发文档/index.html",
     "我方内部开发文档/工程师入门.md",
@@ -48,6 +50,7 @@ REQUIRED_FILES = (
     "我方内部开发文档/升级日志-2026-07-20-未成年人资料字段一致性.md",
     "我方内部开发文档/升级日志-2026-07-20-视觉证据安全与SKU基准.md",
     "我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
+    "我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md",
 )
 REQUIRED_API_PATHS = (
     "/api/v1/review/contracts",
@@ -113,18 +116,46 @@ def main() -> int:
         missing_errors = {"400", "409", "413", "415", "422"} - declared_responses
         if missing_errors:
             errors.append(f"审核创建接口缺少错误响应: {sorted(missing_errors)}")
+        metadata_schema = (((spec.get("components") or {}).get("schemas") or {}).get("ReviewCaseMetadata") or {})
+        metadata_properties = metadata_schema.get("properties") or {}
+        for field in ("output_options", "review_routing_policy"):
+            if field not in metadata_properties:
+                errors.append(f"审核 metadata 缺少字段: {field}")
+        schemas = ((spec.get("components") or {}).get("schemas") or {})
+        for schema_name in (
+            "ReviewAdvisoryAssessment",
+            "ReviewHumanReviewAdvice",
+            "ReviewAdvisorySignal",
+            "ReviewAdvisoryPolicy",
+            "ReviewReportReference",
+        ):
+            if schema_name not in schemas:
+                errors.append(f"OpenAPI 缺少审核结果类型: {schema_name}")
+        report_responses = (((paths.get("/api/v1/review/jobs/{job_id}/report") or {}).get("get") or {}).get("responses") or {})
+        for status in ("404", "409"):
+            if status not in report_responses:
+                errors.append(f"审核报告接口缺少错误响应: {status}")
 
     java_guide = (ROOT / "我方内部开发文档/Java开发部署与联调指南.md").read_text(encoding="utf-8")
     if "/api/v1/review/contracts" not in java_guide:
         errors.append("Java 联调指南缺少真实审核契约端点 /api/v1/review/contracts")
     if re.search(r"/api/v1/review/contract(?!s)", java_guide):
         errors.append("Java 联调指南仍包含错误端点 /api/v1/review/contract")
+    if "advisory_assessment" not in java_guide or "include_html_report=false" not in java_guide:
+        errors.append("Java 联调指南缺少统一建议结果或 JSON-only 说明")
+
+    advisory_guide = (ROOT / "docs/delivery/review-advisory-api.md").read_text(encoding="utf-8")
+    for term in ("required", "optional", "not_required", "request_more_material", "business_action_allowed"):
+        if term not in advisory_guide:
+            errors.append(f"审核建议 API 文档缺少关键字段: {term}")
 
     package_script = (ROOT / "scripts/package_release.ps1").read_text(encoding="utf-8")
     if "我方内部开发文档" in package_script:
         errors.append("打包脚本出现内部文档明文，请确认未复制到客户包")
     if "$obsoleteCustomerDocs" not in package_script or "[System.IO.File]::Delete($obsoletePath)" not in package_script:
         errors.append("打包脚本未启用过时甲方文档排除规则")
+    if "0723审核结论置信度与人工复审分级说明.html" not in package_script:
+        errors.append("甲方打包证据清单缺少 0723 非技术更新说明")
 
     if errors:
         print("文档发布校验失败：")

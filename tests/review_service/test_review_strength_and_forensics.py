@@ -293,11 +293,9 @@ class ReviewJobIntegrationTest(unittest.TestCase):
         self.assertTrue(plan["recommended"])
         self.assertEqual(plan["execution_mode"], "recommendation_only")
         self.assertEqual(plan["automatic_model_retries"], 0)
-        self.assertEqual(plan["actions"][0]["target_preset"], "strong")
-        self.assertEqual(
-            {item["code"] for item in plan["reasons"]},
-            {"low_confidence", "review_conclusion", "material_gaps", "forensic_risk"},
-        )
+        self.assertEqual(plan["source"], "advisory_assessment")
+        self.assertEqual([item["type"] for item in plan["actions"]], ["request_more_material"])
+        self.assertIn("material_resubmission_available", {item["code"] for item in plan["reasons"]})
         public_result = json.dumps(result, ensure_ascii=False).lower()
         self.assertNotIn("api_key", public_result)
         self.assertNotIn("system prompt", public_result)

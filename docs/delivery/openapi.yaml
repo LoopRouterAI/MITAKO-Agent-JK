@@ -482,6 +482,18 @@ paths:
             text/html:
               schema:
                 type: string
+        '404':
+          content:
+            text/html:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            text/html:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Conflict
         '422':
           description: Validation Error
           content:
@@ -2512,6 +2524,126 @@ components:
       required:
       - to_agent_id
       title: ReassignBody
+    ReviewAdvisoryAssessment:
+      properties:
+        scenario:
+          type: string
+          title: Scenario
+        assessment:
+          $ref: '#/components/schemas/ReviewAssessmentDetails'
+        human_review:
+          $ref: '#/components/schemas/ReviewHumanReviewAdvice'
+        workflow_recommendation:
+          type: string
+          enum:
+          - human_review
+          - request_more_material
+          - continue_by_customer_policy
+          title: Workflow Recommendation
+        signals:
+          items:
+            $ref: '#/components/schemas/ReviewAdvisorySignal'
+          type: array
+          title: Signals
+        policy:
+          $ref: '#/components/schemas/ReviewAdvisoryPolicy'
+      type: object
+      required:
+      - scenario
+      - assessment
+      - human_review
+      - workflow_recommendation
+      - policy
+      title: ReviewAdvisoryAssessment
+    ReviewAdvisoryPolicy:
+      properties:
+        policy_ref:
+          type: string
+          title: Policy Ref
+        effective_thresholds:
+          additionalProperties:
+            type: number
+          type: object
+          title: Effective Thresholds
+        advisory_only:
+          type: boolean
+          const: true
+          title: Advisory Only
+          default: true
+        business_action_allowed:
+          type: boolean
+          const: false
+          title: Business Action Allowed
+          default: false
+        boundary:
+          type: string
+          title: Boundary
+      additionalProperties: true
+      type: object
+      required:
+      - policy_ref
+      - boundary
+      title: ReviewAdvisoryPolicy
+    ReviewAdvisorySignal:
+      properties:
+        code:
+          type: string
+          title: Code
+        severity:
+          type: string
+          enum:
+          - info
+          - warning
+          - critical
+          title: Severity
+        effect:
+          type: string
+          title: Effect
+      additionalProperties: true
+      type: object
+      required:
+      - code
+      - severity
+      - effect
+      title: ReviewAdvisorySignal
+    ReviewAssessmentDetails:
+      properties:
+        conclusion_code:
+          type: string
+          enum:
+          - evidence_supports_claim
+          - evidence_does_not_support_claim
+          - evidence_inconclusive
+          title: Conclusion Code
+        conclusion:
+          type: string
+          title: Conclusion
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+        confidence_level:
+          type: string
+          enum:
+          - high
+          - medium
+          - low
+          - unavailable
+          title: Confidence Level
+        calibration_status:
+          type: string
+          const: uncalibrated_evidence_score
+          title: Calibration Status
+      type: object
+      required:
+      - conclusion_code
+      - conclusion
+      - confidence_level
+      - calibration_status
+      title: ReviewAssessmentDetails
     ReviewAsset:
       properties:
         asset_id:
@@ -2794,6 +2926,10 @@ components:
           $ref: '#/components/schemas/ReviewContinuityPolicy'
         damage_causality_policy:
           $ref: '#/components/schemas/ReviewDamageCausalityPolicy'
+        output_options:
+          $ref: '#/components/schemas/ReviewOutputOptions'
+        review_routing_policy:
+          $ref: '#/components/schemas/ReviewRoutingPolicy'
       additionalProperties: true
       type: object
       required:
@@ -2881,7 +3017,7 @@ components:
           maximum: 30.0
           minimum: 0.5
           title: Out Of Frame Warning Seconds
-          default: 2.0
+          default: 3.0
         require_identity_reestablishment:
           type: boolean
           title: Require Identity Reestablishment
@@ -3193,6 +3329,28 @@ components:
       required:
       - baseline_version
       title: ReviewFulfillmentBaseline
+    ReviewHumanReviewAdvice:
+      properties:
+        level:
+          type: string
+          enum:
+          - required
+          - optional
+          - not_required
+          title: Level
+        reason_codes:
+          items:
+            type: string
+          type: array
+          title: Reason Codes
+        recommendation:
+          type: string
+          title: Recommendation
+      type: object
+      required:
+      - level
+      - recommendation
+      title: ReviewHumanReviewAdvice
     ReviewJob:
       properties:
         job_id:
@@ -3229,9 +3387,7 @@ components:
           type: array
           title: Assets
         result:
-          additionalProperties: true
-          type: object
-          title: Result
+          $ref: '#/components/schemas/ReviewJobResult'
         diagnostics:
           additionalProperties: true
           type: object
@@ -3297,6 +3453,15 @@ components:
       required:
       - job
       title: ReviewJobResponse
+    ReviewJobResult:
+      properties:
+        review:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewPayload'
+          - type: 'null'
+      additionalProperties: true
+      type: object
+      title: ReviewJobResult
     ReviewMetadataValidationResponse:
       properties:
         ok:
@@ -3328,6 +3493,71 @@ components:
       required:
       - metrics
       title: ReviewMetricsResponse
+    ReviewOutputOptions:
+      properties:
+        include_html_report:
+          type: boolean
+          title: Include Html Report
+          default: true
+      type: object
+      title: ReviewOutputOptions
+    ReviewPayload:
+      properties:
+        advisory_assessment:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewAdvisoryAssessment'
+          - type: 'null'
+        report:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewReportReference'
+          - type: 'null'
+      additionalProperties: true
+      type: object
+      title: ReviewPayload
+    ReviewReportReference:
+      properties:
+        requested:
+          type: boolean
+          title: Requested
+        status:
+          type: string
+          enum:
+          - ready
+          - not_requested
+          - unavailable
+          title: Status
+        html_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Html Url
+      type: object
+      required:
+      - requested
+      - status
+      title: ReviewReportReference
+    ReviewRoutingPolicy:
+      properties:
+        required_below_confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Required Below Confidence
+          default: 0.5
+        optional_below_confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Optional Below Confidence
+          default: 0.8
+        out_of_frame_resubmit_seconds:
+          type: number
+          maximum: 30.0
+          minimum: 0.5
+          title: Out Of Frame Resubmit Seconds
+          default: 3.0
+      type: object
+      title: ReviewRoutingPolicy
     ReviewSamplingPlanRequest:
       properties:
         duration_seconds:

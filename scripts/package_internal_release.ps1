@@ -18,9 +18,9 @@ $PythonCandidates = @(
 $Python = $PythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $Python) { throw "Missing Python runtime: expected .venv or venv." }
 $GitCommit = (git rev-parse HEAD).Trim()
-$TrackedChanges = @(git status --porcelain --untracked-files=no)
+$TrackedChanges = @(git status --porcelain --untracked-files=normal)
 if ($TrackedChanges.Count -gt 0) {
-    throw "Tracked files contain uncommitted changes. Commit them before creating an auditable internal package."
+    throw "Working tree contains tracked or untracked changes. Commit them before creating an auditable internal package."
 }
 
 function Invoke-InternalValidation {
@@ -28,7 +28,7 @@ function Invoke-InternalValidation {
 }
 
 Invoke-InternalValidation
-$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=no)
+$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=normal)
 if ($TrackedChangesAfterValidation.Count -gt 0) {
     throw "Release validation changed tracked files. Review and commit them before packaging."
 }
@@ -156,6 +156,9 @@ Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_d
 
 $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
+    "docs\delivery\review-advisory-api.md",
+    "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
+    "我方内部开发文档\升级日志-2026-07-23-审核建议契约与可选HTML.md",
     "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
     "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",
     "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
@@ -218,6 +221,7 @@ $required = @(
     "main.py",
     ".env",
     "我方内部开发文档\Java开发部署与联调指南.md",
+    "我方内部开发文档\升级日志-2026-07-23-审核建议契约与可选HTML.md",
     "我方内部开发文档\内部研发包交付说明.md",
     "我方内部开发文档\升级日志-2026-07-17.md",
     "我方内部开发文档\升级日志-2026-07-17-提交模式与双包.md",
@@ -229,6 +233,7 @@ $required = @(
     "我方内部开发文档\升级日志-2026-07-16.md",
     "我方内部开发文档\升级日志-2026-07-15.md",
     "docs\delivery\openapi.yaml",
+    "docs\delivery\review-advisory-api.md",
     "docs\delivery\java-client-sample.md",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
@@ -240,6 +245,7 @@ $required = @(
     "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
     "甲方沟通交付文档\订单SKU快照接入与审核安全升级说明-2026-07-20.html",
     "甲方沟通交付文档\0722订单资料与官方商品图按需接入说明.html",
+    "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
     "docs\三大审核场景的小量样本\sample_labels.json",
     "scripts\pre_release_internal_validation.ps1",
     "data\review_service.db",

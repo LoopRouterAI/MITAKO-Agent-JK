@@ -34,6 +34,7 @@ load_dotenv(
 )
 
 from runtime_paths import app_root
+from review_service.advisory_assessment import attach_advisory_assessment
 from review_media_safety import (
     FOLDER_SUFFIXES,
     IMAGE_SUFFIXES,
@@ -1110,6 +1111,7 @@ def _run_review(
     probe_seconds: int,
     review_model: str,
     evidence_context: Optional[Dict[str, Any]] = None,
+    include_html_report: bool = True,
 ) -> Dict[str, Any]:
     profile = REVIEW_MODEL_PROFILES.get(review_model) or REVIEW_MODEL_PROFILES["standard"]
     load_visual_env()
@@ -1148,7 +1150,14 @@ def _run_review(
         timeout=model_timeout,
         retries=model_retries,
     )
-    review = _agent_report_response(case, video.parent, result, "agent_single", profile["label"])
+    review = _agent_report_response(
+        case,
+        video.parent,
+        result,
+        "agent_single",
+        profile["label"],
+        include_html_report=include_html_report,
+    )
     review["sampling"] = {
         "profile": review_model,
         "label": profile["label"],
@@ -1168,6 +1177,7 @@ def _agent_report_response(
     report_stem: str,
     review_profile_label: str = "标准视觉复核",
     include_internal_metrics: bool = False,
+    include_html_report: bool = True,
 ) -> Dict[str, Any]:
     parsed = result.get("parsed") or {}
     structured_ok = _structured_review_ok(parsed)
@@ -1217,10 +1227,40 @@ def _agent_report_response(
             "videos_received": len(case.get("videos") or []),
         }
         agent_report["diagnostics"] = data["diagnostics"]
+    structured = case.get("structured_business_context") or {}
+    normalized = attach_advisory_assessment(
+        {
+            "summary": data["summary"],
+            "agent_report": data["agent_report"],
+            "agent_brief": {
+                "conclusion": public_conclusion,
+                "confidence": data["summary"].get("confidence"),
+                "system_yes_no": parsed.get("system_yes_no"),
+                "next_step": public_next_step,
+            },
+            "diagnostics": data.get("diagnostics") or {},
+        },
+        {
+            "scenario": structured.get("business_scenario") or case.get("scenario") or "",
+            "review_routing_policy": structured.get("review_routing_policy") or {},
+        },
+        succeeded=ok,
+    )
+    data["summary"] = normalized["summary"]
+    data["agent_report"] = normalized["agent_report"]
+    data["advisory_assessment"] = normalized["advisory_assessment"]
     data = _sanitize_public_report_data(data)
-    ALLOWED_REPORTS[report_name] = data
-    PUBLIC_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
-    (PUBLIC_SUMMARY_DIR / _report_data_name(report_name)).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    if include_html_report:
+        ALLOWED_REPORTS[report_name] = data
+        PUBLIC_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
+        (PUBLIC_SUMMARY_DIR / _report_data_name(report_name)).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        report = {
+            "requested": True,
+            "status": "ready",
+            "html_url": _sign_public_url("/reports/" + quote(report_name, safe="")),
+        }
+    else:
+        report = {"requested": False, "status": "not_requested", "html_url": None}
     response = {
         "review_label": data["review_label"],
         "summary": data["summary"],
@@ -1228,15 +1268,11 @@ def _agent_report_response(
             f"{len(case.get('videos') or [])} 个视频合并为同一证据包，送审 {len(case.get('frames') or [])} 帧，补充图片 {len(case.get('supplemental_images') or [])} 张。"
             + (f"另隔离 {len(case.get('rejected_videos') or [])} 个无法解码的视频。" if case.get("rejected_videos") else "")
         ),
-        "report": {"html_url": _sign_public_url("/reports/" + quote(report_name, safe=""))},
+        "report": report,
         "agent_report": data.get("agent_report") or {},
+        "advisory_assessment": data.get("advisory_assessment") or normalized["advisory_assessment"],
         "media_warnings": data.get("media_warnings") or [],
-        "agent_brief": {
-            "conclusion": public_conclusion,
-            "confidence": data["summary"].get("confidence"),
-            "system_yes_no": parsed.get("system_yes_no"),
-            "next_step": public_next_step,
-        },
+        "agent_brief": normalized["agent_brief"],
     }
     if include_internal_metrics:
         response["agent_report"]["inference_estimate"] = _internal_inference_estimate(result)
@@ -1333,7 +1369,7 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
     }
 
 
-def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False) -> Dict[str, Any]:
+def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False, include_html_report: bool = True) -> Dict[str, Any]:
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
@@ -1367,6 +1403,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         result,
         "agent_folder",
         include_internal_metrics=include_internal_metrics,
+        include_html_report=include_html_report,
     )
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
@@ -1569,6 +1606,8 @@ def review_folder(
     damage_causality_policy: str = Form(""),
     fulfillment_baseline: str = Form(""),
     evidence_coverage: str = Form(""),
+    review_routing_policy: str = Form(""),
+    include_html_report: bool = Form(True),
     sampling_mode: str = Form("adaptive"),
     fps: float = Form(1.0),
     max_frames: int = Form(24),
@@ -1607,6 +1646,7 @@ def review_folder(
         "damage_causality_policy": damage_causality_policy,
         "fulfillment_baseline": fulfillment_baseline,
         "evidence_coverage": evidence_coverage,
+        "review_routing_policy": review_routing_policy,
     }
     response = _run_folder_agent_review(
         folder_dir,
@@ -1619,6 +1659,7 @@ def review_folder(
         api_frame_limit,
         probe_seconds,
         include_internal_metrics=x_mitako_internal_metrics == "1",
+        include_html_report=include_html_report,
     )
     response["ingestion"] = ingestion
     return JSONResponse(response)
@@ -1630,6 +1671,8 @@ def review_folders_batch(
     customer_claim: str = Form(""),
     product_master_data: str = Form(""),
     conversation_history: str = Form(""),
+    review_routing_policy: str = Form(""),
+    include_html_report: bool = Form(True),
     sampling_mode: str = Form("adaptive"),
     fps: float = Form(1.0),
     max_frames: int = Form(24),
@@ -1650,6 +1693,7 @@ def review_folders_batch(
         "customer_claim": customer_claim,
         "product_master_data": product_master_data,
         "conversation_history": conversation_history,
+        "review_routing_policy": review_routing_policy,
     }
     cases = []
     for case_id, case_files in groups.items():
@@ -1665,6 +1709,7 @@ def review_folders_batch(
                 max_frames,
                 api_frame_limit,
                 probe_seconds,
+                include_html_report=include_html_report,
             )
             result["ingestion"] = ingestion
             cases.append({"case_id": case_id, **result})
@@ -1713,6 +1758,8 @@ def review(
     damage_causality_policy: str = Form(""),
     fulfillment_baseline: str = Form(""),
     evidence_coverage: str = Form(""),
+    review_routing_policy: str = Form(""),
+    include_html_report: bool = Form(True),
     fps: float = Form(1.0),
     max_frames: int = Form(24),
     api_frame_limit: int = Form(24),
@@ -1789,8 +1836,19 @@ def review(
         "damage_causality_policy": damage_causality_policy,
         "fulfillment_baseline": fulfillment_baseline,
         "evidence_coverage": evidence_coverage,
+        "review_routing_policy": review_routing_policy,
     }
-    result = _run_review(video, scenario, fps, max_frames, api_frame_limit, probe_seconds, review_model, evidence_context)
+    result = _run_review(
+        video,
+        scenario,
+        fps,
+        max_frames,
+        api_frame_limit,
+        probe_seconds,
+        review_model,
+        evidence_context,
+        include_html_report=include_html_report,
+    )
     response = {"ok": result["ok"], "source_status": source_status, "review": result}
     if result.get("diagnostics"):
         response["diagnostics"] = result["diagnostics"]

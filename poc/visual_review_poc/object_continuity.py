@@ -95,22 +95,27 @@ def apply_object_continuity_guard(
     if not has_video or scenario not in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}:
         return output
     policy = policy or {}
-    warning_seconds = max(0.5, _float(policy.get("out_of_frame_warning_seconds"), 2.0))
+    warning_seconds = max(0.5, _float(policy.get("out_of_frame_warning_seconds"), 3.0))
     assessment = normalize_object_continuity(output.get("object_continuity_assessment"))
     assessment["policy"] = {
         "out_of_frame_warning_seconds": warning_seconds,
-        "effect": "超过阈值转人工复核，不自动拒绝",
+        "effect": "超过阈值建议补充连续原视频，不自动拒绝，也不单独强制人工复核",
     }
     output["object_continuity_assessment"] = assessment
     if not assessment["tracked_subject_defined"]:
         return _review_output(output, "没有定义并逐段跟踪快递包装、商品包装或争议商品主体，无法证明全程未离镜。")
     if assessment["continuity_verdict"] == "indeterminate":
         return _review_output(output, "主体连续性结论不确定，需要查看原视频和离镜时间点。")
-    if assessment["continuity_verdict"] == "long_absence" or assessment["longest_out_of_frame_seconds"] > warning_seconds:
-        return _review_output(
-            output,
-            f"检测到主体最长连续离镜/不可观察 {assessment['longest_out_of_frame_seconds']:.2f} 秒，超过 {warning_seconds:.2f} 秒复核阈值。",
+    if assessment["continuity_verdict"] == "long_absence" or assessment["longest_out_of_frame_seconds"] >= warning_seconds:
+        output["continuity_recommendation"] = "request_more_material"
+        output["continuity_requires_human_review"] = False
+        output["continuity_guard_reason"] = (
+            f"检测到主体最长连续离镜/不可观察 {assessment['longest_out_of_frame_seconds']:.2f} 秒，"
+            f"达到 {warning_seconds:.2f} 秒补件阈值；该信号不能单独证明调包、剪辑或欺诈。"
         )
+        return output
+    output["continuity_recommendation"] = "continue_with_warning" if assessment["longest_out_of_frame_seconds"] > 0 else "continue"
+    output["continuity_requires_human_review"] = False
     output["continuity_guard_reason"] = "已按主体输出连续性时间轴，未超过配置的离镜复核阈值。"
     return output
 
@@ -270,7 +275,7 @@ def aggregate_object_continuity(
     derived_subjects = [item for item in derived if item]
     subjects = derived_subjects or [subject for item in assessments for subject in item.get("tracked_subjects") or []]
     longest = max((subject.get("longest_out_of_frame_seconds") or 0 for subject in subjects), default=0.0)
-    warning_seconds = max(0.5, _float((policy or {}).get("out_of_frame_warning_seconds"), 2.0))
+    warning_seconds = max(0.5, _float((policy or {}).get("out_of_frame_warning_seconds"), 3.0))
     verdicts = {item["continuity_verdict"] for item in assessments}
     unresolved = any(
         event.get("identity_reestablished") is False

@@ -466,6 +466,50 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     video = parsed.get("video_audit_conclusion") or parsed.get("continuity_assessment") or {}
     runtime = report.get("runtime") or {}
     inference = report.get("inference_estimate") or {}
+    advisory = report.get("advisory_assessment") or data.get("advisory_assessment") or {}
+    advisory_assessment = advisory.get("assessment") or {}
+    human_review = advisory.get("human_review") or {}
+    advisory_policy = advisory.get("policy") or {}
+    human_level = str(human_review.get("level") or "")
+    human_level_label = {
+        "required": "必须人工复审",
+        "optional": "建议抽检",
+        "not_required": "无需人工复审",
+    }.get(human_level, "未分级")
+    workflow_label = {
+        "human_review": "进入人工复审",
+        "request_more_material": "补充连续材料",
+        "continue_by_customer_policy": "按甲方规则继续",
+    }.get(str(advisory.get("workflow_recommendation") or ""), "未给出")
+    signal_cards = "".join(
+        '<article class="boundary-card">'
+        f'<h3>{_h(item.get("code") or "风险信号")}</h3>'
+        f'<p>{_h(item.get("effect") or "-")}</p>'
+        + (
+            f'<p><b>持续时间：</b>{_h(item.get("duration_seconds"))} 秒</p>'
+            if item.get("duration_seconds") not in (None, "") else ""
+        )
+        + '</article>'
+        for item in advisory.get("signals") or []
+        if isinstance(item, dict)
+    )
+    advisory_panel = ""
+    if advisory:
+        advisory_panel = f"""
+  <section class="panel boundary-panel advisory-panel">
+    <div class="section-head"><h2>审核建议与使用边界</h2><p>结论是证据判断建议，不是退款、换货、补发或拒绝决定。</p></div>
+    <div class="causality-grid">
+      <article><small>事实结论</small><b>{_h(advisory_assessment.get("conclusion") or "未形成")}</b></article>
+      <article><small>证据分数</small><b>{_h(advisory_assessment.get("confidence") if advisory_assessment.get("confidence") is not None else "-")}</b></article>
+      <article><small>人工复审建议</small><b>{_h(human_level_label)}</b></article>
+      <article><small>流程建议</small><b>{_h(workflow_label)}</b></article>
+    </div>
+    <p><b>人工建议说明：</b>{_h(human_review.get("recommendation") or "-")}</p>
+    <p><b>置信度口径：</b>该分数是未校准的证据强度分，不是客观正确率，也不是售后业务动作阈值。</p>
+    <p><b>业务边界：</b>{_h(advisory_policy.get("boundary") or "本服务不直接决定退款、补发、换货、拒绝或最终定责。")}</p>
+    <div class="boundary-grid">{signal_cards or '<p class="muted">本轮没有额外风险信号。</p>'}</div>
+  </section>
+"""
     channel_labels = {
         "main_review": "主审核",
         "object_continuity": "主体连续性",
@@ -592,6 +636,8 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
       <span>置信度 {_h(confidence)}</span>
     </aside>
   </section>
+
+  {advisory_panel}
 
   <section class="panel next-step">
     <h2>给VIP客服的下一步</h2>

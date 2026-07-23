@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ReviewScenario = Literal["product_damage", "wrong_item", "missing_item", "minor_refund"]
@@ -30,7 +30,7 @@ class ReviewSamplingPolicy(BaseModel):
 
 
 class ReviewContinuityPolicy(BaseModel):
-    out_of_frame_warning_seconds: float = Field(default=2.0, ge=0.5, le=30.0)
+    out_of_frame_warning_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
     require_identity_reestablishment: bool = True
     force_dense_scan: bool = False
     scan_fps: Optional[float] = Field(default=None, ge=0.2, le=2.0)
@@ -40,6 +40,22 @@ class ReviewDamageCausalityPolicy(BaseModel):
     force_action_scan: bool = False
     dedicated_chunk_frames: int = Field(default=20, ge=8, le=24)
     context_frames: int = Field(default=6, ge=2, le=8)
+
+
+class ReviewOutputOptions(BaseModel):
+    include_html_report: bool = True
+
+
+class ReviewRoutingPolicy(BaseModel):
+    required_below_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    optional_below_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    out_of_frame_resubmit_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
+
+    @model_validator(mode="after")
+    def validate_threshold_order(self) -> "ReviewRoutingPolicy":
+        if self.required_below_confidence > self.optional_below_confidence:
+            raise ValueError("required_below_confidence must be <= optional_below_confidence")
+        return self
 
 
 class ReviewAtomicClaim(BaseModel):
@@ -183,6 +199,8 @@ class ReviewCaseMetadata(BaseModel):
     sampling_policy: ReviewSamplingPolicy = Field(default_factory=ReviewSamplingPolicy)
     continuity_policy: ReviewContinuityPolicy = Field(default_factory=ReviewContinuityPolicy)
     damage_causality_policy: ReviewDamageCausalityPolicy = Field(default_factory=ReviewDamageCausalityPolicy)
+    output_options: ReviewOutputOptions = Field(default_factory=ReviewOutputOptions)
+    review_routing_policy: ReviewRoutingPolicy = Field(default_factory=ReviewRoutingPolicy)
 
 
 class ReviewAsset(BaseModel):
@@ -195,6 +213,74 @@ class ReviewAsset(BaseModel):
     fields: List[str] = Field(default_factory=list)
 
 
+class ReviewAssessmentDetails(BaseModel):
+    conclusion_code: Literal[
+        "evidence_supports_claim",
+        "evidence_does_not_support_claim",
+        "evidence_inconclusive",
+    ]
+    conclusion: str
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    confidence_level: Literal["high", "medium", "low", "unavailable"]
+    calibration_status: Literal["uncalibrated_evidence_score"]
+
+
+class ReviewHumanReviewAdvice(BaseModel):
+    level: Literal["required", "optional", "not_required"]
+    reason_codes: List[str] = Field(default_factory=list)
+    recommendation: str
+
+
+class ReviewAdvisorySignal(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    code: str
+    severity: Literal["info", "warning", "critical"]
+    effect: str
+
+
+class ReviewAdvisoryPolicy(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    policy_ref: str
+    effective_thresholds: Dict[str, float] = Field(default_factory=dict)
+    advisory_only: Literal[True] = True
+    business_action_allowed: Literal[False] = False
+    boundary: str
+
+
+class ReviewAdvisoryAssessment(BaseModel):
+    scenario: str
+    assessment: ReviewAssessmentDetails
+    human_review: ReviewHumanReviewAdvice
+    workflow_recommendation: Literal[
+        "human_review",
+        "request_more_material",
+        "continue_by_customer_policy",
+    ]
+    signals: List[ReviewAdvisorySignal] = Field(default_factory=list)
+    policy: ReviewAdvisoryPolicy
+
+
+class ReviewReportReference(BaseModel):
+    requested: bool
+    status: Literal["ready", "not_requested", "unavailable"]
+    html_url: Optional[str] = None
+
+
+class ReviewPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    advisory_assessment: Optional[ReviewAdvisoryAssessment] = None
+    report: Optional[ReviewReportReference] = None
+
+
+class ReviewJobResult(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    review: Optional[ReviewPayload] = None
+
+
 class ReviewJob(BaseModel):
     job_id: str
     tenant_id: str
@@ -204,7 +290,7 @@ class ReviewJob(BaseModel):
     status: str
     metadata: Dict[str, Any]
     assets: List[ReviewAsset]
-    result: Dict[str, Any] = Field(default_factory=dict)
+    result: ReviewJobResult = Field(default_factory=ReviewJobResult)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
     attempts: int = 0
     created_at: float

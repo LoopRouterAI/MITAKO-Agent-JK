@@ -44,7 +44,7 @@ class ObjectContinuityTest(unittest.TestCase):
         self.assertEqual(result["predicted_label"], "review")
         self.assertIn("没有定义", result["continuity_guard_reason"])
 
-    def test_configurable_long_absence_routes_to_review(self):
+    def test_configurable_long_absence_preserves_label_and_requests_more_material(self):
         result = apply_object_continuity_guard(
             {
                 "predicted_label": "positive",
@@ -55,7 +55,9 @@ class ObjectContinuityTest(unittest.TestCase):
             True,
             {"out_of_frame_warning_seconds": 2.0},
         )
-        self.assertEqual(result["predicted_label"], "review")
+        self.assertEqual(result["predicted_label"], "positive")
+        self.assertEqual(result["continuity_recommendation"], "request_more_material")
+        self.assertFalse(result["continuity_requires_human_review"])
         self.assertIn("3.00 秒", result["continuity_guard_reason"])
 
     def test_brief_occlusion_within_threshold_preserves_label(self):
