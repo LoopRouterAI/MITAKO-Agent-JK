@@ -230,6 +230,14 @@ def main() -> int:
                 "all_packages_uploaded": True,
                 "all_items_displayed": True,
             },
+            "logistics": {
+                "source": "customer_logistics_system",
+                "snapshot_at": "2026-07-23T10:00:00+08:00",
+                "all_packages_delivered": True,
+                "packages": [
+                    {"package_ref": "pkg-1", "tracking_ref": "api-smoke-tracking-1", "shipment_status": "delivered"}
+                ],
+            },
         },
     )
     _case(
