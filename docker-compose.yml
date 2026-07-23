@@ -32,6 +32,7 @@ services:
       VISUAL_WORKBENCH_URL: http://visual-workbench:7861
       REDIS_HOST: redis
       CELERY_BROKER_URL: redis://redis:6379/1
+      SLA_WORKER_MODE: celery
     ports:
       - "8015:8015"
     depends_on:

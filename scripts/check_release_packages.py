@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -34,6 +35,28 @@ def _sha256(path: Path) -> str:
 def _assert(condition: bool, message: str) -> None:
     if not condition:
         raise RuntimeError(message)
+
+
+def _verify_customer_text_boundary(root: Path) -> None:
+    blocked_terms = (
+        "chatwoot", "langgraph", "openviking", "viking_memory", "api_key",
+        "provider_id", "show_provider", "gemini", "openai", "deepseek", "doubao",
+        "sensenova", "weknora", "mitako_jwt_secret", "mitako_dev_auth_bypass",
+    )
+    secret_assignment = re.compile(
+        r"(?i)(?:api[_-]?key|secret|access[_-]?token)\s*[:=]\s*[\"']?[A-Za-z0-9_./+:-]{16,}"
+    )
+    text_suffixes = {".md", ".html", ".txt", ".json", ".yaml", ".yml", ".js", ".css", ".bat", ".ps1"}
+    violations: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in text_suffixes:
+            continue
+        text = path.read_text(encoding="utf-8-sig", errors="ignore")
+        lowered = text.lower()
+        term = next((item for item in blocked_terms if item in lowered), "")
+        if term or secret_assignment.search(text):
+            violations.append(f"{path.relative_to(root).as_posix()}:{term or 'secret_assignment'}")
+    _assert(not violations, f"甲方包正文包含内部渠道或疑似凭证：{violations[:20]}")
 
 
 def _zip_names(path: Path) -> set[str]:
@@ -80,6 +103,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "internal-package-manifest.json",
         "我方内部开发文档/Java开发部署与联调指南.md",
         "我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md",
+        "我方内部开发文档/升级日志-2026-07-23-多源证据与接口联调.md",
         "我方内部开发文档/升级日志-2026-07-17.md",
         "我方内部开发文档/升级日志-2026-07-17-提交模式与双包.md",
         "我方内部开发文档/升级日志-2026-07-17-144989未成年人资料审核.md",
@@ -99,7 +123,9 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html",
         "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
         "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
+        "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
         "docs/delivery/review-advisory-api.md",
+        "docs/delivery/after-sales-agent-integration.md",
         "tests/reports/minor_refund_144989_20260717-final.json",
         "tests/reports/minor_refund_144989_20260720-latest.json",
         "tests/reports/minor_refund_144989_20260720-latest.html",
@@ -139,6 +165,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "customer-package-manifest.json",
         "docs/delivery/openapi.yaml",
         "docs/delivery/review-advisory-api.md",
+        "docs/delivery/after-sales-agent-integration.md",
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
         "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
         "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-17.html",
@@ -147,6 +174,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html",
         "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
         "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
+        "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
         "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
         "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
         "甲方沟通交付文档/README.md",
@@ -166,6 +194,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         or "ground_truth" in name.lower()
     )
     _assert(not blocked, f"甲方包包含内部或敏感文件：{blocked[:20]}")
+    _verify_customer_text_boundary(root)
 
     manifest = json.loads((root / "customer-package-manifest.json").read_text(encoding="utf-8-sig"))
     _assert(manifest.get("git_commit") == expected_commit, "甲方包提交号不是当前验收提交")
@@ -181,6 +210,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(any(name.endswith("official_reference_images.pyc") for name in runtime_names), "甲方运行时缺少官方商品图按需读取模块")
     _assert(any(name.endswith("order_info_adapter.pyc") for name in runtime_names), "甲方运行时缺少订单快照适配模块")
     _assert(any(name.endswith("advisory_assessment.pyc") for name in runtime_names), "甲方运行时缺少统一审核建议模块")
+    _assert(any(name.endswith("model_auth.pyc") for name in runtime_names), "甲方运行时缺少模型认证适配模块")
+    _assert(any(name.endswith("observability.pyc") for name in runtime_names), "甲方运行时缺少视觉调用可观测模块")
     workbench_html = (root / "visual_review_workbench" / "workbench.html").read_text(encoding="utf-8-sig")
     _assert("/api/review-folders-batch" in workbench_html and "batchFolderTab" in workbench_html, "甲方工作台缺少批量工单入口")
     return {"entries": len(names), "runtime_entries": len(runtime_names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}

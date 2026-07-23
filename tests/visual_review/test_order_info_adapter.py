@@ -16,6 +16,25 @@ class OrderInfoAdapterTest(unittest.TestCase):
             folder = Path(directory) / "617911"
             folder.mkdir()
             (folder / "content.txt").write_text("商品有伤", encoding="utf-8")
+            (folder / "reply.json").write_text(
+                json.dumps(
+                    [
+                        {"from": "user", "text": "我收到的是蓝色款，手机号 13800138000。", "created_at": "2026-07-01T10:00:00Z"},
+                        {"from": "admin", "text": "人工最终同意退款。", "created_at": "2026-07-01T10:10:00Z"},
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (folder / "conversation_predecision.json").write_text(
+                json.dumps(
+                    [
+                        {"from": "user", "text": "我收到的是蓝色款，手机号 13800138000。", "created_at": "2026-07-01T10:00:00Z"},
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             snapshot = {
                 "user": "不应进入模型",
                 "user_address": "不应进入模型",
@@ -102,6 +121,16 @@ class OrderInfoAdapterTest(unittest.TestCase):
         self.assertNotIn("price_fen", serialized)
         self.assertNotIn("UNORDERED-SKU", serialized)
         self.assertNotIn("all_goods", serialized)
+        history = case["structured_business_context"]["conversation_history"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["role"], "user")
+        self.assertIn("[敏感信息已遮盖]", history[0]["text"])
+        self.assertNotIn("人工最终同意退款", serialized)
+        self.assertEqual(
+            case["structured_business_context"]["conversation_history_policy"],
+            "explicit_predecision_user_messages_only",
+        )
+        self.assertNotIn("reply.json", serialized)
 
 
 if __name__ == "__main__":

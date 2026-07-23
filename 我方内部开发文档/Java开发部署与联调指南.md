@@ -2,6 +2,8 @@
 
 版本：2026-07-23
 
+> 本轮多源客诉证据、包裹物流、当前工单对话与风险摘要的正式契约见 `../docs/delivery/after-sales-agent-integration.md`；字段定义以 `../docs/delivery/openapi.yaml` 为准。风险摘要只用于服务端抽检路由，不进入视觉模型。
+
 ## 1. Java 的职责边界
 
 甲方或我方 Java 网关只调用 FastAPI 主服务，不直接调用内部视觉服务、数据库或模型渠道。

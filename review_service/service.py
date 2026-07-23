@@ -614,6 +614,7 @@ def _apply_input_readiness_guard(review: Dict[str, Any], readiness: Dict[str, An
     parsed["material_gaps"] = list(dict.fromkeys(material_gaps + missing))
     agent_report["parsed"] = parsed
     output["agent_report"] = agent_report
+    output["input_readiness_guard"] = parsed["input_readiness_guard"]
     summary = dict(output.get("summary") or {})
     summary.update(
         {
@@ -624,6 +625,9 @@ def _apply_input_readiness_guard(review: Dict[str, Any], readiness: Dict[str, An
         }
     )
     output["summary"] = summary
+    brief = dict(output.get("agent_brief") or {})
+    brief["conclusion"] = "当前业务基准或必需材料不完整，现有证据不足以形成明确事实判断。"
+    output["agent_brief"] = brief
     return output
 
 
@@ -824,9 +828,9 @@ def contract() -> Dict[str, Any]:
         "supported_scenarios": list(SCENARIO_MAP),
         "required_metadata": ["client_case_id", "scenario"],
         "scenario_input_readiness": {
-            "wrong_item": "需要可唯一确定应收商品的订单基准；SKU 优先，但条码/包装编码或商品名+规格/款式/数量组合可替代。",
+            "wrong_item": "需要可唯一确定应收商品的版本化订单基准、显式抽赏规则状态、包裹商品映射和已提交包裹归属；SKU 优先，但可唯一商品组合可替代。",
             "product_damage": "SKU/商品主数据为推荐增信字段，不是识别明显损伤或审核视频连续性的硬门槛。",
-            "missing_item": "需要应收商品基准和应收数量；拆单/包裹状态为重要增信字段。",
+            "missing_item": "需要完整应发清单、显式赠品/抽赏规则状态、包裹商品映射、证据覆盖和全部应发包裹已签收快照。",
             "opening_continuity": "独立于 SKU，按快递包装、商品包装和争议商品分别跟踪离镜时间线。",
         },
         "business_fields": [
@@ -835,8 +839,14 @@ def contract() -> Dict[str, Any]:
             "conversation_history", "sop_context", "asset_fields", "batch_id", "source_record",
             "claim_scope", "decision_policy", "fulfillment_baseline", "evidence_coverage",
             "sampling_policy", "continuity_policy", "damage_causality_policy",
-            "output_options", "review_routing_policy",
+            "output_options", "review_routing_policy", "customer_risk_context",
         ],
+        "customer_risk_context_policy": {
+            "purpose": "仅用于服务端抽检优先级和人工复审路由，不参与本次事实证据结论。",
+            "model_input": False,
+            "automatic_rejection_allowed": False,
+            "privacy": "只接收最小化聚合统计，不接收历史对话正文、手机号、证件号或其他身份明文。",
+        },
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",
         "media_processing": {

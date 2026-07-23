@@ -2,6 +2,10 @@
 """甲方系统调用的独立审核服务 API。"""
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
+from contextlib import suppress
 from typing import List
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
@@ -28,6 +32,18 @@ from .schemas import (
 
 
 router = APIRouter(prefix="/api/v1/review", tags=["review-service"])
+LOGGER = logging.getLogger("mitako.review_service")
+_RECOVERY_TASK: asyncio.Task | None = None
+
+
+async def _recover_expired_jobs_forever() -> None:
+    interval = max(10, min(int(os.getenv("REVIEW_RECOVERY_INTERVAL_SECONDS", "30") or 30), 300))
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            service.recover_jobs()
+        except Exception:
+            LOGGER.exception("review_job_recovery_failed")
 
 
 def _integration_user():
@@ -36,8 +52,21 @@ def _integration_user():
 
 @router.on_event("startup")
 async def startup() -> None:
+    global _RECOVERY_TASK
     store.init_db()
     service.recover_jobs()
+    if _RECOVERY_TASK is None or _RECOVERY_TASK.done():
+        _RECOVERY_TASK = asyncio.create_task(_recover_expired_jobs_forever())
+
+
+@router.on_event("shutdown")
+async def shutdown() -> None:
+    global _RECOVERY_TASK
+    if _RECOVERY_TASK is not None:
+        _RECOVERY_TASK.cancel()
+        with suppress(asyncio.CancelledError):
+            await _RECOVERY_TASK
+        _RECOVERY_TASK = None
 
 
 @router.get("/contracts", response_model=ReviewContractResponse)

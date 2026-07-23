@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from review_service.advisory_assessment import attach_advisory_assessment, html_report_requested
 from review_service.schemas import ReviewCaseMetadata
+from review_service.service import _apply_input_readiness_guard
 
 
 def review_result(
@@ -125,6 +126,22 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertNotIn("支持用户所述事实", advisory["assessment"]["conclusion"])
 
+    def test_real_guard_nesting_overrides_stale_positive_conclusion(self):
+        guarded = _apply_input_readiness_guard(
+            review_result(label="positive", confidence=0.93),
+            {"full_review_ready": False, "missing_required": ["package_item_mapping"]},
+        )
+        result = attach_advisory_assessment(
+            guarded,
+            {"scenario": "wrong_item"},
+            readiness={"full_review_ready": False, "missing_required": ["package_item_mapping"]},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_inconclusive")
+        self.assertNotIn("支持用户所述事实", advisory["assessment"]["conclusion"])
+        self.assertEqual(result["agent_brief"]["conclusion"], advisory["assessment"]["conclusion"])
+
     def test_output_options_and_routing_thresholds_are_bounded(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
@@ -191,6 +208,25 @@ class AdvisoryAssessmentTest(unittest.TestCase):
                     },
                 }
             )
+
+    def test_customer_risk_only_changes_sampling_advice_not_fact_conclusion(self):
+        result = attach_advisory_assessment(
+            review_result(label="positive", confidence=0.92),
+            {
+                "scenario": "wrong_item",
+                "customer_risk_context": {
+                    "risk_level": "high",
+                    "reason_codes": ["repeat_after_sales"],
+                },
+            },
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_supports_claim")
+        self.assertEqual(advisory["human_review"]["level"], "optional")
+        self.assertIn("customer_risk_context", [item["code"] for item in advisory["signals"]])
+        self.assertFalse(advisory["policy"]["business_action_allowed"])
 
 
 if __name__ == "__main__":

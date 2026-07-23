@@ -5,6 +5,8 @@ import json
 import unittest
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 from review_service.input_readiness import assess_input_readiness
 from review_service.schemas import ReviewCaseMetadata
 from review_service.service import _public_media_urls, contract, sampling_plan
@@ -25,6 +27,8 @@ class InputReadinessTest(unittest.TestCase):
         self.assertFalse(media["official_product_references"]["bulk_download_enabled"])
         self.assertIn("fulfillment_baseline", contract()["business_fields"])
         self.assertIn("sampling_policy", contract()["business_fields"])
+        self.assertIn("customer_risk_context", contract()["business_fields"])
+        self.assertEqual(contract()["customer_risk_context_policy"]["model_input"], False)
 
     def test_public_report_refreshes_signed_workbench_media_urls(self):
         with patch.dict("os.environ", {
@@ -36,15 +40,43 @@ class InputReadinessTest(unittest.TestCase):
         self.assertIn("&sig=", url)
         self.assertNotIn("expired", url)
 
-    def test_wrong_item_accepts_unique_non_sku_baseline(self):
+    def test_wrong_item_without_package_linkage_is_not_ready_for_definite_decision(self):
         result = assess_input_readiness(
             {
                 "scenario": "wrong_item",
                 "order_items": [{"name": "角色拍立得", "style": "A款", "quantity": 1}],
             }
         )
-        self.assertTrue(result["full_review_ready"])
+        self.assertFalse(result["full_review_ready"])
         self.assertNotIn("order_item_baseline", result["missing_required"])
+        self.assertIn("fulfillment_baseline.baseline_version", result["missing_required"])
+        self.assertIn("package_item_mapping", result["missing_required"])
+
+    def test_wrong_item_is_ready_with_package_and_submitted_tracking_linkage(self):
+        result = assess_input_readiness(
+            {
+                "scenario": "wrong_item",
+                "fulfillment_baseline": {
+                    "baseline_version": "ORDER-1@V1",
+                    "expected_items": [
+                        {"item_ref": "LINE-1", "sku": "SKU-1", "expected_quantity": 1}
+                    ],
+                    "expected_package_count": 1,
+                    "packages": [
+                        {
+                            "package_ref": "PKG-1",
+                            "tracking_no": "TRACK-REF-1",
+                            "expected_item_refs": ["LINE-1"],
+                        }
+                    ],
+                    "selection_rules_complete": True,
+                },
+                "evidence_coverage": {"submitted_tracking_nos": ["TRACK-REF-1"]},
+            }
+        )
+
+        self.assertTrue(result["full_review_ready"])
+        self.assertTrue(result["capabilities"]["wrong_item_decision"])
 
     def test_wrong_item_without_order_baseline_degrades_but_keeps_continuity(self):
         result = assess_input_readiness({"scenario": "wrong_item", "order_items": []})
@@ -71,7 +103,7 @@ class InputReadinessTest(unittest.TestCase):
         self.assertIn("all_expected_item_quantities", result["missing_required"])
 
     def test_product_damage_sku_is_recommended_not_required(self):
-        result = assess_input_readiness({"scenario": "product_damage"})
+        result = assess_input_readiness({"scenario": "product_damage", "customer_claim": "商品边角有明显折痕"})
         self.assertTrue(result["full_review_ready"])
         self.assertIn("product_master_data", result["missing_recommended"])
         self.assertTrue(result["capabilities"]["visible_damage_detection"])
@@ -108,6 +140,12 @@ class InputReadinessTest(unittest.TestCase):
                     "expected_package_count": 1,
                     "packages": [{"package_ref": "PKG-1", "expected_item_refs": ["LINE-1", "GIFT-1"]}],
                     "benefit_rules_complete": True,
+                    "selection_rules_complete": True,
+                },
+                "logistics": {
+                    "snapshot_at": "2026-07-23T10:00:00+08:00",
+                    "all_packages_delivered": True,
+                    "packages": [{"package_ref": "PKG-1", "shipment_status": "delivered"}],
                 },
                 "evidence_coverage": {
                     "submitted_package_refs": ["PKG-1"],
@@ -118,6 +156,58 @@ class InputReadinessTest(unittest.TestCase):
         )
         self.assertTrue(result["full_review_ready"])
         self.assertTrue(result["capabilities"]["missing_item_decision"])
+
+    def test_missing_item_in_transit_cannot_form_definite_conclusion(self):
+        result = assess_input_readiness(
+            {
+                "scenario": "missing_item",
+                "customer_claim": "少了一枚徽章",
+                "fulfillment_baseline": {
+                    "baseline_version": "ORDER-1@V1",
+                    "expected_items": [{"item_ref": "LINE-1", "sku": "SKU-1", "expected_quantity": 1}],
+                    "expected_package_count": 1,
+                    "packages": [{"package_ref": "PKG-1", "expected_item_refs": ["LINE-1"]}],
+                    "benefit_rules_complete": True,
+                    "selection_rules_complete": True,
+                },
+                "logistics": {
+                    "snapshot_at": "2026-07-23T10:00:00+08:00",
+                    "all_packages_delivered": False,
+                    "packages": [{"package_ref": "PKG-1", "shipment_status": "in_transit"}],
+                },
+                "evidence_coverage": {
+                    "submitted_package_refs": ["PKG-1"],
+                    "all_packages_uploaded": True,
+                    "all_items_displayed": True,
+                },
+            }
+        )
+
+        self.assertFalse(result["full_review_ready"])
+        self.assertIn("all_expected_packages_delivered", result["missing_required"])
+
+    def test_selection_rules_must_be_explicitly_declared_even_when_not_applicable(self):
+        result = assess_input_readiness(
+            {
+                "scenario": "wrong_item",
+                "customer_claim": "收到的款式与订单不同",
+                "fulfillment_baseline": {
+                    "baseline_version": "ORDER-1@V1",
+                    "expected_items": [{"item_ref": "LINE-1", "sku": "SKU-1", "expected_quantity": 1}],
+                    "expected_package_count": 1,
+                    "packages": [{"package_ref": "PKG-1", "expected_item_refs": ["LINE-1"]}],
+                },
+                "evidence_coverage": {"submitted_package_refs": ["PKG-1"]},
+            }
+        )
+
+        self.assertIn("selection_rules_declaration", result["missing_required"])
+
+    def test_product_damage_without_claim_or_resolved_scope_is_degraded(self):
+        result = assess_input_readiness({"scenario": "product_damage"})
+
+        self.assertFalse(result["full_review_ready"])
+        self.assertIn("customer_claim_or_claim_scope", result["missing_required"])
 
     def test_missing_item_incomplete_video_coverage_must_review(self):
         result = assess_input_readiness(
@@ -207,6 +297,91 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(metadata.continuity_policy.out_of_frame_warning_seconds, 3.5)
         self.assertFalse(metadata.continuity_policy.force_dense_scan)
         self.assertFalse(metadata.damage_causality_policy.force_action_scan)
+
+    def test_api_accepts_typed_logistics_and_privacy_safe_risk_summary(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "CASE-MULTISOURCE-1",
+                "scenario": "wrong_item",
+                "logistics": {
+                    "source": "customer_logistics_system",
+                    "snapshot_at": "2026-07-23T10:00:00+08:00",
+                    "packages": [
+                        {
+                            "package_ref": "PKG-1",
+                            "tracking_ref": "sha256:tracking",
+                            "shipment_status": "delivered",
+                            "events": [{"status": "delivered", "occurred_at": "2026-07-22T18:00:00+08:00"}],
+                        }
+                    ],
+                },
+                "customer_risk_context": {
+                    "source": "customer_risk_service",
+                    "snapshot_at": "2026-07-23T10:00:00+08:00",
+                    "lookback_days": 180,
+                    "prior_after_sales_count": 3,
+                    "prior_upheld_count": 2,
+                    "prior_rejected_count": 1,
+                    "same_scenario_count": 1,
+                    "risk_level": "medium",
+                    "reason_codes": ["repeat_after_sales"],
+                },
+            }
+        )
+
+        self.assertEqual(metadata.logistics.packages[0].shipment_status, "delivered")
+        self.assertEqual(metadata.customer_risk_context.risk_level, "medium")
+
+    def test_formal_api_rejects_final_customer_service_decision_in_conversation(self):
+        with self.assertRaises(ValidationError):
+            ReviewCaseMetadata.model_validate(
+                {
+                    "client_case_id": "CASE-CONVERSATION-FINAL",
+                    "scenario": "product_damage",
+                    "conversation_history": [
+                        {"role": "customer_service", "message_type": "final_decision", "text": "人工最终同意退款"}
+                    ],
+                }
+            )
+
+    def test_formal_api_accepts_predecision_service_question(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "CASE-CONVERSATION-QUESTION",
+                "scenario": "product_damage",
+                "conversation_history": [
+                    {"role": "customer_service", "message_type": "request_more_material", "text": "请补充连续开箱视频"},
+                    {"role": "user", "text": "已经补充"},
+                ],
+            }
+        )
+        self.assertEqual(len(metadata.conversation_history), 2)
+
+    def test_risk_reason_codes_reject_personal_data(self):
+        with self.assertRaises(ValidationError):
+            ReviewCaseMetadata.model_validate(
+                {
+                    "client_case_id": "CASE-RISK-PII",
+                    "scenario": "wrong_item",
+                    "customer_risk_context": {
+                        "risk_level": "medium",
+                        "reason_codes": ["phone_13800138000"],
+                    },
+                }
+            )
+
+    def test_risk_snapshot_timestamp_rejects_personal_data(self):
+        with self.assertRaises(ValidationError):
+            ReviewCaseMetadata.model_validate(
+                {
+                    "client_case_id": "CASE-RISK-TIMESTAMP-PII",
+                    "scenario": "wrong_item",
+                    "customer_risk_context": {
+                        "snapshot_at": "13800138000",
+                        "risk_level": "medium",
+                    },
+                }
+            )
 
     def test_product_damage_adaptive_has_one_fps_quality_floor(self):
         plan = sampling_plan(

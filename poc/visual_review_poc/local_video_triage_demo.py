@@ -6,6 +6,7 @@ import argparse
 import base64
 import html
 import json
+import logging
 import math
 import mimetypes
 import os
@@ -27,6 +28,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.order_info_adapter import build_order_info_context
+from poc.visual_review_poc.model_auth import gemini_auth_headers, gemini_generate_endpoint
+from poc.visual_review_poc.observability import log_visual_event
+from review_input_safety import contains_evaluation_marker, redact_review_personal_data
 
 ROOT = app_root()
 POC_DIR = ROOT / "poc" / "visual_review_poc"
@@ -38,6 +42,7 @@ GEMINI_35_FLASH_INPUT_USD_PER_1M = 1.50
 GEMINI_35_FLASH_OUTPUT_USD_PER_1M = 9.00
 GEMINI_PRICING_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
 DEFAULT_POLICY = {"auto_confidence": 0.80, "manual_confidence": 0.65}
+LOGGER = logging.getLogger("mitako.visual_review")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -276,6 +281,30 @@ def order_info_context(path: Path) -> Dict[str, Any]:
     return build_order_info_context(path)
 
 
+def _redact_conversation_text(value: Any) -> str:
+    return redact_review_personal_data(str(value or "").strip()[:2000])
+
+
+def _blind_review_conversation(folder: Path) -> List[Dict[str, Any]]:
+    raw = read_json(folder / "conversation_predecision.json")
+    if not isinstance(raw, list):
+        return []
+    messages: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict) or str(item.get("from") or "").lower() not in {"user", "customer"}:
+            continue
+        text = _redact_conversation_text(item.get("text"))
+        if text and not contains_evaluation_marker(text) and not any(
+            marker in text for marker in ("人工最终", "最终决定", "同意退款", "已退款", "拒绝退款", "审核通过", "审核不通过")
+        ):
+            messages.append({
+                "role": "user",
+                "text": text,
+                "created_at": str(item.get("created_at") or "")[:80],
+            })
+    return messages[-80:]
+
+
 def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional[Path] = None) -> Dict[str, Any]:
     claim = read_text(folder / "content.txt")
     manifest = {}
@@ -295,6 +324,7 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
     resource_fields = {str(item.get("local_file")): item.get("fields") or [] for item in (manifest.get("resources") or []) if item.get("local_file")}
     scenario = infer_scenario("\n".join((claim, str(manifest.get("tag") or ""))))
     order_snapshot = order_info_context(folder / "order_info_snapshot.json")
+    conversation_history = _blind_review_conversation(folder)
     structured_business_context = {
         "order_items": read_json(folder / "order_items.json") or order_snapshot.get("order_items") or manifest.get("order_items") or [],
         "product_master_data": read_json(folder / "product_master.json") or order_snapshot.get("product_master_data") or manifest.get("product_master_data") or {},
@@ -302,11 +332,14 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
         "sku_master_data": read_json(folder / "sku_master.json") or manifest.get("sku_master_data") or {},
         "fulfillment_baseline": order_snapshot.get("fulfillment_baseline") or {},
         "logistics": order_snapshot.get("logistics") or {},
+        "conversation_history": conversation_history,
+        "conversation_history_policy": "explicit_predecision_user_messages_only",
         "frontdesk_evidence_package": {
             "order_item": order_snapshot.get("order_items") or [],
             "product_master_data": order_snapshot.get("product_master_data") or {},
             "fulfillment_baseline": order_snapshot.get("fulfillment_baseline") or {},
             "logistics": order_snapshot.get("logistics") or {},
+            "conversation_history": conversation_history,
         } if order_snapshot else {},
     }
     return {
@@ -573,24 +606,26 @@ def gemini_channels() -> List[Dict[str, Any]]:
     gateway_key = _first_env(("VISION_REVIEW_API_KEY", "APIYI_API_KEY", "BROUTER_API_KEY", "BRouter_API_KEY"))
     if gateway_key:
         base = os.getenv("VISION_REVIEW_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+        endpoint = gemini_generate_endpoint(base, MODEL)
         channels.append(
             {
                 "channel": "视觉审核主通道",
                 "model": MODEL,
-                "endpoint": f"{base}/v1beta/models/{MODEL}:generateContent",
-                "headers": {"x-goog-api-key": gateway_key, "Content-Type": "application/json"},
+                "endpoint": endpoint,
+                "headers": gemini_auth_headers(endpoint, gateway_key, os.getenv("VISION_REVIEW_GEMINI_AUTH_MODE", "auto")),
                 "soft_retries": 3,
             }
         )
     gemini_key = _first_env(("GEMINI_API_KEY", "GOOGLE_API_KEY"))
     if gemini_key:
         base = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+        endpoint = gemini_generate_endpoint(base, MODEL)
         channels.append(
             {
                 "channel": "Gemini 官方通道",
                 "model": MODEL,
-                "endpoint": f"{base}/v1beta/models/{MODEL}:generateContent",
-                "headers": {"x-goog-api-key": gemini_key, "Content-Type": "application/json"},
+                "endpoint": endpoint,
+                "headers": gemini_auth_headers(endpoint, gemini_key, os.getenv("GEMINI_AUTH_MODE", "auto")),
                 "soft_retries": 3,
             }
         )
@@ -614,6 +649,17 @@ def post_json(channel: Dict[str, Any], payload: Dict[str, Any], timeout: int, so
                 response = client.post(channel["endpoint"], headers=channel["headers"], json=payload)
             latency = round(time.time() - started, 2)
             if response.status_code < 400:
+                log_visual_event(
+                    LOGGER,
+                    "visual_model_http_attempt",
+                    endpoint=channel["endpoint"],
+                    attempt=attempt,
+                    status_code=response.status_code,
+                    latency_seconds=latency,
+                    outcome="success",
+                    channel=channel.get("channel"),
+                    model=channel.get("model"),
+                )
                 return {"ok": True, "attempt": attempt, "status_code": response.status_code, "latency_seconds": latency, "data": response.json()}
             last = {
                 "ok": False,
@@ -626,6 +672,18 @@ def post_json(channel: Dict[str, Any], payload: Dict[str, Any], timeout: int, so
             }
         except Exception as exc:
             last = {"ok": False, "attempt": attempt, "status_code": None, "latency_seconds": round(time.time() - started, 2), "error_type": classify_error(None, str(exc)), "error": str(exc)[:1500]}
+        log_visual_event(
+            LOGGER,
+            "visual_model_http_attempt",
+            endpoint=channel["endpoint"],
+            attempt=attempt,
+            status_code=last.get("status_code"),
+            latency_seconds=last.get("latency_seconds"),
+            error_type=last.get("error_type"),
+            outcome="failed",
+            channel=channel.get("channel"),
+            model=channel.get("model"),
+        )
         if last.get("error_type") != "soft" or attempt == attempts:
             return last
         retry_after = last.get("retry_after")

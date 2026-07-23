@@ -22,6 +22,7 @@ REQUIRED_FILES = (
     "docs/delivery/acceptance-checklist-v1.md",
     "docs/delivery/java-client-sample.md",
     "docs/delivery/review-advisory-api.md",
+    "docs/delivery/after-sales-agent-integration.md",
     "docs/delivery/openapi.yaml",
     "docs/delivery/mitako-full-requirement-reaudit-20260711.html",
     "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
@@ -36,6 +37,7 @@ REQUIRED_FILES = (
     "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
     "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
     "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
+    "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
     "我方内部开发文档/README.md",
     "我方内部开发文档/index.html",
     "我方内部开发文档/工程师入门.md",
@@ -51,6 +53,7 @@ REQUIRED_FILES = (
     "我方内部开发文档/升级日志-2026-07-20-视觉证据安全与SKU基准.md",
     "我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
     "我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md",
+    "我方内部开发文档/升级日志-2026-07-23-多源证据与接口联调.md",
 )
 REQUIRED_API_PATHS = (
     "/api/v1/review/contracts",
@@ -118,7 +121,7 @@ def main() -> int:
             errors.append(f"审核创建接口缺少错误响应: {sorted(missing_errors)}")
         metadata_schema = (((spec.get("components") or {}).get("schemas") or {}).get("ReviewCaseMetadata") or {})
         metadata_properties = metadata_schema.get("properties") or {}
-        for field in ("output_options", "review_routing_policy"):
+        for field in ("output_options", "review_routing_policy", "logistics", "customer_risk_context"):
             if field not in metadata_properties:
                 errors.append(f"审核 metadata 缺少字段: {field}")
         schemas = ((spec.get("components") or {}).get("schemas") or {})
@@ -128,6 +131,10 @@ def main() -> int:
             "ReviewAdvisorySignal",
             "ReviewAdvisoryPolicy",
             "ReviewReportReference",
+            "ReviewLogisticsContext",
+            "ReviewLogisticsPackage",
+            "ReviewLogisticsEvent",
+            "ReviewCustomerRiskContext",
         ):
             if schema_name not in schemas:
                 errors.append(f"OpenAPI 缺少审核结果类型: {schema_name}")
@@ -156,6 +163,8 @@ def main() -> int:
         errors.append("打包脚本未启用过时甲方文档排除规则")
     if "0723审核结论置信度与人工复审分级说明.html" not in package_script:
         errors.append("甲方打包证据清单缺少 0723 非技术更新说明")
+    if "0723客诉审核Agent接口联调与商务沟通说明.html" not in package_script:
+        errors.append("甲方打包证据清单缺少客诉审核接口联调说明")
 
     if errors:
         print("文档发布校验失败：")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import logging
 import mimetypes
 import os
 import random
@@ -64,10 +65,13 @@ from poc.visual_review_poc.minor_material_pipeline import run_minor_material_pip
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
+from poc.visual_review_poc.model_auth import gemini_auth_headers, gemini_generate_endpoint
+from poc.visual_review_poc.observability import log_visual_event
 
 ROOT = app_root()
 SAMPLE_ROOT = ROOT / "docs" / "三大审核场景的小量样本"
 CNY_PER_USD = 7.0
+LOGGER = logging.getLogger("mitako.visual_review")
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -340,10 +344,29 @@ def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str,
                 response = client.post(endpoint, headers=headers, json=payload)
             latency = round(time.time() - started, 2)
             if response.status_code < 400:
+                log_visual_event(
+                    LOGGER,
+                    "visual_model_http_attempt",
+                    endpoint=endpoint,
+                    attempt=attempt,
+                    status_code=response.status_code,
+                    latency_seconds=latency,
+                    outcome="success",
+                )
                 return {"ok": True, "status_code": response.status_code, "latency_seconds": latency, "data": response.json(), "attempt": attempt}
             last = {"ok": False, "status_code": response.status_code, "latency_seconds": latency, "error": response.text[:1600], "error_type": classify_error(response.status_code, response.text), "attempt": attempt, "retry_after": response.headers.get("Retry-After")}
         except Exception as exc:
             last = {"ok": False, "status_code": None, "latency_seconds": round(time.time() - started, 2), "error": str(exc)[:1600], "error_type": classify_error(None, str(exc)), "attempt": attempt}
+        log_visual_event(
+            LOGGER,
+            "visual_model_http_attempt",
+            endpoint=endpoint,
+            attempt=attempt,
+            status_code=last.get("status_code"),
+            latency_seconds=last.get("latency_seconds"),
+            error_type=last.get("error_type"),
+            outcome="failed",
+        )
         if last["error_type"] != "soft" or attempt > retries:
             return last
         retry_after = last.get("retry_after")
@@ -357,16 +380,18 @@ def gemini_request_options(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     gateway_key = os.getenv("VISION_REVIEW_API_KEY")
     if gateway_key:
         base = os.getenv("VISION_REVIEW_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+        endpoint = gemini_generate_endpoint(base, cfg["model"])
         options.append({
-            "endpoint": f"{base}/v1beta/models/{cfg['model']}:generateContent",
-            "headers": {"x-goog-api-key": gateway_key, "Content-Type": "application/json"},
+            "endpoint": endpoint,
+            "headers": gemini_auth_headers(endpoint, gateway_key, os.getenv("VISION_REVIEW_GEMINI_AUTH_MODE", "auto")),
         })
     gemini_key = os.getenv("GEMINI_API_KEY")
     if gemini_key:
         base = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+        endpoint = gemini_generate_endpoint(base, cfg["model"])
         options.append({
-            "endpoint": f"{base}/v1beta/models/{cfg['model']}:generateContent",
-            "headers": {"x-goog-api-key": gemini_key, "Content-Type": "application/json"},
+            "endpoint": endpoint,
+            "headers": gemini_auth_headers(endpoint, gemini_key, os.getenv("GEMINI_AUTH_MODE", "auto")),
         })
     return options
 

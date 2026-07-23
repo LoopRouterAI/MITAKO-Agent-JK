@@ -47,6 +47,18 @@ def _has_quantity(metadata: Dict[str, Any]) -> bool:
     return bool(order_items) and all(_nonempty(item.get("quantity")) for item in order_items)
 
 
+def _has_resolved_claim_scope(metadata: Dict[str, Any]) -> bool:
+    scope = metadata.get("claim_scope") or {}
+    if not isinstance(scope, dict) or scope.get("split_status") not in {"resolved", "single_legacy"}:
+        return False
+    if _nonempty(scope.get("claim_text")):
+        return True
+    return any(
+        isinstance(item, dict) and _nonempty(item.get("issue_type"))
+        for item in scope.get("claims") or []
+    )
+
+
 def _fulfillment_state(metadata: Dict[str, Any]) -> Dict[str, bool]:
     baseline = metadata.get("fulfillment_baseline") or {}
     coverage = metadata.get("evidence_coverage") or {}
@@ -92,6 +104,23 @@ def _fulfillment_state(metadata: Dict[str, Any]) -> Dict[str, bool]:
         set(package_refs).issubset(submitted_refs)
         or (bool(expected_tracking) and expected_tracking.issubset(submitted_tracking))
     )
+    logistics = metadata.get("logistics") or {}
+    if not isinstance(logistics, dict):
+        logistics = {}
+    logistics_packages = [item for item in logistics.get("packages") or [] if isinstance(item, dict)]
+    logistics_by_ref = {
+        str(item.get("package_ref") or "").strip(): str(item.get("shipment_status") or "").strip().lower()
+        for item in logistics_packages
+        if str(item.get("package_ref") or "").strip()
+    }
+    delivered_statuses = {"delivered", "signed", "received", "已签收", "已送达"}
+    all_expected_packages_delivered = (
+        _nonempty(logistics.get("snapshot_at"))
+        and logistics.get("all_packages_delivered") is True
+        and valid_package_refs
+        and set(package_refs).issubset(logistics_by_ref)
+        and all(logistics_by_ref[ref] in delivered_statuses for ref in package_refs)
+    )
     return {
         "baseline_versioned": _nonempty(baseline.get("baseline_version")),
         "package_baseline_complete": linked_packages,
@@ -100,6 +129,7 @@ def _fulfillment_state(metadata: Dict[str, Any]) -> Dict[str, bool]:
         "selection_rules_complete": baseline.get("selection_rules_complete") is True,
         "all_packages_uploaded": coverage.get("all_packages_uploaded") is True,
         "all_items_displayed": coverage.get("all_items_displayed") is True,
+        "all_expected_packages_delivered": bool(all_expected_packages_delivered),
     }
 
 
@@ -124,11 +154,16 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
         if not has_product_master:
             missing_recommended.append("product_master_data")
         if not fulfillment["baseline_versioned"]:
-            missing_recommended.append("fulfillment_baseline.baseline_version")
-        if (metadata.get("fulfillment_baseline") or {}).get("selection_rules") and not fulfillment["selection_rules_complete"]:
-            missing_required.append("fulfillment_baseline.selection_rules_complete")
+            missing_required.append("fulfillment_baseline.baseline_version")
+        if not fulfillment["package_baseline_complete"]:
+            missing_required.append("package_item_mapping")
+        if not fulfillment["submitted_package_mapping_complete"]:
+            missing_required.append("submitted_package_mapping")
+        if not fulfillment["selection_rules_complete"]:
+            field = "fulfillment_baseline.selection_rules_complete" if (metadata.get("fulfillment_baseline") or {}).get("selection_rules") else "selection_rules_declaration"
+            missing_required.append(field)
         alternatives.append("SKU/条码/包装编码任一唯一标识，或商品名+规格/款式/角色/数量的可唯一组合")
-        warnings.append("缺少订单商品基准时仍可审核开箱连续性，但不能可靠判断是否发错货。")
+        warnings.append("缺少订单商品基准或包裹归属时仍可审核开箱连续性，但不能可靠判断是否发错货。")
     elif scenario == "missing_item":
         if not has_baseline:
             missing_required.append("order_item_baseline")
@@ -140,17 +175,21 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
             missing_required.append("package_item_mapping")
         if not fulfillment["benefit_rules_complete"]:
             missing_required.append("benefit_rules_declaration")
-        if (metadata.get("fulfillment_baseline") or {}).get("selection_rules") and not fulfillment["selection_rules_complete"]:
+        if not fulfillment["selection_rules_complete"]:
             missing_required.append("selection_rules_declaration")
         if not fulfillment["submitted_package_mapping_complete"]:
             missing_required.append("submitted_package_mapping")
         if not fulfillment["all_packages_uploaded"] or not fulfillment["all_items_displayed"]:
             missing_required.append("complete_evidence_coverage")
+        if not fulfillment["all_expected_packages_delivered"]:
+            missing_required.append("all_expected_packages_delivered")
         if not has_product_master:
             missing_recommended.append("product_master_data_or_standard_packing_list")
         alternatives.append("SKU/条码/包装编码或可唯一商品组合 + 每项应发数量 + 版本化规则 + 包裹关联")
-        warnings.append("视频未完整展示全部包裹、商品、配件或赠品时只能输出证据不足并转人工，不能直接认定漏发。")
+        warnings.append("视频未完整展示全部包裹、商品、配件或赠品时只能输出证据不足并补材料或复核，不能直接认定漏发。")
     elif scenario == "product_damage":
+        if not _nonempty(metadata.get("customer_claim")) and not _has_resolved_claim_scope(metadata):
+            missing_required.append("customer_claim_or_claim_scope")
         if not has_product_master:
             missing_recommended.append("product_master_data")
         alternatives.append("SKU 不是判断可见损伤的前提；商品主图、材质、正常纹理、包装结构或质检标准均可作为参照")

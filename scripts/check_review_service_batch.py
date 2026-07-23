@@ -74,7 +74,7 @@ def metadata_for(sample_id: str, batch_id: str = "", sampling_preset: str = "ada
         "order_items": read_json(sample_dir / "order_items.json", manifest.get("order_items") or []),
         "product_master_data": read_json(sample_dir / "product_master.json", manifest.get("product_master_data") or {}),
         "warehouse_master_data": read_json(sample_dir / "warehouse_master.json", manifest.get("warehouse_master_data") or {}),
-        "conversation_history": read_json(sample_dir / "reply.json", []),
+        "conversation_history": read_json(sample_dir / "conversation_predecision.json", []),
         "sop_context": {
             "summary": {
                 "product_damage": "核验开箱连续性、未拆封包装/面单、瑕疵位置与严重程度；只输出证据建议，业务动作由人工执行。",

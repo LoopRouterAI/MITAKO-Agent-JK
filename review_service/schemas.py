@@ -2,9 +2,11 @@
 """审核服务的 OpenAPI 数据契约。"""
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 ReviewScenario = Literal["product_damage", "wrong_item", "missing_item", "minor_refund"]
@@ -17,6 +19,18 @@ ForensicCheck = Literal[
     "packet_timeline",
     "editor_metadata",
 ]
+
+
+def _validate_optional_iso_timestamp(value: str) -> str:
+    if not value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("timestamp_must_be_iso8601_with_timezone") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp_must_be_iso8601_with_timezone")
+    return value
 
 
 class ReviewSamplingPolicy(BaseModel):
@@ -169,6 +183,70 @@ class ReviewEvidenceCoverage(BaseModel):
     coverage_notes: str = ""
 
 
+class ReviewLogisticsEvent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str = Field(min_length=1, max_length=80)
+    occurred_at: str = Field(default="", max_length=80)
+    location: str = Field(default="", max_length=240)
+
+    @field_validator("occurred_at")
+    @classmethod
+    def validate_occurred_at(cls, value: str) -> str:
+        return _validate_optional_iso_timestamp(value)
+
+
+class ReviewLogisticsPackage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    package_ref: str = Field(min_length=1, max_length=160)
+    tracking_ref: str = Field(default="", max_length=240)
+    carrier: str = Field(default="", max_length=160)
+    shipment_status: str = Field(default="", max_length=80)
+    events: List[ReviewLogisticsEvent] = Field(default_factory=list, max_length=200)
+
+
+class ReviewLogisticsContext(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    source: str = Field(default="customer_logistics_system", max_length=160)
+    snapshot_at: str = Field(default="", max_length=80)
+    packages: List[ReviewLogisticsPackage] = Field(default_factory=list, max_length=100)
+    all_packages_delivered: Optional[bool] = None
+
+    @field_validator("snapshot_at")
+    @classmethod
+    def validate_snapshot_at(cls, value: str) -> str:
+        return _validate_optional_iso_timestamp(value)
+
+
+class ReviewCustomerRiskContext(BaseModel):
+    """甲方系统生成的脱敏统计摘要；不接收历史对话或用户隐私原文。"""
+
+    source: str = Field(default="customer_risk_service", max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
+    snapshot_at: str = Field(default="", max_length=80)
+    lookback_days: int = Field(default=180, ge=1, le=3650)
+    prior_after_sales_count: int = Field(default=0, ge=0, le=100000)
+    prior_upheld_count: int = Field(default=0, ge=0, le=100000)
+    prior_rejected_count: int = Field(default=0, ge=0, le=100000)
+    same_scenario_count: int = Field(default=0, ge=0, le=100000)
+    risk_level: Literal["unknown", "low", "medium", "high"] = "unknown"
+    reason_codes: List[str] = Field(default_factory=list, max_length=40)
+
+    @field_validator("snapshot_at")
+    @classmethod
+    def validate_snapshot_at(cls, value: str) -> str:
+        return _validate_optional_iso_timestamp(value)
+
+    @field_validator("reason_codes")
+    @classmethod
+    def validate_reason_codes(cls, values: List[str]) -> List[str]:
+        for value in values:
+            if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", value) or re.search(r"\d{7,}", value):
+                raise ValueError("customer_risk_reason_code_invalid")
+        return values
+
+
 class ReviewCaseMetadata(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -189,8 +267,9 @@ class ReviewCaseMetadata(BaseModel):
     evidence_coverage: ReviewEvidenceCoverage = Field(default_factory=ReviewEvidenceCoverage)
     product_master_data: Dict[str, Any] = Field(default_factory=dict)
     warehouse_master_data: Dict[str, Any] = Field(default_factory=dict)
-    logistics: Dict[str, Any] = Field(default_factory=dict)
+    logistics: ReviewLogisticsContext = Field(default_factory=ReviewLogisticsContext)
     conversation_history: List[Dict[str, Any]] = Field(default_factory=list)
+    customer_risk_context: ReviewCustomerRiskContext = Field(default_factory=ReviewCustomerRiskContext)
     sop_context: Dict[str, Any] = Field(default_factory=dict)
     asset_fields: Dict[str, List[str]] = Field(default_factory=dict)
     source_record: Dict[str, Any] = Field(default_factory=dict)
@@ -201,6 +280,32 @@ class ReviewCaseMetadata(BaseModel):
     damage_causality_policy: ReviewDamageCausalityPolicy = Field(default_factory=ReviewDamageCausalityPolicy)
     output_options: ReviewOutputOptions = Field(default_factory=ReviewOutputOptions)
     review_routing_policy: ReviewRoutingPolicy = Field(default_factory=ReviewRoutingPolicy)
+
+    @field_validator("conversation_history", mode="before")
+    @classmethod
+    def validate_conversation_history(cls, value: Any) -> Any:
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list) or len(value) > 100:
+            raise ValueError("conversation_history_invalid")
+        user_roles = {"user", "customer"}
+        service_roles = {"customer_service", "service_agent", "agent", "admin"}
+        service_types = {"question", "request_more_material", "status_update"}
+        final_keys = {"decision", "resolution", "refund_result", "final_outcome", "human_conclusion", "approved"}
+        final_markers = ("人工最终", "最终决定", "同意退款", "已退款", "拒绝退款", "审核通过", "审核不通过")
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("conversation_message_invalid")
+            role = str(item.get("role") or item.get("from") or item.get("sender_role") or "").strip().lower()
+            message_type = str(item.get("message_type") or item.get("type") or "").strip().lower()
+            if role not in user_roles and (role not in service_roles or message_type not in service_types):
+                raise ValueError("conversation_role_or_type_not_allowed")
+            if any(str(key).strip().lower() in final_keys for key in item):
+                raise ValueError("conversation_final_outcome_not_allowed")
+            text = str(item.get("text") or item.get("content") or "")
+            if len(text) > 4000 or any(marker in text for marker in final_markers):
+                raise ValueError("conversation_final_outcome_not_allowed")
+        return value
 
 
 class ReviewAsset(BaseModel):

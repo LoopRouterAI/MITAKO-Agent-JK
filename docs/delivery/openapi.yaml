@@ -2892,15 +2892,15 @@ components:
           type: object
           title: Warehouse Master Data
         logistics:
-          additionalProperties: true
-          type: object
-          title: Logistics
+          $ref: '#/components/schemas/ReviewLogisticsContext'
         conversation_history:
           items:
             additionalProperties: true
             type: object
           type: array
           title: Conversation History
+        customer_risk_context:
+          $ref: '#/components/schemas/ReviewCustomerRiskContext'
         sop_context:
           additionalProperties: true
           type: object
@@ -3049,6 +3049,67 @@ components:
       required:
       - contract
       title: ReviewContractResponse
+    ReviewCustomerRiskContext:
+      properties:
+        source:
+          type: string
+          maxLength: 160
+          pattern: ^[A-Za-z0-9_.:-]+$
+          title: Source
+          default: customer_risk_service
+        snapshot_at:
+          type: string
+          maxLength: 80
+          title: Snapshot At
+          default: ''
+        lookback_days:
+          type: integer
+          maximum: 3650.0
+          minimum: 1.0
+          title: Lookback Days
+          default: 180
+        prior_after_sales_count:
+          type: integer
+          maximum: 100000.0
+          minimum: 0.0
+          title: Prior After Sales Count
+          default: 0
+        prior_upheld_count:
+          type: integer
+          maximum: 100000.0
+          minimum: 0.0
+          title: Prior Upheld Count
+          default: 0
+        prior_rejected_count:
+          type: integer
+          maximum: 100000.0
+          minimum: 0.0
+          title: Prior Rejected Count
+          default: 0
+        same_scenario_count:
+          type: integer
+          maximum: 100000.0
+          minimum: 0.0
+          title: Same Scenario Count
+          default: 0
+        risk_level:
+          type: string
+          enum:
+          - unknown
+          - low
+          - medium
+          - high
+          title: Risk Level
+          default: unknown
+        reason_codes:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Reason Codes
+      type: object
+      title: ReviewCustomerRiskContext
+      description: 甲方系统生成的脱敏统计摘要；不接收历史对话或用户隐私原文。
     ReviewDamageCausalityPolicy:
       properties:
         force_action_scan:
@@ -3462,6 +3523,87 @@ components:
       additionalProperties: true
       type: object
       title: ReviewJobResult
+    ReviewLogisticsContext:
+      properties:
+        source:
+          type: string
+          maxLength: 160
+          title: Source
+          default: customer_logistics_system
+        snapshot_at:
+          type: string
+          maxLength: 80
+          title: Snapshot At
+          default: ''
+        packages:
+          items:
+            $ref: '#/components/schemas/ReviewLogisticsPackage'
+          type: array
+          maxItems: 100
+          title: Packages
+        all_packages_delivered:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: All Packages Delivered
+      additionalProperties: true
+      type: object
+      title: ReviewLogisticsContext
+    ReviewLogisticsEvent:
+      properties:
+        status:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Status
+        occurred_at:
+          type: string
+          maxLength: 80
+          title: Occurred At
+          default: ''
+        location:
+          type: string
+          maxLength: 240
+          title: Location
+          default: ''
+      additionalProperties: true
+      type: object
+      required:
+      - status
+      title: ReviewLogisticsEvent
+    ReviewLogisticsPackage:
+      properties:
+        package_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Package Ref
+        tracking_ref:
+          type: string
+          maxLength: 240
+          title: Tracking Ref
+          default: ''
+        carrier:
+          type: string
+          maxLength: 160
+          title: Carrier
+          default: ''
+        shipment_status:
+          type: string
+          maxLength: 80
+          title: Shipment Status
+          default: ''
+        events:
+          items:
+            $ref: '#/components/schemas/ReviewLogisticsEvent'
+          type: array
+          maxItems: 200
+          title: Events
+      additionalProperties: true
+      type: object
+      required:
+      - package_ref
+      title: ReviewLogisticsPackage
     ReviewMetadataValidationResponse:
       properties:
         ok:

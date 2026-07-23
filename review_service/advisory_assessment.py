@@ -106,7 +106,7 @@ def attach_advisory_assessment(
         or parsed.get("conclusion")
         or "当前证据尚不足以形成明确事实判断。"
     ).strip()
-    readiness_guard = _dict(output.get("input_readiness_guard"))
+    readiness_guard = _dict(output.get("input_readiness_guard")) or _dict(parsed.get("input_readiness_guard"))
     if readiness_guard.get("applied") is True:
         conclusion = "当前业务基准或必需材料不完整，现有证据不足以形成明确事实判断。"
 
@@ -121,6 +121,8 @@ def attach_advisory_assessment(
         "manual_verification_required",
         "pending",
     }
+    customer_risk = _dict(metadata.get("customer_risk_context"))
+    customer_risk_level = str(customer_risk.get("risk_level") or "unknown").lower()
     diagnostics = _dict(output.get("diagnostics")) or _dict(agent_report.get("diagnostics"))
     failed = succeeded is False or summary.get("review_status") == "failed" or bool(diagnostics)
 
@@ -181,6 +183,14 @@ def attach_advisory_assessment(
             "材料图像识别已完成，但身份、实名、订单或支付归属仍需甲方权威系统或授权人员核验。",
             pending_checks=_items(authoritative.get("pending_checks"))[:20],
         ))
+    if customer_risk_level in {"medium", "high"}:
+        signals.append(_signal(
+            "customer_risk_context",
+            "warning",
+            "脱敏历史统计只用于决定抽检优先级，不改变本次证据结论，也不能单独触发拒绝。",
+            risk_level=customer_risk_level,
+            reason_codes=[str(item) for item in _items(customer_risk.get("reason_codes"))[:20]],
+        ))
     forensic_summary = _dict(_dict(media_forensics).get("summary"))
     forensic_count = int(forensic_summary.get("risk_signal_count") or 0)
     if forensic_count:
@@ -213,6 +223,8 @@ def attach_advisory_assessment(
             optional_reasons.append("inconclusive_model_assessment")
         if out_of_frame_seconds > 0 or identity_unresolved or forensic_count:
             optional_reasons.append("non_blocking_risk_signal")
+        if customer_risk_level in {"medium", "high"}:
+            optional_reasons.append("customer_risk_sampling")
 
     if required_reasons:
         level = "required"

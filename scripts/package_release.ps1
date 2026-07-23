@@ -586,6 +586,8 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\workbench_server.py",
     "poc\visual_review_poc\local_video_triage_demo.py",
     "poc\visual_review_poc\model_selection_e2e.py",
+    "poc\visual_review_poc\model_auth.py",
+    "poc\visual_review_poc\observability.py",
     "poc\visual_review_poc\minor_material_model_prompt.py",
     "poc\visual_review_poc\minor_material_pipeline.py",
     "poc\visual_review_poc\continuity_model_prompt.py",
@@ -823,6 +825,8 @@ $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbe
 $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
+    "docs\delivery\after-sales-agent-integration.md",
+    "甲方沟通交付文档\0723客诉审核Agent接口联调与商务沟通说明.html",
     "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
     "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",
     "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",

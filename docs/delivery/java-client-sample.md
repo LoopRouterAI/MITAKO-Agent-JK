@@ -67,8 +67,12 @@ public Mono<JsonNode> validateMetadata(WebClient client, String token, Map<Strin
       "specification": "A款",
       "expected_quantity": 1,
       "master_image_urls": ["https://approved-cdn.example/products/SKU-001.png"]
-    }]
+    }],
+    "expected_package_count": 1,
+    "packages": [{"package_ref": "PKG-1", "tracking_no": "SF000001", "expected_item_refs": ["LINE-1"]}],
+    "selection_rules_complete": true
   },
+  "evidence_coverage": {"submitted_package_refs": ["PKG-1"], "submitted_tracking_nos": ["SF000001"]},
   "product_master_data": {"LINE-1": {"sku": "SKU-001", "product_name": "角色拍立得", "specification": "A款"}},
   "sampling_policy": {"preset": "strict", "frames_per_model_call": 24},
   "continuity_policy": {"out_of_frame_warning_seconds": 3.0, "force_dense_scan": true},
@@ -109,6 +113,12 @@ public Mono<JsonNode> validateMetadata(WebClient client, String token, Map<Strin
     "submitted_tracking_nos": ["SF000001"],
     "all_packages_uploaded": true,
     "all_items_displayed": true
+  },
+  "logistics": {
+    "source": "customer_logistics_system",
+    "snapshot_at": "2026-07-23T10:00:00+08:00",
+    "all_packages_delivered": true,
+    "packages": [{"package_ref": "PKG-1", "tracking_ref": "masked-or-internal-ref", "shipment_status": "delivered"}]
   }
 }
 ```
@@ -248,3 +258,28 @@ public Mono<JsonNode> retryJob(WebClient client, String token, String jobId) {
 - 未成年人材料和面单按甲方保留周期加密、脱敏和删除。
 - 不把人工标准答案或评测标签传入 `/review/jobs`。
 - 业务动作必须由人工或甲方系统确认。
+
+## 11. 多源客诉证据接入
+
+生产环境不要让坐席手工拼接订单和物流。Java 适配层应在客诉创建时调用甲方内部服务，冻结同一时点的订单、商品、包裹物流和当前工单对话，再生成 `ReviewCaseMetadata`。
+
+`logistics` 推荐结构：
+
+```json
+{
+  "source": "customer_logistics_system",
+  "snapshot_at": "2026-07-23T10:00:00+08:00",
+  "all_packages_delivered": true,
+  "packages": [{
+    "package_ref": "PKG-1",
+    "tracking_ref": "internal-or-masked-ref",
+    "carrier": "SF",
+    "shipment_status": "delivered",
+    "events": [{"status": "delivered", "occurred_at": "2026-07-22T16:20:00+08:00"}]
+  }]
+}
+```
+
+`customer_risk_context` 只允许传近 N 天售后次数、同场景次数、甲方已有风险等级和原因码。不要传历史对话或用户隐私原文；服务端不会把该字段送给模型。
+
+完整场景字段和联调步骤见 [客诉审核 Agent 与沟通 Agent 接口联调指南](./after-sales-agent-integration.md)。
