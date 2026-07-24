@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MITAKO 售后审核 Agent 0724 更新说明</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17201c;
+      --muted: #68736d;
+      --line: #dfe6e1;
+      --surface: #ffffff;
+      --wash: #f3f7f4;
+      --lime: #bdf238;
+      --lime-soft: #effbcf;
+      --orange: #ff9f43;
+      --blue: #3778c2;
+      --green: #147a48;
+      font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--wash); }
+    main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 56px; }
+    header { position: relative; overflow: hidden; padding: 42px; border: 1px solid #d8e1da; border-radius: 8px; background: var(--surface); }
+    header::after { content: ""; position: absolute; inset: auto -40px -70px auto; width: 260px; height: 150px; background: var(--lime); transform: rotate(-8deg); opacity: .72; }
+    .eyebrow { display: inline-flex; padding: 6px 10px; border-radius: 4px; background: var(--lime-soft); color: #36510b; font-size: 13px; font-weight: 700; }
+    h1 { max-width: 760px; margin: 18px 0 14px; font-size: 42px; line-height: 1.16; letter-spacing: 0; }
+    header p { max-width: 760px; margin: 0; color: var(--muted); font-size: 17px; line-height: 1.8; }
+    .status { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+    .status span { padding: 8px 11px; border: 1px solid #cad5cd; border-radius: 4px; background: #fff; font-size: 13px; font-weight: 700; }
+    section { margin-top: 18px; padding: 28px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    h2 { margin: 0 0 18px; font-size: 23px; letter-spacing: 0; }
+    h3 { margin: 0 0 8px; font-size: 16px; }
+    p { line-height: 1.75; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .item { min-height: 138px; padding: 18px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfb; }
+    .item p { margin: 0; color: var(--muted); font-size: 14px; }
+    .number { margin-bottom: 16px; color: var(--green); font-size: 28px; font-weight: 800; }
+    .flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .step { padding: 16px; border-top: 4px solid var(--blue); background: #f7faff; }
+    .step strong { display: block; margin-bottom: 8px; }
+    .step span { color: var(--muted); font-size: 13px; line-height: 1.65; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 13px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 13px; font-weight: 700; }
+    td { font-size: 14px; line-height: 1.65; }
+    .pass { color: var(--green); font-weight: 800; }
+    .boundary { border-left: 5px solid var(--orange); background: #fffaf3; }
+    .boundary ul { margin: 0; padding-left: 20px; }
+    .boundary li { margin: 9px 0; line-height: 1.65; }
+    footer { padding: 24px 4px 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    @media (max-width: 760px) {
+      main { width: min(100% - 20px, 1120px); padding-top: 10px; }
+      header, section { padding: 22px; }
+      h1 { font-size: 30px; }
+      .grid, .flow { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+    }
+    @media print {
+      body { background: #fff; }
+      main { width: 100%; padding: 0; }
+      header, section { break-inside: avoid; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="eyebrow">0724 可测试更新</span>
+    <h1>MITAKO 售后审核 Agent<br>低成本路由与稳定性更新</h1>
+    <p>本轮将单模型调用改造为可回退的审核服务，同时保留实际模型、请求耗时、Token 与成本的内部可观测性。网页与标准 API 使用同一套审核核心。</p>
+    <div class="status">
+      <span>代码已更新</span>
+      <span>API 与网页已回归</span>
+      <span>真实多模态请求已验证</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>这次实际更新了什么</h2>
+    <div class="grid">
+      <article class="item"><div class="number">01</div><h3>优先使用低成本审核模型</h3><p>日常审核默认走更适合批量抽帧的轻量多模态模型，仍可由部署配置覆盖。</p></article>
+      <article class="item"><div class="number">02</div><h3>通道故障自动回退</h3><p>首选通道不可用时会转入已配置的备用通道；缺少必需配置的通道不会被误调用。</p></article>
+      <article class="item"><div class="number">03</div><h3>成本统计不再误报</h3><p>成功调用按实际模型估算。前序通道失败、备用通道成功时，明确标记“部分成本未知”，不会假设失败请求为零成本。</p></article>
+      <article class="item"><div class="number">04</div><h3>旧部署配置仍可使用</h3><p>兼容原有环境变量和网关配置，升级时不要求甲方立即改造全部配置。</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>审核任务怎样运行</h2>
+    <div class="flow">
+      <div class="step"><strong>1. 接收证据包</strong><span>单文件、单工单文件夹或批量工单，同时接收订单与商品上下文。</span></div>
+      <div class="step"><strong>2. 媒体预处理</strong><span>过滤无效隐藏文件，按策略抽帧、压缩、分段并执行媒体取证。</span></div>
+      <div class="step"><strong>3. 并发证据审核</strong><span>分别检查事实、连续性、损伤成因、商品对账或未成年人资料一致性。</span></div>
+      <div class="step"><strong>4. 输出建议</strong><span>返回结论、置信度、证据链、人工复审等级，可选返回 HTML 报告。</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>已完成的验收</h2>
+    <table>
+      <thead><tr><th>验收项</th><th>结果</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>视觉审核自动化回归</td><td class="pass">141 / 141</td><td>覆盖材料审核、视频连续性、商品损伤、发错/漏发对账、官方商品图与公开报告脱敏。</td></tr>
+        <tr><td>私有化 API 验收</td><td class="pass">14 / 14</td><td>包含审核契约、采样策略、鉴权、指标与运营事件。</td></tr>
+        <tr><td>API / 网页提交模式</td><td class="pass">7 / 7</td><td>已验证 API 单文件、API 文件夹、批量查询、网页单文件、网页文件夹和网页批量文件夹。</td></tr>
+        <tr><td>真实多模态请求</td><td class="pass">成功</td><td>已使用当前默认轻量审核模型完成真实图片请求。</td></tr>
+        <tr><td>前端生产构建与 OpenAPI</td><td class="pass">通过</td><td>前端生产包构建成功，文档校验覆盖 42 个必需文件与 70 条 OpenAPI 路由。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="boundary">
+    <h2>本轮交付边界</h2>
+    <ul>
+      <li>Agent 输出审核建议、置信度和复审建议，不直接执行退款、换货、拒绝售后或赔付。</li>
+      <li>订单、物流、CRM、客服工单和权威身份核验仍需与甲方真实系统联调；当前演示数据不伪装成已接通生产。</li>
+      <li>审核服务可以按甲方策略使用结构化 JSON，或同时生成供人工客服阅读的 HTML 证据报告。</li>
+    </ul>
+  </section>
+
+  <footer>文档版本：2026-07-24 · 审核服务功能基线提交：25d3cae · 本文档不包含模型渠道、凭据、内部 Prompt 或调试参数。</footer>
+</main>
+</body>
+</html>
