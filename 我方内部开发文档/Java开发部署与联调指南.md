@@ -1,6 +1,6 @@
 # Java 开发部署与联调指南
 
-版本：2026-07-23
+版本：2026-07-24
 
 > 本轮多源客诉证据、包裹物流、当前工单对话与风险摘要的正式契约见 `../docs/delivery/after-sales-agent-integration.md`；字段定义以 `../docs/delivery/openapi.yaml` 为准。风险摘要只用于服务端抽检路由，不进入视觉模型。
 
@@ -55,6 +55,13 @@ Nginx / Java Gateway
 - 自动分类策略：`decision_policy` 默认 `conservative_review`。只有配置甲方批准的 `policy_ref@version` 并选择 `classification_recommendation` 后，才允许命中规则性 `negative`；该结果仍保持 `business_action_allowed=false`。
 - 甲方未提供完整基准时接口不拒绝创建任务，但 `metadata/validate` 会返回 `degraded_review`。运行结果优先建议补材料，不再仅因材料缺口强制占用人工席位。
 
+样本与标签边界：
+
+- 研发样本中的 `annotation.json`、人工最终回复、退款/补发/拒绝结果属于离线评测答案，不得进入 `metadata`、附件、文件名或模型上下文。
+- `reply.json` 只有经业务明确冻结、去除人工终判并脱敏后的审核前用户消息才可转成 `conversation_history`；生产调用方应从工单系统按时间点生成，不直接上传历史导出文件。
+- 包裹与 SKU 关系只能来自甲方权威履约快照。不得用“一个运单=未分包、多个运单=分包”替代映射。
+- `metadata.logistics` 会由主服务以结构化形式传到审核证据包；Java 不应调用或依赖内部字段 `logistics_context`。
+
 ## 4. 大文件
 
 - 小于直接上传阈值：Java 网关可以流式转发，不把文件整体读入 JVM 堆。
@@ -99,7 +106,8 @@ set E2E_BASE_URL=http://127.0.0.1:8000
 .venv\Scripts\python.exe scripts\check_review_input_isolation.py
 .venv\Scripts\python.exe scripts\check_customer_agent_0714_regression.py
 .venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_003 --run-id java-integration
-.venv\Scripts\python.exe scripts\check_review_runtime_dependencies.py --media D:\approved-samples\sample.mp4
+$env:MITAKO_SAMPLE_ROOT='D:\approved-samples'
+.venv\Scripts\python.exe scripts\check_review_runtime_dependencies.py --media (Join-Path $env:MITAKO_SAMPLE_ROOT 'sample.mp4')
 ```
 
 如果内部环境目录名为 `venv`，可将上述 `.venv` 替换为 `venv`。预发布脚本会自动识别两种目录。

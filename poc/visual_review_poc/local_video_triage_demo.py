@@ -412,6 +412,9 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
         "sku": _structured_context_value(context.get("sku")),
         "product_master_data": _structured_context_value(context.get("product_master_data")),
         "warehouse_master_data": _structured_context_value(context.get("warehouse_master_data")),
+        "logistics": _structured_context_value(
+            context.get("logistics_context") or context.get("logistics_status")
+        ),
         "conversation_history": _structured_context_value(context.get("conversation_history")),
         "customer_tone": _structured_context_value(context.get("customer_tone")),
         "sop_context": _structured_context_value(context.get("sop_context")),

@@ -413,6 +413,7 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         "order_item": json.dumps(metadata.get("order_items") or [], ensure_ascii=False),
         "sku": ",".join(str(item.get("sku") or "") for item in metadata.get("order_items") or [] if item.get("sku")),
         "logistics_status": json.dumps(metadata.get("logistics") or {}, ensure_ascii=False),
+        "logistics_context": json.dumps(metadata.get("logistics") or {}, ensure_ascii=False),
         "complaint_stage": str(metadata.get("complaint_stage") or ""),
         "product_master_data": json.dumps(metadata.get("product_master_data") or {}, ensure_ascii=False),
         "warehouse_master_data": json.dumps(metadata.get("warehouse_master_data") or {}, ensure_ascii=False),

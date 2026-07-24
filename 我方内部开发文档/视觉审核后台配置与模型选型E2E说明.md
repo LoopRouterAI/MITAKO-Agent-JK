@@ -40,14 +40,17 @@ BananaRouter 与 API易按 Gemini 原生 `generateContent` 和 Bearer Token 接�
 ## 推荐命令
 
 ```powershell
+$env:MITAKO_SAMPLE_ROOT = "E:\AIGC\0 Mitako样本"
 .venv\Scripts\python.exe poc\visual_review_poc\model_selection_e2e.py `
-  --samples-dir "E:\AIGC\0 Mitako样本" `
+  --samples-dir $env:MITAKO_SAMPLE_ROOT `
   --models gemini35lite,gemini31lite `
   --sampling-mode adaptive --fps 1 `
   --max-frames-per-video 24 --api-frame-limit 24 `
   --supplemental-image-limit 20 --concurrency 4 `
   --request-timeout 240 --soft-retries 2
 ```
+
+`MITAKO_SAMPLE_ROOT` 只服务于我方离线选型和盲测，可改为任意存在的目录。正式审核 API 不读取该变量，也不要求甲方复现我方盘符；甲方部署通过 multipart 文件或后续双方约定的对象引用提交案件。
 
 ## 内部报告必须包含
 

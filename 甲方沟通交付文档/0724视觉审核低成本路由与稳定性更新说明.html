@@ -3,55 +3,64 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MITAKO 售后审核 Agent 0724 更新说明</title>
+  <title>MITAKO 0724 功能、测试与联调说明</title>
   <style>
     :root {
       color-scheme: light;
-      --ink: #17201c;
-      --muted: #68736d;
-      --line: #dfe6e1;
+      --ink: #152019;
+      --muted: #617067;
+      --line: #dce4de;
       --surface: #ffffff;
-      --wash: #f3f7f4;
-      --lime: #bdf238;
-      --lime-soft: #effbcf;
-      --orange: #ff9f43;
-      --blue: #3778c2;
-      --green: #147a48;
-      font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      --wash: #f4f7f5;
+      --lime: #c9f24b;
+      --lime-soft: #f1fad7;
+      --green: #17653e;
+      --blue: #276eaa;
+      --orange: #b85d10;
+      --orange-soft: #fff4e9;
+      --red: #a43d37;
+      font-family: "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
     }
     * { box-sizing: border-box; }
     body { margin: 0; color: var(--ink); background: var(--wash); }
-    main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 56px; }
-    header { position: relative; overflow: hidden; padding: 42px; border: 1px solid #d8e1da; border-radius: 8px; background: var(--surface); }
-    header::after { content: ""; position: absolute; inset: auto -40px -70px auto; width: 260px; height: 150px; background: var(--lime); transform: rotate(-8deg); opacity: .72; }
-    .eyebrow { display: inline-flex; padding: 6px 10px; border-radius: 4px; background: var(--lime-soft); color: #36510b; font-size: 13px; font-weight: 700; }
-    h1 { max-width: 760px; margin: 18px 0 14px; font-size: 42px; line-height: 1.16; letter-spacing: 0; }
-    header p { max-width: 760px; margin: 0; color: var(--muted); font-size: 17px; line-height: 1.8; }
-    .status { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
-    .status span { padding: 8px 11px; border: 1px solid #cad5cd; border-radius: 4px; background: #fff; font-size: 13px; font-weight: 700; }
-    section { margin-top: 18px; padding: 28px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-    h2 { margin: 0 0 18px; font-size: 23px; letter-spacing: 0; }
+    main { width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 56px; }
+    header, section { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    header { padding: 42px; border-top: 8px solid var(--lime); }
+    .eyebrow { display: inline-block; padding: 6px 10px; border-radius: 4px; background: var(--lime-soft); color: #36510b; font-size: 13px; font-weight: 800; }
+    h1 { max-width: 880px; margin: 18px 0 14px; font-size: 40px; line-height: 1.18; letter-spacing: 0; }
+    .lead { max-width: 900px; margin: 0; color: var(--muted); font-size: 17px; line-height: 1.85; }
+    .status { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 24px; }
+    .status span { padding: 8px 11px; border: 1px solid #cad5cd; border-radius: 4px; background: #fff; font-size: 13px; font-weight: 800; }
+    section { margin-top: 18px; padding: 28px; }
+    h2 { margin: 0 0 16px; font-size: 23px; letter-spacing: 0; }
     h3 { margin: 0 0 8px; font-size: 16px; }
-    p { line-height: 1.75; }
+    p, li { line-height: 1.75; }
+    .summary { padding: 18px 20px; border-left: 5px solid var(--green); background: #f4fbf7; }
+    .summary strong { color: var(--green); }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    .item { min-height: 138px; padding: 18px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfb; }
+    .item { min-height: 150px; padding: 18px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfb; }
     .item p { margin: 0; color: var(--muted); font-size: 14px; }
-    .number { margin-bottom: 16px; color: var(--green); font-size: 28px; font-weight: 800; }
+    .number { margin-bottom: 14px; color: var(--green); font-size: 26px; font-weight: 900; }
     .flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-    .step { padding: 16px; border-top: 4px solid var(--blue); background: #f7faff; }
+    .step { min-height: 150px; padding: 16px; border-top: 4px solid var(--blue); background: #f6faff; }
     .step strong { display: block; margin-bottom: 8px; }
-    .step span { color: var(--muted); font-size: 13px; line-height: 1.65; }
+    .step span { color: var(--muted); font-size: 13px; line-height: 1.7; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 13px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-size: 13px; font-weight: 700; }
+    th { color: var(--muted); font-size: 13px; }
     td { font-size: 14px; line-height: 1.65; }
-    .pass { color: var(--green); font-weight: 800; }
-    .boundary { border-left: 5px solid var(--orange); background: #fffaf3; }
-    .boundary ul { margin: 0; padding-left: 20px; }
-    .boundary li { margin: 9px 0; line-height: 1.65; }
+    code { padding: 2px 5px; border-radius: 3px; background: #eef2ef; font-family: Consolas, monospace; font-size: .92em; }
+    .ready { color: var(--green); font-weight: 800; }
+    .poc { color: var(--blue); font-weight: 800; }
+    .pending { color: var(--orange); font-weight: 800; }
+    .warning { border-left: 5px solid var(--orange); background: var(--orange-soft); }
+    .warning ul { margin: 0; padding-left: 20px; }
+    .warning li { margin: 8px 0; }
+    .test-list { margin: 0; padding-left: 22px; }
+    .test-list li { margin: 8px 0; }
     footer { padding: 24px 4px 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
-    @media (max-width: 760px) {
-      main { width: min(100% - 20px, 1120px); padding-top: 10px; }
+    @media (max-width: 800px) {
+      main { width: min(100% - 20px, 1160px); padding-top: 10px; }
       header, section { padding: 22px; }
       h1 { font-size: 30px; }
       .grid, .flow { grid-template-columns: 1fr; }
@@ -60,67 +69,116 @@
     @media print {
       body { background: #fff; }
       main { width: 100%; padding: 0; }
-      header, section { break-inside: avoid; box-shadow: none; }
+      header, section { break-inside: avoid; }
     }
   </style>
 </head>
 <body>
 <main>
   <header>
-    <span class="eyebrow">0724 可测试更新</span>
-    <h1>MITAKO 售后审核 Agent<br>低成本路由与稳定性更新</h1>
-    <p>本轮将单模型调用改造为可回退的审核服务，同时保留实际模型、请求耗时、Token 与成本的内部可观测性。网页与标准 API 使用同一套审核核心。</p>
+    <span class="eyebrow">2026-07-24 客户沟通版</span>
+    <h1>MITAKO 售后审核 Agent<br>功能、测试方法与真实联调边界</h1>
+    <p class="lead">这份说明回答四个问题：本轮究竟改了什么、当前一共能做什么、甲方应该怎样测试、哪些能力仍需接入甲方真实系统。正式业务接入以标准审核 API 为主，网页用于 POC 验证、人工查看证据和复测。</p>
     <div class="status">
-      <span>代码已更新</span>
-      <span>API 与网页已回归</span>
-      <span>真实多模态请求已验证</span>
+      <span>四类售后审核</span>
+      <span>单案与异步批量</span>
+      <span>JSON / HTML 可选</span>
+      <span>订单、SKU、包裹物流上下文</span>
+      <span>标签隔离</span>
     </div>
   </header>
 
   <section>
-    <h2>这次实际更新了什么</h2>
+    <h2>先说结论</h2>
+    <div class="summary">
+      <strong>审核服务可以作为独立 API 进行甲方联调。</strong>甲方不需要使用我们的网页来录入订单，也不需要直接调用内部模型服务。甲方按案件提交业务 JSON 和图片/视频，服务异步返回结构化审核建议、置信度、证据链、人工复审等级和可选 HTML 报告。网页工作台保留给测试人员和客服查看报告，不是生产订单录入系统。
+    </div>
+  </section>
+
+  <section>
+    <h2>本轮实际更新</h2>
     <div class="grid">
-      <article class="item"><div class="number">01</div><h3>优先使用低成本审核模型</h3><p>日常审核默认走更适合批量抽帧的轻量多模态模型，仍可由部署配置覆盖。</p></article>
-      <article class="item"><div class="number">02</div><h3>通道故障自动回退</h3><p>首选通道不可用时会转入已配置的备用通道；缺少必需配置的通道不会被误调用。</p></article>
-      <article class="item"><div class="number">03</div><h3>成本统计不再误报</h3><p>成功调用按实际模型估算。前序通道失败、备用通道成功时，明确标记“部分成本未知”，不会假设失败请求为零成本。</p></article>
-      <article class="item"><div class="number">04</div><h3>旧部署配置仍可使用</h3><p>兼容原有环境变量和网关配置，升级时不要求甲方立即改造全部配置。</p></article>
+      <article class="item"><div class="number">01</div><h3>包裹物流进入真实审核上下文</h3><p>修复正式 API 已接收物流 JSON、但内部视觉链路只保留文本状态的问题。包裹状态、包裹引用和商品归属现在能进入统一证据包，供发错货、漏发货对账使用。</p></article>
+      <article class="item"><div class="number">02</div><h3>样本答案与线上推理严格隔离</h3><p><code>annotation.json</code> 和客服最终处理记录仅用于离线评测与业务复核，不进入模型请求。线上只读取用户证据、订单快照、明确的商品规则和审核时点之前的必要对话。</p></article>
+      <article class="item"><div class="number">03</div><h3>部署路径不再绑定研发电脑</h3><p>样本根目录由命令行参数或部署配置传入；正式 API 使用上传文件、案件 ID 和后续约定的对象引用。甲方可以使用自己的 Linux 路径、对象存储和目录结构。</p></article>
+      <article class="item"><div class="number">04</div><h3>保留低成本路由与稳定性能力</h3><p>审核模型、超时、重试、并发和抽帧强度继续由服务端配置；失败通道可受控回退，任务记录耗时、调用次数、Token/成本状态和失败原因，公开报告不暴露凭证或内部提示词。</p></article>
     </div>
   </section>
 
   <section>
-    <h2>审核任务怎样运行</h2>
-    <div class="flow">
-      <div class="step"><strong>1. 接收证据包</strong><span>单文件、单工单文件夹或批量工单，同时接收订单与商品上下文。</span></div>
-      <div class="step"><strong>2. 媒体预处理</strong><span>过滤无效隐藏文件，按策略抽帧、压缩、分段并执行媒体取证。</span></div>
-      <div class="step"><strong>3. 并发证据审核</strong><span>分别检查事实、连续性、损伤成因、商品对账或未成年人资料一致性。</span></div>
-      <div class="step"><strong>4. 输出建议</strong><span>返回结论、置信度、证据链、人工复审等级，可选返回 HTML 报告。</span></div>
-    </div>
-  </section>
-
-  <section>
-    <h2>已完成的验收</h2>
+    <h2>真实样本字段应该怎样使用</h2>
     <table>
-      <thead><tr><th>验收项</th><th>结果</th><th>说明</th></tr></thead>
+      <thead><tr><th>研发理解</th><th>核对结论</th><th>正确用法</th></tr></thead>
       <tbody>
-        <tr><td>视觉审核自动化回归</td><td class="pass">141 / 141</td><td>覆盖材料审核、视频连续性、商品损伤、发错/漏发对账、官方商品图与公开报告脱敏。</td></tr>
-        <tr><td>私有化 API 验收</td><td class="pass">14 / 14</td><td>包含审核契约、采样策略、鉴权、指标与运营事件。</td></tr>
-        <tr><td>API / 网页提交模式</td><td class="pass">7 / 7</td><td>已验证 API 单文件、API 文件夹、批量查询、网页单文件、网页文件夹和网页批量文件夹。</td></tr>
-        <tr><td>真实多模态请求</td><td class="pass">成功</td><td>已使用当前默认轻量审核模型完成真实图片请求。</td></tr>
-        <tr><td>前端生产构建与 OpenAPI</td><td class="pass">通过</td><td>前端生产包构建成功，文档校验覆盖 42 个必需文件与 70 条 OpenAPI 路由。</td></tr>
+        <tr><td>商品有伤的视频不合格原因、人工伤情意见来自标注与客服记录</td><td class="poc">部分正确</td><td>适合整理离线评测标签，不得把人工结论送入模型。线上伤情等级必须由本次媒体证据独立判断。</td></tr>
+        <tr><td>商品特殊规则来自 SKU 详情、活动或抽赏规则</td><td class="ready">正确</td><td>只传本订单相关且可解释的规则；历史快照不完整时标记规则未齐，不擅自补全。</td></tr>
+        <tr><td>漏发货应发清单来自订单，实收清单来自用户媒体</td><td class="ready">正确</td><td>还要提供赠品/特典、套装组件、包裹数和证据覆盖范围，服务才能做履约对账。</td></tr>
+        <tr><td>一个物流单号代表未分包，多个物流单号代表分包</td><td class="pending">不能这样推断</td><td>物流单号数量不能证明包裹与 SKU 的归属。需要甲方订单/仓储系统给出权威的包裹-SKU 映射；缺失时输出证据不足或复核建议。</td></tr>
+        <tr><td>仓库核实结论、发错/漏发事实标签来自标注和客服记录</td><td class="poc">仅限离线评测</td><td>可由业务人员离线整理为评测标签，但线上模型请求不能读取；生产事实应来自仓储核验接口或本次证据。</td></tr>
+        <tr><td>随机、隐藏、特典和款式规则来自订单商品详情</td><td class="ready">有条件正确</td><td>以版本化规则为准。只有订单快照明确记录且与本订单商品关联时才可用于确定判断。</td></tr>
       </tbody>
     </table>
   </section>
 
-  <section class="boundary">
-    <h2>本轮交付边界</h2>
+  <section>
+    <h2>当前提供的功能</h2>
+    <table>
+      <thead><tr><th>系统</th><th>当前能力</th><th>成熟度与边界</th></tr></thead>
+      <tbody>
+        <tr><td><strong>售后审核 API</strong></td><td>商品有伤、发错货、漏发货、未成年人资料；多图/多视频；元数据预检；单案异步任务；同批次查询；幂等、失败隔离、抽帧计划、结构化结果和可选 HTML。</td><td class="ready">POC 联调主入口。真实订单、物流、身份核验、对象存储和生产队列仍需双方接入。</td></tr>
+        <tr><td><strong>视觉审核网页</strong></td><td>单文件、单文件夹、最多 10 案的小批量复测；抽帧强度选择；证据报告查看。</td><td class="poc">适合 UAT 和人工复测，不建议作为甲方生产订单录入入口。</td></tr>
+        <tr><td><strong>客服对话模拟界面</strong></td><td>业务问答、图片/视频附件、SOP 回复、转人工流程和审核摘要展示。</td><td class="poc">演示与接口验证可用；尚未接入甲方真实用户渠道、工单和会话 ID。</td></tr>
+        <tr><td><strong>人工客服工作台</strong></td><td>队列、接单、会话上下文、审核简报、回复与升级流程。</td><td class="poc">用于验证协同设计；甲方若使用自有客服台，应通过 API 嵌入审核结果，不要求更换工作台。</td></tr>
+        <tr><td><strong>运营后台与私域 Agent</strong></td><td>群事件、商品事件、分层、频控、风险预警、运营动作审批和复盘演示。</td><td class="pending">P0 演示能力；企业微信、飞书、CRM/CDP、商品、库存和真实群仍待联调。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>甲方怎样测试审核服务</h2>
+    <div class="flow">
+      <div class="step"><strong>1. 检查服务</strong><span>读取健康、就绪和审核契约，确认媒体工具、任务存储和必需配置可用。</span></div>
+      <div class="step"><strong>2. 校验案件</strong><span>先提交 metadata 校验。发错/漏发应带版本化订单基线、包裹映射和证据覆盖。</span></div>
+      <div class="step"><strong>3. 创建任务</strong><span>每个案件一个异步 job，同批案件共用 batch_id；不要把 120GB 素材塞进一个请求。</span></div>
+      <div class="step"><strong>4. 读取结果</strong><span>轮询任务，优先消费结构化建议；需要人读时再打开 HTML 证据报告。</span></div>
+    </div>
+    <ol class="test-list">
+      <li>正式入口：主服务 <code>/api/v1/review/*</code>。内部视觉端口不对甲方业务系统开放。</li>
+      <li>单案：验证同一个幂等键不会重复创建任务，图片和视频都能进入同一案件。</li>
+      <li>批量：每案独立提交、共用 <code>batch_id</code>，验证部分失败不阻塞整批。</li>
+      <li>盲测：文件名、目录名、请求 JSON 和对话不得包含正负标签、人工最终结论或标准答案。</li>
+      <li>输出：分别测试 JSON-only 与 JSON + HTML；核对结论、置信度、证据帧、材料缺口和复审等级。</li>
+      <li>路径：甲方可从任意目录读取文件后上传。服务不要求出现 <code>E:\AIGC\0 Mitako样本</code>，该路径只是我方研发数据源。</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>本轮实际验证结果</h2>
+    <table>
+      <thead><tr><th>验收项</th><th>结果</th><th>解释</th></tr></thead>
+      <tbody>
+        <tr><td>审核服务单元回归</td><td class="ready">77 / 77</td><td>覆盖正式任务、输入就绪度、策略、报告和接口字段传递。</td></tr>
+        <tr><td>视觉审核单元回归</td><td class="ready">141 / 141</td><td>覆盖媒体安全、抽帧、连续性、商品有伤、履约对账、未成年人资料和公开报告。</td></tr>
+        <tr><td>私有化 HTTP 接口验收</td><td class="ready">14 / 14</td><td>覆盖 OpenAPI、鉴权、四场景契约、采样计划、元数据校验、指标和私域事件。</td></tr>
+        <tr><td>前端生产构建</td><td class="ready">通过</td><td>用户端、人工客服台和运营后台生产资源均完成构建。</td></tr>
+        <tr><td>真实 16 文件批任务</td><td class="poc">任务成功，模型链路有降级</td><td>任务状态为 SUCCEEDED，35 帧、6 次模型调用并生成 HTML；其中两个分段发生 SSL 握手/EOF 网络异常并被记录为降级，不能据此宣称供应商网络全程稳定。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="warning">
+    <h2>还需要甲方联调或确认</h2>
     <ul>
-      <li>Agent 输出审核建议、置信度和复审建议，不直接执行退款、换货、拒绝售后或赔付。</li>
-      <li>订单、物流、CRM、客服工单和权威身份核验仍需与甲方真实系统联调；当前演示数据不伪装成已接通生产。</li>
-      <li>审核服务可以按甲方策略使用结构化 JSON，或同时生成供人工客服阅读的 HTML 证据报告。</li>
+      <li>订单行、SKU、套装、赠品、特典、随机/隐藏款规则的版本化快照。</li>
+      <li>商品与包裹/运单的权威映射、物流轨迹、签收状态和仓储核验结果。</li>
+      <li>官方商品图和包装标识的受控访问地址；服务按本单按需读取，不全量下载商品库。</li>
+      <li>未成年人身份、监护关系、手机号实名、订单和支付事实的权威核验接口。</li>
+      <li>审核 <code>job_id</code> 与甲方工单/会话的关联、回调鉴权、对象存储、保留期限和 SLA。</li>
+      <li>企业微信、飞书、CRM/CDP、商品和库存系统的真实接口。当前仅有契约和演示数据，不伪装已接通。</li>
     </ul>
   </section>
 
-  <footer>文档版本：2026-07-24 · 审核服务功能基线提交：25d3cae · 本文档不包含模型渠道、凭据、内部 Prompt 或调试参数。</footer>
+  <footer>文档版本：2026-07-24。本文面向甲方业务、测试和项目人员，不包含模型渠道、密钥、内部 Prompt、供应商调试参数或人工评测答案。</footer>
 </main>
 </body>
 </html>

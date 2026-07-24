@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
+from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context
 from review_service.input_readiness import assess_input_readiness
 from review_service.schemas import ReviewCaseMetadata
 from review_service.service import _public_media_urls, contract, sampling_plan
@@ -558,6 +559,42 @@ class InputReadinessTest(unittest.TestCase):
 
         self.assertEqual(fields["include_html_report"], "false")
         self.assertEqual(json.loads(fields["review_routing_policy"])["optional_below_confidence"], 0.82)
+
+    def test_formal_job_propagates_structured_logistics_to_model_evidence(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "CASE-LOGISTICS-PROPAGATION",
+                "scenario": "missing_item",
+                "logistics": {
+                    "shipment_status": "delivered",
+                    "packages": [
+                        {
+                            "package_ref": "PKG-1",
+                            "expected_item_refs": ["LINE-1"],
+                            "status": "delivered",
+                        }
+                    ],
+                },
+            }
+        ).model_dump(mode="json")
+        fields = _review_fields(
+            {
+                "scenario": "missing_item",
+                "client_case_id": "CASE-LOGISTICS-PROPAGATION",
+                "metadata": metadata,
+                "assets": [],
+            }
+        )
+
+        current = apply_frontdesk_context(
+            {"structured_business_context": {}},
+            fields["scenario"],
+            json.dumps(fields, ensure_ascii=False),
+        )
+        logistics = current["structured_business_context"]["frontdesk_evidence_package"]["logistics"]
+
+        self.assertEqual(json.loads(fields["logistics_context"])["shipment_status"], "delivered")
+        self.assertEqual(logistics["packages"][0]["expected_item_refs"], ["LINE-1"])
 
     def test_chinese_human_annotation_is_rejected_from_runtime_input(self):
         with self.assertRaisesRegex(ValueError, "evaluation_label_not_allowed"):
