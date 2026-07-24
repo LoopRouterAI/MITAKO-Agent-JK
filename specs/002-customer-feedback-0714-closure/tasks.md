@@ -146,4 +146,4 @@
 - [x] T095 先行补充正式 API 物流上下文未进入模型证据包的失败回归
 - [x] T096 保留旧字段兼容并贯通 `metadata.logistics` 到 `frontdesk_evidence_package.logistics`
 - [x] T097 更新甲方功能/测试 HTML、Java 联调指南、模型选型说明和内部升级日志
-- [ ] T098 完成全量回归、真实 HTTP 验收、交付包刷新与发布记录
+- [x] T098 完成全量回归、真实 HTTP 验收、交付包刷新与发布记录
