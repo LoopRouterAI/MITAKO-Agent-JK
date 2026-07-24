@@ -53,7 +53,11 @@ from poc.visual_review_poc.object_continuity import (
     aggregate_object_continuity,
     apply_object_continuity_guard,
 )
-from poc.visual_review_poc.model_catalog import MODEL_CONFIGS, PRICING_NOTE
+from poc.visual_review_poc.model_catalog import (
+    MODEL_CONFIGS,
+    PRICING_NOTE,
+    summarize_cost_observability as _cost_observability,
+)
 from poc.visual_review_poc.review_model_prompt import build_selection_prompt
 from poc.visual_review_poc.model_result_scoring import score_result
 from poc.visual_review_poc.fulfillment_reconciliation import (
@@ -65,7 +69,7 @@ from poc.visual_review_poc.minor_material_pipeline import run_minor_material_pip
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
-from poc.visual_review_poc.model_auth import gemini_auth_headers, gemini_generate_endpoint
+from poc.visual_review_poc.model_auth import gemini_channel_options
 from poc.visual_review_poc.observability import log_visual_event
 
 ROOT = app_root()
@@ -251,7 +255,7 @@ def gemini_payload(system_prompt: str, user_prompt: str, case: Dict[str, Any]) -
     return {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"parts": parts}],
-        "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1, "maxOutputTokens": 8192},
+        "generationConfig": {"response_mime_type": "application/json", "maxOutputTokens": 8192},
     }
 
 
@@ -301,39 +305,6 @@ def estimate_model_cost(cfg: Dict[str, Any], usage: Dict[str, Any]) -> Dict[str,
     }
 
 
-def _cost_observability(items: List[Dict[str, Any]]) -> Dict[str, Any]:
-    unknown = 0
-    estimated = 0
-    not_incurred = 0
-    for item in items:
-        explicit = str(item.get("cost_status") or "")
-        if explicit == "not_incurred":
-            not_incurred += 1
-            continue
-        usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
-        cost = item.get("cost") if isinstance(item.get("cost"), dict) else {}
-        usage_reported = any(value not in (None, "") for value in usage.values())
-        cost_reported = "estimated_usd" in cost
-        if explicit == "estimated" or usage_reported or cost_reported:
-            estimated += 1
-        else:
-            unknown += 1
-    if unknown and estimated:
-        status = "partial_unknown"
-    elif unknown:
-        status = "unknown"
-    elif estimated:
-        status = "estimated"
-    else:
-        status = "not_incurred"
-    return {
-        "cost_status": status,
-        "unknown_cost_calls": unknown,
-        "estimated_cost_calls": estimated,
-        "not_incurred_calls": not_incurred,
-    }
-
-
 def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
     last: Dict[str, Any] = {}
     for attempt in range(1, retries + 2):
@@ -376,24 +347,7 @@ def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str,
 
 
 def gemini_request_options(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    options: List[Dict[str, Any]] = []
-    gateway_key = os.getenv("VISION_REVIEW_API_KEY")
-    if gateway_key:
-        base = os.getenv("VISION_REVIEW_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
-        endpoint = gemini_generate_endpoint(base, cfg["model"])
-        options.append({
-            "endpoint": endpoint,
-            "headers": gemini_auth_headers(endpoint, gateway_key, os.getenv("VISION_REVIEW_GEMINI_AUTH_MODE", "auto")),
-        })
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    if gemini_key:
-        base = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
-        endpoint = gemini_generate_endpoint(base, cfg["model"])
-        options.append({
-            "endpoint": endpoint,
-            "headers": gemini_auth_headers(endpoint, gemini_key, os.getenv("GEMINI_AUTH_MODE", "auto")),
-        })
-    return options
+    return gemini_channel_options(cfg["model"])
 
 
 def extract_openai_text(data: Dict[str, Any]) -> str:
@@ -432,13 +386,13 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
     analysis_mode = str((case.get("structured_business_context") or {}).get("analysis_mode") or "")
     system_prompt = build_system_prompt(business_scenario or case["scenario"])
     user_prompt = build_selection_prompt(case)
+    failures: List[Dict[str, Any]] = []
     if cfg["provider"] == "gemini_native":
         options = gemini_request_options(cfg)
         if not options:
             return {"status": "skipped", "error": "missing_api_key", "cost_status": "not_incurred"}
         payload = gemini_payload(system_prompt, user_prompt, case)
         response: Dict[str, Any] = {}
-        failures: List[Dict[str, Any]] = []
         for option in options:
             response = post_with_retries(option["endpoint"], option["headers"], payload, timeout, retries)
             if response.get("ok"):
@@ -491,6 +445,7 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
         )
         parsed = apply_fulfillment_guard(parsed, business_scenario or case["scenario"])
     label = load_report_label(case["case_id"])
+    cost_status = "partial_unknown" if failures else "estimated"
     return {
         "status": "success",
         "model": cfg["model"],
@@ -502,7 +457,10 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
         "latency_seconds": response.get("latency_seconds"),
         "usage": usage,
         "cost": estimate_model_cost(cfg, usage),
-        "cost_status": "estimated",
+        "cost_status": cost_status,
+        "unknown_cost_calls": len(failures),
+        "estimated_cost_calls": 1,
+        "attempts": failures,
         "raw_text": text,
         "raw_response": compact_response(response.get("data") or {}),
         "parsed_before_boundary": parsed_before_boundary,

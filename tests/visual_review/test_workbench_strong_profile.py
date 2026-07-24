@@ -10,6 +10,12 @@ from poc.visual_review_poc import workbench_server
 
 
 class WorkbenchStrongProfileTest(unittest.TestCase):
+    def test_auto_model_route_defaults_to_gemini_35_flash_lite(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            model_keys = workbench_server._configured_model_keys("auto")
+
+        self.assertEqual(model_keys, ["gemini35lite"])
+
     def test_folder_review_prepares_official_references_after_frontdesk_context_merge(self) -> None:
         observed = {}
         with tempfile.TemporaryDirectory() as temp_dir:

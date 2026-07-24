@@ -450,6 +450,12 @@ class MinorMaterialPipelineTest(unittest.TestCase):
                     "cost": {"estimated_usd": 0.005},
                 }
             result = _consistency_result(check_id)
+            if check_id == "guardian_relationship":
+                result.update({
+                    "cost_status": "partial_unknown",
+                    "unknown_cost_calls": 1,
+                    "estimated_cost_calls": 1,
+                })
             result["parsed"]["coverage_ack"] = {
                 "expected_image_indices": indices,
                 "observed_image_indices": indices,
@@ -466,6 +472,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(channel["estimated_usd"], 0.013)
         self.assertEqual(result["usage"]["total_tokens"], 215)
         self.assertEqual(result["cost"]["estimated_usd"], 0.018)
+        self.assertEqual(result["cost_status"], "partial_unknown")
+        self.assertEqual(result["unknown_cost_calls"], 1)
 
     def test_unclassified_image_blocks_missing_material_claim(self) -> None:
         case = _case(image_count=5, frame_count=0)
@@ -500,6 +508,9 @@ class MinorMaterialPipelineTest(unittest.TestCase):
                 "parsed": {"material_observations": observations},
                 "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
                 "cost": {"estimated_usd": 0.001},
+                "cost_status": "partial_unknown" if attempts == 1 else "estimated",
+                "unknown_cost_calls": 2 if attempts == 1 else 0,
+                "estimated_cost_calls": 1,
                 "latency_seconds": 0.1,
             }
 
@@ -510,6 +521,9 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 2)
         self.assertEqual(result["usage"]["total_tokens"], 30)
         self.assertEqual(result["cost"]["estimated_usd"], 0.002)
+        self.assertEqual(result["cost_status"], "partial_unknown")
+        self.assertEqual(result["unknown_cost_calls"], 2)
+        self.assertEqual(result["estimated_cost_calls"], 2)
 
     def test_household_register_or_birth_certificate_satisfies_relationship_rule(self) -> None:
         case = _case(image_count=8, frame_count=0)

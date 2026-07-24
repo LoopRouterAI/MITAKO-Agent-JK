@@ -913,7 +913,11 @@ def _configured_model_keys(requested_model_key: str) -> List[str]:
     if requested_model_key != "auto":
         resolved = _model_key_from_identifier(requested_model_key)
         return [resolved] if resolved else []
-    identifiers = [os.getenv("VISUAL_REVIEW_PRIMARY_MODEL", "gemini-3.5-flash")]
+    identifiers = [
+        os.getenv("VISUAL_REVIEW_PRIMARY_MODEL")
+        or os.getenv("GEMINI_MODEL")
+        or "gemini-3.5-flash-lite"
+    ]
     identifiers.extend(
         item.strip()
         for item in os.getenv("VISUAL_REVIEW_FALLBACK_MODELS", "").split(",")
@@ -924,7 +928,7 @@ def _configured_model_keys(requested_model_key: str) -> List[str]:
         key = _model_key_from_identifier(identifier)
         if key and key not in keys:
             keys.append(key)
-    return keys or ["gemini35"]
+    return keys or ["gemini35lite"]
 
 
 def _call_model_chunked_with_fallback(

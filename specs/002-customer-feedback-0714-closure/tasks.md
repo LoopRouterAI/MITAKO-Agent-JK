@@ -131,3 +131,10 @@
 - [x] T086 回迁 Gemini 兼容网关认证、Celery 任务注册和视觉结构化日志
 - [x] T087 输出甲方商务沟通 HTML、API/OpenAPI、Java 和部署联调说明
 - [x] T088 完成源码、真实 HTTP、浏览器、双包冷启动和敏感边界验收
+
+## Phase 15: 低成本 Gemini 审核通道路由
+
+- [x] T089 先行补充 BananaRouter Bearer 认证、渠道顺序、缺配置跳过和模型环境变量回归
+- [x] T090 复用共享认证模块生成 BananaRouter、百度、API易与官方 Gemini 通道
+- [x] T091 将工作台和单样本审核默认模型改为 `gemini-3.5-flash-lite`，保留环境变量覆盖
+- [x] T092 更新环境变量和内部部署说明，完成视觉回归与发布门禁

@@ -3,6 +3,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from poc.visual_review_poc.model_catalog import summarize_cost_observability
+
 
 
 VALID_CONTINUITY_STATES = {"visible", "partial", "occluded", "out_of_frame", "not_yet_exposed", "unknown"}
@@ -91,8 +93,7 @@ def run_specialized_frame_pass(
                 6,
             )
         }
-        statuses = {str(primary.get("cost_status") or ""), str(repair.get("cost_status") or "")}
-        merged["cost_status"] = "partial_unknown" if "unknown" in statuses else "estimated"
+        merged.update(summarize_cost_observability([primary, repair]))
         merged["latency_seconds"] = round(
             float(primary.get("latency_seconds") or 0) + float(repair.get("latency_seconds") or 0),
             2,

@@ -28,7 +28,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.order_info_adapter import build_order_info_context
-from poc.visual_review_poc.model_auth import gemini_auth_headers, gemini_generate_endpoint
+from poc.visual_review_poc.model_auth import DEFAULT_GEMINI_MODEL, gemini_channel_options, resolve_gemini_model
+from poc.visual_review_poc.model_catalog import MODEL_CONFIGS
 from poc.visual_review_poc.observability import log_visual_event
 from review_input_safety import contains_evaluation_marker, redact_review_personal_data
 
@@ -37,9 +38,7 @@ POC_DIR = ROOT / "poc" / "visual_review_poc"
 REPORT_DIR = POC_DIR / "reports"
 TMP_DIR = ROOT / "tmp" / "visual_review_gemini35"
 SAMPLE_LABELS = ROOT / "docs" / "三大审核场景的小量样本" / "sample_labels.json"
-MODEL = "gemini-3.5-flash"
-GEMINI_35_FLASH_INPUT_USD_PER_1M = 1.50
-GEMINI_35_FLASH_OUTPUT_USD_PER_1M = 9.00
+MODEL = DEFAULT_GEMINI_MODEL
 GEMINI_PRICING_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
 DEFAULT_POLICY = {"auto_confidence": 0.80, "manual_confidence": 0.65}
 LOGGER = logging.getLogger("mitako.visual_review")
@@ -48,7 +47,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Gemini 3.5 Flash 单样本视觉审核")
+    parser = argparse.ArgumentParser(description="Gemini 单样本视觉审核")
     parser.add_argument("--video", required=True, help="本地视频路径")
     parser.add_argument("--scenario", choices=["video_unboxing", "product_damage", "minor_material"], default="", help="强制指定审核场景")
     parser.add_argument("--context-json", default="", help="客服证据包上下文 JSON")
@@ -602,34 +601,7 @@ def _first_env(names: Iterable[str]) -> str:
 
 
 def gemini_channels() -> List[Dict[str, Any]]:
-    channels: List[Dict[str, Any]] = []
-    gateway_key = _first_env(("VISION_REVIEW_API_KEY", "APIYI_API_KEY", "BROUTER_API_KEY", "BRouter_API_KEY"))
-    if gateway_key:
-        base = os.getenv("VISION_REVIEW_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
-        endpoint = gemini_generate_endpoint(base, MODEL)
-        channels.append(
-            {
-                "channel": "视觉审核主通道",
-                "model": MODEL,
-                "endpoint": endpoint,
-                "headers": gemini_auth_headers(endpoint, gateway_key, os.getenv("VISION_REVIEW_GEMINI_AUTH_MODE", "auto")),
-                "soft_retries": 3,
-            }
-        )
-    gemini_key = _first_env(("GEMINI_API_KEY", "GOOGLE_API_KEY"))
-    if gemini_key:
-        base = os.getenv("GEMINI_API_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
-        endpoint = gemini_generate_endpoint(base, MODEL)
-        channels.append(
-            {
-                "channel": "Gemini 官方通道",
-                "model": MODEL,
-                "endpoint": endpoint,
-                "headers": gemini_auth_headers(endpoint, gemini_key, os.getenv("GEMINI_AUTH_MODE", "auto")),
-                "soft_retries": 3,
-            }
-        )
-    return channels
+    return [{**option, "soft_retries": 3} for option in gemini_channel_options()]
 
 
 def classify_error(status: Optional[int], text: str) -> str:
@@ -707,16 +679,28 @@ def extract_usage(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def estimate_cost(usage: Dict[str, Any]) -> Dict[str, Any]:
+def estimate_cost(usage: Dict[str, Any], model: str = "") -> Dict[str, Any]:
     input_tokens = int(usage.get("input_tokens") or 0)
     output_tokens = int(usage.get("output_tokens") or 0)
-    usd = input_tokens / 1_000_000 * GEMINI_35_FLASH_INPUT_USD_PER_1M + output_tokens / 1_000_000 * GEMINI_35_FLASH_OUTPUT_USD_PER_1M
+    resolved_model = resolve_gemini_model(model)
+    cfg = next((item for item in MODEL_CONFIGS.values() if item.get("model") == resolved_model), None)
+    if not cfg:
+        return {
+            "estimated_usd": None,
+            "input_usd_per_1m": None,
+            "output_usd_per_1m": None,
+            "basis": f"未配置 {resolved_model} 的成本口径。",
+            "source": GEMINI_PRICING_SOURCE,
+        }
+    input_price = float(cfg["input_price"])
+    output_price = float(cfg["output_price"])
+    usd = input_tokens / 1_000_000 * input_price + output_tokens / 1_000_000 * output_price
     return {
         "estimated_usd": round(usd, 6),
-        "input_usd_per_1m": GEMINI_35_FLASH_INPUT_USD_PER_1M,
-        "output_usd_per_1m": GEMINI_35_FLASH_OUTPUT_USD_PER_1M,
-        "basis": "Google Gemini API Gemini 3.5 Flash 官方价格基准；第三方渠道可能另有加价。",
-        "source": GEMINI_PRICING_SOURCE,
+        "input_usd_per_1m": input_price,
+        "output_usd_per_1m": output_price,
+        "basis": f"Google Gemini API {cfg['label']} 标准价格基准；第三方渠道可能另有加价。",
+        "source": cfg["source"],
     }
 
 
@@ -763,7 +747,7 @@ def build_payload(system_prompt: str, user_prompt: str, frames: List[Dict[str, A
     return {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"parts": parts}],
-        "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1, "maxOutputTokens": 8192},
+        "generationConfig": {"response_mime_type": "application/json", "maxOutputTokens": 8192},
     }
 
 
@@ -785,13 +769,38 @@ def call_gemini(payload: Dict[str, Any], timeout: int, soft_retries: int) -> Dic
             raw_text = extract_text(response["data"])
             parsed = enforce_boundary(parse_model_json(raw_text))
             usage = extract_usage(response["data"])
-            attempt.update({"raw_text": raw_text, "parsed": parsed, "usage": usage, "cost": estimate_cost(usage)})
+            unknown_cost_calls = sum(1 for item in attempts if not item.get("ok"))
+            cost_status = "partial_unknown" if unknown_cost_calls else "estimated"
+            cost = estimate_cost(usage, channel["model"])
+            cost.update({"status": cost_status, "unknown_cost_calls": unknown_cost_calls})
+            if unknown_cost_calls:
+                cost["basis"] += f" 前序 {unknown_cost_calls} 次失败调用成本未知。"
+            attempt.update({"raw_text": raw_text, "parsed": parsed, "usage": usage, "cost": cost})
             attempts.append(attempt)
-            return {"status": "success", "winner": attempt, "attempts": attempts}
+            return {
+                "status": "success",
+                "winner": attempt,
+                "attempts": attempts,
+                "cost_status": cost_status,
+                "unknown_cost_calls": unknown_cost_calls,
+                "estimated_cost_calls": 1,
+            }
         attempts.append(attempt)
         if response.get("error_type") == "soft":
             continue
-    return {"status": "failed", "winner": None, "attempts": attempts}
+    cost_status = "unknown" if attempts else "not_incurred"
+    return {
+        "status": "failed",
+        "winner": None,
+        "attempts": attempts,
+        "cost_status": cost_status,
+        "cost": {
+            "estimated_usd": None,
+            "status": cost_status,
+            "basis": "模型调用失败，成本未知。" if attempts else "未发生模型调用，未产生费用。",
+            "source": GEMINI_PRICING_SOURCE,
+        },
+    }
 
 
 def evaluate(parsed: Dict[str, Any], label: Dict[str, Any]) -> Dict[str, Any]:
@@ -839,8 +848,9 @@ def detail(title: str, data: Any, open_: bool = True) -> str:
 
 
 def render_html(report: Dict[str, Any]) -> str:
-    parsed = ((report.get("gemini") or {}).get("winner") or {}).get("parsed") or {}
-    winner = (report.get("gemini") or {}).get("winner") or {}
+    gemini = report.get("gemini") or {}
+    parsed = ((gemini.get("winner") or {}).get("parsed") or {})
+    winner = gemini.get("winner") or {}
     evaluation = report.get("evaluation") or {}
     frames = report.get("frames") or []
     images = report.get("supplemental_images") or []
@@ -850,7 +860,23 @@ def render_html(report: Dict[str, Any]) -> str:
     supporting = parsed.get("supporting_evidence") or []
     challenging = parsed.get("challenging_evidence") or []
     policy = report.get("policy_decision") or policy_decision(parsed)
-    cost = winner.get("cost") or estimate_cost(winner.get("usage") or {})
+    actual_model = str(winner.get("model") or report.get("model") or resolve_gemini_model())
+    cost = winner.get("cost") or (
+        estimate_cost(winner.get("usage") or {}, actual_model) if winner else gemini.get("cost")
+    )
+    if not cost:
+        cost_status = "unknown" if gemini.get("attempts") else "not_incurred"
+        cost = {
+            "estimated_usd": None,
+            "status": cost_status,
+            "basis": "模型调用失败，成本未知。" if cost_status == "unknown" else "未发生模型调用，未产生费用。",
+            "source": GEMINI_PRICING_SOURCE,
+        }
+    cost_display = (
+        f"${cost['estimated_usd']}"
+        if cost.get("estimated_usd") is not None
+        else "成本未知" if cost.get("status") == "unknown" else "未发生"
+    )
     label = str(parsed.get("predicted_label") or "")
     confidence = parsed.get("confidence")
     if parsed.get("visual_evidence_verdict"):
@@ -906,7 +932,7 @@ def render_html(report: Dict[str, Any]) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gemini 3.5 Flash 单样本审核报告</title>
+  <title>{h(actual_model)} 单样本审核报告</title>
   <style>
     body {{ margin:0; font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif; color:#182421; background:#f6fbf7; }}
     main {{ max-width:1280px; margin:0 auto; padding:24px 16px 56px; }}
@@ -944,8 +970,8 @@ def render_html(report: Dict[str, Any]) -> str:
 <main>
   <section>
     <span class="pill">单样本审计</span>
-    <h1>Gemini 3.5 Flash 单样本审核报告</h1>
-    <p>本报告只验证一个开箱/发错货样本能否被 Gemini 3.5 Flash 审核清楚；不做模型选型，不设计多模型复核。</p>
+    <h1>{h(actual_model)} 单样本审核报告</h1>
+    <p>本报告只验证一个开箱/发错货样本能否被当前模型审核清楚；不做模型选型，不设计多模型复核。</p>
   </section>
 
   <section>
@@ -963,7 +989,7 @@ def render_html(report: Dict[str, Any]) -> str:
     <h2>模型到底说了什么</h2>
     <div class="grid">
       <div class="cell"><small>API 状态</small><b>{h(report["gemini"].get("status"))}</b></div>
-      <div class="cell"><small>模型</small><b>{h(winner.get("model") or MODEL)}</b></div>
+      <div class="cell"><small>模型</small><b>{h(actual_model)}</b></div>
       <div class="cell"><small>模型结论 decision</small><b>{h(parsed.get("decision"))}</b></div>
       <div class="cell"><small>诉求标签 predicted_label</small><b>{h(parsed.get("predicted_label"))}</b></div>
       <div class="cell"><small>后端可读结论</small><b>{h(parsed.get("system_yes_no") or policy.get("system_yes_no"))}</b></div>
@@ -971,7 +997,7 @@ def render_html(report: Dict[str, Any]) -> str:
       <div class="cell"><small>历史标签对比</small><b>{h(hit_text)}</b></div>
       <div class="cell"><small>耗时</small><b>{h(winner.get("latency_seconds"))}s</b></div>
       <div class="cell"><small>Token</small><b>{h((winner.get("usage") or {}).get("total_tokens"))}</b></div>
-      <div class="cell"><small>估算成本</small><b>${h(cost.get("estimated_usd"))}</b></div>
+      <div class="cell"><small>估算成本</small><b>{h(cost_display)}</b></div>
       <div class="cell wide"><small>策略动作</small><b>{h(policy.get("action"))}</b><p class="muted">阈值：高置信 ≥ {h((policy.get("threshold") or {}).get("auto_confidence"))}；低置信 &lt; {h((policy.get("threshold") or {}).get("manual_confidence"))}。</p></div>
     </div>
     <p><b>视觉质检结论：</b>{h(visual_verdict)}</p>
@@ -980,7 +1006,7 @@ def render_html(report: Dict[str, Any]) -> str:
     <p><b>为什么还要人工：</b>{h(follow_up_reason)}</p>
     <p><b>历史标签对比是什么意思：</b>这是报告侧用本地人工标签做的回归对照，不是 Gemini 输出，也不是业务裁决。如果旧人工标签被复盘修正，报告会按修正后的标签重新评测。</p>
     <p><b>是否泄题：</b>这是报告侧说明，不是 Gemini 输出。发送给模型的是用户诉求、订单上下文、抽帧帧号/时间戳、补充图片文件名和图片内容；没有发送 sample_labels.json、human_conclusion、expected_predicted_label 或人工答案。</p>
-    <p class="muted">成本估算按 Gemini 3.5 Flash 官方 Token 单价基准计算，第三方渠道可能另有加价。来源：{h(cost.get("source") or GEMINI_PRICING_SOURCE)}</p>
+    <p class="muted">{h(cost.get("basis"))} 来源：{h(cost.get("source") or GEMINI_PRICING_SOURCE)}</p>
   </section>
 
   <section>
@@ -1032,7 +1058,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     if not video.exists():
         raise SystemExit(f"视频不存在：{video}")
     if not gemini_channels():
-        raise SystemExit("未找到 Gemini 渠道 Key：需要 VISION_REVIEW_API_KEY、GEMINI_API_KEY、GOOGLE_API_KEY、APIYI_API_KEY 或 BROUTER_API_KEY")
+        raise SystemExit(
+            "未找到 Gemini 渠道 Key 或 Base URL：BananaRouter、百度、API易各需 Key + Base URL；"
+            "Google 官方只需 Key。旧部署可将 BROUTER_API_KEY、BRouter_API_KEY 或 APIYI_API_KEY "
+            "与 VISION_REVIEW_GEMINI_BASE_URL 配对。"
+        )
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
     run_dir = TMP_DIR / stamp
@@ -1051,7 +1081,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     report_label = load_report_label(case["case_id"])
     report = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "model": MODEL,
+        "model": ((gemini.get("winner") or {}).get("model") or resolve_gemini_model()),
         "case": {
             "case_id": case["case_id"],
             "scenario": case["scenario"],

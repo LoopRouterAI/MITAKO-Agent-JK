@@ -7,6 +7,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
+from poc.visual_review_poc.model_catalog import summarize_cost_observability
+
 
 ALLOWED_DOCUMENT_TYPES = {
     "identity_card",
@@ -99,8 +101,10 @@ def _merge_semantic_attempts(first: Dict[str, Any], second: Dict[str, Any]) -> D
         key: sum(int((item.get("usage") or {}).get(key) or 0) for item in (first, second))
         for key in ("input_tokens", "output_tokens", "total_tokens")
     }
+    cost_observability = summarize_cost_observability([first, second])
     return {
         **second,
+        **cost_observability,
         "status": "success" if first.get("status") == "success" or second.get("status") == "success" else "failed",
         "parsed": {
             **(second.get("parsed") or {}),
@@ -908,6 +912,7 @@ def run_minor_material_pipeline(
         for key in ("input_tokens", "output_tokens", "total_tokens")
     }
     cost = round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in billed_results), 6)
+    cost_observability = summarize_cost_observability(billed_results)
     return {
         "status": "success" if image_rows or not images else "failed",
         "error": "minor_material_all_image_batches_failed" if images and not image_rows else "",
@@ -915,6 +920,7 @@ def run_minor_material_pipeline(
         "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in billed_results), 2),
         "usage": usage,
         "cost": {"estimated_usd": cost},
+        **cost_observability,
         "parsed": parsed,
         "chunking": {
             "segment_count": len(image_batches) + len(frame_batches) + len(consistency_jobs),

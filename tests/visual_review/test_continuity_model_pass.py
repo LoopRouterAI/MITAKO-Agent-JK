@@ -617,12 +617,15 @@ class ContinuityModelPassTest(unittest.TestCase):
             ]
             if targets == [1, 2, 3, 4]:
                 selected = selected[:-1]
+            is_primary = targets == [1, 2, 3, 4]
             return {
                 "status": "success",
                 "parsed": {"frame_findings": [finding(frame) for frame in selected]},
                 "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
                 "cost": {"estimated_usd": 0.001},
-                "cost_status": "estimated",
+                "cost_status": "partial_unknown" if is_primary else "estimated",
+                "unknown_cost_calls": 1 if is_primary else 0,
+                "estimated_cost_calls": 1,
                 "latency_seconds": 0.1,
             }
 
@@ -643,6 +646,9 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(results[0]["repair_calls"], 1)
         self.assertEqual(results[0]["usage"]["total_tokens"], 30)
         self.assertEqual(results[0]["cost"]["estimated_usd"], 0.002)
+        self.assertEqual(results[0]["cost_status"], "partial_unknown")
+        self.assertEqual(results[0]["unknown_cost_calls"], 1)
+        self.assertEqual(results[0]["estimated_cost_calls"], 2)
         self.assertEqual(
             [item["global_frame_index"] for item in results[0]["parsed"]["frame_findings"]],
             [1, 2, 3, 4],

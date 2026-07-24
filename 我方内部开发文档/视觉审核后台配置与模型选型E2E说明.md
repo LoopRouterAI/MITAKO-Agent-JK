@@ -1,6 +1,6 @@
 # 视觉审核后台配置与模型选型 E2E 说明
 
-更新时间：2026-07-20
+更新时间：2026-07-24
 
 ## 当前路线
 
@@ -9,7 +9,7 @@
 - Gemini/GPT/Qwen/Doubao 使用同一批本地抽帧证据和补充图片。
 - 抽帧、补充图片、用户诉求、订单/工单上下文共同组成输入证据包。
 - 报告区分 API 成功、结构化成功、人工标注命中、三连测稳定性、时间戳命中、耗时和成本。
-- 默认公开报告不暴露模型、渠道、端点、Token、成本；内部报告通过 `--internal-report` 展示。
+- 默认公开报告不暴露模型、渠道、端点、Token、成本；`model_selection_e2e.py` 的内部选型报告展示模型、状态、耗时、Token 和成本，服务端结构化日志只记录脱敏后的供应商主机提示。
 
 ## 当前供应商媒体请求方式
 
@@ -19,22 +19,40 @@
 
 `REVIEW_MODEL_TIMEOUT_SECONDS`、`REVIEW_MODEL_RETRIES`、`REVIEW_CHUNK_WORKERS` 和 `REVIEW_CONTINUITY_FRAMES_PER_CALL` 分别控制单次供应商请求时限、软失败重试、分段并发和连续性分段大小。它们适用于网页单文件、网页文件夹和正式审核 API 的共享执行链路。
 
+## 低成本 Gemini 通道路由
+
+默认审核模型为 `gemini-3.5-flash-lite`，可用 `VISUAL_REVIEW_PRIMARY_MODEL` 覆盖；未设置时再读取 `GEMINI_MODEL`。Gemini 原生通道按 BananaRouter、百度兼容端点、API易、Google 官方顺序尝试，缺少 Key 或 Base URL 的渠道直接跳过。
+
+```dotenv
+VISUAL_REVIEW_PRIMARY_MODEL=gemini-3.5-flash-lite
+BANANAROUTER_API_KEY=
+BANANAROUTER_GEMINI_BASE_URL=https://api.bananarouter.com
+BAIDU_API_KEY=
+BAIDU_GEMINI_BASE_URL=
+APIYI_API_KEY=
+APIYI_GEMINI_BASE_URL=https://api.apiyi.com
+GEMINI_API_KEY=
+GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com
+```
+
+BananaRouter 与 API易按 Gemini 原生 `generateContent` 和 Bearer Token 接入。百度官方 VOD 文档采用 OpenAI 兼容请求和 BCE 签名，不能把其地址与普通 API Key 直接填入上述 Gemini 原生通道；只有甲方或我方取得已转换为 Gemini 原生格式的兼容端点时才填写 `BAIDU_GEMINI_BASE_URL`。真实上线前必须用各账号的模型列表或最小图片请求验证模型权限，不能仅凭环境变量存在宣称渠道已接通。
+
 ## 推荐命令
 
 ```powershell
-venv\Scripts\python.exe poc\visual_review_poc\local_video_triage_demo.py `
-  --customer-samples --scenario all `
-  --fps 1 --max-frames 12 --api-frame-limit 12 --probe-seconds 0 `
-  --supplemental-image-limit 4 `
-  --compare-models DEFAULT --repeat-runs 3 --concurrency 24 `
-  --request-timeout 240 --soft-retries 2 --enable-thinking `
-  --text-review-image-detail high --internal-report
+.venv\Scripts\python.exe poc\visual_review_poc\model_selection_e2e.py `
+  --samples-dir "E:\AIGC\0 Mitako样本" `
+  --models gemini35lite,gemini31lite `
+  --sampling-mode adaptive --fps 1 `
+  --max-frames-per-video 24 --api-frame-limit 24 `
+  --supplemental-image-limit 20 --concurrency 4 `
+  --request-timeout 240 --soft-retries 2
 ```
 
 ## 内部报告必须包含
 
 - 每次审核输入的视频、用户诉求、抽帧数量、时间戳、补充图片数量。
-- 渠道、端点、实际请求模型、状态码、耗时、Token、预估成本、重试记录。
+- 实际请求模型、状态码、耗时、Token、预估成本、重试记录；具体渠道故障从服务端脱敏结构化日志排查。
 - 模型原始返回全文。
 - 解析后的 `decision`、`predicted_label`、`confidence`、`confidence_reason`。
 - 支持证据、反证、材料缺口、补件建议。
