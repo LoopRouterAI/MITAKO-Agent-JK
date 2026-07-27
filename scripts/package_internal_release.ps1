@@ -145,9 +145,9 @@ Copy-LatestReport "review_0717_four_samples_20260720-617911-independent24-*.json
 Copy-LatestReport "review_0717_four_samples_20260720-617911-independent24-*.html" "tests\reports\review_617911_individual24_20260720-latest.html"
 Copy-Path "tests\reports\customer_order_info_sync_verify_20260720.json"
 Copy-Path "tests\reports\customer_order_info_integration_20260720.json"
-Copy-Path "tests\reports\customer_order_info_0722_applied.json"
-Copy-Path "tests\reports\customer_order_info_0722_post_apply_verify.json"
-Copy-Path "tests\reports\order_reference_integration_617341_20260722.json"
+Copy-Path "tests\reports\customer_order_info_sync_strict_verify_20260720.json"
+Copy-Path "tests\reports\customer_order_info_reconcile_applied_20260720.json"
+Copy-Path "tests\reports\customer_order_info_integration_strict_final_20260720.json"
 Copy-Path "tests\reports\review_submission_modes_20260717-final.json"
 Copy-Path "tests\reports\review_submission_modes_20260717-final.html"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
@@ -189,9 +189,9 @@ $evidenceFiles = @(
     "tests\reports\minor_refund_144989_20260720-latest.html",
     "tests\reports\customer_order_info_sync_verify_20260720.json",
     "tests\reports\customer_order_info_integration_20260720.json",
-    "tests\reports\customer_order_info_0722_applied.json",
-    "tests\reports\customer_order_info_0722_post_apply_verify.json",
-    "tests\reports\order_reference_integration_617341_20260722.json",
+    "tests\reports\customer_order_info_sync_strict_verify_20260720.json",
+    "tests\reports\customer_order_info_reconcile_applied_20260720.json",
+    "tests\reports\customer_order_info_integration_strict_final_20260720.json",
     "tests\reports\review_submission_modes_20260717-final.json",
     "tests\reports\review_submission_modes_20260717-final.html",
     "tests\reports\full_pipeline_latest.html",
