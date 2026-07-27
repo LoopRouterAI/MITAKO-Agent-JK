@@ -85,6 +85,22 @@ def _review_output(output: Dict[str, Any], reason: str) -> Dict[str, Any]:
     return output
 
 
+def _confirmed_damage_fact(output: Dict[str, Any], scenario: str) -> bool:
+    damage = output.get("damage_causality_assessment") or {}
+    return (
+        scenario == "product_damage"
+        and output.get("predicted_label") == "positive"
+        and damage.get("damage_presence") == "confirmed"
+    )
+
+
+def _preserve_damage_fact_with_warning(output: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    output["continuity_recommendation"] = "continue_with_warning"
+    output["continuity_requires_human_review"] = False
+    output["continuity_guard_reason"] = f"{reason}；该不确定性影响成因和责任判断，但不覆盖已确认的可见伤情事实。"
+    return output
+
+
 def apply_object_continuity_guard(
     result: Dict[str, Any],
     scenario: str,
@@ -103,8 +119,12 @@ def apply_object_continuity_guard(
     }
     output["object_continuity_assessment"] = assessment
     if not assessment["tracked_subject_defined"]:
+        if _confirmed_damage_fact(output, scenario):
+            return _preserve_damage_fact_with_warning(output, "本轮没有形成完整的争议商品主体时间轴")
         return _review_output(output, "没有定义并逐段跟踪快递包装、商品包装或争议商品主体，无法证明全程未离镜。")
     if assessment["continuity_verdict"] == "indeterminate":
+        if _confirmed_damage_fact(output, scenario):
+            return _preserve_damage_fact_with_warning(output, "争议商品连续性仍不确定")
         return _review_output(output, "主体连续性结论不确定，需要查看原视频和离镜时间点。")
     if assessment["continuity_verdict"] == "long_absence" or assessment["longest_out_of_frame_seconds"] >= warning_seconds:
         output["continuity_recommendation"] = "request_more_material"

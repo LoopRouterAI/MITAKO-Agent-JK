@@ -246,6 +246,34 @@ def _report_data():
 
 
 class ReportEvidenceRenderingTest(unittest.TestCase):
+    def test_material_request_report_does_not_claim_vip_review(self):
+        data = _report_data()
+        data["agent_report"]["advisory_assessment"] = {
+            "assessment": {
+                "conclusion": "当前缺少连续开箱材料，暂不能形成明确事实判断。",
+                "confidence": 0.69,
+                "confidence_level": "medium",
+                "calibration_status": "uncalibrated_evidence_score",
+            },
+            "human_review": {
+                "level": "not_required",
+                "reason_codes": ["material_resubmission_available"],
+                "recommendation": "当前可直接向用户补充收集材料，无需先占用人工审核席位。",
+            },
+            "workflow_recommendation": "request_more_material",
+            "signals": [
+                {"code": "material_gap", "severity": "warning", "effect": "请补充连续原视频。"}
+            ],
+            "policy": {"business_action_allowed": False},
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("当前缺少连续开箱材料", report_html)
+        self.assertIn("无需人工复审", report_html)
+        self.assertIn("补充连续材料", report_html)
+        self.assertNotIn("证据不足，需要VIP客服复核", report_html)
+
     def test_report_renders_advisory_assessment_and_business_boundary(self):
         data = _report_data()
         data["agent_report"]["advisory_assessment"] = {
@@ -318,6 +346,8 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("开箱过程完整性", report_html)
         self.assertIn("商品证据连续性", report_html)
         self.assertIn("媒体技术取证", report_html)
+        self.assertIn("视频时间轴完整不等于争议商品全程连续可见", report_html)
+        self.assertNotIn("requires_media_forensics", report_html)
         self.assertIn("版本化规则判定说明", report_html)
         self.assertIn("争议商品离镜时间超过策略阈值", report_html)
         self.assertIn("补充证据关联尚未解决", report_html)

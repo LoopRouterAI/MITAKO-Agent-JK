@@ -39,14 +39,48 @@ def action_chain():
 
 
 class DamageCausalityTest(unittest.TestCase):
-    def test_visible_damage_without_causal_chain_is_review(self):
+    def test_visible_damage_supports_fact_even_when_origin_is_unresolved(self):
+        result = apply_damage_causality_guard(
+            {
+                "predicted_label": "positive",
+                "confidence": 0.95,
+                "damage_causality_assessment": assessment(claim_support="supported"),
+            },
+            "product_damage",
+        )
+        self.assertEqual(result["predicted_label"], "positive")
+        self.assertEqual(result["system_yes_no"], "YES")
+        self.assertEqual(result["confidence"], 0.95)
+        self.assertIn("伤情事实", result["causality_guard_reason"])
+
+    def test_visible_damage_without_resolved_origin_stays_positive(self):
         result = apply_damage_causality_guard(
             {"predicted_label": "positive", "confidence": 0.95, "damage_causality_assessment": assessment()},
             "product_damage",
         )
-        self.assertEqual(result["predicted_label"], "review")
-        self.assertEqual(result["system_yes_no"], "REVIEW")
-        self.assertLessEqual(result["confidence"], 0.69)
+        self.assertEqual(result["predicted_label"], "positive")
+        self.assertIn("责任归属", result["causality_guard_reason"])
+
+    def test_linked_high_confidence_supplemental_image_confirms_visible_damage(self):
+        result = apply_damage_causality_guard(
+            {
+                "predicted_label": "review",
+                "confidence": 0.72,
+                "damage_causality_assessment": assessment(damage_presence="uncertain"),
+                "adopted_evidence": [
+                    {
+                        "source_type": "supplemental_image",
+                        "fact": "争议部位存在清晰可见的外观瑕疵。",
+                        "confidence": 0.9,
+                        "same_item_linkage": "与开箱视频中的同款商品一致",
+                    }
+                ],
+            },
+            "product_damage",
+        )
+
+        self.assertEqual(result["damage_causality_assessment"]["damage_presence"], "confirmed")
+        self.assertEqual(result["predicted_label"], "positive")
 
     def test_transport_is_only_positive_with_direct_preopening_evidence(self):
         result = apply_damage_causality_guard(
@@ -91,10 +125,10 @@ class DamageCausalityTest(unittest.TestCase):
             },
             "product_damage",
         )
-        self.assertEqual(without_change["predicted_label"], "review")
+        self.assertEqual(without_change["predicted_label"], "positive")
         self.assertEqual(with_change["predicted_label"], "negative")
 
-    def test_customer_damage_without_structured_frame_chain_is_review(self):
+    def test_customer_damage_without_structured_frame_chain_keeps_visible_fact_positive(self):
         result = apply_damage_causality_guard(
             {
                 "confidence": 0.95,
@@ -109,7 +143,7 @@ class DamageCausalityTest(unittest.TestCase):
             },
             "product_damage",
         )
-        self.assertEqual(result["predicted_label"], "review")
+        self.assertEqual(result["predicted_label"], "positive")
 
     def test_conflicting_direct_chunk_origins_are_not_forced(self):
         rows = [

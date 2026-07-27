@@ -67,9 +67,29 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
         self.assertIn("short_out_of_frame", [item["code"] for item in advisory["signals"]])
 
+    def test_confirmed_fact_with_unresolved_continuity_is_optional_not_forced_review(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="positive",
+                confidence=0.91,
+                parsed_extra={
+                    "object_continuity_assessment": {"continuity_verdict": "indeterminate"},
+                    "continuity_recommendation": "continue_with_warning",
+                },
+            ),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_supports_claim")
+        self.assertEqual(advisory["human_review"]["level"], "optional")
+        self.assertIn("continuity_unresolved", [item["code"] for item in advisory["signals"]])
+
     def test_three_second_out_of_frame_requests_material_without_forcing_human(self):
         result = attach_advisory_assessment(
             review_result(
+                label="review",
                 continuity={
                     "continuity_verdict": "long_absence",
                     "longest_out_of_frame_seconds": 3.2,
@@ -86,7 +106,33 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "not_required")
         self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
+        self.assertIn("补充", advisory["assessment"]["conclusion"])
+        self.assertNotIn("VIP客服复核", advisory["assessment"]["conclusion"])
         self.assertIn("out_of_frame_over_threshold", [item["code"] for item in advisory["signals"]])
+
+    def test_decisive_fact_keeps_material_gaps_as_optional_risk(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="positive",
+                confidence=0.91,
+                continuity={
+                    "continuity_verdict": "indeterminate",
+                    "longest_out_of_frame_seconds": 4.0,
+                    "tracked_subjects": [{"subject_id": "claimed_item"}],
+                },
+                parsed_extra={"material_gaps": ["缺少损伤成因证据"]},
+            ),
+            {
+                "scenario": "product_damage",
+                "review_routing_policy": {"out_of_frame_resubmit_seconds": 3.0},
+            },
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_supports_claim")
+        self.assertEqual(advisory["human_review"]["level"], "optional")
+        self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
 
     def test_conflicting_evidence_requires_human_review(self):
         result = attach_advisory_assessment(
@@ -124,6 +170,8 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["assessment"]["confidence"], 0.41)
         self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
         self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertIn("补充", advisory["assessment"]["conclusion"])
+        self.assertNotIn("VIP客服复核", advisory["assessment"]["conclusion"])
         self.assertNotIn("支持用户所述事实", advisory["assessment"]["conclusion"])
 
     def test_real_guard_nesting_overrides_stale_positive_conclusion(self):

@@ -90,6 +90,16 @@ def _public_yes_no(parsed: Dict[str, Any]) -> str:
     return "REVIEW"
 
 
+def _public_status(value: Any) -> str:
+    return {
+        "completed": "已完成，未发现阻断性技术异常",
+        "unavailable": "本轮不可用",
+        "not_provided": "未提供",
+        "requires_media_forensics": "需要结合媒体技术取证",
+        "ffprobe_not_available": "媒体取证工具不可用",
+    }.get(str(value or "").strip().lower(), str(value or "未提供"))
+
+
 def _decision_policy_panel(value: Any) -> str:
     if not isinstance(value, dict) or not value:
         return ""
@@ -483,7 +493,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     }.get(str(advisory.get("workflow_recommendation") or ""), "未给出")
     signal_cards = "".join(
         '<article class="boundary-card">'
-        f'<h3>{_h(item.get("code") or "风险信号")}</h3>'
+        f'<h3>{_h({"material_gap": "材料缺口", "short_out_of_frame": "短暂离镜", "out_of_frame_over_threshold": "离镜超过补件阈值", "identity_reestablishment_unresolved": "重新入镜同物关系未确认", "continuity_unresolved": "商品连续性未完全确认", "media_forensic_risk": "媒体技术风险"}.get(str(item.get("code") or ""), item.get("code") or "风险信号"))}</h3>'
         f'<p>{_h(item.get("effect") or "-")}</p>'
         + (
             f'<p><b>持续时间：</b>{_h(item.get("duration_seconds"))} 秒</p>'
@@ -556,12 +566,19 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     )
     scenario_label = report.get("scenario_label") or str(data.get("review_label") or "当前审核").split("/", 1)[0].strip()
     public_brief = report.get("public_brief") or {}
-    conclusion = public_brief.get("conclusion") or safe_agent_conclusion(parsed, scenario_label)
-    confidence = overall.get("confidence") or parsed.get("confidence") or "-"
+    conclusion = advisory_assessment.get("conclusion") or public_brief.get("conclusion") or safe_agent_conclusion(parsed, scenario_label)
+    confidence = advisory_assessment.get("confidence")
+    if confidence is None:
+        confidence = overall.get("confidence") or parsed.get("confidence") or "-"
     core_reason = _safe_agent_reason(overall.get("core_reason") or parsed.get("confidence_reason") or "")
     if not core_reason:
         core_reason = parsed.get("visual_evidence_verdict") or visual.get("reason") or ""
     next_step = public_brief.get("next_step") or safe_agent_next_step(overall.get("business_follow_up_suggestion") or parsed.get("next_step"))
+    workflow = str(advisory.get("workflow_recommendation") or "")
+    if workflow == "request_more_material":
+        next_step = "按报告中的材料缺口向用户补充收集证据，材料齐备后重新送审。"
+    elif workflow == "human_review":
+        next_step = human_review.get("recommendation") or next_step
     if failed:
         conclusion = data.get("conclusion") or conclusion
         core_reason = diagnostics.get("failure_reason") or "本轮审核没有完成，不能把该结果解释为业务证据不足。"
@@ -584,7 +601,17 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     minor_material_panel = render_minor_material_panel(parsed.get("minor_material_assessment"), _h)
     confidence_components_panel = render_confidence_components_panel(parsed.get("confidence_components"), _h)
     decision_policy_panel = _decision_policy_panel(parsed.get("decision_policy_audit") or data.get("decision_policy_audit"))
-    yes_no = "REVIEW" if failed else _public_yes_no(parsed)
+    conclusion_code = str(advisory_assessment.get("conclusion_code") or "")
+    yes_no = "REVIEW" if failed else {
+        "evidence_supports_claim": "YES",
+        "evidence_does_not_support_claim": "NO",
+        "evidence_inconclusive": "REVIEW",
+    }.get(conclusion_code, _public_yes_no(parsed))
+    visual_verdict = {
+        "evidence_supports_claim": "证据支持本次事实诉求",
+        "evidence_does_not_support_claim": "现有证据不支持本次事实诉求",
+        "evidence_inconclusive": "证据不足，建议按流程补充或复核",
+    }.get(conclusion_code, _public_verdict(parsed, scenario_label))
     latency = runtime.get("latency_seconds") or "-"
     video_count = len(evidence_package.get("videos") or [])
     def effective_sample_fps(item: Dict[str, Any]) -> Any:
@@ -640,12 +667,12 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
   {advisory_panel}
 
   <section class="panel next-step">
-    <h2>给VIP客服的下一步</h2>
+    <h2>建议下一步</h2>
     <p>{_h(next_step)}</p>
   </section>
 
 	  <section class="metrics">
-		    <div class="metric hot"><small>视觉质检</small><b>{_h("审核未完成" if failed else _public_verdict(parsed, scenario_label))}</b></div>
+		    <div class="metric hot"><small>视觉质检</small><b>{_h("审核未完成" if failed else visual_verdict)}</b></div>
 	    <div class="metric"><small>连续性分数</small><b>{_h(video.get("continuity_score") or "-")}</b></div>
 	    <div class="metric"><small>调包风险</small><b>{_h(video.get("swap_risk_level") or "-")}</b></div>
 	    <div class="metric"><small>耗时</small><b>{_h(latency)}s</b></div>
@@ -656,7 +683,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    <div class="metric"><small>估算 Token</small><b>{_h(inference.get("total_tokens") or "-")}</b></div>
 	    <div class="metric"><small>估算成本</small><b>{_h((f"${inference.get('estimated_usd')}" if inference.get("estimated_usd") not in (None, "") else "-"))}</b></div>
 		    <div class="metric"><small>模型调用</small><b>{_h(inference.get("segment_count") or 1)}</b></div>
-		    <div class="metric"><small>报告属性</small><b>VIP客服复核参考</b></div>
+		    <div class="metric"><small>报告属性</small><b>审核建议参考</b></div>
 		  </section>
 		  <section class="panel inference-channels-panel">
 			    <div class="section-head"><h2>分通道调用统计</h2><p>墙钟耗时与累计模型耗时分开统计；成本与 Token 包含所有模型调用。</p></div>
@@ -691,10 +718,11 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     <h2>视频审核论证</h2>
     <div class="causality-grid">
       <article><small>抽帧首尾覆盖</small><b>{_h({"covered": "已覆盖", "incomplete": "未完整覆盖", "unknown": "未知"}.get(video.get("sampling_boundary_status"), video.get("sampling_boundary_status") or "未知"))}</b></article>
-      <article><small>媒体技术取证</small><b>{_h((parsed.get("decision_policy_audit") or data.get("decision_policy_audit") or {}).get("evidence_gate", {}).get("media_forensics_status") or video.get("technical_timeline_status") or "未提供")}</b></article>
+      <article><small>媒体技术取证</small><b>{_h(_public_status((parsed.get("decision_policy_audit") or data.get("decision_policy_audit") or {}).get("evidence_gate", {}).get("media_forensics_status") or video.get("technical_timeline_status") or "未提供"))}</b></article>
       <article><small>开箱过程完整性</small><b>{_h({"complete": "完整", "incomplete": "不完整", "indeterminate": "不确定"}.get(video.get("opening_integrity"), video.get("opening_integrity") or "未知"))}</b></article>
       <article><small>商品证据连续性</small><b>{_h({"continuous": "连续", "brief_occlusion": "短暂遮挡", "long_absence": "较长离镜", "indeterminate": "不确定"}.get(video.get("evidence_continuity_status"), video.get("evidence_continuity_status") or "未知"))}</b></article>
     </div>
+    <p><b>口径说明：</b>视频时间轴完整不等于争议商品全程连续可见；抽帧覆盖、媒体技术取证、开箱过程和商品连续性是四个独立维度。</p>
     <p><b>连续性：</b>{_h(video.get("continuity_reason") or video.get("reason") or "本轮没有输出明确连续性理由。")}</p>
     <p><b>剪辑/调包风险：</b>{_h(video.get("edit_or_cut_risk") or "-")} / {_h(video.get("swap_risk_level") or "-")}</p>
   </section>

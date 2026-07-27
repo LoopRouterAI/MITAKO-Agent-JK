@@ -44,6 +44,23 @@ class ObjectContinuityTest(unittest.TestCase):
         self.assertEqual(result["predicted_label"], "review")
         self.assertIn("没有定义", result["continuity_guard_reason"])
 
+    def test_missing_timeline_does_not_erase_confirmed_damage_fact(self):
+        result = apply_object_continuity_guard(
+            {
+                "predicted_label": "positive",
+                "confidence": 0.91,
+                "damage_causality_assessment": {
+                    "damage_presence": "confirmed",
+                    "claim_support": "insufficient",
+                },
+            },
+            "product_damage",
+            True,
+        )
+        self.assertEqual(result["predicted_label"], "positive")
+        self.assertEqual(result["continuity_recommendation"], "continue_with_warning")
+        self.assertIn("不覆盖已确认的可见伤情", result["continuity_guard_reason"])
+
     def test_configurable_long_absence_preserves_label_and_requests_more_material(self):
         result = apply_object_continuity_guard(
             {
@@ -133,7 +150,7 @@ class ObjectContinuityTest(unittest.TestCase):
         combined = aggregate_object_continuity([{"frame_findings": findings}], frames, {"out_of_frame_warning_seconds": 2.0})
         guarded = apply_object_continuity_guard(
             {"predicted_label": "positive", "confidence": 0.9, "object_continuity_assessment": combined},
-            "product_damage",
+            "wrong_item",
             True,
             {"out_of_frame_warning_seconds": 2.0},
         )

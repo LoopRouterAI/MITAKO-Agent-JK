@@ -110,6 +110,20 @@ def _has_direct_chain(item: Dict[str, Any]) -> bool:
     )
 
 
+def _has_linked_supplemental_damage(evidence: Any) -> bool:
+    for item in evidence if isinstance(evidence, list) else []:
+        if not isinstance(item, dict) or "image" not in str(item.get("source_type") or "").lower():
+            continue
+        linkage = item.get("same_item_linkage")
+        linkage_text = str(linkage or "").strip().lower()
+        linkage_unresolved = not linkage or any(
+            marker in linkage_text for marker in ("unresolved", "unknown", "不确定", "无法", "未建立")
+        )
+        if item.get("fact") and _float(item.get("confidence")) >= 0.8 and not linkage_unresolved:
+            return True
+    return False
+
+
 def normalize_damage_causality(value: Any) -> Dict[str, Any]:
     source = value if isinstance(value, dict) else {}
     possible_origins: List[Dict[str, Any]] = []
@@ -148,12 +162,15 @@ def apply_damage_causality_guard(
     scenario: str,
     valid_frames: Iterable[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
-    """商品有伤只有形成直接因果链时才允许输出确定标签。"""
+    """伤情事实与损伤成因分层；只有直接用户致损链可覆盖可见伤情事实。"""
     output = dict(result)
     if scenario != "product_damage":
         return output
 
     assessment = normalize_damage_causality(output.get("damage_causality_assessment"))
+    if assessment["damage_presence"] != "confirmed" and _has_linked_supplemental_damage(output.get("adopted_evidence")):
+        assessment["damage_presence"] = "confirmed"
+        assessment["presence_reconciliation"] = "linked_high_confidence_supplemental_image"
     output["damage_causality_assessment"] = assessment
     presence = assessment["damage_presence"]
     timing = assessment["damage_timing"]
@@ -185,10 +202,13 @@ def apply_damage_causality_guard(
         and claim_support == "supported"
         and _has_preopening_reference(assessment, valid_frame_keys)
     )
+    visible_damage_confirmed = presence == "confirmed"
 
     if direct_customer_damage:
         label = "negative"
     elif direct_preexisting_damage:
+        label = "positive"
+    elif visible_damage_confirmed:
         label = "positive"
     else:
         label = "review"
@@ -202,9 +222,12 @@ def apply_damage_causality_guard(
             "伤情存在性与损伤成因必须分开判断；当前缺少足以证明损伤在拆封前已存在，"
             "或由用户操作直接造成的连续前后证据。"
         )
-    else:
+    elif direct_customer_damage or direct_preexisting_damage:
         output["confidence"] = min(_float(output.get("confidence"), origin_confidence), origin_confidence or 1.0)
         output["causality_guard_reason"] = "已形成拆封/操作前后可回链的直接因果证据。"
+    else:
+        output["confidence"] = _float(output.get("confidence"), 0.5)
+        output["causality_guard_reason"] = "可见伤情事实已获证据支持；损伤发生阶段和责任归属仍单独保持不确定。"
     return output
 
 

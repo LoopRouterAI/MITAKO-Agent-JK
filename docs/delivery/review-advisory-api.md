@@ -1,6 +1,6 @@
 # 审核建议结果 API 使用说明
 
-版本：2026-07-23
+版本：2026-07-27
 
 ## 1. 使用目的
 
@@ -83,6 +83,8 @@
 
 `confidence` 是当前证据链的未校准证据强度分，不是客观正确率，也不是退款成功概率。
 
+商品有伤场景中，伤情存在性与损伤成因分开计算。明确可见伤情可以输出 `evidence_supports_claim`；成因、责任或商品连续性未完全确认时，以 `signals` 和 `human_review=optional` 表达，不再覆盖已经确认的伤情事实。发错货、漏发货缺少订单、规则、包裹或证据覆盖基准时仍保持 `evidence_inconclusive`。
+
 ## 4. 人工复审三级含义
 
 | `human_review.level` | 适用情况 | 建议使用方式 |
@@ -107,6 +109,7 @@
 - 正式 API 默认也生成 HTML，兼容旧调用方。
 - JSON-only 请求设为 `false` 后，不生成报告文件；访问 `/api/v1/review/jobs/{job_id}/report` 返回 HTTP 409，错误码 `review_report_not_requested`。
 - HTML 首屏展示事实结论、证据分数、三级复审建议、流程建议、风险信号和业务边界；后续展示关键帧、反证、时间点、订单基线和媒体取证。
+- HTML 的标题、事实结论、人工复审建议和流程建议全部来自同一份 `advisory_assessment`。`request_more_material + not_required` 不得显示为“需要 VIP 客服复核”。
 
 ## 7. 批量案件
 

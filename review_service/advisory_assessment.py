@@ -138,6 +138,10 @@ def attach_advisory_assessment(
         for event in subject.get("out_of_frame_events") or []
         if isinstance(event, dict)
     )
+    continuity_unresolved = (
+        str(continuity.get("continuity_verdict") or "").lower() == "indeterminate"
+        and parsed.get("continuity_recommendation") == "continue_with_warning"
+    )
 
     signals: List[Dict[str, Any]] = []
     if out_of_frame_seconds >= policy["out_of_frame_resubmit_seconds"]:
@@ -161,6 +165,12 @@ def attach_advisory_assessment(
             "identity_reestablishment_unresolved",
             "warning",
             "重新入镜后的同物关系尚未由证据链确认。",
+        ))
+    if continuity_unresolved:
+        signals.append(_signal(
+            "continuity_unresolved",
+            "warning",
+            "争议商品连续性尚未完全确认；该信号降低成因和责任判断强度，但不覆盖已确认的可见事实。",
         ))
     if missing_material:
         signals.append(_signal(
@@ -215,13 +225,16 @@ def attach_advisory_assessment(
     elif confidence is not None and confidence < policy["required_below_confidence"] and not missing_material:
         required_reasons.append("confidence_below_required_threshold")
 
-    needs_more_material = bool(missing_material) or out_of_frame_seconds >= policy["out_of_frame_resubmit_seconds"]
+    decisive_fact = label in {"positive", "negative"}
+    needs_more_material = not decisive_fact and (
+        bool(missing_material) or out_of_frame_seconds >= policy["out_of_frame_resubmit_seconds"]
+    )
     if not required_reasons and not needs_more_material:
         if confidence is not None and confidence < policy["optional_below_confidence"]:
             optional_reasons.append("confidence_below_optional_threshold")
         if label == "review":
             optional_reasons.append("inconclusive_model_assessment")
-        if out_of_frame_seconds > 0 or identity_unresolved or forensic_count:
+        if missing_material or out_of_frame_seconds > 0 or identity_unresolved or continuity_unresolved or forensic_count:
             optional_reasons.append("non_blocking_risk_signal")
         if customer_risk_level in {"medium", "high"}:
             optional_reasons.append("customer_risk_sampling")
@@ -246,6 +259,12 @@ def attach_advisory_assessment(
         workflow = "continue_by_customer_policy"
         recommendation = "当前证据链与置信度达到本次配置门槛，可由甲方系统按自身业务规则继续处理。"
         reason_codes = ["configured_thresholds_satisfied"]
+
+    if workflow == "request_more_material":
+        if conclusion_code == "evidence_inconclusive" or readiness_guard.get("applied") is True:
+            conclusion = "当前证据或业务基准不足，建议先补充所列材料，再形成明确事实判断。"
+        else:
+            conclusion = f"{conclusion.rstrip('。')}；但连续性或材料仍有缺口，建议补充所列材料。"
 
     advisory = {
         "scenario": str(metadata.get("scenario") or ""),
@@ -295,8 +314,7 @@ def attach_advisory_assessment(
         summary["confidence"] = confidence
     summary["human_review_level"] = level
     summary["workflow_recommendation"] = workflow
-    if readiness_guard.get("applied") is True:
-        brief["conclusion"] = conclusion
+    brief["conclusion"] = conclusion
     brief["human_review_level"] = level
     brief["workflow_recommendation"] = workflow
     output["summary"] = summary
