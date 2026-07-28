@@ -38,6 +38,7 @@ REQUIRED_FILES = (
     "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
     "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
     "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
+    "甲方沟通交付文档/0728事实结论与人工复审闭环更新说明.html",
     "我方内部开发文档/README.md",
     "我方内部开发文档/index.html",
     "我方内部开发文档/工程师入门.md",
@@ -54,6 +55,7 @@ REQUIRED_FILES = (
     "我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
     "我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md",
     "我方内部开发文档/升级日志-2026-07-23-多源证据与接口联调.md",
+    "我方内部开发文档/升级日志-2026-07-28-事实结论与人工复审闭环.md",
 )
 REQUIRED_API_PATHS = (
     "/api/v1/review/contracts",
@@ -165,10 +167,12 @@ def main() -> int:
         errors.append("打包脚本出现内部文档明文，请确认未复制到客户包")
     if "$obsoleteCustomerDocs" not in package_script or "[System.IO.File]::Delete($obsoletePath)" not in package_script:
         errors.append("打包脚本未启用过时甲方文档排除规则")
-    if "0723审核结论置信度与人工复审分级说明.html" not in package_script:
-        errors.append("甲方打包证据清单缺少 0723 非技术更新说明")
-    if "0723客诉审核Agent接口联调与商务沟通说明.html" not in package_script:
-        errors.append("甲方打包证据清单缺少客诉审核接口联调说明")
+    if "0728事实结论与人工复审闭环更新说明.html" not in package_script:
+        errors.append("甲方打包证据清单缺少 0728 最新非技术更新说明")
+
+    internal_package_script = (ROOT / "scripts/package_internal_release.ps1").read_text(encoding="utf-8")
+    if "升级日志-2026-07-28-事实结论与人工复审闭环.md" not in internal_package_script:
+        errors.append("内部打包证据清单缺少 0728 最新升级日志")
 
     if errors:
         print("文档发布校验失败：")

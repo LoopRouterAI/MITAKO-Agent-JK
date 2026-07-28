@@ -830,6 +830,7 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
     "甲方沟通交付文档\0723客诉审核Agent接口联调与商务沟通说明.html",
     "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
     "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",
