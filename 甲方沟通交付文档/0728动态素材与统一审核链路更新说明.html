@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MITAKO 售后审核 Agent：动态素材与统一审核链路更新说明</title>
+  <style>
+    :root { color-scheme: light; --ink:#13151a; --muted:#5a616d; --line:#dfe3e8; --paper:#fff; --lime:#c9f227; --cyan:#1bc7bd; --yellow:#ffd84d; --red:#e84b4b; --soft:#f5f7f4; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#eef1ed; color:var(--ink); font-family:Inter,"Microsoft YaHei",system-ui,sans-serif; line-height:1.65; letter-spacing:0; }
+    .shell { max-width:1160px; margin:0 auto; background:var(--paper); min-height:100vh; box-shadow:0 0 32px rgba(20,28,24,.08); }
+    header { padding:56px 64px 48px; background:#171a1f; color:#fff; border-bottom:8px solid var(--lime); }
+    .eyebrow { display:inline-block; padding:5px 10px; border:1px solid #78818d; border-radius:4px; color:var(--lime); font-weight:700; font-size:14px; }
+    h1 { max-width:880px; margin:22px 0 14px; font-size:46px; line-height:1.16; letter-spacing:0; }
+    header p { max-width:850px; margin:0; color:#d8dde3; font-size:19px; }
+    .meta { margin-top:26px; display:flex; gap:24px; flex-wrap:wrap; color:#aeb6c0; font-size:14px; }
+    main { padding:0 64px 64px; }
+    section { padding:46px 0; border-bottom:1px solid var(--line); }
+    section:last-child { border-bottom:0; }
+    h2 { margin:0 0 22px; font-size:28px; letter-spacing:0; }
+    h3 { margin:0 0 8px; font-size:18px; letter-spacing:0; }
+    p { margin:8px 0 0; }
+    .lead { font-size:18px; color:#333941; max-width:920px; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-top:24px; }
+    .item { border:1px solid var(--line); border-top:4px solid var(--cyan); border-radius:6px; padding:20px; background:#fff; }
+    .item strong { display:block; font-size:24px; margin-bottom:6px; }
+    .item p { color:var(--muted); }
+    .band { margin-top:24px; padding:22px 24px; border-left:6px solid var(--lime); background:var(--soft); }
+    .band.warn { border-color:var(--yellow); }
+    .band.boundary { border-color:var(--red); }
+    table { width:100%; margin-top:20px; border-collapse:collapse; font-size:15px; }
+    th,td { padding:14px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:#f0f3ef; font-weight:800; }
+    code { padding:2px 5px; background:#eef1f3; border-radius:3px; font-family:Consolas,monospace; font-size:.92em; }
+    ol,ul { padding-left:22px; }
+    li { margin:8px 0; }
+    .flow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; margin-top:22px; }
+    .step { min-height:118px; padding:16px; background:#f5f7f4; border-bottom:4px solid var(--lime); }
+    .step span { display:block; color:var(--muted); font-size:13px; }
+    .step b { display:block; margin-top:6px; font-size:16px; }
+    .check { color:#08766f; font-weight:800; }
+    footer { padding:28px 64px; background:#171a1f; color:#b9c1ca; }
+    @media (max-width:800px) { header,main,footer{padding-left:22px;padding-right:22px} h1{font-size:34px}.grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr 1fr}.shell{box-shadow:none} }
+    @media (max-width:480px) { .flow{grid-template-columns:1fr} h1{font-size:30px} }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <span class="eyebrow">0728 交付更新</span>
+      <h1>多资料不再被截断，网页和 API 使用同一套审核结论</h1>
+      <p>本轮处理的不是单纯“把模型调得更敢下结论”，而是修正资料接收、分批处理、结论聚合和报告访问四条工程链路。目标是让同一案件无论从网页还是正式 API 提交，都能完整处理、解释一致、可追溯。</p>
+      <div class="meta"><span>适用：商品有伤、发错货、漏发货、未成年人资料</span><span>版本：2026-07-29</span><span>性质：审核建议，不直接执行售后处置</span></div>
+    </header>
+    <main>
+      <section>
+        <h2>之前真正的问题是什么</h2>
+        <p class="lead">0727 反馈中“置信度普遍偏低、全部不确定、未成年人图片处理不全、报告图片打不开”并不只是提示词保守。更直接的原因是：单案资料在不同层被重复限量，网页和正式 API 的后处理不完全一致，内部处理失败又被误写成用户缺材料，浏览器还拿到了只能在服务器内部访问的媒体地址。</p>
+        <div class="grid">
+          <article class="item"><strong>资料被截断</strong><p>上传成功不等于全部进入分析。旧链路存在第二次限量，62 张资料可能只处理其中一部分。</p></article>
+          <article class="item"><strong>失败被误解释</strong><p>系统没有处理完时，旧报告可能要求用户补材料，导致“资料明明在，却说缺失”。</p></article>
+          <article class="item"><strong>两套结论链</strong><p>网页和正式 API 经过的校验与建议生成不同，可能出现同材料不同口径。</p></article>
+        </div>
+      </section>
+
+      <section>
+        <h2>本轮实际更新</h2>
+        <div class="flow">
+          <div class="step"><span>01 接收</span><b>清点全部资料</b><span>记录接收数、软上限和安全上限</span></div>
+          <div class="step"><span>02 处理</span><b>动态分批</b><span>40 份以内标准处理，41-200 份扩展处理</span></div>
+          <div class="step"><span>03 聚合</span><b>全部批次再下结论</b><span>任何未完成批次都不会伪装成证据结论</span></div>
+          <div class="step"><span>04 建议</span><b>统一网页与 API</b><span>事实、置信度、复审等级来自同一对象</span></div>
+          <div class="step"><span>05 报告</span><b>任务级媒体访问</b><span>帧图和视频通过主服务安全返回</span></div>
+        </div>
+        <div class="band"><strong>动态上限的含义：</strong>40 不是拒收线，而是正常处理软上限。默认安全上限为 200；安全上限内全部接收并分批聚合。超过上限时明确返回 HTTP 413 和收到数量，不静默少审。部署方可根据机器、时延和成本评测调整。</div>
+      </section>
+
+      <section>
+        <h2>结论如何使用</h2>
+        <table>
+          <thead><tr><th>输出</th><th>人话含义</th><th>建议用法</th></tr></thead>
+          <tbody>
+            <tr><td><code>positive</code></td><td>现有证据支持本次事实诉求</td><td>可按甲方规则继续，不等于自动退款</td></tr>
+            <tr><td><code>negative</code></td><td>完整审查后证据不支持诉求，或命中已批准材料规则</td><td>可作为客服事实建议，不等于自动拒绝</td></tr>
+            <tr><td><code>review</code></td><td>证据冲突、关键基准缺失或事实无法确定</td><td>人工复审或按报告补齐明确缺口</td></tr>
+            <tr><td><code>system_retry</code></td><td>当前请求完成结构修复和逐张恢复后，仍有资料未被完整处理</td><td>可受控重跑整案，可能重复模型成本；不要求用户重传，达到重试上限后再转授权人员</td></tr>
+          </tbody>
+        </table>
+        <div class="band warn">商品有伤已启用版本化事实建议规则：清楚看到伤情可建议正；视频与补充证据完整、覆盖主诉位置但仍未见伤情时可建议负；存在实质冲突才复审。离镜、遮挡和轻度媒体风险是证据权重信号，不单独证明调包或欺诈。</div>
+      </section>
+
+      <section>
+        <h2>甲方如何复测</h2>
+        <ol>
+          <li>同一案件分别从网页和 <code>POST /api/v1/review/jobs</code> 提交，核对事实结论、置信度、人工等级和流程建议一致。</li>
+          <li>提交 40 份以内和 41-200 份的未成年人资料，核对接收数、已处理数和分类汇总；不得出现“已上传但未处理完却要求用户补件”。</li>
+          <li>商品有伤分别测试：清楚可见伤情、完整观察未见伤情、证据冲突三类案件，预期分别覆盖正、负、复审，而不是全部转人工。</li>
+          <li>打开 HTML 报告并查看关键帧、问题时间点和原视频预览；浏览器不应再请求服务器本机地址或内部工作台端口。</li>
+          <li>用同一幂等键重放请求，确认任务 ID 不变；服务重启后再次打开报告媒体，确认索引可恢复。</li>
+        </ol>
+        <p class="check">正式 API 可选择只返回结构化字段，也可为每个案件生成 HTML；生产批量仍推荐“一案一任务、同批共用 batch_id”。</p>
+      </section>
+
+      <section>
+        <h2>本轮实际验收结果</h2>
+        <table>
+          <thead><tr><th>验收项</th><th>结果</th><th>可回溯证据</th></tr></thead>
+          <tbody>
+            <tr><td>单案 62 份图片真实 HTTP 审核</td><td class="check">通过，62/62 接收、62/62 处理、覆盖率 1.0</td><td>任务 <code>RJ-C7354AA2373E4FF2</code>，容量模式 <code>expanded</code></td></tr>
+            <tr><td>正式 API 与网页提交模式</td><td class="check">7/7 通过</td><td>API 单件、多附件、批次；网页单文件、文件夹、文件夹批量</td></tr>
+            <tr><td>私有化 API 冒烟</td><td class="check">14/14 通过</td><td>OpenAPI、鉴权、四场景契约、采样计划、监控指标</td></tr>
+            <tr><td>主服务/视觉服务契约握手</td><td class="check">通过</td><td>版本 <code>2026-07-28.2</code>，容量 <code>40/200</code>；版本或容量不一致时 readiness 阻断新任务</td></tr>
+            <tr><td>报告媒体访问</td><td class="check">通过</td><td>任务 <code>RJ-A208C27CD91E482A</code> 的媒体经主服务返回 <code>200 video/mp4</code>、5783 字节；视觉服务重启后同一地址仍可读取</td></tr>
+            <tr><td>自动化与构建</td><td class="check">通过</td><td>审核服务 99/99、视觉审核 156/156、39 项子断言、前端生产构建、Python 编译、OpenAPI 71 条路由</td></tr>
+          </tbody>
+        </table>
+        <p>真实容量回归没有读取或发送目录标签、人工答案、<code>annotation.json</code> 或 <code>reply.json</code>，只验证资料是否被完整接收、处理和聚合。</p>
+      </section>
+
+      <section>
+        <h2>明确边界</h2>
+        <div class="band boundary">本服务输出证据事实、未校准证据分、风险信号和人工建议，不直接执行退款、补偿、换货、补发或拒绝。企微、CRM、订单/库存、仓库核验、对象存储与未成年人权威真伪接口，仍需甲方提供测试环境和契约后联调；当前演示数据不能冒充真实接入。</div>
+        <p>主服务与视觉执行器现在会校验版本、素材容量、固定签名密钥和运行目录可写性；内部后处理控制只接受主服务共享密钥，报告媒体 API 已明确支持图片、视频与 Range 分段读取。甲方部署只需对外暴露主服务 API，视觉执行器保留在内网。</p>
+        <p>本轮工程修复可以解决“少审、错把系统失败当缺件、网页/API 不一致、报告媒体失效”等问题，但不能替代黄金样本集。生产准确率仍应由双方冻结的样本、审核时点输入和事实标签进行盲测评估；最终 ZIP 内机器报告会记录对应 <code>git_commit</code>，用于确认 62 份资料验收确实来自包内代码版本。</p>
+      </section>
+    </main>
+    <footer>MITAKO 售后审核 Agent · 对外人类可读更新说明 · 2026-07-29</footer>
+  </div>
+</body>
+</html>

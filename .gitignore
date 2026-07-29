@@ -43,6 +43,7 @@ tests/reports/*.json
 !tests/reports/review_0717_four_samples_20260717-final.json
 poc/visual_review_poc/reports/
 poc/visual_review_poc/uploaded_videos/
+poc/visual_review_poc/runtime_media/
 poc/visual_review_poc/downloaded_videos/
 poc/visual_review_poc/sample_videos/
 docs/三大审核场景的小量样本/

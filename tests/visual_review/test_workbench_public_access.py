@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi.testclient import TestClient
 
 from poc.visual_review_poc import workbench_server
+from poc.visual_review_poc.media_registry import MediaRegistry
 
 
 class WorkbenchPublicAccessTest(unittest.TestCase):
@@ -127,32 +128,20 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             self.assertNotIn(media.name, url)
             self.assertEqual(self.client.get(url).status_code, 200)
 
-    def test_media_registry_retries_transient_windows_replace_error_and_cleans_temp_file(self) -> None:
-        workbench_server.RUNTIME_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=workbench_server.RUNTIME_MEDIA_DIR) as temp_dir:
-            root = Path(temp_dir)
-            media = root / "evidence.jpg"
-            registry = root / "registry.json"
-            media.write_bytes(b"evidence")
-            real_replace = workbench_server.os.replace
-            attempts = 0
-
-            def flaky_replace(source, target):
-                nonlocal attempts
-                attempts += 1
-                if attempts == 1:
-                    raise PermissionError("sharing violation")
-                return real_replace(source, target)
-
-            with patch.object(workbench_server, "PUBLIC_MEDIA_INDEX_PATH", registry), patch.object(
-                workbench_server.os, "replace", side_effect=flaky_replace
-            ), patch.object(workbench_server.time, "sleep", return_value=None):
+    def test_external_workbench_directory_media_remains_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            external = Path(temp_dir)
+            media = external / "external-evidence.jpg"
+            media.write_bytes(b"image")
+            registry = MediaRegistry(external / "registry.sqlite3", external)
+            with patch.object(workbench_server, "WORKBENCH_DIR", external), patch.object(
+                workbench_server, "PUBLIC_WORKBENCH_MEDIA_REGISTRY", registry
+            ):
                 url = workbench_server._media_url(media)
+                response = self.client.get(url)
 
-            self._assert_signed(url)
-            self.assertEqual(attempts, 2)
-            self.assertTrue(registry.is_file())
-            self.assertEqual(list(root.glob(".registry.json.*.tmp")), [])
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content, b"image")
 
     def test_health_declares_inline_frame_transport_without_supplier_file_uri_dependency(self) -> None:
         payload = workbench_server.health()
@@ -162,10 +151,24 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertIs(transport["supplier_file_uri_required"], False)
         self.assertIn("image/webp", transport["accepted_model_media_types"])
 
+    def test_technical_processing_incomplete_is_completed_transport_with_system_retry(self) -> None:
+        self.assertTrue(workbench_server._structured_review_ok({
+            "predicted_label": "review",
+            "confidence": None,
+            "processing_status": "technical_processing_incomplete",
+            "system_action": "system_retry",
+        }))
+        self.assertFalse(workbench_server._structured_review_ok({
+            "predicted_label": "review",
+            "confidence": None,
+        }))
+
     def test_minor_material_public_parsed_uses_strict_whitelist_and_redacts_identifiers(self) -> None:
         parsed = {
             "predicted_label": "review",
             "confidence": 0.66,
+            "processing_status": "technical_processing_incomplete",
+            "system_action": "system_retry",
             "overall_audit": {
                 "conclusion": "联系 18012345678，证件 320000200801011234",
                 "confidence": 0.66,
@@ -173,6 +176,8 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             },
             "minor_material_assessment": {
                 "readiness": "needs_human_gap_confirmation",
+                "processing_status": "technical_processing_incomplete",
+                "system_action": "system_retry",
                 "checklist": [{
                     "requirement_id": "identity",
                     "label": "身份证明",
@@ -212,6 +217,12 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         serialized = json.dumps(public_parsed, ensure_ascii=False)
 
         self.assertEqual(public_parsed["predicted_label"], "review")
+        self.assertEqual(public_parsed["processing_status"], "technical_processing_incomplete")
+        self.assertEqual(public_parsed["system_action"], "system_retry")
+        self.assertEqual(
+            public_parsed["minor_material_assessment"]["processing_status"],
+            "technical_processing_incomplete",
+        )
         self.assertEqual(public_parsed["minor_material_assessment"]["checklist"][0]["status"], "present")
         self.assertEqual(
             public_parsed["minor_material_assessment"]["checklist"][0]["quality_status"],
@@ -327,6 +338,16 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertIs(payload["report_signing_secret_configured"], False)
         self.assertIs(payload["ok"], False)
         self.assertNotIn(workbench_server.REPORT_SIGNING_SECRET.hex(), serialized)
+
+    def test_health_fails_when_runtime_media_directory_is_not_writable_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            blocked = Path(temp_dir) / "not-a-directory"
+            blocked.write_text("blocked", encoding="ascii")
+            with patch.object(workbench_server, "RUNTIME_MEDIA_DIR", blocked):
+                payload = workbench_server.health()
+
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["runtime_media_storage"]["ready"])
 
     def test_health_declares_on_demand_product_reference_boundary(self) -> None:
         payload = workbench_server.health()

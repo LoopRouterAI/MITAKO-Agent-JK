@@ -581,6 +581,11 @@ def aggregate_minor_material_results(
     accepted_image_count = len(expected_indices)
     processed_indices = [item["image_index"] for item in observations]
     ingestion_complete = declared_image_count <= accepted_image_count
+    technical_processing_incomplete = (
+        not ingestion_complete
+        or bool(image_failures)
+        or len(processed_indices) < accepted_image_count
+    )
     coverage_complete = (
         not image_failures
         and not unclassified
@@ -650,8 +655,27 @@ def aggregate_minor_material_results(
         f"全量图片中尚未确认到“{item['label']}”；不得据此断言用户未提交，请VIP客服先回看未分类或低清图片。"
         for item in not_observed
     ]
-    if not coverage_complete:
+    if not coverage_complete and not technical_processing_incomplete:
         material_gaps.insert(0, "本轮未完成全部图片的可靠识别，缺件结论已被门禁阻断。")
+    if technical_processing_incomplete:
+        material_gaps = []
+        confidence = None
+        decision = "system_retry"
+        readiness = "technical_processing_incomplete"
+        visual_precheck_status = "processing_incomplete"
+        conclusion = "系统尚未完成全部已接收图片的技术处理，本轮不形成材料缺失或真实性结论。"
+
+    human_required = not technical_processing_incomplete
+    business_follow_up_reason = (
+        "当前请求已完成结构修复和逐张恢复；仍未覆盖时可受控重跑整案，可能重复模型成本，且不要求用户补件。"
+        if technical_processing_incomplete
+        else "未成年人退款涉及身份、监护关系、账号归属与资金处置，必须由授权人员终审。"
+    )
+    next_step = (
+        "请受控重跑整案；全部资料处理完成后再生成事实与人工复审建议，达到重试上限后再转授权人员。"
+        if technical_processing_incomplete
+        else "请授权人员按一致性检查的图片编号复核差异；随后调用甲方身份、订单支付和运营商能力完成权威验证。"
+    )
 
     supporting_evidence = [
         {
@@ -685,6 +709,8 @@ def aggregate_minor_material_results(
         "coverage_ratio": coverage_ratio,
         "coverage_complete": coverage_complete,
         "ingestion_complete": ingestion_complete,
+        "processing_status": "technical_processing_incomplete" if technical_processing_incomplete else "completed",
+        "system_action": "system_retry" if technical_processing_incomplete else "none",
         "image_batch_failures": image_failures,
         "video_batch_failures": video_failures,
         "material_inventory": observations,
@@ -716,23 +742,33 @@ def aggregate_minor_material_results(
         },
         "visual_evidence_verdict": conclusion,
         "visual_qc_conclusion": {"verdict": predicted_label, "confidence": confidence, "core_reason": conclusion},
-        "confidence_reason": f"图片覆盖率 {coverage_ratio}，已确认材料类别 {present_count}/{len(checklist)}；该分数是未校准的证据完整性参考。",
+        "confidence_reason": (
+            "技术处理未完成，本轮不输出证据分。"
+            if technical_processing_incomplete
+            else f"图片覆盖率 {coverage_ratio}，已确认材料类别 {present_count}/{len(checklist)}；该分数是未校准的证据完整性参考。"
+        ),
         "minor_material_assessment": assessment,
         "supporting_evidence": supporting_evidence,
         "adopted_evidence": supporting_evidence,
         "challenging_evidence": [],
         "material_gaps": material_gaps,
+        "processing_status": "technical_processing_incomplete" if technical_processing_incomplete else "completed",
+        "system_action": "system_retry" if technical_processing_incomplete else "none",
         "audit_methods": ["全图片分批识别", "图片编号覆盖校验", "SOP五类材料确定性聚合", "跨材料视觉字段一致性", "过程视频独立识别", "缺件与一致性门禁"],
         "business_action_allowed": False,
-        "human_required": True,
-        "business_follow_up_reason": "未成年人退款涉及身份、监护关系、账号归属与资金处置，必须由授权人员终审。",
-        "next_step": "请授权人员按一致性检查的图片编号复核差异；随后调用甲方身份、订单支付和运营商能力完成权威验证。",
+        "human_required": human_required,
+        "business_follow_up_reason": business_follow_up_reason,
+        "next_step": next_step,
         "model_limitations": ["视觉字段一致不等同于法定真实性", "公开结果不展示姓名、号码、金额或OCR原文", "权威验证依赖甲方接口", "退款结果由甲方业务系统和授权人员决定"],
         "confidence_components": {
             "material_image_coverage": coverage_ratio,
             "required_category_completeness": round(present_count / max(len(checklist), 1), 4),
             "final_decision": confidence,
-            "calibration_status": "uncalibrated_model_score",
+            "calibration_status": (
+                "not_applicable_technical_processing_incomplete"
+                if technical_processing_incomplete
+                else "uncalibrated_model_score"
+            ),
             "interpretation": "覆盖率表示图片是否全部处理，类别完整度表示五类材料是否被识别；均不等同于退款审核正确率。",
         },
     }
@@ -794,8 +830,19 @@ def run_minor_material_pipeline(
             }
         batch_case["structured_business_context"] = structured
         result = invoke(batch_case)
+
+        def invoke_repair(retry_case: Dict[str, Any]) -> Dict[str, Any]:
+            try:
+                return invoke(retry_case)
+            except Exception as exc:
+                return {
+                    "status": "failed",
+                    "error": str(exc)[:500],
+                    "_model_calls": 1,
+                }
+
         if kind == "image" and result.get("status") == "success":
-            schema_retries = max(0, min(int(os.getenv("REVIEW_MINOR_SCHEMA_RETRIES", "1") or 1), 2))
+            schema_retries = max(0, min(int(os.getenv("REVIEW_MINOR_SCHEMA_RETRIES", "2") or 2), 2))
             for retry_index in range(schema_retries):
                 missing = sorted(set(indices) - _result_observed_indices(result))
                 if not missing:
@@ -809,7 +856,25 @@ def run_minor_material_pipeline(
                     "instruction": "上次响应遗漏了图片编号；本次必须逐张返回全部 expected_image_indices，仍不得输出任何个人信息。",
                 }
                 retry_case["structured_business_context"] = retry_structured
-                result = _merge_semantic_attempts(result, invoke(retry_case))
+                result = _merge_semantic_attempts(result, invoke_repair(retry_case))
+            missing = sorted(set(indices) - _result_observed_indices(result))
+            images_by_index = {int(item["image_index"]): item for item in batch}
+            for image_index in missing:
+                for recovery_index in range(schema_retries + 1):
+                    retry_case = dict(batch_case)
+                    retry_case["supplemental_images"] = [images_by_index[image_index]]
+                    retry_structured = dict(structured)
+                    retry_structured["minor_material_batch"] = {
+                        **(structured.get("minor_material_batch") or {}),
+                        "single_image_recovery": True,
+                        "single_image_recovery_attempt": recovery_index + 1,
+                        "expected_image_indices": [image_index],
+                        "instruction": "批量响应持续遗漏该图片；本次只审核这一张，并必须返回该图片编号的受控分类结果。",
+                    }
+                    retry_case["structured_business_context"] = retry_structured
+                    result = _merge_semantic_attempts(result, invoke_repair(retry_case))
+                    if image_index in _result_observed_indices(result):
+                        break
         result.setdefault("_model_calls", 1)
         return kind, index, indices, result
 

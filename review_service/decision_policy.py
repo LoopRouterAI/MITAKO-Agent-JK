@@ -5,7 +5,27 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 
+DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-PD-ADVISORY@20260728.1"
+
+
 APPROVED_POLICY_SNAPSHOTS: Dict[Any, Dict[str, Any]] = {
+    ("mitako", DEFAULT_PRODUCT_DAMAGE_POLICY_REF): {
+        "mode": "classification_recommendation",
+        "opening_video_required": True,
+        "missing_required_opening_video": "negative",
+        "complete_video_no_claimed_damage": "negative",
+        "require_claim_scope": True,
+        "minimum_visibility_coverage": 0.8,
+        "minimum_required_view_coverage": 0.8,
+        "minimum_confidence": 0.8,
+        "require_continuity_complete": True,
+        "require_fully_observable": True,
+        "require_claimed_region_closeup": True,
+        "require_same_item_linkage": True,
+        "require_media_forensics": False,
+        "maximum_forensic_risk": "medium",
+        "max_unobserved_seconds": 3.0,
+    },
     ("mitako", "MITAKO-PD-MISSING-OPENING@20260717.1"): {
         "mode": "classification_recommendation",
         "opening_video_required": True,
@@ -251,9 +271,14 @@ def apply_review_decision_policy(
         return output
 
     if policy.get("complete_video_no_claimed_damage") == "negative":
-        minimum_coverage = max(0.95, _float(policy.get("minimum_visibility_coverage"), 0.95))
-        minimum_view_coverage = 1.0
+        minimum_coverage = _float(policy.get("minimum_visibility_coverage"), 0.95)
+        minimum_view_coverage = _float(policy.get("minimum_required_view_coverage"), 1.0)
         minimum_confidence = max(0.8, _float(policy.get("minimum_confidence"), 0.8))
+        require_continuity_complete = policy.get("require_continuity_complete", True) is not False
+        require_fully_observable = policy.get("require_fully_observable", True) is not False
+        require_claimed_region_closeup = policy.get("require_claimed_region_closeup", True) is not False
+        require_same_item_linkage = policy.get("require_same_item_linkage", True) is not False
+        max_unobserved_seconds = _nonnegative_float(policy.get("max_unobserved_seconds"), 0.0)
         continuity_complete = continuity.get("continuity_verdict") == "continuous"
         opening_complete = str(video_audit.get("opening_integrity") or "").lower() in {
             "complete", "完整", "完整开箱", "complete_opening"
@@ -270,15 +295,15 @@ def apply_review_decision_policy(
         no_conflict = observability.get("conflicting_evidence") is not True
         no_unobserved_time = (
             claimed_item_longest_absence is not None
-            and claimed_item_longest_absence <= 0.0
+            and claimed_item_longest_absence <= max_unobserved_seconds
         )
-        continuity_gate = continuity_complete
+        continuity_gate = not require_continuity_complete or continuity_complete
         observability_gate = (
-            fully_observable
+            (not require_fully_observable or fully_observable)
             and required_views_complete
             and no_conflict
-            and same_item_linked
-            and closeup_complete
+            and (not require_same_item_linkage or same_item_linked)
+            and (not require_claimed_region_closeup or closeup_complete)
         )
         pass_integrity = (
             parsed.get("pass_integrity_status") in {None, "", "complete"}
@@ -333,12 +358,16 @@ def apply_review_decision_policy(
                 "minimum_visibility_coverage": minimum_coverage,
                 "minimum_confidence": minimum_confidence,
                 "minimum_required_view_coverage": minimum_view_coverage,
+                "require_continuity_complete": require_continuity_complete,
+                "require_fully_observable": require_fully_observable,
+                "require_claimed_region_closeup": require_claimed_region_closeup,
+                "require_same_item_linkage": require_same_item_linkage,
                 "fully_observable": fully_observable,
                 "same_item_linkage": same_item_linked,
                 "claimed_region_closeup": closeup_complete,
                 "required_view_coverage": view_coverage,
                 "conflicting_evidence": observability.get("conflicting_evidence"),
-                "max_unobserved_seconds": 0.0,
+                "max_unobserved_seconds": max_unobserved_seconds,
                 "claimed_item_longest_out_of_frame_seconds": claimed_item_longest_absence,
                 "maximum_forensic_risk": maximum_forensic_risk,
             }

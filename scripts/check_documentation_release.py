@@ -39,6 +39,7 @@ REQUIRED_FILES = (
     "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
     "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
     "甲方沟通交付文档/0728事实结论与人工复审闭环更新说明.html",
+    "甲方沟通交付文档/0728动态素材与统一审核链路更新说明.html",
     "我方内部开发文档/README.md",
     "我方内部开发文档/index.html",
     "我方内部开发文档/工程师入门.md",
@@ -144,6 +145,8 @@ def main() -> int:
         for status in ("404", "409"):
             if status not in report_responses:
                 errors.append(f"审核报告接口缺少错误响应: {status}")
+        if "/api/v1/review/jobs/{job_id}/media/{media_id}" not in paths:
+            errors.append("OpenAPI 缺少任务级报告媒体访问端点")
 
     java_guide = (ROOT / "我方内部开发文档/Java开发部署与联调指南.md").read_text(encoding="utf-8")
     if "/api/v1/review/contracts" not in java_guide:
@@ -154,7 +157,15 @@ def main() -> int:
         errors.append("Java 联调指南缺少统一建议结果或 JSON-only 说明")
 
     advisory_guide = (ROOT / "docs/delivery/review-advisory-api.md").read_text(encoding="utf-8")
-    for term in ("required", "optional", "not_required", "request_more_material", "business_action_allowed"):
+    for term in (
+        "required",
+        "optional",
+        "not_required",
+        "request_more_material",
+        "system_retry",
+        "technical_processing_incomplete",
+        "business_action_allowed",
+    ):
         if term not in advisory_guide:
             errors.append(f"审核建议 API 文档缺少关键字段: {term}")
 
@@ -169,6 +180,19 @@ def main() -> int:
         errors.append("打包脚本未启用过时甲方文档排除规则")
     if "0728事实结论与人工复审闭环更新说明.html" not in package_script:
         errors.append("甲方打包证据清单缺少 0728 最新非技术更新说明")
+    if "0728动态素材与统一审核链路更新说明.html" not in package_script:
+        errors.append("甲方打包证据清单缺少 0728 动态素材更新说明")
+    for marker in (
+        "report-signing-secret.txt",
+        "secrets.token_hex(32)",
+        "set VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1",
+    ):
+        if marker not in package_script:
+            errors.append(f"甲方启动脚本缺少持久报告签名配置: {marker}")
+
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    if "VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1" not in env_example:
+        errors.append(".env.example 未默认要求持久报告签名密钥")
 
     internal_package_script = (ROOT / "scripts/package_internal_release.ps1").read_text(encoding="utf-8")
     if "升级日志-2026-07-28-事实结论与人工复审闭环.md" not in internal_package_script:

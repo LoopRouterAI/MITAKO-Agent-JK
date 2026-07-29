@@ -70,7 +70,7 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 
 ## 5. 环境变量
 
-完整变量名见 `.env.example`。必须配置：
+内部源码包的完整变量名见 `.env.example`；甲方预览包不携带环境文件，按本节变量清单由部署平台注入。必须配置：
 
 - JWT/访问保护相关变量。
 - 主文本服务凭证。
@@ -80,7 +80,8 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 - `VISUAL_MAX_FOLDER_FILES`：网页单工单文件夹的文件数上限，默认 200。
 - `VISUAL_MAX_BATCH_FOLDERS`：网页批量父目录的工单数上限，默认 10、最大 20。
 - `VISUAL_MAX_BATCH_FILES`：网页批量父目录的总文件数上限，默认 400、最大 1000。
-- `VISUAL_MAX_SUPPLEMENTAL_IMAGES`：单案件进入资料审核管线的图片上限，默认 40、最大 80。
+- `VISUAL_SUPPLEMENTAL_IMAGE_SOFT_LIMIT` / `VISUAL_MAX_SUPPLEMENTAL_IMAGES`：单案件图片软上限默认 40，超过后自动分段处理；安全上限默认 200，全部素材都必须处理或明确返回结构化拒绝，不能静默截断。
+- `VISUAL_RUNTIME_MEDIA_DIR`：可选抽帧与报告媒体运行目录；默认位于视觉工作台目录下，生产挂载必须可写且持久，健康检查会验证可写性但不会公开绝对路径。
 - `REVIEW_FFPROBE_PATH`：可选固定路径；为空时从主服务进程 `PATH` 查找。
 - `REVIEW_WORKBENCH_RETRIES`：内部工作台遇到 429/502/503/504 时的有限重试次数，默认 2。
 - `REVIEW_MODEL_TIMEOUT_SECONDS`：单次供应商请求超时，网页和正式审核 API 共用，默认 180 秒。
@@ -97,7 +98,7 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 - `REVIEW_PRODUCT_IMAGE_MAX_SEGMENTS`：同一案件中附带官方图的主审核分段上限，默认且最大为 3（首/中/末），避免长视频重复发送导致成本失控。
 - `REVIEW_PRODUCT_IMAGE_DNS_TIMEOUT_SECONDS`：官方图主机解析等待上限，默认 3 秒。
 - `REVIEW_PRODUCT_IMAGE_CACHE_TTL_SECONDS` / `REVIEW_PRODUCT_IMAGE_CACHE_MAX_MB`：缓存时效与容量，默认 7 天 / 512MiB；超限按最旧文件淘汰。
-- `VISUAL_REPORT_SIGNING_SECRET`：生产必须由 Secret 管理器注入固定高熵密钥。
+- `VISUAL_REPORT_SIGNING_SECRET`：生产必须由 Secret 管理器注入固定高熵密钥，主服务与视觉服务必须一致；它同时保护内部后处理控制头，视觉工作台不应直接暴露到公网。
 - `VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1`：生产必须开启；缺少固定签名密钥时视觉健康检查与主服务 readiness 失败。
 - `VISUAL_REPORT_URL_TTL_SECONDS`：报告与媒体签名 URL 的有效期，默认 900 秒。
 - 数据目录和日志目录。

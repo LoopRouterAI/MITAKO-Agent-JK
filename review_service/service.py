@@ -12,12 +12,13 @@ import re
 import shutil
 import sqlite3
 import time
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import UploadFile
@@ -51,6 +52,7 @@ SCENARIO_LABELS = {
 }
 MAX_WORKERS = max(1, min(int(os.getenv("REVIEW_JOB_WORKERS", "2") or 2), 8))
 EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="mitako-review")
+REVIEW_CONTRACT_VERSION = "2026-07-28.2"
 
 
 class WorkbenchRequestError(RuntimeError):
@@ -104,20 +106,38 @@ def _upload_ingestion_summary(uploads: Sequence[UploadFile]) -> Dict[str, Any]:
         reason = ignored_upload_reason(name)
         if reason:
             ignored.append({"name": Path(name.replace("\\", "/")).name, "reason_code": reason})
+    accepted_count = len(uploads) - len(ignored)
+    soft_limit, safe_limit = _review_asset_limits()
     return {
         "received_count": len(uploads),
-        "accepted_count": len(uploads) - len(ignored),
+        "accepted_count": accepted_count,
         "ignored_count": len(ignored),
         "ignored_files": ignored[:50],
+        "capacity_mode": "expanded" if accepted_count > soft_limit else "standard",
+        "soft_limit": soft_limit,
+        "safe_limit": safe_limit,
     }
+
+
+def _review_asset_limits() -> Tuple[int, int]:
+    soft_limit = max(1, int(os.getenv("REVIEW_ASSET_SOFT_LIMIT", "40") or 40))
+    safe_limit = max(1, int(os.getenv("REVIEW_MAX_ASSETS", "200") or 200))
+    if soft_limit > safe_limit:
+        raise ValueError("invalid_review_asset_capacity")
+    return soft_limit, safe_limit
 
 
 async def _save_uploads(job_id: str, metadata: ReviewCaseMetadata, uploads: Sequence[UploadFile]) -> List[Dict[str, Any]]:
     accepted_uploads = [item for item in uploads if not ignored_upload_reason(item.filename or "")]
     if not accepted_uploads:
         raise ValueError("review_assets_required")
-    if len(accepted_uploads) > int(os.getenv("REVIEW_MAX_ASSETS", "40") or 40):
-        raise ValueError("too_many_review_assets")
+    _, safe_limit = _review_asset_limits()
+    if len(accepted_uploads) > safe_limit:
+        raise ValueError(json.dumps({
+            "code": "too_many_review_assets",
+            "received_count": len(accepted_uploads),
+            "safe_limit": safe_limit,
+        }, ensure_ascii=False))
 
     max_asset = _limit_bytes("REVIEW_MAX_ASSET_MB", 650)
     max_case = _limit_bytes("REVIEW_MAX_CASE_MB", 750)
@@ -257,6 +277,63 @@ def _public_media_urls(value: Any) -> Any:
                 return f"{_public_workbench_url()}{split.path}?expires={expires}&sig={signature}{fragment}"
             return _public_workbench_url() + value
     return value
+
+
+def _job_media_urls(value: Any, job_id: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _job_media_urls(item, job_id) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_job_media_urls(item, job_id) for item in value]
+    if isinstance(value, str):
+        split = urlsplit(value)
+        match = re.fullmatch(r"/media-item/([0-9a-f]{32})", split.path)
+        if match:
+            fragment = f"#{split.fragment}" if split.fragment else ""
+            return f"/api/v1/review/jobs/{quote(job_id, safe='')}/media/{match.group(1)}{fragment}"
+    return value
+
+
+def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    output = deepcopy(job)
+    output["result"] = _job_media_urls(output.get("result") or {}, str(output.get("job_id") or ""))
+    return output
+
+
+def _find_job_media_source(value: Any, media_id: str) -> str:
+    if isinstance(value, dict):
+        for item in value.values():
+            found = _find_job_media_source(item, media_id)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _find_job_media_source(item, media_id)
+            if found:
+                return found
+    elif isinstance(value, str) and urlsplit(value).path == f"/media-item/{media_id}":
+        return value
+    return ""
+
+
+def resolve_job_media_url(job: Dict[str, Any], media_id: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", media_id):
+        raise ValueError("review_media_not_found")
+    source = _find_job_media_source(
+        (((job.get("result") or {}).get("review") or {}).get("agent_report") or {}),
+        media_id,
+    )
+    if not source:
+        raise ValueError("review_media_not_found")
+    split = urlsplit(source)
+    secret = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
+    if secret:
+        expires = int(time.time()) + max(60, int(os.getenv("VISUAL_REPORT_URL_TTL_SECONDS", "900") or 900))
+        message = f"{split.path}\n{expires}".encode("utf-8")
+        signature = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+        return f"{_workbench_url()}{split.path}?expires={expires}&sig={signature}"
+    if split.query:
+        return f"{_workbench_url()}{split.path}?{split.query}"
+    raise ValueError("review_media_signing_unavailable")
 
 
 def _effective_review_policies(metadata: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
@@ -435,10 +512,27 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         "continuity_policy": json.dumps(continuity_policy, ensure_ascii=False),
         "damage_causality_policy": json.dumps(damage_causality_policy, ensure_ascii=False),
         "review_routing_policy": json.dumps(metadata.get("review_routing_policy") or {}, ensure_ascii=False),
-        "include_html_report": str(html_report_requested(metadata)).lower(),
+        "defer_postprocess": "true",
+        "include_html_report": "false",
         **_sampling_fields(metadata),
         "probe_seconds": os.getenv("REVIEW_PROBE_SECONDS", "12"),
     }
+
+
+def _validate_workbench_health(
+    payload: Dict[str, Any],
+    *,
+    expected_soft_limit: int,
+    expected_safe_limit: int,
+) -> None:
+    capacity = payload.get("asset_capacity") or {}
+    if (
+        payload.get("ok") is not True
+        or payload.get("review_contract_version") != REVIEW_CONTRACT_VERSION
+        or capacity.get("soft_limit") != expected_soft_limit
+        or capacity.get("safe_limit") != expected_safe_limit
+    ):
+        raise ValueError("visual_workbench_contract_mismatch")
 
 
 def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -448,6 +542,16 @@ def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
     retryable = {429, 502, 503, 504}
     attempts: List[Dict[str, Any]] = []
     payload: Any = None
+    soft_limit, safe_limit = _review_asset_limits()
+    with httpx.Client(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
+        health = client.get(f"{_workbench_url()}/api/health")
+    if health.status_code != 200:
+        raise ValueError("visual_workbench_contract_mismatch")
+    _validate_workbench_health(
+        health.json(),
+        expected_soft_limit=soft_limit,
+        expected_safe_limit=safe_limit,
+    )
     for attempt in range(1, retries + 2):
         with ExitStack() as stack:
             files = []
@@ -465,6 +569,7 @@ def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
                     headers={
                         "X-Request-ID": f"{job['job_id']}-workbench-{attempt}",
                         "X-MITAKO-Internal-Metrics": "1",
+                        "X-MITAKO-Internal-Token": os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip(),
                     },
                     data=_review_fields(job),
                     files=files,
@@ -544,7 +649,14 @@ def _recommended_escalation(
     )
 
     actions: List[Dict[str, Any]] = []
-    if workflow == "request_more_material":
+    if workflow == "system_retry":
+        actions.append({
+            "type": "retry_review_case",
+            "full_case_retry": True,
+            "may_repeat_model_cost": True,
+            "description": "当前请求已完成结构修复和逐张恢复；仍未覆盖时可受控重跑整案，可能重复模型调用成本。",
+        })
+    elif workflow == "request_more_material":
         actions.append({
             "type": "request_more_material",
             "description": "按缺口清单补充业务证据；增加抽帧强度不能替代缺失材料。",
@@ -632,6 +744,28 @@ def _apply_input_readiness_guard(review: Dict[str, Any], readiness: Dict[str, An
     return output
 
 
+def postprocess_review(
+    job: Dict[str, Any],
+    review: Dict[str, Any],
+    *,
+    readiness: Optional[Dict[str, Any]] = None,
+    media_forensics: Optional[Dict[str, Any]] = None,
+    succeeded: bool = True,
+) -> Dict[str, Any]:
+    """网页工作台和正式 API 共用的审核后处理顺序。"""
+    metadata = job.get("metadata") or {}
+    resolved_readiness = readiness if readiness is not None else assess_input_readiness(metadata)
+    output = _apply_input_readiness_guard(review, resolved_readiness)
+    output = apply_review_decision_policy(job, output, media_forensics=media_forensics)
+    return attach_advisory_assessment(
+        output,
+        metadata,
+        readiness=resolved_readiness,
+        media_forensics=media_forensics,
+        succeeded=succeeded,
+    )
+
+
 def run_job(job_id: str) -> Dict[str, Any]:
     lease_seconds = max(30, int(os.getenv("REVIEW_JOB_TIMEOUT_SECONDS", "1800") or 1800)) + 60
     if not store.claim_job(job_id, lease_seconds):
@@ -652,11 +786,9 @@ def run_job(job_id: str) -> Dict[str, Any]:
         payload = _call_workbench(job)
         workbench_transport = payload.pop("_workbench_transport", {})
         review = dict(payload.get("review")) if isinstance(payload.get("review"), dict) else {}
-        review = _apply_input_readiness_guard(review, readiness)
-        review = apply_review_decision_policy(job, review, media_forensics=forensics)
-        review = attach_advisory_assessment(
+        review = postprocess_review(
+            job,
             review,
-            job.get("metadata") or {},
             readiness=readiness,
             media_forensics=forensics,
             succeeded=payload.get("ok") is True,
@@ -712,13 +844,14 @@ def run_job(job_id: str) -> Dict[str, Any]:
 def render_job_report(job: Dict[str, Any]) -> str:
     result = job.get("result") or {}
     review = result.get("review") or {}
-    agent_report = _public_media_urls(review.get("agent_report") or {})
+    agent_report = _job_media_urls(review.get("agent_report") or {}, str(job.get("job_id") or ""))
     brief = review.get("agent_brief") or {}
     data = {
         "ok": job.get("status") == "SUCCEEDED",
         "review_label": review.get("review_label") or result.get("scenario_label") or "审核结果",
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(job.get("completed_at") or time.time())),
         "summary": review.get("summary") or {},
+        "advisory_assessment": review.get("advisory_assessment") or {},
         "conclusion": brief.get("conclusion") or "本轮审核尚未形成可复核结论。",
         "agent_report": agent_report,
         "diagnostics": job.get("diagnostics") or review.get("diagnostics") or {},
@@ -776,9 +909,17 @@ def runtime_readiness() -> Dict[str, Any]:
     try:
         with httpx.Client(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
             response = client.get(f"{_workbench_url()}/api/health")
+        health_payload = response.json()
+        soft_limit, safe_limit = _review_asset_limits()
+        _validate_workbench_health(
+            health_payload,
+            expected_soft_limit=soft_limit,
+            expected_safe_limit=safe_limit,
+        )
         checks["visual_workbench"] = {
-            "ready": response.status_code == 200 and bool(response.json().get("ok")),
+            "ready": response.status_code == 200,
             "status_code": response.status_code,
+            "review_contract_version": health_payload.get("review_contract_version"),
         }
     except Exception as exc:
         checks["visual_workbench"] = {"ready": False, "error_type": exc.__class__.__name__}
@@ -809,7 +950,7 @@ def batch_status(tenant_id: str, batch_id: str, limit: int = 100, offset: int = 
             "returned": len(jobs),
             "offset": offset,
         },
-        "jobs": jobs,
+        "jobs": [public_job(job) for job in jobs],
     }
 
 

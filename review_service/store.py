@@ -178,7 +178,13 @@ def queue_retry(job_id: str) -> Optional[Dict[str, Any]]:
             UPDATE review_jobs
             SET status='RETRYING', result='{}', diagnostics='{}', started_at=0,
                 completed_at=0, lease_until=0, updated_at=?
-            WHERE job_id=? AND status='FAILED'
+            WHERE job_id=? AND (
+                status='FAILED'
+                OR (
+                    status='SUCCEEDED'
+                    AND json_extract(result, '$.review.advisory_assessment.workflow_recommendation')='system_retry'
+                )
+            )
             """,
             (now, job_id),
         )

@@ -500,6 +500,92 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/jobs/{job_id}/media/{media_id}:
+    get:
+      tags:
+      - review-service
+      summary: Job Media
+      operationId: job_media_api_v1_review_jobs__job_id__media__media_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: media_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Media Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          description: Range 分段媒体响应
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Not Found
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Bad Gateway
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/review/jobs/{job_id}/retry:
     post:
       tags:
@@ -2539,6 +2625,7 @@ components:
           - human_review
           - request_more_material
           - continue_by_customer_policy
+          - system_retry
           title: Workflow Recommendation
         signals:
           items:
@@ -2614,6 +2701,7 @@ components:
           - evidence_supports_claim
           - evidence_does_not_support_claim
           - evidence_inconclusive
+          - technical_processing_incomplete
           title: Conclusion Code
         conclusion:
           type: string
@@ -2635,7 +2723,9 @@ components:
           title: Confidence Level
         calibration_status:
           type: string
-          const: uncalibrated_evidence_score
+          enum:
+          - uncalibrated_evidence_score
+          - not_applicable_processing_incomplete
           title: Calibration Status
       type: object
       required:
@@ -3138,12 +3228,12 @@ components:
           - conservative_review
           - classification_recommendation
           title: Mode
-          default: conservative_review
+          default: classification_recommendation
         policy_ref:
           type: string
           maxLength: 160
           title: Policy Ref
-          default: ''
+          default: MITAKO-PD-ADVISORY@20260728.1
         opening_video_required:
           type: boolean
           title: Opening Video Required

@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -126,6 +127,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
         "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
         "甲方沟通交付文档/0728事实结论与人工复审闭环更新说明.html",
+        "甲方沟通交付文档/0728动态素材与统一审核链路更新说明.html",
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
         "tests/reports/minor_refund_144989_20260717-final.json",
@@ -135,6 +137,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "tests/reports/review_617911_individual24_20260720-latest.html",
         "tests/reports/review_submission_modes_20260717-final.json",
         "tests/reports/review_submission_modes_20260717-final.html",
+        "tests/reports/dynamic_material_capacity_http_latest.json",
         "tests/reports/customer_order_info_sync_strict_verify_20260720.json",
         "tests/reports/customer_order_info_reconcile_applied_20260720.json",
         "tests/reports/customer_order_info_integration_strict_final_20260720.json",
@@ -154,6 +157,12 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     manifest = json.loads((root / "internal-package-manifest.json").read_text(encoding="utf-8-sig"))
     _assert(manifest.get("env_included") is True, "内部包清单未确认 .env")
     _assert(manifest.get("git_commit") == expected_commit, "内部包提交号不是当前验收提交")
+    dynamic_report = json.loads(
+        (root / "tests/reports/dynamic_material_capacity_http_latest.json").read_text(encoding="utf-8")
+    )
+    _assert(dynamic_report.get("ok") is True, "动态素材真实 HTTP 证据未通过")
+    _assert(dynamic_report.get("requested_count") == 62, "动态素材证据不是 62 份资料")
+    _assert(dynamic_report.get("git_commit") == expected_commit, "动态素材证据未绑定当前验收提交")
     _verify_hashes(root, list(manifest.get("evidence") or []))
     return {"entries": len(names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
 
@@ -178,6 +187,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
         "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
         "甲方沟通交付文档/0728事实结论与人工复审闭环更新说明.html",
+        "甲方沟通交付文档/0728动态素材与统一审核链路更新说明.html",
         "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
         "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
         "甲方沟通交付文档/README.md",
@@ -298,6 +308,8 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             "ALLOW_PORT_FALLBACK": "0",
             "VISUAL_WORKBENCH_PORT": str(visual_port),
             "VISUAL_WORKBENCH_PUBLIC_URL": f"http://127.0.0.1:{visual_port}",
+            "VISUAL_REPORT_SIGNING_SECRET": secrets.token_hex(32),
+            "VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET": "1",
             "MITAKO_APP_ROOT": str(customer_root),
             "MITAKO_DATA_DIR": str(customer_root / ".runtime-data"),
             "MITAKO_MOCK_DATA_FILE": str(customer_root / "sample_data.json"),

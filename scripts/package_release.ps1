@@ -591,6 +591,7 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\local_video_triage_demo.py",
     "poc\visual_review_poc\model_selection_e2e.py",
     "poc\visual_review_poc\model_auth.py",
+    "poc\visual_review_poc\media_registry.py",
     "poc\visual_review_poc\observability.py",
     "poc\visual_review_poc\minor_material_model_prompt.py",
     "poc\visual_review_poc\minor_material_pipeline.py",
@@ -716,6 +717,16 @@ if %ERRORLEVEL% EQU 2 (
 call install-runtime-windows.bat
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
+if not exist data mkdir data
+if not exist data\report-signing-secret.txt venv\Scripts\python.exe -c "import secrets,pathlib; pathlib.Path(r'data\report-signing-secret.txt').write_text(secrets.token_hex(32), encoding='ascii')"
+if not exist data\report-signing-secret.txt (
+  echo [ERROR] Failed to create the persistent report signing secret.
+  pause
+  exit /b 1
+)
+set /p VISUAL_REPORT_SIGNING_SECRET=<data\report-signing-secret.txt
+set VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1
+
 set APP_PORT=8000
 set "MTK=MITAKO"
 set "DATA_KIND=MO"
@@ -800,6 +811,16 @@ if %ERRORLEVEL% EQU 2 (
 call install-runtime-windows.bat
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
+if not exist data mkdir data
+if not exist data\report-signing-secret.txt venv\Scripts\python.exe -c "import secrets,pathlib; pathlib.Path(r'data\report-signing-secret.txt').write_text(secrets.token_hex(32), encoding='ascii')"
+if not exist data\report-signing-secret.txt (
+  echo [ERROR] Failed to create the persistent report signing secret.
+  pause
+  exit /b 1
+)
+set /p VISUAL_REPORT_SIGNING_SECRET=<data\report-signing-secret.txt
+set VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1
+
 set VISUAL_WORKBENCH_PORT=7861
 set "MTK=MITAKO"
 set "DATA_KIND=MO"
@@ -831,6 +852,7 @@ $customerEvidenceFiles = @(
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
     "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
+    "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
     "甲方沟通交付文档\0723客诉审核Agent接口联调与商务沟通说明.html",
     "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
     "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",

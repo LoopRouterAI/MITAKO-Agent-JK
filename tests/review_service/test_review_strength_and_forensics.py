@@ -175,6 +175,7 @@ class ReviewJobIntegrationTest(unittest.TestCase):
 
         responses = [Response(503), Response(200, {"ok": True, "review": {}})]
         observed_sizes = []
+        health_requests = []
 
         class Client:
             def __init__(self, *args, **kwargs):
@@ -192,6 +193,14 @@ class ReviewJobIntegrationTest(unittest.TestCase):
                 self_outer.assertEqual(headers.get("X-MITAKO-Internal-Metrics"), "1")
                 observed_sizes.append(sum(len(item[1][1].read()) for item in files))
                 return responses.pop(0)
+
+            def get(self, url):
+                health_requests.append(url)
+                return Response(200, {
+                    "ok": True,
+                    "review_contract_version": service.REVIEW_CONTRACT_VERSION,
+                    "asset_capacity": {"soft_limit": 40, "safe_limit": 200},
+                })
 
         self_outer = self
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -219,8 +228,29 @@ class ReviewJobIntegrationTest(unittest.TestCase):
                 payload = service._call_workbench(job)
 
         self.assertEqual(observed_sizes, [11, 11])
+        self.assertEqual(len(health_requests), 1)
         self.assertEqual(payload["_workbench_transport"]["retry_count"], 1)
         self.assertEqual([item["status_code"] for item in payload["_workbench_transport"]["attempts"]], [503, 200])
+
+    def test_workbench_contract_rejects_old_capacity_before_upload(self) -> None:
+        with self.assertRaisesRegex(ValueError, "visual_workbench_contract_mismatch"):
+            service._validate_workbench_health(
+                {
+                    "ok": True,
+                    "review_contract_version": "old",
+                    "asset_capacity": {"soft_limit": 40, "safe_limit": 40},
+                },
+                expected_soft_limit=40,
+                expected_safe_limit=200,
+            )
+
+    def test_invalid_asset_capacity_configuration_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"REVIEW_ASSET_SOFT_LIMIT": "300", "REVIEW_MAX_ASSETS": "200"},
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid_review_asset_capacity"):
+                service._review_asset_limits()
 
     def test_run_job_forensics_precedes_single_model_call_and_recommends_bounded_escalation(self) -> None:
         calls = []

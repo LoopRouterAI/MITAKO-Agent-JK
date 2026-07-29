@@ -490,10 +490,11 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         "human_review": "进入人工复审",
         "request_more_material": "补充连续材料",
         "continue_by_customer_policy": "按甲方规则继续",
+        "system_retry": "受控重跑技术处理",
     }.get(str(advisory.get("workflow_recommendation") or ""), "未给出")
     signal_cards = "".join(
         '<article class="boundary-card">'
-        f'<h3>{_h({"material_gap": "材料缺口", "short_out_of_frame": "短暂离镜", "out_of_frame_over_threshold": "离镜超过补件阈值", "identity_reestablishment_unresolved": "重新入镜同物关系未确认", "continuity_unresolved": "商品连续性未完全确认", "media_forensic_risk": "媒体技术风险"}.get(str(item.get("code") or ""), item.get("code") or "风险信号"))}</h3>'
+        f'<h3>{_h({"material_gap": "材料缺口", "technical_processing_incomplete": "技术处理未完成", "short_out_of_frame": "短暂离镜", "out_of_frame_over_threshold": "离镜超过补件阈值", "identity_reestablishment_unresolved": "重新入镜同物关系未确认", "continuity_unresolved": "商品连续性未完全确认", "media_forensic_risk": "媒体技术风险"}.get(str(item.get("code") or ""), item.get("code") or "风险信号"))}</h3>'
         f'<p>{_h(item.get("effect") or "-")}</p>'
         + (
             f'<p><b>持续时间：</b>{_h(item.get("duration_seconds"))} 秒</p>'
@@ -579,6 +580,8 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         next_step = "按报告中的材料缺口向用户补充收集证据，材料齐备后重新送审。"
     elif workflow == "human_review":
         next_step = human_review.get("recommendation") or next_step
+    elif workflow == "system_retry":
+        next_step = "当前请求已完成结构修复和逐张恢复；仍未覆盖时可受控重跑整案，可能重复模型成本，且不要求用户补材料。"
     if failed:
         conclusion = data.get("conclusion") or conclusion
         core_reason = diagnostics.get("failure_reason") or "本轮审核没有完成，不能把该结果解释为业务证据不足。"

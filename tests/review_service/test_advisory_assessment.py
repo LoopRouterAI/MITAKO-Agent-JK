@@ -6,7 +6,7 @@ import unittest
 from pydantic import ValidationError
 
 from review_service.advisory_assessment import attach_advisory_assessment, html_report_requested
-from review_service.schemas import ReviewCaseMetadata
+from review_service.schemas import ReviewAdvisoryAssessment, ReviewCaseMetadata
 from review_service.service import _apply_input_readiness_guard
 
 
@@ -243,6 +243,41 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "required")
         self.assertIn("authoritative_verification_pending", advisory["human_review"]["reason_codes"])
+
+    def test_minor_internal_processing_gap_retries_system_without_asking_user_for_material(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="review",
+                confidence=0.5,
+                parsed_extra={
+                    "material_gaps": ["本轮未完成全部图片的可靠识别，缺件结论已被门禁阻断。"],
+                    "minor_material_assessment": {
+                        "declared_image_count": 62,
+                        "accepted_image_count": 62,
+                        "processed_image_count": 40,
+                        "ingestion_complete": True,
+                        "coverage_complete": False,
+                        "image_batch_failures": [{"batch_index": 11, "error": "provider_timeout"}],
+                    },
+                },
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["assessment"]["conclusion_code"], "technical_processing_incomplete")
+        self.assertIsNone(advisory["assessment"]["confidence"])
+        self.assertEqual(advisory["workflow_recommendation"], "system_retry")
+        self.assertEqual(advisory["human_review"]["level"], "not_required")
+        self.assertIn("technical_processing_incomplete", [item["code"] for item in advisory["signals"]])
+        self.assertNotIn("material_gap", [item["code"] for item in advisory["signals"]])
+        self.assertNotIn("补充收集材料", advisory["human_review"]["recommendation"])
+
+        public_contract = ReviewAdvisoryAssessment.model_validate(advisory)
+        self.assertEqual(public_contract.assessment.conclusion_code, "technical_processing_incomplete")
+        self.assertEqual(public_contract.assessment.calibration_status, "not_applicable_processing_incomplete")
+        self.assertEqual(public_contract.workflow_recommendation, "system_retry")
 
     def test_reversed_routing_thresholds_are_rejected(self):
         with self.assertRaises(ValidationError):

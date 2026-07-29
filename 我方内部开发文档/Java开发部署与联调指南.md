@@ -1,6 +1,6 @@
 # Java 开发部署与联调指南
 
-版本：2026-07-24
+版本：2026-07-28
 
 > 本轮多源客诉证据、包裹物流、当前工单对话与风险摘要的正式契约见 `../docs/delivery/after-sales-agent-integration.md`；字段定义以 `../docs/delivery/openapi.yaml` 为准。风险摘要只用于服务端抽检路由，不进入视觉模型。
 
@@ -32,6 +32,8 @@ Nginx / Java Gateway
 
 生产只暴露主服务；视觉服务、数据库和队列保持内网访问。
 
+主服务与视觉服务必须来自同一 Git 提交。启动前显式核对 `VISUAL_WORKBENCH_PORT` 或 `VISUAL_WORKBENCH_URL`，避免新版主服务误连仍在运行的旧视觉实例；这种错配会导致接口契约看似正常、下游处理能力却仍停留在旧上限。
+
 ## 3. Java 请求要求
 
 - `Authorization: Bearer <token>`。
@@ -51,8 +53,9 @@ Nginx / Java Gateway
 - 商品有伤：使用 `damage_causality_policy` 控制动作因果专项扫描；使用 `continuity_policy` 配置离镜阈值和连续性专项扫描。
 - 人工复审分级：使用 `review_routing_policy` 配置必须复审、建议抽检和 3 秒离镜补件阈值；离镜阈值不得解释为自动拒绝或已证实调包。
 - 报告输出：网页默认生成 HTML；系统批量可用 `output_options.include_html_report=false` 只保留结构化 JSON。
+- 单案素材容量：默认 40 份以内为标准处理，41-200 份自动扩展分批且不丢资料；超过 `REVIEW_MAX_ASSETS` 返回 HTTP 413 `too_many_review_assets`。Java 不得自行截断后继续提交。
 - 商品有伤多诉求：用 `claim_scope.active_claim_ids` 明确本次原子诉求。后续追加的不同商品、部位或损伤机制必须新建 claim，不得用一个工单级标签覆盖全部诉求。
-- 自动分类策略：`decision_policy` 默认 `conservative_review`。只有配置甲方批准的 `policy_ref@version` 并选择 `classification_recommendation` 后，才允许命中规则性 `negative`；该结果仍保持 `business_action_allowed=false`。
+- 自动分类策略：商品有伤默认使用已批准快照 `classification_recommendation + MITAKO-PD-ADVISORY@20260728.1`。它允许完整审查未见主诉伤情时给出事实 `negative` 建议；所有结果仍保持 `business_action_allowed=false`，Java/甲方系统不得把建议等同于自动退款或自动拒绝。
 - 甲方未提供完整基准时接口不拒绝创建任务，但 `metadata/validate` 会返回 `degraded_review`。运行结果优先建议补材料，不再仅因材料缺口强制占用人工席位。
 
 样本与标签边界：
@@ -103,6 +106,7 @@ Java 网关不调用模型供应商，也不需要实现 Gemini Files URI：
 ```bat
 set E2E_BASE_URL=http://127.0.0.1:8000
 .venv\Scripts\python.exe scripts\check_private_deployment_api.py
+.venv\Scripts\python.exe scripts\check_dynamic_material_capacity_http.py --count 62
 .venv\Scripts\python.exe scripts\check_review_input_isolation.py
 .venv\Scripts\python.exe scripts\check_customer_agent_0714_regression.py
 .venv\Scripts\python.exe scripts\check_review_service_batch.py --samples sample_003 --run-id java-integration
@@ -120,7 +124,9 @@ Java 侧至少补充：
 - 批次分页时 summary 仍是全批次统计。
 - 服务重启后未完成任务可恢复或重试。
 - `required/optional/not_required` 三种复审分级和 `request_more_material` 流程建议。
+- `system_retry` 表示当前请求内的结构修复与逐张恢复后仍未覆盖全部资料；可由调用方受控调用任务重试接口重跑整案，可能重复模型成本，不应要求用户补件。达到甲方配置的重试上限后再转授权人员。
 - JSON-only 任务不生成 HTML，报告路由返回 409 `review_report_not_requested`。
+- HTML 内媒体只通过主服务 `/api/v1/review/jobs/{job_id}/media/{media_id}` 获取；验证 Range 请求和服务重启后媒体仍可访问。
 
 字段级说明见 `docs/delivery/review-advisory-api.md`。
 
@@ -129,6 +135,9 @@ Java 侧至少补充：
 - TLS、域名、网关超时和上传大小。
 - SSO/集成账号和最小权限。
 - 主服务到视觉服务的内网地址。
+- 主服务和视觉服务必须使用同一个稳定的 `VISUAL_REPORT_SIGNING_SECRET`；只通过部署环境或密钥管理服务注入，轮换时应保留旧任务报告的兼容窗口。
+- 按机器容量配置 `REVIEW_ASSET_SOFT_LIMIT/REVIEW_MAX_ASSETS` 与 `VISUAL_SUPPLEMENTAL_IMAGE_SOFT_LIMIT/VISUAL_MAX_SUPPLEMENTAL_IMAGES`；两层安全上限应保持一致。
+- `REVIEW_MINOR_SCHEMA_RETRIES` 默认 2、最大 2；它只修复供应商响应遗漏图片编号，不替代失败任务的运维告警与重试上限。
 - 主服务进程可执行的 ffprobe 路径；调用 `/api/v1/review/readiness` 必须返回 200。
 - 数据库、队列、对象存储和备份。
 - Prometheus/Grafana、日志采集和告警。

@@ -475,7 +475,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(result["cost_status"], "partial_unknown")
         self.assertEqual(result["unknown_cost_calls"], 1)
 
-    def test_unclassified_image_blocks_missing_material_claim(self) -> None:
+    def test_unclassified_image_requests_system_retry_without_user_material_gap(self) -> None:
         case = _case(image_count=5, frame_count=0)
         rows = [
             (
@@ -491,8 +491,12 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertFalse(assessment["coverage_complete"])
         self.assertEqual(assessment["unclassified_image_indices"], [5])
         self.assertEqual(parsed["predicted_label"], "review")
-        self.assertIn("缺件结论已被门禁阻断", parsed["material_gaps"][0])
-        self.assertNotIn("用户未提交", "".join(parsed["material_gaps"]))
+        self.assertEqual(parsed["processing_status"], "technical_processing_incomplete")
+        self.assertEqual(parsed["system_action"], "system_retry")
+        self.assertIsNone(parsed["confidence"])
+        self.assertEqual(parsed["material_gaps"], [])
+        self.assertFalse(parsed["human_required"])
+        self.assertIn("受控重跑整案", parsed["next_step"])
 
     def test_structural_retry_recovers_omitted_image_indices_and_counts_cost(self) -> None:
         case = _case(image_count=4, frame_count=0)
@@ -524,6 +528,115 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(result["cost_status"], "partial_unknown")
         self.assertEqual(result["unknown_cost_calls"], 2)
         self.assertEqual(result["estimated_cost_calls"], 2)
+
+    def test_default_structural_retry_allows_two_repairs_before_system_retry(self) -> None:
+        case = _case(image_count=4, frame_count=0)
+        attempts = 0
+
+        def invoke(batch_case: dict) -> dict:
+            nonlocal attempts
+            attempts += 1
+            indices = [item["image_index"] for item in batch_case["supplemental_images"]]
+            return {
+                "status": "success",
+                "parsed": {
+                    "material_observations": (
+                        [_observation(index) for index in indices] if attempts == 3 else []
+                    )
+                },
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                "cost": {"estimated_usd": 0.001},
+            }
+
+        result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
+
+        self.assertEqual(attempts, 3)
+        self.assertTrue(result["parsed"]["minor_material_assessment"]["coverage_complete"])
+        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 3)
+
+    def test_persistent_batch_omission_falls_back_to_single_image_recovery(self) -> None:
+        case = _case(image_count=4, frame_count=0)
+        batch_attempts = 0
+        single_attempts = []
+
+        def invoke(batch_case: dict) -> dict:
+            nonlocal batch_attempts
+            indices = [item["image_index"] for item in batch_case["supplemental_images"]]
+            if len(indices) == 1:
+                single_attempts.extend(indices)
+                observations = [_observation(indices[0])]
+            else:
+                batch_attempts += 1
+                observations = []
+            return {
+                "status": "success",
+                "parsed": {"material_observations": observations},
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                "cost": {"estimated_usd": 0.001},
+            }
+
+        result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
+
+        self.assertEqual(batch_attempts, 3)
+        self.assertEqual(single_attempts, [1, 2, 3, 4])
+        self.assertTrue(result["parsed"]["minor_material_assessment"]["coverage_complete"])
+        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 7)
+
+    def test_single_image_recovery_reuses_bounded_schema_retries(self) -> None:
+        case = _case(image_count=1, frame_count=0)
+        batch_attempts = 0
+        recovery_attempts = 0
+
+        def invoke(batch_case: dict) -> dict:
+            nonlocal batch_attempts, recovery_attempts
+            recovery = bool(
+                batch_case["structured_business_context"]["minor_material_batch"].get(
+                    "single_image_recovery"
+                )
+            )
+            if recovery:
+                recovery_attempts += 1
+            else:
+                batch_attempts += 1
+            observations = [_observation(1)] if recovery and recovery_attempts == 2 else []
+            return {
+                "status": "success",
+                "parsed": {"material_observations": observations},
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                "cost": {"estimated_usd": 0.001},
+            }
+
+        result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
+
+        self.assertEqual(batch_attempts, 3)
+        self.assertEqual(recovery_attempts, 2)
+        self.assertTrue(result["parsed"]["minor_material_assessment"]["coverage_complete"])
+        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 5)
+
+    def test_recovery_exception_preserves_prior_usage_and_marks_processing_incomplete(self) -> None:
+        case = _case(image_count=1, frame_count=0)
+        attempts = 0
+
+        def invoke(batch_case: dict) -> dict:
+            nonlocal attempts
+            attempts += 1
+            if attempts > 1:
+                raise RuntimeError("supplier timeout")
+            return {
+                "status": "success",
+                "parsed": {"material_observations": []},
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                "cost": {"estimated_usd": 0.001},
+            }
+
+        result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
+
+        assessment = result["parsed"]["minor_material_assessment"]
+        self.assertEqual(attempts, 6)
+        self.assertEqual(assessment["processing_status"], "technical_processing_incomplete")
+        self.assertEqual(result["usage"]["total_tokens"], 15)
+        self.assertEqual(result["cost"]["estimated_usd"], 0.001)
+        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 6)
 
     def test_household_register_or_birth_certificate_satisfies_relationship_rule(self) -> None:
         case = _case(image_count=8, frame_count=0)

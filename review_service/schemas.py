@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
+
 
 ReviewScenario = Literal["product_damage", "wrong_item", "missing_item", "minor_refund"]
 ReviewStrength = Literal["adaptive", "strong", "strict", "forensic", "custom"]
@@ -103,8 +105,8 @@ class ReviewClaimScope(BaseModel):
 class ReviewDecisionPolicy(BaseModel):
     """甲方可选的规则判定策略；默认不把证据不足自动判为不支持。"""
 
-    mode: Literal["conservative_review", "classification_recommendation"] = "conservative_review"
-    policy_ref: str = Field(default="", max_length=160)
+    mode: Literal["conservative_review", "classification_recommendation"] = "classification_recommendation"
+    policy_ref: str = Field(default=DEFAULT_PRODUCT_DAMAGE_POLICY_REF, max_length=160)
     opening_video_required: bool = False
     missing_required_opening_video: Literal["review", "negative"] = "review"
     complete_video_no_claimed_damage: Literal["review", "negative"] = "review"
@@ -323,11 +325,15 @@ class ReviewAssessmentDetails(BaseModel):
         "evidence_supports_claim",
         "evidence_does_not_support_claim",
         "evidence_inconclusive",
+        "technical_processing_incomplete",
     ]
     conclusion: str
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     confidence_level: Literal["high", "medium", "low", "unavailable"]
-    calibration_status: Literal["uncalibrated_evidence_score"]
+    calibration_status: Literal[
+        "uncalibrated_evidence_score",
+        "not_applicable_processing_incomplete",
+    ]
 
 
 class ReviewHumanReviewAdvice(BaseModel):
@@ -362,6 +368,7 @@ class ReviewAdvisoryAssessment(BaseModel):
         "human_review",
         "request_more_material",
         "continue_by_customer_policy",
+        "system_retry",
     ]
     signals: List[ReviewAdvisorySignal] = Field(default_factory=list)
     policy: ReviewAdvisoryPolicy

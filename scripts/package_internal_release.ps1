@@ -150,6 +150,7 @@ Copy-Path "tests\reports\customer_order_info_reconcile_applied_20260720.json"
 Copy-Path "tests\reports\customer_order_info_integration_strict_final_20260720.json"
 Copy-Path "tests\reports\review_submission_modes_20260717-final.json"
 Copy-Path "tests\reports\review_submission_modes_20260717-final.html"
+Copy-Path "tests\reports\dynamic_material_capacity_http_latest.json"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
 Copy-LatestReport "auth_strict_*.html" "tests\reports\auth_strict_latest.html"
 Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_deployment_api_smoke_latest.json"
@@ -159,6 +160,7 @@ $evidenceFiles = @(
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
     "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
+    "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
     "我方内部开发文档\升级日志-2026-07-28-事实结论与人工复审闭环.md",
     "甲方沟通交付文档\0723客诉审核Agent接口联调与商务沟通说明.html",
     "我方内部开发文档\升级日志-2026-07-23-多源证据与接口联调.md",
@@ -196,6 +198,7 @@ $evidenceFiles = @(
     "tests\reports\customer_order_info_integration_strict_final_20260720.json",
     "tests\reports\review_submission_modes_20260717-final.json",
     "tests\reports\review_submission_modes_20260717-final.html",
+    "tests\reports\dynamic_material_capacity_http_latest.json",
     "tests\reports\full_pipeline_latest.html",
     "tests\reports\auth_strict_latest.html",
     "tests\reports\private_deployment_api_smoke_latest.json"
@@ -247,6 +250,7 @@ $required = @(
     "docs\delivery\客服Agent与私域Agent正式接入前人工UAT指南_20260716.md",
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
+    "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
     "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
     "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
     "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
@@ -266,7 +270,8 @@ $required = @(
     "tests\reports\customer_order_info_sync_verify_20260720.json",
     "tests\reports\customer_order_info_integration_20260720.json",
     "tests\reports\review_submission_modes_20260717-final.json",
-    "tests\reports\review_submission_modes_20260717-final.html"
+    "tests\reports\review_submission_modes_20260717-final.html",
+    "tests\reports\dynamic_material_capacity_http_latest.json"
 )
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {

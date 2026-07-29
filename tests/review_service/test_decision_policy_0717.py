@@ -11,7 +11,223 @@ def review(parsed=None):
 
 
 class ReviewDecisionPolicy0717Test(unittest.TestCase):
-    def test_default_policy_never_turns_missing_video_into_negative(self):
+    def _complete_no_damage_case(
+        self,
+        policy_overrides=None,
+        parsed_overrides=None,
+        requested_overrides=None,
+        media_forensics=None,
+    ):
+        policy = {
+            "mode": "classification_recommendation",
+            "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@CONFIG-TEST",
+            "complete_video_no_claimed_damage": "negative",
+            "require_claim_scope": True,
+            "minimum_visibility_coverage": 0.95,
+            "minimum_required_view_coverage": 1.0,
+            "minimum_confidence": 0.8,
+            "require_continuity_complete": True,
+            "require_fully_observable": True,
+            "require_claimed_region_closeup": True,
+            "require_same_item_linkage": True,
+            "require_media_forensics": True,
+            "maximum_forensic_risk": "low",
+            "max_unobserved_seconds": 0.0,
+        }
+        policy.update(policy_overrides or {})
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-configurable-policy",
+                "scenario": "product_damage",
+                "customer_claim": "商品存在可见损伤",
+                "claim_scope": {
+                    "split_status": "resolved",
+                    "active_claim_ids": ["CLM-1"],
+                    "claims": [{"claim_id": "CLM-1", "issue_type": "visible_damage"}],
+                },
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": policy["policy_ref"],
+                    **(requested_overrides or {}),
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.9,
+            "damage_causality_assessment": {
+                "damage_presence": "not_visible",
+                "claim_support": "not_supported",
+                "evidence_source_summary": {
+                    "supplemental_images": {
+                        "provided_count": 0,
+                        "referenced_count": 0,
+                        "linkage_status": "not_provided",
+                    }
+                },
+            },
+            "damage_observability": {
+                "status": "fully_observable",
+                "same_item_linkage": True,
+                "claimed_region_closeup": True,
+                "required_view_coverage": 1.0,
+                "conflicting_evidence": False,
+            },
+            "object_continuity_assessment": {
+                "continuity_verdict": "continuous",
+                "tracked_subjects": [{
+                    "subject_id": "claimed_item",
+                    "visibility_coverage": 1.0,
+                    "longest_out_of_frame_seconds": 0.0,
+                }],
+            },
+            "video_audit_conclusion": {
+                "opening_integrity": "complete",
+                "opening_integrity_source": "full_timeline_continuity",
+                "sampling_boundary_status": "covered",
+            },
+        }
+        for key, value in (parsed_overrides or {}).items():
+            if isinstance(value, dict) and isinstance(parsed.get(key), dict):
+                parsed[key].update(value)
+            else:
+                parsed[key] = value
+        result = apply_review_decision_policy(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "video/mp4"}],
+            },
+            review(parsed),
+            media_forensics=(
+                {"status": "completed", "summary": {"risk_level": "low"}}
+                if media_forensics is None
+                else media_forensics
+            ),
+            approved_policies={
+                ("mitako", policy["policy_ref"]): policy,
+            },
+        )
+        return result
+
+    def test_complete_no_damage_uses_each_server_approved_evidence_threshold(self):
+        cases = [
+            (
+                "minimum_visibility_coverage",
+                {"minimum_visibility_coverage": 0.85},
+                {"object_continuity_assessment": {"tracked_subjects": [{
+                    "subject_id": "claimed_item",
+                    "visibility_coverage": 0.9,
+                    "longest_out_of_frame_seconds": 0.0,
+                }]}},
+            ),
+            (
+                "minimum_required_view_coverage",
+                {"minimum_required_view_coverage": 0.8},
+                {"damage_observability": {"required_view_coverage": 0.85}},
+            ),
+            (
+                "require_continuity_complete",
+                {"require_continuity_complete": False},
+                {"object_continuity_assessment": {"continuity_verdict": "indeterminate"}},
+            ),
+            (
+                "require_fully_observable",
+                {"require_fully_observable": False},
+                {"damage_observability": {"status": "partial"}},
+            ),
+            (
+                "require_claimed_region_closeup",
+                {"require_claimed_region_closeup": False},
+                {"damage_observability": {"claimed_region_closeup": False}},
+            ),
+            (
+                "require_same_item_linkage",
+                {"require_same_item_linkage": False},
+                {"damage_observability": {"same_item_linkage": False}},
+            ),
+            (
+                "max_unobserved_seconds",
+                {"max_unobserved_seconds": 3.0},
+                {"object_continuity_assessment": {"tracked_subjects": [{
+                    "subject_id": "claimed_item",
+                    "visibility_coverage": 1.0,
+                    "longest_out_of_frame_seconds": 2.5,
+                }]}},
+            ),
+            (
+                "require_media_forensics",
+                {"require_media_forensics": False},
+                {},
+                {},
+            ),
+        ]
+        for case in cases:
+            field, policy_overrides, parsed_overrides, *optional = case
+            with self.subTest(field=field):
+                result = self._complete_no_damage_case(
+                    policy_overrides,
+                    parsed_overrides,
+                    media_forensics=optional[0] if optional else None,
+                )
+                self.assertEqual(result["summary"]["predicted_label"], "negative")
+                self.assertTrue(result["decision_policy_audit"]["applied"])
+
+    def test_request_overrides_cannot_weaken_server_approved_snapshot(self):
+        strict_policy = {
+            "mode": "classification_recommendation",
+            "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@STRICT",
+            "complete_video_no_claimed_damage": "negative",
+            "require_claim_scope": True,
+            "minimum_visibility_coverage": 0.95,
+            "minimum_required_view_coverage": 1.0,
+            "minimum_confidence": 0.8,
+            "require_continuity_complete": True,
+            "require_fully_observable": True,
+            "require_claimed_region_closeup": True,
+            "require_same_item_linkage": True,
+            "require_media_forensics": True,
+            "maximum_forensic_risk": "low",
+            "max_unobserved_seconds": 0.0,
+        }
+        result = self._complete_no_damage_case(
+            strict_policy,
+            {
+                "damage_observability": {
+                    "status": "partial",
+                    "same_item_linkage": False,
+                    "claimed_region_closeup": False,
+                    "required_view_coverage": 0.5,
+                },
+                "object_continuity_assessment": {
+                    "continuity_verdict": "indeterminate",
+                    "tracked_subjects": [{
+                        "subject_id": "claimed_item",
+                        "visibility_coverage": 0.5,
+                        "longest_out_of_frame_seconds": 10.0,
+                    }],
+                },
+            },
+            requested_overrides={
+                "minimum_visibility_coverage": 0.5,
+                "minimum_required_view_coverage": 0.5,
+                "require_continuity_complete": False,
+                "require_fully_observable": False,
+                "require_claimed_region_closeup": False,
+                "require_same_item_linkage": False,
+                "require_media_forensics": False,
+                "max_unobserved_seconds": 30.0,
+            },
+        )
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertFalse(result["decision_policy_audit"]["applied"])
+        self.assertIn(
+            "minimum_visibility_coverage",
+            result["decision_policy_audit"]["requested_overrides_ignored"],
+        )
+
+    def test_default_policy_without_claim_scope_never_turns_missing_video_into_negative(self):
         metadata = ReviewCaseMetadata(
             client_case_id="case-default",
             scenario="product_damage",
@@ -23,10 +239,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         )
         self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertFalse(result["decision_policy_audit"]["applied"])
-        self.assertEqual(
-            result["agent_report"]["parsed"]["decision_policy_audit"]["reason"],
-            "未启用商品有伤规则分类建议。",
-        )
+        audit = result["agent_report"]["parsed"]["decision_policy_audit"]
+        self.assertFalse(audit["claim_scope"]["ready"])
 
     def test_617341_explicit_versioned_policy_can_recommend_negative(self):
         metadata = ReviewCaseMetadata.model_validate(

@@ -11,7 +11,6 @@ import re
 import secrets
 import shutil
 import sys
-import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,7 +33,9 @@ load_dotenv(
 )
 
 from runtime_paths import app_root
-from review_service.advisory_assessment import attach_advisory_assessment
+from review_service.service import postprocess_review
+from review_service.decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
+from poc.visual_review_poc.media_registry import MediaRegistry
 from review_media_safety import (
     FOLDER_SUFFIXES,
     IMAGE_SUFFIXES,
@@ -84,53 +85,39 @@ WORKBENCH_DIR = Path(os.getenv(_env_name("MITAKO", "VISUAL", "WORKBENCH", "DIR")
 UPLOAD_DIR = WORKBENCH_DIR / "uploaded_videos"
 REPORT_DIR = WORKBENCH_DIR / "reports"
 PUBLIC_SUMMARY_DIR = REPORT_DIR / "public_summaries"
-RUNTIME_MEDIA_DIR = (ROOT / "tmp" / "visual_review_workbench").resolve()
+RUNTIME_MEDIA_DIR = Path(
+    os.getenv("VISUAL_RUNTIME_MEDIA_DIR") or WORKBENCH_DIR / "runtime_media"
+).resolve()
 INDEX_HTML = WORKBENCH_DIR / "workbench.html"
 SAMPLE_MATERIAL_DIR = (ROOT / "docs" / "三大审核场景的小量样本").resolve()
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
-PUBLIC_MEDIA_INDEX: dict[str, str] = {}
-PUBLIC_MEDIA_INDEX_LOCK = threading.Lock()
-PUBLIC_MEDIA_INDEX_PATH = REPORT_DIR / "internal" / "public_media_registry.json"
-LEGACY_PUBLIC_MEDIA_INDEX_PATH = REPORT_DIR / "public_media_registry.json"
-
-
-def _migrate_public_media_index() -> None:
-    if not LEGACY_PUBLIC_MEDIA_INDEX_PATH.is_file():
-        return
-    PUBLIC_MEDIA_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not PUBLIC_MEDIA_INDEX_PATH.exists():
-        os.replace(LEGACY_PUBLIC_MEDIA_INDEX_PATH, PUBLIC_MEDIA_INDEX_PATH)
-        return
-
-    merged: dict[str, str] = {}
-    for path in (PUBLIC_MEDIA_INDEX_PATH, LEGACY_PUBLIC_MEDIA_INDEX_PATH):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            continue
-        if isinstance(payload, dict):
-            merged.update({str(key): str(value) for key, value in payload.items() if isinstance(value, str)})
-    temp_path = PUBLIC_MEDIA_INDEX_PATH.with_name(f".{PUBLIC_MEDIA_INDEX_PATH.name}.{uuid4().hex}.tmp")
-    temp_path.write_text(json.dumps(merged, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-    os.replace(temp_path, PUBLIC_MEDIA_INDEX_PATH)
-    LEGACY_PUBLIC_MEDIA_INDEX_PATH.unlink(missing_ok=True)
-
-
-_migrate_public_media_index()
+PUBLIC_MEDIA_REGISTRY = MediaRegistry(REPORT_DIR / "internal" / "public_media_registry.sqlite3", ROOT)
+PUBLIC_WORKBENCH_MEDIA_REGISTRY = MediaRegistry(
+    REPORT_DIR / "internal" / "public_workbench_media_registry.sqlite3",
+    WORKBENCH_DIR,
+)
 _configured_signing_secret = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
 REPORT_SIGNING_SECRET_CONFIGURED = bool(_configured_signing_secret)
 REPORT_SIGNING_SECRET = _configured_signing_secret.encode("utf-8") if _configured_signing_secret else secrets.token_bytes(32)
 REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET = os.getenv(
-    "VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET", "0"
+    "VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET", "1"
 ).strip().lower() in {"1", "true", "yes", "on"}
+REVIEW_CONTRACT_VERSION = "2026-07-28.2"
 try:
     REPORT_URL_TTL_SECONDS = max(1, int(os.getenv("VISUAL_REPORT_URL_TTL_SECONDS", "900") or 900))
 except ValueError:
     REPORT_URL_TTL_SECONDS = 900
 MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
-MAX_SUPPLEMENTAL_IMAGES = max(1, min(int(os.getenv("VISUAL_MAX_SUPPLEMENTAL_IMAGES", "40") or 40), 80))
 MAX_FOLDER_FILES = max(1, int(os.getenv("VISUAL_MAX_FOLDER_FILES", "200") or 200))
+SUPPLEMENTAL_IMAGE_SOFT_LIMIT = min(
+    max(1, int(os.getenv("VISUAL_SUPPLEMENTAL_IMAGE_SOFT_LIMIT", "40") or 40)),
+    MAX_FOLDER_FILES,
+)
+MAX_SUPPLEMENTAL_IMAGES = max(
+    SUPPLEMENTAL_IMAGE_SOFT_LIMIT,
+    min(int(os.getenv("VISUAL_MAX_SUPPLEMENTAL_IMAGES", "200") or 200), MAX_FOLDER_FILES),
+)
 MAX_BATCH_FOLDERS = max(1, min(int(os.getenv("VISUAL_MAX_BATCH_FOLDERS", "10") or 10), 20))
 MAX_BATCH_FILES = max(MAX_FOLDER_FILES, min(int(os.getenv("VISUAL_MAX_BATCH_FILES", "400") or 400), 1000))
 PRIVATE_REPORT_KEYS = {
@@ -236,8 +223,13 @@ def _safe_basename(name: str, fallback: str) -> str:
 def _save_folder_uploads(files: List[UploadFile]) -> tuple[Path, Dict[str, Any]]:
     if not files:
         raise HTTPException(status_code=400, detail="请选择工单素材文件夹")
-    if len(files) > MAX_FOLDER_FILES:
-        raise HTTPException(status_code=413, detail=f"单次最多接收 {MAX_FOLDER_FILES} 个文件，请拆分工单素材")
+    accepted_candidates = [file for file in files if not ignored_upload_reason(file.filename or "")]
+    if len(accepted_candidates) > MAX_FOLDER_FILES:
+        raise HTTPException(status_code=413, detail={
+            "code": "too_many_review_assets",
+            "received_count": len(accepted_candidates),
+            "safe_limit": MAX_FOLDER_FILES,
+        })
     target_dir = UPLOAD_DIR / f"folder_{time.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:12]}"
     target_dir.mkdir(parents=True, exist_ok=False)
     total = 0
@@ -299,6 +291,9 @@ def _save_folder_uploads(files: List[UploadFile]) -> tuple[Path, Dict[str, Any]]
             {"name": item["name"], "reason": public_skip_reason(item["reason"]), "reason_code": item["reason"]}
             for item in skipped[:50]
         ],
+        "capacity_mode": "expanded" if len(accepted) > SUPPLEMENTAL_IMAGE_SOFT_LIMIT else "standard",
+        "soft_limit": SUPPLEMENTAL_IMAGE_SOFT_LIMIT,
+        "safe_limit": MAX_FOLDER_FILES,
     }
     return target_dir, summary
 
@@ -399,6 +394,8 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
     "predicted_label": True,
     "system_yes_no": True,
     "confidence": True,
+    "processing_status": True,
+    "system_action": True,
     "overall_audit": {
         "conclusion": True,
         "confidence": True,
@@ -420,6 +417,8 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
         "coverage_ratio": True,
         "coverage_complete": True,
         "ingestion_complete": True,
+        "processing_status": True,
+        "system_action": True,
         "checklist": [{
             "requirement_id": True,
             "label": True,
@@ -564,6 +563,7 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "global_review_summary", "sampled_start_seconds", "sampled_end_seconds", "source_duration_seconds",
     "claimed_item_first_exposed_timestamp", "timeline_coverage_ratio",
     "chunk_narratives_excluded_from_public_conclusion", "quality_issues", "tamper_risk", "risk_reason_codes",
+    "input_readiness_guard", "missing_required",
 }
 
 
@@ -628,6 +628,11 @@ def _sign_public_url(path: str, *, expires: Optional[int] = None) -> str:
     expires_at = int(expires if expires is not None else time.time() + REPORT_URL_TTL_SECONDS)
     signed = f"{split.path}?expires={expires_at}&sig={_public_url_signature(split.path, expires_at)}"
     return signed + (f"#{split.fragment}" if split.fragment else "")
+
+
+def _internal_request_authorized(token: str) -> bool:
+    expected = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
+    return bool(expected and token and hmac.compare_digest(token, expected))
 
 
 def _require_public_signature(path: str, expires: str, sig: str) -> None:
@@ -768,33 +773,20 @@ def _media_url(path_value: Any) -> str:
     allowed_roots = [ROOT.resolve(), WORKBENCH_DIR.resolve()]
     if not any(path == base or base in path.parents for base in allowed_roots):
         return ""
-    rel = path.relative_to(ROOT.resolve()).as_posix()
+    try:
+        rel = path.relative_to(ROOT.resolve()).as_posix()
+        registry = PUBLIC_MEDIA_REGISTRY
+        namespace = ""
+    except ValueError:
+        rel = path.relative_to(WORKBENCH_DIR.resolve()).as_posix()
+        registry = PUBLIC_WORKBENCH_MEDIA_REGISTRY
+        namespace = "workbench\n"
     media_id = hmac.new(
         REPORT_SIGNING_SECRET,
-        f"media\n{rel}".encode("utf-8"),
+        f"media\n{namespace}{rel}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()[:32]
-    with PUBLIC_MEDIA_INDEX_LOCK:
-        PUBLIC_MEDIA_INDEX[media_id] = rel
-        PUBLIC_MEDIA_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = PUBLIC_MEDIA_INDEX_PATH.with_name(
-            f".{PUBLIC_MEDIA_INDEX_PATH.name}.{uuid4().hex}.tmp"
-        )
-        try:
-            temp_path.write_text(
-                json.dumps(PUBLIC_MEDIA_INDEX, ensure_ascii=False, sort_keys=True),
-                encoding="utf-8",
-            )
-            for attempt in range(1, 6):
-                try:
-                    os.replace(temp_path, PUBLIC_MEDIA_INDEX_PATH)
-                    break
-                except PermissionError:
-                    if attempt == 5:
-                        raise
-                    time.sleep(0.05 * attempt)
-        finally:
-            temp_path.unlink(missing_ok=True)
+    registry.register(media_id, rel)
     return _sign_public_url(f"/media-item/{media_id}")
 
 
@@ -893,7 +885,14 @@ def _report_data_name(report_name: str) -> str:
 
 
 def _structured_review_ok(parsed: Dict[str, Any]) -> bool:
-    return bool(parsed.get("predicted_label")) and parsed.get("confidence") not in (None, "")
+    if not parsed.get("predicted_label"):
+        return False
+    if parsed.get("confidence") not in (None, ""):
+        return True
+    return (
+        parsed.get("processing_status") == "technical_processing_incomplete"
+        and parsed.get("system_action") == "system_retry"
+    )
 
 
 def _model_key_from_identifier(identifier: str) -> Optional[str]:
@@ -1182,6 +1181,7 @@ def _agent_report_response(
     review_profile_label: str = "标准视觉复核",
     include_internal_metrics: bool = False,
     include_html_report: bool = True,
+    defer_postprocess: bool = False,
 ) -> Dict[str, Any]:
     parsed = result.get("parsed") or {}
     structured_ok = _structured_review_ok(parsed)
@@ -1232,27 +1232,65 @@ def _agent_report_response(
         }
         agent_report["diagnostics"] = data["diagnostics"]
     structured = case.get("structured_business_context") or {}
-    normalized = attach_advisory_assessment(
-        {
-            "summary": data["summary"],
-            "agent_report": data["agent_report"],
-            "agent_brief": {
-                "conclusion": public_conclusion,
-                "confidence": data["summary"].get("confidence"),
-                "system_yes_no": parsed.get("system_yes_no"),
-                "next_step": public_next_step,
+    frontdesk = structured.get("frontdesk_evidence_package") or {}
+    business_scenario = structured.get("business_scenario") or {
+        "video_unboxing": "wrong_item",
+        "product_damage": "product_damage",
+        "minor_material": "minor_refund",
+    }.get(case.get("scenario"), case.get("scenario") or "")
+    metadata = {
+        "scenario": business_scenario,
+        "customer_claim": case.get("customer_claim") or "",
+        "order_items": structured.get("order_items") or frontdesk.get("order_item") or [],
+        "product_master_data": structured.get("product_master_data") or frontdesk.get("product_master_data") or {},
+        "fulfillment_baseline": structured.get("fulfillment_baseline") or frontdesk.get("fulfillment_baseline") or {},
+        "logistics": structured.get("logistics") or frontdesk.get("logistics") or {},
+        "evidence_coverage": structured.get("evidence_coverage") or frontdesk.get("evidence_coverage") or {},
+        "claim_scope": structured.get("claim_scope") or frontdesk.get("claim_scope") or {},
+        "sop_context": structured.get("sop_context") or frontdesk.get("sop_context") or {},
+        "review_routing_policy": structured.get("review_routing_policy") or {},
+        "decision_policy": (
+            {
+                "mode": "classification_recommendation",
+                "policy_ref": DEFAULT_PRODUCT_DAMAGE_POLICY_REF,
+            }
+            if business_scenario == "product_damage"
+            else {}
+        ),
+    }
+    review_assets = [
+        {"mime_type": "video/mp4"}
+        for _ in case.get("videos") or []
+    ] + [
+        {"mime_type": "image/jpeg"}
+        for _ in case.get("supplemental_images") or []
+    ]
+    raw_brief = {
+        "conclusion": public_conclusion,
+        "confidence": data["summary"].get("confidence"),
+        "system_yes_no": parsed.get("system_yes_no"),
+        "next_step": public_next_step,
+    }
+    if not defer_postprocess:
+        normalized = postprocess_review(
+            {
+                "tenant_id": "mitako",
+                "scenario": business_scenario,
+                "metadata": metadata,
+                "assets": review_assets,
             },
-            "diagnostics": data.get("diagnostics") or {},
-        },
-        {
-            "scenario": structured.get("business_scenario") or case.get("scenario") or "",
-            "review_routing_policy": structured.get("review_routing_policy") or {},
-        },
-        succeeded=ok,
-    )
-    data["summary"] = normalized["summary"]
-    data["agent_report"] = normalized["agent_report"]
-    data["advisory_assessment"] = normalized["advisory_assessment"]
+            {
+                "summary": data["summary"],
+                "agent_report": data["agent_report"],
+                "agent_brief": raw_brief,
+                "diagnostics": data.get("diagnostics") or {},
+            },
+            succeeded=ok,
+        )
+        data["summary"] = normalized["summary"]
+        data["agent_report"] = normalized["agent_report"]
+        data["advisory_assessment"] = normalized["advisory_assessment"]
+        raw_brief = normalized["agent_brief"]
     data = _sanitize_public_report_data(data)
     if include_html_report:
         ALLOWED_REPORTS[report_name] = data
@@ -1274,10 +1312,11 @@ def _agent_report_response(
         ),
         "report": report,
         "agent_report": data.get("agent_report") or {},
-        "advisory_assessment": data.get("advisory_assessment") or normalized["advisory_assessment"],
         "media_warnings": data.get("media_warnings") or [],
-        "agent_brief": normalized["agent_brief"],
+        "agent_brief": raw_brief,
     }
+    if data.get("advisory_assessment"):
+        response["advisory_assessment"] = data["advisory_assessment"]
     if include_internal_metrics:
         response["agent_report"]["inference_estimate"] = _internal_inference_estimate(result)
     if data.get("diagnostics"):
@@ -1373,7 +1412,7 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
     }
 
 
-def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False, include_html_report: bool = True) -> Dict[str, Any]:
+def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False, include_html_report: bool = True, defer_postprocess: bool = False) -> Dict[str, Any]:
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
@@ -1386,7 +1425,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         frame_width=960,
         supplemental_image_limit=MAX_SUPPLEMENTAL_IMAGES,
     )
-    run_dir = ROOT / "tmp" / "visual_review_workbench" / f"folder_{folder_dir.name}_{int(time.time())}"
+    run_dir = RUNTIME_MEDIA_DIR / f"folder_{folder_dir.name}_{int(time.time())}"
     try:
         case = load_case_bundle(folder_dir, args, run_dir, scenario_override=scenario)
     except SystemExit as exc:
@@ -1408,6 +1447,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         "agent_folder",
         include_internal_metrics=include_internal_metrics,
         include_html_report=include_html_report,
+        defer_postprocess=defer_postprocess,
     )
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
@@ -1441,15 +1481,33 @@ def health() -> Dict[str, Any]:
     sample_base = _sample_base()
     sample_ids = [path.name for path in sample_base.glob("sample_*") if path.is_dir()] if sample_base.is_dir() else []
     signing_ready = REPORT_SIGNING_SECRET_CONFIGURED or not REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET
+    probe = RUNTIME_MEDIA_DIR / f".health-{uuid4().hex}"
+    try:
+        RUNTIME_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+        probe.write_bytes(b"ok")
+        probe.unlink()
+        runtime_storage = {"ready": True, "writable": True}
+    except OSError as exc:
+        runtime_storage = {"ready": False, "writable": False, "error_type": type(exc).__name__}
+        try:
+            probe.unlink(missing_ok=True)
+        except OSError:
+            pass
     return {
-        "ok": signing_ready,
+        "ok": signing_ready and runtime_storage["ready"],
         "service": "visual_review_workbench",
+        "review_contract_version": REVIEW_CONTRACT_VERSION,
+        "asset_capacity": {
+            "soft_limit": SUPPLEMENTAL_IMAGE_SOFT_LIMIT,
+            "safe_limit": MAX_FOLDER_FILES,
+        },
         "data_mode": "demo",
         "source_system": "mitako_fixture",
         "integration_status": "not_connected",
         "access_control": "生产部署必须由主服务或反向代理执行租户鉴权",
         "report_signing_secret_configured": REPORT_SIGNING_SECRET_CONFIGURED,
         "persistent_report_signing_required": REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET,
+        "runtime_media_storage": runtime_storage,
         "model_media_transport": {
             "mode": "inline_base64_images",
             "supplier_file_uri_required": False,
@@ -1522,26 +1580,15 @@ def opaque_media_asset(media_id: str, expires: str = "", sig: str = "") -> FileR
     if not re.fullmatch(r"[a-f0-9]{32}", media_id):
         raise HTTPException(status_code=404, detail="素材不存在")
     _require_public_signature(f"/media-item/{media_id}", expires, sig)
-    with PUBLIC_MEDIA_INDEX_LOCK:
-        rel = PUBLIC_MEDIA_INDEX.get(media_id)
-        if not rel and PUBLIC_MEDIA_INDEX_PATH.is_file():
-            try:
-                stored = json.loads(PUBLIC_MEDIA_INDEX_PATH.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError):
-                stored = {}
-            if isinstance(stored, dict):
-                PUBLIC_MEDIA_INDEX.update(
-                    {
-                        str(key): str(value)
-                        for key, value in stored.items()
-                        if re.fullmatch(r"[a-f0-9]{32}", str(key)) and isinstance(value, str)
-                    }
-                )
-            rel = PUBLIC_MEDIA_INDEX.get(media_id)
+    rel = PUBLIC_MEDIA_REGISTRY.get(media_id)
+    base = ROOT
+    if not rel:
+        rel = PUBLIC_WORKBENCH_MEDIA_REGISTRY.get(media_id)
+        base = WORKBENCH_DIR
     if not rel:
         raise HTTPException(status_code=404, detail="素材不存在")
     try:
-        path = (ROOT / rel).resolve()
+        path = (base / rel).resolve()
     except OSError as exc:
         raise HTTPException(status_code=404, detail="素材不存在") from exc
     allowed_roots = [WORKBENCH_DIR.resolve(), SAMPLE_MATERIAL_DIR, RUNTIME_MEDIA_DIR]
@@ -1588,6 +1635,7 @@ def review_samples_batch(payload: Dict[str, str]) -> JSONResponse:
 @app.post("/api/review-folder")
 def review_folder(
     x_mitako_internal_metrics: str = Header("", alias="X-MITAKO-Internal-Metrics"),
+    x_mitako_internal_token: str = Header("", alias="X-MITAKO-Internal-Token"),
     scenario: str = Form("video_unboxing"),
     business_scenario: str = Form(""),
     ticket_id: str = Form(""),
@@ -1612,6 +1660,7 @@ def review_folder(
     fulfillment_baseline: str = Form(""),
     evidence_coverage: str = Form(""),
     review_routing_policy: str = Form(""),
+    defer_postprocess: bool = Form(False),
     include_html_report: bool = Form(True),
     sampling_mode: str = Form("adaptive"),
     fps: float = Form(1.0),
@@ -1629,6 +1678,7 @@ def review_folder(
     api_frame_limit = _clamp_int(api_frame_limit, 1, 24, 24)
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
     folder_dir, ingestion = _save_folder_uploads(files)
+    internal_request = _internal_request_authorized(x_mitako_internal_token)
     evidence_context = {
         "business_scenario": business_scenario,
         "ticket_id": ticket_id,
@@ -1664,8 +1714,9 @@ def review_folder(
         max_frames,
         api_frame_limit,
         probe_seconds,
-        include_internal_metrics=x_mitako_internal_metrics == "1",
+        include_internal_metrics=internal_request and x_mitako_internal_metrics == "1",
         include_html_report=include_html_report,
+        defer_postprocess=internal_request and defer_postprocess,
     )
     response["ingestion"] = ingestion
     return JSONResponse(response)

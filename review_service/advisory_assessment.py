@@ -112,7 +112,18 @@ def attach_advisory_assessment(
 
     readiness = _dict(readiness)
     missing_required = [str(item) for item in readiness.get("missing_required") or []]
-    material_gaps = [str(item) for item in _items(parsed.get("material_gaps"))]
+    minor = _dict(parsed.get("minor_material_assessment"))
+    declared_images = int(minor.get("declared_image_count") or 0)
+    accepted_images = int(minor.get("accepted_image_count") or 0)
+    processed_images = int(minor.get("processed_image_count") or 0)
+    technical_processing_incomplete = bool(minor) and (
+        accepted_images < declared_images
+        or processed_images < accepted_images
+        or bool(minor.get("image_batch_failures"))
+    )
+    material_gaps = [] if technical_processing_incomplete else [
+        str(item) for item in _items(parsed.get("material_gaps"))
+    ]
     missing_material = list(dict.fromkeys(missing_required + material_gaps))
     conflicts = _conflicts(parsed)
     authoritative = _dict(parsed.get("authoritative_verification"))
@@ -144,6 +155,15 @@ def attach_advisory_assessment(
     )
 
     signals: List[Dict[str, Any]] = []
+    if technical_processing_incomplete:
+        signals.append(_signal(
+            "technical_processing_incomplete",
+            "warning",
+            "当前请求已完成结构修复和逐张恢复但仍未覆盖全部资料；可受控重跑整案，可能重复模型成本，不能据此要求用户补交。",
+            declared_count=declared_images,
+            accepted_count=accepted_images,
+            processed_count=processed_images,
+        ))
     if out_of_frame_seconds >= policy["out_of_frame_resubmit_seconds"]:
         signals.append(_signal(
             "out_of_frame_over_threshold",
@@ -220,9 +240,14 @@ def attach_advisory_assessment(
         required_reasons.append("evidence_conflict")
     if authoritative_pending:
         required_reasons.append("authoritative_verification_pending")
-    if confidence is None and not missing_material:
+    if confidence is None and not missing_material and not technical_processing_incomplete:
         required_reasons.append("confidence_unavailable")
-    elif confidence is not None and confidence < policy["required_below_confidence"] and not missing_material:
+    elif (
+        confidence is not None
+        and confidence < policy["required_below_confidence"]
+        and not missing_material
+        and not technical_processing_incomplete
+    ):
         required_reasons.append("confidence_below_required_threshold")
 
     decisive_fact = label in {"positive", "negative"}
@@ -239,7 +264,15 @@ def attach_advisory_assessment(
         if customer_risk_level in {"medium", "high"}:
             optional_reasons.append("customer_risk_sampling")
 
-    if required_reasons:
+    if technical_processing_incomplete:
+        level = "not_required"
+        workflow = "system_retry"
+        recommendation = "可受控重跑整案，可能重复模型成本；达到业务配置的重试上限后再转授权人员，不应要求用户重复补交。"
+        reason_codes = ["technical_processing_incomplete"]
+        conclusion_code = "technical_processing_incomplete"
+        conclusion = "本轮尚未完成全部已提交材料的处理，暂不形成事实结论；可受控重跑整案。"
+        confidence = None
+    elif required_reasons:
         level = "required"
         workflow = "human_review"
         recommendation = "建议必须由授权人员复核原始证据后再进入甲方业务规则。"
@@ -276,7 +309,11 @@ def attach_advisory_assessment(
                 "unavailable" if confidence is None else "high" if confidence >= policy["optional_below_confidence"]
                 else "medium" if confidence >= policy["required_below_confidence"] else "low"
             ),
-            "calibration_status": "uncalibrated_evidence_score",
+            "calibration_status": (
+                "not_applicable_processing_incomplete"
+                if technical_processing_incomplete
+                else "uncalibrated_evidence_score"
+            ),
         },
         "human_review": {
             "level": level,
@@ -310,7 +347,10 @@ def attach_advisory_assessment(
     agent_report["advisory_assessment"] = advisory
     summary["needs_human_review"] = level == "required"
     summary["predicted_label"] = label
-    if confidence is not None:
+    if technical_processing_incomplete:
+        summary["confidence"] = None
+        parsed["confidence"] = None
+    elif confidence is not None:
         summary["confidence"] = confidence
     summary["human_review_level"] = level
     summary["workflow_recommendation"] = workflow

@@ -224,7 +224,6 @@ def load_case_bundle(
         frame["global_frame_index"] = index
     case["model_frames_per_call"] = max(1, min(int(args.api_frame_limit), 24))
     case["sampling_mode"] = args.sampling_mode
-    case["supplemental_images"] = case["supplemental_images"][: args.supplemental_image_limit]
     media_dir = run_dir / "api_media"
     case["frames"] = prepare_media(case["frames"], media_dir / "frames")
     minor_material = case.get("scenario") in {"minor_material", "minor_refund"}

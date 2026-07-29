@@ -5,7 +5,7 @@
 
 本目录用于研发交接和私有化部署，不进入甲方客户测试 ZIP。对外材料只使用 `甲方沟通交付文档/` 与 `docs/delivery/`。
 
-最新变更：[事实结论与人工复审闭环升级日志](./升级日志-2026-07-28-事实结论与人工复审闭环.md)。业务判断基线仍以 [MITAKO 售后审核 Agent 业务认知基线](./MITAKO售后审核Agent业务认知基线-20260727.md) 为准；Java/后端联调同时阅读 `../docs/delivery/after-sales-agent-integration.md`、`../docs/delivery/review-advisory-api.md` 和当前 OpenAPI。
+最新变更：[事实结论与人工复审闭环升级日志](./升级日志-2026-07-28-事实结论与人工复审闭环.md) 顶部“动态素材与统一审核链路”记录。业务判断基线仍以 [MITAKO 售后审核 Agent 业务认知基线](./MITAKO售后审核Agent业务认知基线-20260727.md) 为准；Java/后端联调同时阅读 `../docs/delivery/after-sales-agent-integration.md`、`../docs/delivery/review-advisory-api.md` 和当前 OpenAPI。
 
 ## 新同事阅读顺序
 

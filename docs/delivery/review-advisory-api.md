@@ -1,6 +1,6 @@
 # 审核建议结果 API 使用说明
 
-版本：2026-07-27
+版本：2026-07-28
 
 ## 1. 使用目的
 
@@ -100,6 +100,7 @@
 | `human_review` | 建议必须人工复审 |
 | `request_more_material` | 当前优先补充材料，无需仅因材料缺口先占用人工席位 |
 | `continue_by_customer_policy` | 甲方系统按自身已审批规则继续处理 |
+| `system_retry` | 当前请求内结构修复与逐张恢复后仍未完整处理；调用方可受控重跑整案，可能重复模型成本，不要求用户补件 |
 
 连续离镜达到默认 3 秒时，系统输出 `request_more_material + not_required`。这是“当前开箱证据不完整”，不是“自动拒绝”，也不是“已证明用户调包”。
 
@@ -110,6 +111,7 @@
 - JSON-only 请求设为 `false` 后，不生成报告文件；访问 `/api/v1/review/jobs/{job_id}/report` 返回 HTTP 409，错误码 `review_report_not_requested`。
 - HTML 首屏展示事实结论、证据分数、三级复审建议、流程建议、风险信号和业务边界；后续展示关键帧、反证、时间点、订单基线和媒体取证。
 - HTML 的标题、事实结论、人工复审建议和流程建议全部来自同一份 `advisory_assessment`。`request_more_material + not_required` 不得显示为“需要 VIP 客服复核”。
+- HTML 中的帧图、关键图和原视频链接统一使用主服务任务级地址 `/api/v1/review/jobs/{job_id}/media/{media_id}`；调用方不需要也不应访问内部视觉服务地址。
 
 ## 7. 批量案件
 
@@ -117,10 +119,15 @@
 
 网页父目录批量用于小批量人工复测，默认逐案生成 HTML；直接调用工作台接口时可传 `include_html_report=false` 只取 JSON。
 
+单案素材容量采用动态策略：默认 40 份以内为 `standard`，41-200 份为 `expanded`，服务全部接收后分批处理并聚合结果。响应的 `ingestion.capacity_mode/soft_limit/safe_limit` 可用于观测本案容量状态。超过安全上限返回 HTTP 413，错误码 `too_many_review_assets`，并包含 `received_count` 与 `safe_limit`；部署方可按机器、模型和成本评测调整安全上限，但不得静默截断已接收资料。
+
+若已接收资料中仍有未处理批次，结果必须标记 `processing_status=technical_processing_incomplete`、`workflow_recommendation=system_retry`，`confidence=null`，且不得把内部失败转换成用户 `material_gaps`。本版本的任务重试会重跑整案，可能重复模型成本；不宣称跨进程断点续跑。
+
 ## 8. 兼容与审计
 
 - `policy.policy_ref` 用于记录本次建议规则版本。
 - `policy.business_action_allowed` 永远为 `false`。
+- 商品有伤默认策略为 `classification_recommendation + MITAKO-PD-ADVISORY@20260728.1`。它只输出事实建议：完整审查未见主诉伤情可建议 `negative`，明确伤情可建议 `positive`，证据冲突或关键基准缺失为 `review`；不授权退款、换货、补偿或拒绝。
 - `signals` 记录信号代码、程度、影响和可用持续时间，方便甲方后续配置抽检规则。
 - 旧字段 `human_required`、`decision`、`system_yes_no` 会镜像新主契约，避免新旧客户端得到相反分流；新开发仍应只以 `advisory_assessment` 为准。
 - 人工标签、标准答案和评测目录名不得进入审核请求；只能在审核完成后离线比对。
@@ -135,3 +142,11 @@
 - `conversation_history` 只能包含本次审核时点之前的必要对话，不得包含人工最终决定、退款结果或评测标签。
 - `customer_risk_context` 只接收脱敏聚合统计，只影响服务端抽检优先级，不发送给视觉模型，不改变本次事实结论，也不允许自动拒绝。
 - 发错货和漏发货如果缺少商品到包裹/运单的权威映射，仍可审核媒体，但确定性结论会降级。
+
+## 10. 动态容量真实回归
+
+```powershell
+.venv\Scripts\python.exe scripts\check_dynamic_material_capacity_http.py --base-url http://127.0.0.1:8000 --count 62
+```
+
+该脚本不读取或发送人工标签，只验证真实 HTTP 上传、异步任务、动态容量、全部图片处理和结构化聚合。机器报告写入 `tests/reports/dynamic_material_capacity_http_latest.json`。
