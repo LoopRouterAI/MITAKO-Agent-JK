@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT_DIR = Path(__file__).resolve().parent / "reports"
+REPORT_DIR = Path(__file__).resolve().parent / "reports" / "internal_archive"
 ASSET_DIR = ROOT / "tmp" / "gemini_e2e_assets"
 DEFAULT_MODEL = "gemini-3.5-flash"
 

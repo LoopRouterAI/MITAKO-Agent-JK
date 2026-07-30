@@ -35,7 +35,7 @@ from review_input_safety import contains_evaluation_marker, redact_review_person
 
 ROOT = app_root()
 POC_DIR = ROOT / "poc" / "visual_review_poc"
-REPORT_DIR = POC_DIR / "reports"
+REPORT_DIR = POC_DIR / "reports" / "internal_archive"
 TMP_DIR = ROOT / "tmp" / "visual_review_gemini35"
 SAMPLE_LABELS = ROOT / "docs" / "三大审核场景的小量样本" / "sample_labels.json"
 MODEL = DEFAULT_GEMINI_MODEL
