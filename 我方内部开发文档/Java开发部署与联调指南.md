@@ -1,6 +1,6 @@
 # Java 开发部署与联调指南
 
-版本：2026-07-28
+版本：2026-07-30
 
 > 本轮多源客诉证据、包裹物流、当前工单对话与风险摘要的正式契约见 `../docs/delivery/after-sales-agent-integration.md`；字段定义以 `../docs/delivery/openapi.yaml` 为准。风险摘要只用于服务端抽检路由，不进入视觉模型。
 
@@ -53,6 +53,7 @@ Nginx / Java Gateway
 - 商品有伤：使用 `damage_causality_policy` 控制动作因果专项扫描；使用 `continuity_policy` 配置离镜阈值和连续性专项扫描。
 - 人工复审分级：使用 `review_routing_policy` 配置必须复审、建议抽检和 3 秒离镜补件阈值；离镜阈值不得解释为自动拒绝或已证实调包。
 - 报告输出：网页默认生成 HTML；系统批量可用 `output_options.include_html_report=false` 只保留结构化 JSON。
+- 未成年人资料：默认提交 `minor_refund_policy={"review_mode":"standard","authoritative_verification":"disabled"}`。该模式不依赖甲方当前不存在的身份、运营商或支付验真接口；`advisory` 只提示，只有业务方明确批准严格流程后才使用 `strict + required`。
 - 单案素材容量：默认 40 份以内为标准处理，41-200 份自动扩展分批且不丢资料；超过 `REVIEW_MAX_ASSETS` 返回 HTTP 413 `too_many_review_assets`。Java 不得自行截断后继续提交。
 - 商品有伤多诉求：用 `claim_scope.active_claim_ids` 明确本次原子诉求。后续追加的不同商品、部位或损伤机制必须新建 claim，不得用一个工单级标签覆盖全部诉求。
 - 自动分类策略：商品有伤默认使用已批准快照 `classification_recommendation + MITAKO-PD-ADVISORY@20260728.1`。它允许完整审查未见主诉伤情时给出事实 `negative` 建议；所有结果仍保持 `business_action_allowed=false`，Java/甲方系统不得把建议等同于自动退款或自动拒绝。
@@ -125,6 +126,7 @@ Java 侧至少补充：
 - 服务重启后未完成任务可恢复或重试。
 - `required/optional/not_required` 三种复审分级和 `request_more_material` 流程建议。
 - `system_retry` 表示当前请求内的结构修复与逐张恢复后仍未覆盖全部资料；可由调用方受控调用任务重试接口重跑整案，可能重复模型成本，不应要求用户补件。达到甲方配置的重试上限后再转授权人员。
+- 未成年人标准策略下验证：五类材料齐全但个别字段存疑时可返回 `continue_by_customer_policy + human_required=false`；字段明确冲突、字段比对技术失败、多重疑似编辑或显式严格验真待完成时返回必须复审。
 - JSON-only 任务不生成 HTML，报告路由返回 409 `review_report_not_requested`。
 - HTML 内媒体只通过主服务 `/api/v1/review/jobs/{job_id}/media/{media_id}` 获取；验证 Range 请求和服务重启后媒体仍可访问。
 

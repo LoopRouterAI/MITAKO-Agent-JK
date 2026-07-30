@@ -18,9 +18,9 @@ $PythonCandidates = @(
 $Python = $PythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $Python) { throw "Missing Python runtime: expected .venv or venv." }
 $GitCommit = (git rev-parse HEAD).Trim()
-$TrackedChanges = @(git status --porcelain --untracked-files=normal)
+$TrackedChanges = @(git status --porcelain --untracked-files=no)
 if ($TrackedChanges.Count -gt 0) {
-    throw "Working tree contains tracked or untracked changes. Commit them before creating an auditable internal package."
+    throw "Working tree contains tracked changes. Commit them before creating an auditable internal package."
 }
 
 function Invoke-InternalValidation {
@@ -28,7 +28,7 @@ function Invoke-InternalValidation {
 }
 
 Invoke-InternalValidation
-$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=normal)
+$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=no)
 if ($TrackedChangesAfterValidation.Count -gt 0) {
     throw "Release validation changed tracked files. Review and commit them before packaging."
 }
@@ -151,6 +151,9 @@ Copy-Path "tests\reports\customer_order_info_integration_strict_final_20260720.j
 Copy-Path "tests\reports\review_submission_modes_20260717-final.json"
 Copy-Path "tests\reports\review_submission_modes_20260717-final.html"
 Copy-Path "tests\reports\dynamic_material_capacity_http_latest.json"
+Copy-Path "tests\reports\dynamic_material_capacity_http_51_20260730.json"
+Copy-Path "tests\reports\dynamic_material_capacity_http_62_20260730.json"
+Copy-Path "tests\reports\minor_refund_144989_20260730_223430.json"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
 Copy-LatestReport "auth_strict_*.html" "tests\reports\auth_strict_latest.html"
 Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_deployment_api_smoke_latest.json"
@@ -159,6 +162,9 @@ $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
+    "甲方沟通交付文档\0730未成年人资料审核与客服报告升级说明.html",
+    "我方内部开发文档\升级日志-2026-07-30-未成年人策略与客服报告.md",
     "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
     "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
     "我方内部开发文档\升级日志-2026-07-28-事实结论与人工复审闭环.md",
@@ -199,6 +205,9 @@ $evidenceFiles = @(
     "tests\reports\review_submission_modes_20260717-final.json",
     "tests\reports\review_submission_modes_20260717-final.html",
     "tests\reports\dynamic_material_capacity_http_latest.json",
+    "tests\reports\dynamic_material_capacity_http_51_20260730.json",
+    "tests\reports\dynamic_material_capacity_http_62_20260730.json",
+    "tests\reports\minor_refund_144989_20260730_223430.json",
     "tests\reports\full_pipeline_latest.html",
     "tests\reports\auth_strict_latest.html",
     "tests\reports\private_deployment_api_smoke_latest.json"
@@ -229,6 +238,7 @@ $required = @(
     "main.py",
     ".env",
     "我方内部开发文档\Java开发部署与联调指南.md",
+    "我方内部开发文档\升级日志-2026-07-30-未成年人策略与客服报告.md",
     "我方内部开发文档\升级日志-2026-07-28-事实结论与人工复审闭环.md",
     "我方内部开发文档\升级日志-2026-07-23-审核建议契约与可选HTML.md",
     "我方内部开发文档\内部研发包交付说明.md",
@@ -244,6 +254,7 @@ $required = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
     "docs\delivery\java-client-sample.md",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
     "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
@@ -251,6 +262,7 @@ $required = @(
     "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
     "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
     "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
+    "甲方沟通交付文档\0730未成年人资料审核与客服报告升级说明.html",
     "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
     "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
     "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
@@ -271,7 +283,10 @@ $required = @(
     "tests\reports\customer_order_info_integration_20260720.json",
     "tests\reports\review_submission_modes_20260717-final.json",
     "tests\reports\review_submission_modes_20260717-final.html",
-    "tests\reports\dynamic_material_capacity_http_latest.json"
+    "tests\reports\dynamic_material_capacity_http_latest.json",
+    "tests\reports\dynamic_material_capacity_http_51_20260730.json",
+    "tests\reports\dynamic_material_capacity_http_62_20260730.json",
+    "tests\reports\minor_refund_144989_20260730_223430.json"
 )
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {

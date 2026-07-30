@@ -126,12 +126,16 @@ def attach_advisory_assessment(
     ]
     missing_material = list(dict.fromkeys(missing_required + material_gaps))
     conflicts = _conflicts(parsed)
-    authoritative = _dict(parsed.get("authoritative_verification"))
-    authoritative_pending = str(authoritative.get("status") or "").lower() in {
+    authoritative = _dict(parsed.get("authoritative_verification")) or _dict(minor.get("authoritative_verification"))
+    minor_policy = _dict(metadata.get("minor_refund_policy"))
+    authoritative_required = str(minor_policy.get("authoritative_verification") or "disabled") == "required"
+    authoritative_pending = authoritative_required and str(authoritative.get("status") or "").lower() in {
         "customer_integration_required",
         "manual_verification_required",
         "pending",
     }
+    authenticity = _dict(parsed.get("authenticity_assessment")) or _dict(minor.get("authenticity_assessment"))
+    authenticity_critical = str(authenticity.get("severity") or "").lower() == "critical"
     customer_risk = _dict(metadata.get("customer_risk_context"))
     customer_risk_level = str(customer_risk.get("risk_level") or "unknown").lower()
     diagnostics = _dict(output.get("diagnostics")) or _dict(agent_report.get("diagnostics"))
@@ -213,6 +217,14 @@ def attach_advisory_assessment(
             "材料图像识别已完成，但身份、实名、订单或支付归属仍需甲方权威系统或授权人员核验。",
             pending_checks=_items(authoritative.get("pending_checks"))[:20],
         ))
+    if authenticity:
+        signals.append(_signal(
+            "image_authenticity_risk",
+            "critical" if authenticity_critical else "warning" if authenticity.get("severity") == "warning" else "info",
+            str(authenticity.get("conclusion") or "本轮未发现阻断性的图片修改线索。"),
+            risk_percent=authenticity.get("risk_percent"),
+            evidence_image_indices=_items(authenticity.get("evidence_image_indices"))[:20],
+        ))
     if customer_risk_level in {"medium", "high"}:
         signals.append(_signal(
             "customer_risk_context",
@@ -240,6 +252,8 @@ def attach_advisory_assessment(
         required_reasons.append("evidence_conflict")
     if authoritative_pending:
         required_reasons.append("authoritative_verification_pending")
+    if authenticity_critical:
+        required_reasons.append("image_authenticity_risk")
     if confidence is None and not missing_material and not technical_processing_incomplete:
         required_reasons.append("confidence_unavailable")
     elif (
@@ -292,6 +306,9 @@ def attach_advisory_assessment(
         workflow = "continue_by_customer_policy"
         recommendation = "当前证据链与置信度达到本次配置门槛，可由甲方系统按自身业务规则继续处理。"
         reason_codes = ["configured_thresholds_satisfied"]
+
+    if minor and workflow == "continue_by_customer_policy" and label == "review":
+        conclusion = "五类材料已齐全；部分可见字段建议抽检，但不要求每单转VIP客服复审。"
 
     if workflow == "request_more_material":
         if conclusion_code == "evidence_inconclusive" or readiness_guard.get("applied") is True:

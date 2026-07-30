@@ -51,6 +51,28 @@ class WorkbenchUploadSafetyTest(unittest.TestCase):
                 workbench_server.UPLOAD_DIR = original_upload_dir
         self.assertEqual(len({folder.name for folder in folders}), 20)
 
+    def test_folder_upload_excludes_evaluation_label_context(self) -> None:
+        valid_body = b"\x00\x00\x00\x18ftypmp42" + b"0" * 64
+        uploads = [
+            upload("case/evidence.mp4", valid_body),
+            upload("case/annotation.json", b'{"expected_label":"negative"}'),
+            upload("case/reply.json", b'{"manual_result":"approved"}'),
+        ]
+        original_upload_dir = workbench_server.UPLOAD_DIR
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workbench_server.UPLOAD_DIR = Path(temp_dir)
+            try:
+                folder, summary = workbench_server._save_folder_uploads(uploads)
+                self.assertEqual(summary["accepted_count"], 1)
+                self.assertEqual(summary["skipped_count"], 2)
+                self.assertTrue(all(
+                    item["reason_code"] == "evaluation_label_not_allowed"
+                    for item in summary["skipped_files"]
+                ))
+                self.assertEqual([path.name for path in folder.iterdir()], ["evidence.mp4"])
+            finally:
+                workbench_server.UPLOAD_DIR = original_upload_dir
+
     def test_undecodable_video_is_isolated_when_valid_video_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             case_dir = Path(temp_dir) / "case"

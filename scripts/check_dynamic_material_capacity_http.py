@@ -16,6 +16,7 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT = ROOT / "tests" / "reports" / "dynamic_material_capacity_http_latest.json"
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 
 
 def git_commit() -> str:
@@ -32,6 +33,7 @@ def args() -> argparse.Namespace:
     parser.add_argument("--base-url", default=os.getenv("E2E_BASE_URL", "http://127.0.0.1:8000"))
     parser.add_argument("--count", type=int, default=62)
     parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--case-folder", type=Path, help="真实工单目录；仅上传其中的图片，不读取人工标签或客服结论")
     parser.add_argument(
         "--image",
         type=Path,
@@ -42,13 +44,23 @@ def args() -> argparse.Namespace:
 
 def main() -> int:
     options = args()
-    if not options.image.is_file():
+    source_images = []
+    if options.case_folder:
+        case_folder = options.case_folder.resolve()
+        if not case_folder.is_dir():
+            raise FileNotFoundError(f"工单目录不存在：{case_folder}")
+        source_images = [
+            path for path in sorted(case_folder.iterdir())
+            if path.is_file() and not path.name.startswith("._") and path.suffix.lower() in IMAGE_SUFFIXES
+        ]
+        options.count = len(source_images)
+    if not source_images and not options.image.is_file():
         candidates = sorted((options.image.parent).glob("*.*"))
         options.image = next(
             (path for path in candidates if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}),
             options.image,
         )
-    if not options.image.is_file():
+    if not source_images and not options.image.is_file():
         raise FileNotFoundError(f"缺少回归图片：{options.image}")
     if options.count < 1:
         raise ValueError("count 必须大于 0")
@@ -81,18 +93,23 @@ def main() -> int:
                 "claims": [{"claim_id": "CLM-MATERIAL", "issue_type": "material_completeness"}],
             },
             "sop_context": {"policy_ref": "minor_refund_2_0"},
+            "minor_refund_policy": {
+                "review_mode": "standard",
+                "authoritative_verification": "disabled",
+            },
         }
         with ExitStack() as stack:
+            paths = source_images or [options.image] * options.count
             files = [
                 (
                     "files",
                     (
-                        f"material_{index:03d}{options.image.suffix.lower()}",
-                        stack.enter_context(options.image.open("rb")),
-                        mimetypes.guess_type(options.image.name)[0] or "image/jpeg",
+                        f"material_{index:03d}{path.suffix.lower()}",
+                        stack.enter_context(path.open("rb")),
+                        mimetypes.guess_type(path.name)[0] or "image/jpeg",
                     ),
                 )
-                for index in range(1, options.count + 1)
+                for index, path in enumerate(paths, start=1)
             ]
             submitted = client.post(
                 f"{base_url}/api/v1/review/jobs",
@@ -138,6 +155,8 @@ def main() -> int:
         "job_id": job_id,
         "status": job.get("status"),
         "requested_count": options.count,
+        "input_mode": "real_case_images" if source_images else "repeated_capacity_fixture",
+        "blind_input_boundary": "未读取或上传 annotation.json、reply.json、manifest.json 和目录人工标签",
         "ingestion": ingestion,
         "assessment": {
             key: assessment.get(key)

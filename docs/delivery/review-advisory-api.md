@@ -1,6 +1,6 @@
 # 审核建议结果 API 使用说明
 
-版本：2026-07-28
+版本：2026-07-30
 
 ## 1. 使用目的
 
@@ -27,6 +27,24 @@
 }
 ```
 
+未成年人资料默认策略：
+
+```json
+{
+  "client_case_id": "MINOR-20260730-001",
+  "scenario": "minor_refund",
+  "minor_refund_policy": {
+    "review_mode": "standard",
+    "authoritative_verification": "disabled"
+  },
+  "output_options": {
+    "include_html_report": true
+  }
+}
+```
+
+`review_mode=standard + authoritative_verification=disabled` 是默认值：完成五类材料、可见字段一致性和图片风险初审，不因甲方没有身份/运营商接口而强制转人工。`authoritative_verification=advisory` 只增加黄色提示；只有甲方明确选择 `review_mode=strict + authoritative_verification=required` 时，未完成权威核验才阻断。
+
 字段说明：
 
 | 字段 | 默认值 | 作用 |
@@ -35,6 +53,8 @@
 | `review_routing_policy.required_below_confidence` | `0.5` | 低于该证据分数时建议必须人工复审 |
 | `review_routing_policy.optional_below_confidence` | `0.8` | 低于该分数但未达到必须复审条件时建议抽检 |
 | `review_routing_policy.out_of_frame_resubmit_seconds` | `3.0` | 连续离镜达到该秒数时建议补充连续原视频 |
+| `minor_refund_policy.review_mode` | `standard` | 未成年人资料视觉初审；`strict` 仅供甲方显式启用 |
+| `minor_refund_policy.authoritative_verification` | `disabled` | `disabled/advisory/required`；默认不依赖外部验真接口 |
 
 三个阈值只控制建议分级，不授权服务执行任何售后动作。离镜本身不等于剪辑、调包或欺诈。
 
@@ -150,3 +170,22 @@
 ```
 
 该脚本不读取或发送人工标签，只验证真实 HTTP 上传、异步任务、动态容量、全部图片处理和结构化聚合。机器报告写入 `tests/reports/dynamic_material_capacity_http_latest.json`。
+
+## 11. 未成年人资料结果口径
+
+- `minor_material_assessment.checklist`：五类材料是否识别、质量状态和证据图片编号。
+- `minor_material_assessment.field_consistency`：只比较图片中可见字段是否互相对得上，不冒充政府、运营商或支付系统验真。
+- `minor_material_assessment.authenticity_assessment`：图片风险提示。缺少 EXIF 或单个疑似编辑信号默认标黄；多项相互印证才标红。
+- `minor_material_assessment.authoritative_verification.status=not_configured_optional`：默认未配置且不阻断；不是接口故障。
+- 五类材料齐全、字段仅有非阻断存疑时允许 `decision=continue_by_customer_policy`、`human_required=false`，由甲方按风险偏好抽检。
+- 字段明确冲突、字段比对技术失败、多重疑似编辑证据或严格验真待完成时才 `human_required=true`。
+
+真实盲测命令：
+
+```powershell
+.venv\Scripts\python.exe scripts\check_minor_refund_144989.py `
+  --sample-root "E:\AIGC\0 Mitako样本" `
+  --base-url http://127.0.0.1:8000
+```
+
+该脚本会过滤人工标签、最终回复、隐藏资源文件和无效媒体，只把用户诉求与真实媒体送入正式异步 API。

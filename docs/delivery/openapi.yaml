@@ -3020,6 +3020,8 @@ components:
           $ref: '#/components/schemas/ReviewOutputOptions'
         review_routing_policy:
           $ref: '#/components/schemas/ReviewRoutingPolicy'
+        minor_refund_policy:
+          $ref: '#/components/schemas/ReviewMinorRefundPolicy'
       additionalProperties: true
       type: object
       required:
@@ -3725,6 +3727,26 @@ components:
       required:
       - metrics
       title: ReviewMetricsResponse
+    ReviewMinorRefundPolicy:
+      properties:
+        review_mode:
+          type: string
+          enum:
+          - standard
+          - strict
+          title: Review Mode
+          default: standard
+        authoritative_verification:
+          type: string
+          enum:
+          - disabled
+          - advisory
+          - required
+          title: Authoritative Verification
+          default: disabled
+      type: object
+      title: ReviewMinorRefundPolicy
+      description: 未成年人资料视觉初审策略；权威验真未接入时默认不阻断。
     ReviewOutputOptions:
       properties:
         include_html_report:

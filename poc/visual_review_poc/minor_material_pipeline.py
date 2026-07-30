@@ -136,6 +136,70 @@ def _declared_image_count(case: Dict[str, Any]) -> int:
     return max(declared, len(case.get("supplemental_images") or []))
 
 
+def _minor_refund_policy(case: Dict[str, Any]) -> Dict[str, str]:
+    raw = (case.get("structured_business_context") or {}).get("minor_refund_policy") or {}
+    review_mode = str(raw.get("review_mode") or "standard")
+    authoritative = str(raw.get("authoritative_verification") or "disabled")
+    return {
+        "review_mode": review_mode if review_mode in {"standard", "strict"} else "standard",
+        "authoritative_verification": (
+            authoritative if authoritative in {"disabled", "advisory", "required"} else "disabled"
+        ),
+    }
+
+
+def _authenticity_assessment(
+    case: Dict[str, Any],
+    observations: List[Dict[str, Any]],
+    field_consistency: Dict[str, Any],
+) -> Dict[str, Any]:
+    image_by_index = {
+        int(item["image_index"]): item
+        for item in case.get("supplemental_images") or []
+        if item.get("image_index") is not None
+    }
+    missing_exif = sorted(index for index, item in image_by_index.items() if item.get("has_exif") is False)
+    unknown_exif = sorted(index for index, item in image_by_index.items() if item.get("has_exif") is None)
+    suspected_editing = {
+        int(item["image_index"])
+        for item in observations
+        if "suspected_editing" in (item.get("quality_issues") or [])
+    }
+    corroborated_editing: set[int] = set()
+    for check in field_consistency.get("checks") or []:
+        if str(check.get("tamper_risk") or "").lower() == "high":
+            corroborated_editing.update(int(index) for index in check.get("evidence_image_indices") or [])
+    suspected_editing.update(corroborated_editing)
+    evidence_indices = sorted(suspected_editing)
+    if corroborated_editing or len(evidence_indices) >= 2:
+        severity = "critical"
+        risk_score = min(0.94, 0.78 + 0.04 * len(evidence_indices))
+        conclusion = "发现较强的疑似编辑或修改线索，请优先回看标红图片。"
+    elif evidence_indices:
+        severity = "warning"
+        risk_score = 0.48
+        conclusion = "单张图片出现疑似编辑提示，但缺少交叉证据；已标黄供抽检，不单独阻断初审。"
+    elif missing_exif or unknown_exif:
+        severity = "warning"
+        risk_score = 0.25
+        conclusion = "部分图片没有可用拍摄信息；压缩、转发或格式转换都可能造成该情况，本身不能证明图片造假。"
+    else:
+        severity = "clear"
+        risk_score = 0.08
+        conclusion = "图片保留拍摄信息，视觉检查也未发现明显编辑线索。"
+    return {
+        "severity": severity,
+        "risk_score": risk_score,
+        "risk_percent": int(round(risk_score * 100)),
+        "blocks_visual_precheck": severity == "critical",
+        "evidence_image_indices": evidence_indices,
+        "missing_exif_image_indices": missing_exif,
+        "unknown_exif_image_indices": unknown_exif,
+        "conclusion": conclusion,
+        "boundary": "该分数是未校准的图片风险提示，不是图片真实或伪造的客观概率。",
+    }
+
+
 def _normalize_observations(
     rows: List[Tuple[List[int], Dict[str, Any]]],
 ) -> Tuple[List[Dict[str, Any]], List[int]]:
@@ -465,7 +529,7 @@ def _normalize_consistency_checks(
                 if status == "mismatched" and (visibility != "complete" or len(evidence_indices) < 2):
                     status = "uncertain"
                 if status == "matched" and (
-                    visibility not in {"complete", "partial"} or len(evidence_indices) < 2
+                    visibility not in {"complete", "partial"} or not evidence_indices
                 ):
                     status = "uncertain"
                 field_candidates[field_name].append({
@@ -599,6 +663,12 @@ def aggregate_minor_material_results(
     not_observed = [item for item in checklist if item["status"] == "not_observed_after_full_scan"]
     field_consistency = _normalize_consistency_checks(consistency_results, consistency_failures)
     consistency_by_id = {item["check_id"]: item for item in field_consistency["checks"]}
+    consistency_status_labels = {
+        "matched": "未发现明显矛盾",
+        "mismatched": "存在明确冲突",
+        "uncertain": "仍待确认",
+        "not_assessed": "尚未完成",
+    }
     requirement_checks = {
         "identity": "identity_age",
         "relationship": "guardian_relationship",
@@ -614,26 +684,69 @@ def aggregate_minor_material_results(
             "uncertain": "visual_consistency_uncertain",
         }.get(check.get("status"), item["validation_status"])
 
-    if coverage_complete and present_count == len(checklist) and field_consistency["verdict"] == "matched":
-        predicted_label = "review"
-        decision = "manual_review"
-        system_yes_no = "REVIEW"
+    policy = _minor_refund_policy(case)
+    authoritative_required = policy["authoritative_verification"] == "required"
+    authenticity = _authenticity_assessment(case, observations, field_consistency)
+    authenticity_blocked = bool(authenticity["blocks_visual_precheck"])
+
+    if (
+        coverage_complete
+        and present_count == len(checklist)
+        and field_consistency["verdict"] == "matched"
+        and not authenticity_blocked
+        and not authoritative_required
+    ):
+        predicted_label = "positive"
+        decision = "visual_precheck_passed"
+        system_yes_no = "YES"
         confidence = 0.88
-        readiness = "ready_for_authorized_final_review"
+        readiness = "ready_for_customer_policy"
         visual_precheck_status = "passed"
-        conclusion = "五类材料齐全，五项视觉字段一致性初审未发现明显矛盾；仍须完成权威系统校验和授权人员终审。"
-    elif coverage_complete and present_count == len(checklist):
+        conclusion = "五类必交材料已齐全，视觉字段未发现明显矛盾，可以按甲方现行流程继续审核。"
+    elif coverage_complete and present_count == len(checklist) and field_consistency["verdict"] == "mismatched":
+        predicted_label = "negative"
+        decision = "visual_precheck_not_passed"
+        system_yes_no = "NO"
+        confidence = 0.84
+        readiness = "visual_conflict_requires_review"
+        visual_precheck_status = "failed"
+        conclusion = "材料虽然齐全，但可见字段存在明确冲突，当前资料不支持继续通过初审；请回看标红图片。"
+    elif coverage_complete and present_count == len(checklist) and authenticity_blocked:
         predicted_label = "review"
         decision = "manual_review"
         system_yes_no = "REVIEW"
-        confidence = 0.78 if field_consistency["verdict"] == "mismatched" else 0.69
+        confidence = 0.74
+        readiness = "suspected_editing_requires_review"
+        visual_precheck_status = "needs_review"
+        conclusion = "五类材料已齐全，但部分图片存在较强的疑似编辑线索，请重点复核标红证据。"
+    elif coverage_complete and present_count == len(checklist) and authoritative_required:
+        predicted_label = "review"
+        decision = "manual_review"
+        system_yes_no = "REVIEW"
+        confidence = 0.88 if field_consistency["verdict"] == "matched" else 0.69
+        readiness = "ready_for_authoritative_verification"
+        visual_precheck_status = "needs_review"
+        conclusion = "视觉初审已完成；当前工单启用了严格验真策略，仍需完成甲方配置的权威核验。"
+    elif (
+        coverage_complete
+        and present_count == len(checklist)
+        and field_consistency["status"] in {"degraded", "not_completed"}
+    ):
+        predicted_label = "review"
+        decision = "manual_consistency_review"
+        system_yes_no = "REVIEW"
+        confidence = 0.69
         readiness = "needs_field_consistency_review"
         visual_precheck_status = "needs_review"
-        conclusion = (
-            "材料类别齐全，但视觉字段存在冲突，必须按证据图片复核；不能只按资料齐全判定。"
-            if field_consistency["verdict"] == "mismatched"
-            else "材料类别齐全，但字段一致性未完成或仍不确定；不能只按资料齐全判定。"
-        )
+        conclusion = "五类材料已齐全，但字段仍不清楚或未完成比对；请回看标黄图片或受控重试，不能直接按本轮结果处理。"
+    elif coverage_complete and present_count == len(checklist):
+        predicted_label = "review"
+        decision = "continue_by_customer_policy"
+        system_yes_no = "REVIEW"
+        confidence = 0.69
+        readiness = "ready_with_visual_warnings"
+        visual_precheck_status = "needs_review"
+        conclusion = "五类材料已齐全，部分可见字段仍不清楚或无法比较；可按甲方现行流程继续，标黄图片建议抽检。"
     elif not_observed:
         predicted_label = "review"
         decision = "request_more_material"
@@ -665,17 +778,32 @@ def aggregate_minor_material_results(
         visual_precheck_status = "processing_incomplete"
         conclusion = "系统尚未完成全部已接收图片的技术处理，本轮不形成材料缺失或真实性结论。"
 
-    human_required = not technical_processing_incomplete
+    human_required = bool(
+        not technical_processing_incomplete
+        and (
+            field_consistency["verdict"] == "mismatched"
+            or field_consistency["status"] in {"degraded", "not_completed"}
+            or authenticity_blocked
+            or authoritative_required
+        )
+    )
     business_follow_up_reason = (
         "当前请求已完成结构修复和逐张恢复；仍未覆盖时可受控重跑整案，可能重复模型成本，且不要求用户补件。"
         if technical_processing_incomplete
-        else "未成年人退款涉及身份、监护关系、账号归属与资金处置，必须由授权人员终审。"
+        else "Agent只给资料初审建议，不执行退款或拒绝；甲方可按当前流程继续、抽检或要求用户补充指定材料。"
     )
-    next_step = (
-        "请受控重跑整案；全部资料处理完成后再生成事实与人工复审建议，达到重试上限后再转授权人员。"
-        if technical_processing_incomplete
-        else "请授权人员按一致性检查的图片编号复核差异；随后调用甲方身份、订单支付和运营商能力完成权威验证。"
-    )
+    if technical_processing_incomplete:
+        next_step = "请受控重跑整案；全部资料处理完成后再生成审核建议，达到重试上限后再转授权人员。"
+    elif predicted_label == "positive":
+        next_step = "五类材料和可见字段均已通过初审，可按甲方现行一审流程继续；本服务不直接执行退款。"
+    elif predicted_label == "negative":
+        next_step = "请先回看报告中标红的冲突图片；确认无误后，按 SOP 告知用户补交或更正对应材料。"
+    elif authenticity_blocked:
+        next_step = "请优先打开报告中标红的疑似编辑图片；确认原图无误后可重新送审。"
+    elif authoritative_required:
+        next_step = "当前工单显式启用了严格验真，请完成甲方配置的核验步骤；没有可用接口时请改回默认策略。"
+    else:
+        next_step = "请回看报告中标黄的字段或图片；能确认一致时按现行流程继续，不能确认时只补对应材料。"
 
     supporting_evidence = [
         {
@@ -684,7 +812,7 @@ def aggregate_minor_material_results(
             "asset_ref": f"supplemental_image_{image_index}",
             "description": (
                 f"该图片支持“{item['label']}”材料存在；视觉字段一致性状态为"
-                f"{consistency_by_id.get(requirement_checks[item['requirement_id']], {}).get('status', 'not_assessed')}。"
+                f"{consistency_status_labels.get(consistency_by_id.get(requirement_checks[item['requirement_id']], {}).get('status', 'not_assessed'), '尚未完成')}。"
             ),
             "confidence": 0.82,
         }
@@ -697,6 +825,25 @@ def aggregate_minor_material_results(
         for item in case.get("frames") or []
     }
     process_observations = _normalize_process_observations(video_results, valid_frames)
+    evidence_conflicts = [
+        {
+            "check_id": item.get("check_id"),
+            "evidence_image_indices": item.get("evidence_image_indices") or [],
+            "message": "可见字段存在冲突，请回看对应图片。",
+        }
+        for item in field_consistency.get("checks") or []
+        if item.get("status") == "mismatched"
+    ]
+    challenging_evidence = [
+        {
+            "source_type": "supplementary_image",
+            "image_index": image_index,
+            "asset_ref": f"supplemental_image_{image_index}",
+            "description": "该图片存在较强的疑似编辑线索，需要优先人工回看原图。",
+            "confidence": authenticity["risk_score"],
+        }
+        for image_index in authenticity["evidence_image_indices"]
+    ]
     assessment = {
         "sop_version": "minor_refund_2_0",
         "readiness": readiness,
@@ -716,18 +863,37 @@ def aggregate_minor_material_results(
         "material_inventory": observations,
         "checklist": checklist,
         "field_consistency": field_consistency,
+        "authenticity_assessment": authenticity,
+        "policy": policy,
         "authoritative_verification": {
-            "status": "customer_integration_required",
+            "status": (
+                "customer_integration_required"
+                if authoritative_required
+                else "not_configured_advisory"
+                if policy["authoritative_verification"] == "advisory"
+                else "not_configured_optional"
+            ),
             "checks": [
-                {"verification_id": "identity_registry", "integration_status": "customer_integration_required"},
-                {"verification_id": "carrier_realname", "integration_status": "customer_integration_required"},
-                {"verification_id": "order_payment_system", "integration_status": "customer_integration_required"},
+                {
+                    "verification_id": verification_id,
+                    "integration_status": "customer_integration_required" if authoritative_required else "not_configured",
+                }
+                for verification_id in ("identity_registry", "carrier_realname", "order_payment_system")
             ],
-            "boundary": "视觉一致性不等于法定真实性；需甲方权威系统或授权人员完成最终核验。",
+            "pending_checks": (
+                ["identity_registry", "carrier_realname", "order_payment_system"]
+                if authoritative_required
+                else []
+            ),
+            "boundary": (
+                "当前策略要求完成甲方权威验真后再继续。"
+                if authoritative_required
+                else "当前默认不依赖外部验真接口；视觉一致性仍不等于法定真实性，报告不会宣称证件已权威验真。"
+            ),
         },
         "process_evidence": process_observations,
         "privacy_boundary": "报告只保留材料类型、图片编号、清晰度和一致性待核点，不输出姓名、手机号、证件号、住址或OCR原文。",
-        "business_boundary": "资料齐全只表示可进入人工一审、二审和终审；Agent不得自动退款、自动通过或自动拒绝。",
+        "business_boundary": "Agent输出资料初审建议，不自动退款、自动通过、自动拒绝或注销账号；最终业务动作仍由甲方规则执行。",
     }
     return {
         "decision": decision,
@@ -737,8 +903,8 @@ def aggregate_minor_material_results(
         "overall_audit": {
             "conclusion": conclusion,
             "confidence": confidence,
-            "core_reason": f"已处理 {len(processed_indices)}/{declared_image_count} 张申报图片，五类材料确认 {present_count}/{len(checklist)} 项；字段一致性为 {field_consistency['verdict']}。",
-            "business_follow_up_suggestion": "请授权人员复核差异项，并通过甲方身份、订单支付和运营商接口完成权威验证。",
+            "core_reason": f"已处理 {len(processed_indices)}/{declared_image_count} 张申报图片，五类材料确认 {present_count}/{len(checklist)} 项；字段一致性{consistency_status_labels.get(field_consistency['verdict'], '尚未完成')}。",
+            "business_follow_up_suggestion": next_step,
         },
         "visual_evidence_verdict": conclusion,
         "visual_qc_conclusion": {"verdict": predicted_label, "confidence": confidence, "core_reason": conclusion},
@@ -748,9 +914,12 @@ def aggregate_minor_material_results(
             else f"图片覆盖率 {coverage_ratio}，已确认材料类别 {present_count}/{len(checklist)}；该分数是未校准的证据完整性参考。"
         ),
         "minor_material_assessment": assessment,
+        "authoritative_verification": assessment["authoritative_verification"],
+        "authenticity_assessment": authenticity,
         "supporting_evidence": supporting_evidence,
         "adopted_evidence": supporting_evidence,
-        "challenging_evidence": [],
+        "challenging_evidence": challenging_evidence,
+        "evidence_conflicts": evidence_conflicts,
         "material_gaps": material_gaps,
         "processing_status": "technical_processing_incomplete" if technical_processing_incomplete else "completed",
         "system_action": "system_retry" if technical_processing_incomplete else "none",
@@ -759,7 +928,12 @@ def aggregate_minor_material_results(
         "human_required": human_required,
         "business_follow_up_reason": business_follow_up_reason,
         "next_step": next_step,
-        "model_limitations": ["视觉字段一致不等同于法定真实性", "公开结果不展示姓名、号码、金额或OCR原文", "权威验证依赖甲方接口", "退款结果由甲方业务系统和授权人员决定"],
+        "model_limitations": [
+            "视觉字段一致不等同于法定真实性",
+            "缺少 EXIF 不等于图片造假，疑似编辑分数也不是客观真伪概率",
+            "公开结果不展示姓名、号码、金额或OCR原文",
+            "退款结果由甲方业务系统和授权人员决定",
+        ],
         "confidence_components": {
             "material_image_coverage": coverage_ratio,
             "required_category_completeness": round(present_count / max(len(checklist), 1), 4),
@@ -780,6 +954,7 @@ def run_minor_material_pipeline(
     workers: int,
 ) -> Dict[str, Any]:
     wall_started = time.time()
+    effective_workers = max(1, min(int(workers or 1), 8))
     images = list(case.get("supplemental_images") or [])
     frames = list(case.get("frames") or [])
     image_batch_size = max(1, min(int(os.getenv("REVIEW_MINOR_IMAGE_BATCH_SIZE", "4") or 4), 6))
@@ -879,7 +1054,7 @@ def run_minor_material_pipeline(
         return kind, index, indices, result
 
     if jobs:
-        with ThreadPoolExecutor(max_workers=max(1, min(workers, 4, len(jobs)))) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, min(effective_workers, len(jobs)))) as pool:
             futures = {pool.submit(review_job, *job): job for job in jobs}
             completed = []
             for future in as_completed(futures):
@@ -933,7 +1108,7 @@ def run_minor_material_pipeline(
             result.setdefault("_model_calls", 1)
             return result
 
-        with ThreadPoolExecutor(max_workers=max(1, min(workers, 4, len(consistency_jobs)))) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, min(effective_workers, len(consistency_jobs)))) as pool:
             futures = {
                 pool.submit(review_consistency, job): job
                 for job in consistency_jobs
@@ -988,6 +1163,7 @@ def run_minor_material_pipeline(
         **cost_observability,
         "parsed": parsed,
         "chunking": {
+            "effective_workers": effective_workers,
             "segment_count": len(image_batches) + len(frame_batches) + len(consistency_jobs),
             "frames_per_segment": frame_batch_size,
             "total_frames": len(frames),

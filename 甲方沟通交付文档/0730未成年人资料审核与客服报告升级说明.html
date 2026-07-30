@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>0730 未成年人资料审核与客服报告升级说明</title>
+<style>
+:root{--ink:#111827;--muted:#5f6b78;--line:#dce4dc;--green:#79b51c;--amber:#eea922;--red:#d64545;--paper:#fff;--soft:#f4f8f2}*{box-sizing:border-box}body{margin:0;background:#f6f8f5;color:var(--ink);font:16px/1.7 Inter,"Microsoft YaHei",sans-serif;letter-spacing:0}.wrap{width:min(1120px,calc(100% - 28px));margin:auto;padding:28px 0 56px}.hero{background:var(--paper);border:1px solid var(--line);border-top:8px solid var(--green);padding:34px;border-radius:8px}.eyebrow{font-weight:800;color:#477a12}.hero h1{font-size:42px;line-height:1.12;margin:12px 0;letter-spacing:0}.hero p{max-width:850px;color:var(--muted)}.status{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:22px}.status div,.panel{background:var(--paper);border:1px solid var(--line);border-radius:8px}.status div{padding:16px}.status b{display:block;font-size:24px}.panel{margin-top:14px;padding:26px}.panel h2{margin:0 0 12px;font-size:24px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.item{padding:16px;border-left:6px solid var(--green);background:var(--soft)}.item.amber{border-color:var(--amber)}.item.red{border-color:var(--red)}.item h3{margin:0 0 6px}.traffic{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.traffic article{padding:18px;border:1px solid var(--line);border-radius:8px}.traffic .g{border-top:7px solid var(--green)}.traffic .a{border-top:7px solid var(--amber)}.traffic .r{border-top:7px solid var(--red)}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:var(--soft)}code{background:#edf2ed;padding:2px 5px;border-radius:4px}.note{padding:14px;border-left:6px solid var(--amber);background:#fff9e9}.boundary{padding:16px;border:1px solid #f0c6c6;background:#fff7f7}.footer{margin-top:18px;color:var(--muted);font-size:14px}@media(max-width:760px){.wrap{width:calc(100% - 20px);padding-top:10px}.hero,.panel{padding:18px}.hero h1{font-size:30px}.status,.grid,.traffic{grid-template-columns:1fr}table{font-size:14px;display:block;overflow-x:auto}}
+</style>
+</head>
+<body><main class="wrap">
+<section class="hero"><div class="eyebrow">MITAKO 售后审核 Agent · 0730 更新</div><h1>资料齐全不再因为“没有外部验真接口”而统一转人工</h1><p>本轮针对甲方未成年人资料审核反馈进行了策略、速度和客服报告三方面整改。默认按现有资料完成视觉初审；不存在的身份、运营商和支付验真接口不再作为每单必须复核的理由。</p><div class="status"><div><span>真实图片</span><b>20/20</b></div><div><span>五类材料</span><b>5/5</b></div><div><span>真实验收</span><b>14/14</b></div><div><span>处理用时</span><b>32.79 秒</b></div></div></section>
+
+<section class="panel"><h2>这次到底改了什么</h2><div class="grid">
+<article class="item"><h3>默认不依赖不存在的接口</h3><p>身份、运营商和支付在线验真默认关闭。系统会明确说明“没有做法定验真”，但不会因此要求每一单都转 VIP 客服。</p></article>
+<article class="item"><h3>51/62 张图片全部看完</h3><p>单案图片量会动态分批和并发处理。真实任务已验证 51/51、62/62 全部接收与处理，不静默截断。</p></article>
+<article class="item amber"><h3>黄色风险只建议抽检</h3><p>缺少拍摄信息、单个疑似编辑提示、部分字段看不清，都会标黄并给出图片链接，但不单独阻断。</p></article>
+<article class="item red"><h3>红色问题才要求重点复核</h3><p>明确字段冲突、字段比对失败、多项疑似编辑互相印证，或甲方主动启用严格验真时，才要求人工重点查看。</p></article>
+<article class="item"><h3>报告先说结论和下一步</h3><p>首屏先展示事实结论、证据分数、是否需要人工、下一步怎么做；五类材料可点击原图回看，末尾再次给客服行动建议。</p></article>
+<article class="item"><h3>网页与 API 使用同一结果</h3><p>网页单件、工单文件夹和正式异步 API 使用同一策略与报告链路；API 可选择只返回字段，或同时生成 HTML。</p></article>
+</div></section>
+
+<section class="panel"><h2>客服怎么读新的交通灯报告</h2><div class="traffic"><article class="g"><h3>绿色：可继续</h3><p>五类材料和可见字段没有明显矛盾。Agent 给出事实建议，甲方系统仍按自身规则决定最终动作。</p></article><article class="a"><h3>黄色：建议抽检</h3><p>资料齐全但有非阻断疑点。客服只看标黄图片，不需要整单从头再审。</p></article><article class="r"><h3>红色：重点复核</h3><p>存在明确冲突、技术失败或多项高风险证据。报告会说明具体图片和理由。</p></article></div></section>
+
+<section class="panel"><h2>未成年人资料现在检查什么</h2><table><thead><tr><th>检查层</th><th>系统会做</th><th>系统不会冒充</th></tr></thead><tbody><tr><td>五类材料</td><td>身份证明、监护关系、双方签字承诺书、订单/支付凭证、手机号归属证明</td><td>不会因为图片多就只看前 40 张</td></tr><tr><td>可见字段一致性</td><td>比较图片中看得清的年龄、关系、签署主体、订单支付和手机号材料</td><td>不输出姓名、证件号、手机号或 OCR 原文</td></tr><tr><td>图片风险</td><td>提示拍摄信息是否缺失、是否有疑似编辑线索，并给出风险百分比和证据图片</td><td>风险百分比不是图片真伪概率</td></tr><tr><td>权威在线验真</td><td>保留未来对接开关；甲方明确要求时可启用严格模式</td><td>当前没有接口时不会宣称已权威验真</td></tr></tbody></table></section>
+
+<section class="panel"><h2>甲方如何复测</h2><ol><li>网页端选择“资料审核”，上传单个工单文件夹；可使用 51 张或 62 张图片样本验证全量处理。</li><li>查看首屏是否写清“可继续、建议抽检或重点复核”，并确认理由与下一步一致。</li><li>打开“五类材料核对”，点击图片编号和证据缩略图，确认原图可放大。</li><li>通过正式接口提交同一案件，轮询任务状态，并读取结构化字段或 HTML 报告。</li><li>盲测时不要把目录标签、人工结论、<code>annotation.json</code>、<code>reply.json</code> 或最终退款结果送入审核请求。</li></ol><p class="note">默认策略是视觉初审，不依赖外部验真。若甲方未来明确要求每单做身份/运营商在线验真，再开启严格模式并联调对应接口。</p></section>
+
+<section class="panel"><h2>本轮真实验收</h2><table><thead><tr><th>任务</th><th>结果</th></tr></thead><tbody><tr><td>144989 正式 API 盲测</td><td><code>RJ-62DE227AA5234D70</code>；20/20 图片、1 个有效视频、五类材料 5/5、14/14 检查通过；不要求每单人工。</td></tr><tr><td>51 张动态容量</td><td><code>RJ-073A540EFD844C13</code>；51/51 接收与处理，覆盖率 100%。</td></tr><tr><td>62 张动态容量</td><td><code>RJ-88CB542816B44F77</code>；62/62 接收与处理，覆盖率 100%。</td></tr><tr><td>网页报告</td><td>36/36 张媒体可加载；证据可放大；桌面和手机无横向溢出；无跨场景或内部调试文案。</td></tr><tr><td>自动化</td><td>269 项测试通过，另有 39 个子测试通过；前端生产构建通过。</td></tr></tbody></table></section>
+
+<section class="boundary"><strong>交付边界：</strong>当前已实现可部署的审核 API、网页 UAT 工作台和人类可读报告；尚未接入甲方真实身份、运营商、支付、订单、企微或客服生产系统。审核结论是证据建议，不自动退款、补发、换货或拒绝。生产准确率仍需双方冻结黄金样本集后评测。</section>
+<p class="footer">版本日期：2026-07-30 · 面向甲方项目负责人、客服负责人和联调研发</p>
+</main></body></html>

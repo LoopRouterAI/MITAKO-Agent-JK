@@ -131,6 +131,10 @@ def build_minor_material_video_prompt(case: Dict[str, Any]) -> str:
 
 def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
     context = case.get("structured_business_context") or {}
+    policy = context.get("minor_refund_policy") or {
+        "review_mode": "standard",
+        "authoritative_verification": "disabled",
+    }
     check = context.get("minor_consistency_check") or {}
     check_id = str(check.get("check_id") or "")
     fields = CONSISTENCY_FIELDS.get(check_id) or []
@@ -157,6 +161,7 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
 必须检查的字段类型：{json.dumps(fields, ensure_ascii=False)}
 本次图片：{json.dumps(images, ensure_ascii=False)}
 预期图片编号：{json.dumps(check.get("expected_image_indices") or [], ensure_ascii=False)}
+本次审核策略：{json.dumps(policy, ensure_ascii=False)}
 
 审核方法：
 1. 比较图片中可见字段是否彼此一致，逐项返回 matched、mismatched、uncertain 或 not_assessed。
@@ -175,7 +180,8 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
 隐私与业务边界：
 - 模型可以在本次推理中读取字段用于比较，但不得输出任何字段原值、部分值、尾号、姓名、号码、金额、地址、OCR原文或哈希。
 - 输出不得包含自由文本说明，只能使用下面的枚举和图片编号。
-- 本检查只表示视觉字段一致性；身份证、运营商实名、平台订单和支付真实性仍为 customer_integration_required。
+- 本检查只表示视觉字段一致性，不得声称已完成政府、运营商、平台订单或支付系统的在线验真。
+- 在线验真是否阻断由服务端策略决定：默认 disabled，不得仅因没有外部接口把视觉初审降级为人工复核。
 - 不执行退款、通过、拒绝或定责。
 
 只输出 JSON：
@@ -188,6 +194,6 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
     "tamper_risk": "low|medium|high|uncertain",
     "risk_reason_codes": ["no_obvious_risk|suspected_editing|unreadable_fields|incomplete_document|conflicting_fields|evidence_gap"]
   }},
-  "authoritative_verification": "customer_integration_required"
+  "authoritative_verification": "disabled|advisory|required"
 }}
 """

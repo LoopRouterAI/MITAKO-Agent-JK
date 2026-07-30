@@ -440,6 +440,9 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
     review_routing_policy = _structured_context_value(context.get("review_routing_policy"))
     if isinstance(review_routing_policy, dict):
         structured["review_routing_policy"] = review_routing_policy
+    minor_refund_policy = _structured_context_value(context.get("minor_refund_policy"))
+    if isinstance(minor_refund_policy, dict):
+        structured["minor_refund_policy"] = minor_refund_policy
     return case
 
 
@@ -478,11 +481,11 @@ def scenario_rules(scenario: str) -> str:
     if scenario in {"minor_material", "minor_refund"}:
         return """未成年人资料审核专项规则：
 - 只判断材料是否完整、清晰、前后一致，不识别或暴露真实身份。
-- 必须要求人工终审；不得自动通过、自动退费或自动拒绝。
+- 输出资料视觉初审建议，不自动退费、自动拒绝或注销账号；没有外部验真接口时不得据此强制转人工。
 - 必查五类材料：未成年人和监护人身份证明、监护关系证明、双方签字承诺书、订单及支付凭证、账号绑定手机号实名归属证明。
-- 检查监护人、手机号实名、付款主体、订单主体是否形成一致链路；主副卡、非法定监护人、10周岁以下等情况必须标记人工补充核验。
+- 检查监护人、手机号实名、付款主体、订单主体是否形成一致链路；主副卡、非法定监护人、10周岁以下等 SOP 例外只标记对应补充项，不得笼统写“必须调用权威接口”。
 - 发票实名必须与监护人一致，备注栏需能核对购物手机号；主副卡场景需补充主副卡关系证明和开票录屏。
-- 重点检查资料遮挡、重复使用、篡改痕迹、发票备注手机号及金额一致性；材料齐全只表示可进入人工一审、二审和终审。"""
+- 重点检查资料遮挡、重复使用、篡改痕迹、发票备注手机号及金额一致性；五类材料齐全且视觉字段未发现冲突时，可以输出明确正向初审建议。"""
     if scenario == "missing_item":
         return """漏发货专项规则：
 - 用户应是“买了多件但实际少收到，且没有多收到其他错误商品”；若少了 A 却多了未购买的 C，应改按发错货审查。
@@ -509,8 +512,8 @@ def build_system_prompt(scenario: str = "video_unboxing") -> str:
         "wrong_item": "用户提供的开箱过程、订单商品、到手实物和绿色自封袋面单，是否支持发错货诉求。",
         "missing_item": "用户提供的开箱过程、订单数量、拆单状态和到手实物，是否支持漏发货诉求。",
         "product_damage": "用户提供的视频、补充图片和工单材料，是否支持“商品到手已有破损/压痕/划痕/折损/污损”等商品有伤诉求，并判断图片真实性与证据强度。",
-        "minor_material": "用户提交的未成年人/监护人相关资料是否完整、清晰、前后一致，是否足以进入人工退费/售后终审。",
-        "minor_refund": "用户提交的未成年人退款五类材料是否完整、清晰、前后一致，是否足以进入人工一审、二审和终审。",
+        "minor_material": "用户提交的未成年人/监护人相关资料是否完整、清晰、前后一致，是否足以形成明确的资料视觉初审建议。",
+        "minor_refund": "用户提交的未成年人退款五类材料是否完整、清晰、前后一致，是否足以形成明确的资料视觉初审建议。",
     }.get(scenario, "用户提供的视觉材料是否支持当前售后诉求。")
     return f"""你是二次元电商售后“{ {'video_unboxing': '开箱视频', 'wrong_item': '发错货', 'missing_item': '漏发货', 'product_damage': '商品有伤', 'minor_material': '未成年人资料', 'minor_refund': '未成年人退款资料'}.get(scenario, '视觉审核') }”首席视觉质检员。
 你的任务不是聊天，也不是业务裁决，而是围绕一个明确目标做证据审查：{objective}

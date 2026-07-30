@@ -3,7 +3,7 @@
 
 import unittest
 
-from poc.visual_review_poc.report_renderer import _evidence_items, render_public_report
+from poc.visual_review_poc.report_renderer import _decision_policy_panel, _evidence_items, render_public_report
 
 
 def _report_data():
@@ -246,6 +246,15 @@ def _report_data():
 
 
 class ReportEvidenceRenderingTest(unittest.TestCase):
+    def test_non_product_damage_report_hides_product_damage_policy_panel(self):
+        panel = _decision_policy_panel({
+            "applied": False,
+            "policy_ref": "MITAKO-PD-ADVISORY@20260728.1",
+            "reason": "未启用商品有伤规则分类建议。",
+        })
+
+        self.assertEqual(panel, "")
+
     def test_material_request_report_does_not_claim_vip_review(self):
         data = _report_data()
         data["agent_report"]["advisory_assessment"] = {

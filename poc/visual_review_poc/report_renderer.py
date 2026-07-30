@@ -103,6 +103,8 @@ def _public_status(value: Any) -> str:
 def _decision_policy_panel(value: Any) -> str:
     if not isinstance(value, dict) or not value:
         return ""
+    if str(value.get("reason") or "").startswith("未启用商品有伤规则"):
+        return ""
     labels = {
         "opening_complete": "开箱过程未被确认完整",
         "sampling_boundary_covered": "抽帧未覆盖源视频首尾边界",
@@ -401,7 +403,8 @@ def _evidence_items(
 
 def _gallery_items(items: List[Dict[str, Any]], kind: str) -> str:
     html_items: List[str] = []
-    for item in items[:24]:
+    visible_items = items if kind == "补充图片" else items[:24]
+    for item in visible_items:
         if not item.get("url"):
             continue
         subtitle = item.get("timestamp") or item.get("file") or "-"
@@ -412,8 +415,10 @@ def _gallery_items(items: List[Dict[str, Any]], kind: str) -> str:
                 f'data-preview-src="{_h(item.get("video_url"))}" data-preview-title="视频时间点 {_h(item.get("timestamp") or "")}">'
                 "预览视频时间点</button>"
             )
+        image_index = item.get("image_index")
+        anchor = f' id="image-{_h(image_index)}"' if image_index not in (None, "") else ""
         html_items.append(
-            '<figure class="media-tile">'
+            f'<figure class="media-tile"{anchor}>'
             f'<button class="preview-trigger" type="button" data-preview-kind="image" data-preview-src="{_h(item.get("url"))}" data-preview-title="{_h(item.get("file") or kind)}">'
             f'<img src="{_h(item.get("url"))}" alt="{_h(item.get("file") or kind)}"></button>'
             f"<figcaption><b>{_h(kind)}</b><span>{_h(subtitle)}</span>{video_link}</figcaption>"
@@ -488,13 +493,13 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     }.get(human_level, "未分级")
     workflow_label = {
         "human_review": "进入人工复审",
-        "request_more_material": "补充连续材料",
+        "request_more_material": "只补充缺少或看不清的材料",
         "continue_by_customer_policy": "按甲方规则继续",
-        "system_retry": "受控重跑技术处理",
+        "system_retry": "系统重试，不让用户重复补材料",
     }.get(str(advisory.get("workflow_recommendation") or ""), "未给出")
     signal_cards = "".join(
         '<article class="boundary-card">'
-        f'<h3>{_h({"material_gap": "材料缺口", "technical_processing_incomplete": "技术处理未完成", "short_out_of_frame": "短暂离镜", "out_of_frame_over_threshold": "离镜超过补件阈值", "identity_reestablishment_unresolved": "重新入镜同物关系未确认", "continuity_unresolved": "商品连续性未完全确认", "media_forensic_risk": "媒体技术风险"}.get(str(item.get("code") or ""), item.get("code") or "风险信号"))}</h3>'
+        f'<h3>{_h({"material_gap": "材料缺口", "technical_processing_incomplete": "系统处理未完成", "short_out_of_frame": "短暂离镜", "out_of_frame_over_threshold": "离镜超过补件阈值", "identity_reestablishment_unresolved": "重新入镜后是否同一件商品尚未确认", "continuity_unresolved": "商品连续性尚未完全确认", "media_forensic_risk": "视频技术风险", "authoritative_verification_pending": "严格在线验真尚未完成", "image_authenticity_risk": "图片真实性风险"}.get(str(item.get("code") or ""), item.get("code") or "风险信号"))}</h3>'
         f'<p>{_h(item.get("effect") or "-")}</p>'
         + (
             f'<p><b>持续时间：</b>{_h(item.get("duration_seconds"))} 秒</p>'
@@ -507,7 +512,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     advisory_panel = ""
     if advisory:
         advisory_panel = f"""
-  <section class="panel boundary-panel advisory-panel">
+  <section class="panel boundary-panel advisory-panel decision-{_h(advisory_assessment.get('conclusion_code') or 'unknown')}">
     <div class="section-head"><h2>审核建议与使用边界</h2><p>结论是证据判断建议，不是退款、换货、补发或拒绝决定。</p></div>
     <div class="causality-grid">
       <article><small>事实结论</small><b>{_h(advisory_assessment.get("conclusion") or "未形成")}</b></article>
@@ -515,8 +520,8 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
       <article><small>人工复审建议</small><b>{_h(human_level_label)}</b></article>
       <article><small>流程建议</small><b>{_h(workflow_label)}</b></article>
     </div>
-    <p><b>人工建议说明：</b>{_h(human_review.get("recommendation") or "-")}</p>
-    <p><b>置信度口径：</b>该分数是未校准的证据强度分，不是客观正确率，也不是售后业务动作阈值。</p>
+    <p><b>为什么：</b>{_h(human_review.get("recommendation") or "-")}</p>
+    <p><b>分数怎么看：</b>这是证据充分程度，不是客观正确率。分数越高，表示本轮证据链越完整、矛盾越少。</p>
     <p><b>业务边界：</b>{_h(advisory_policy.get("boundary") or "本服务不直接决定退款、补发、换货、拒绝或最终定责。")}</p>
     <div class="boundary-grid">{signal_cards or '<p class="muted">本轮没有额外风险信号。</p>'}</div>
   </section>
@@ -576,8 +581,13 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         core_reason = parsed.get("visual_evidence_verdict") or visual.get("reason") or ""
     next_step = public_brief.get("next_step") or safe_agent_next_step(overall.get("business_follow_up_suggestion") or parsed.get("next_step"))
     workflow = str(advisory.get("workflow_recommendation") or "")
+    is_minor_report = bool(parsed.get("minor_material_assessment"))
     if workflow == "request_more_material":
-        next_step = "按报告中的材料缺口向用户补充收集证据，材料齐备后重新送审。"
+        next_step = (
+            "只补交报告中明确标黄的缺失或看不清材料，补齐后可在同一工单继续审核。"
+            if is_minor_report
+            else "按报告中的材料缺口补充连续材料或其他缺失证据，材料齐备后重新送审。"
+        )
     elif workflow == "human_review":
         next_step = human_review.get("recommendation") or next_step
     elif workflow == "system_retry":
@@ -610,11 +620,58 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         "evidence_does_not_support_claim": "NO",
         "evidence_inconclusive": "REVIEW",
     }.get(conclusion_code, _public_yes_no(parsed))
-    visual_verdict = {
+    tone = "gray" if failed else {
+        "evidence_supports_claim": "green",
+        "evidence_does_not_support_claim": "red",
+        "evidence_inconclusive": "amber",
+    }.get(conclusion_code, "amber")
+    report_class = "minor-report" if is_minor_report else "product-report"
+    verdict_text = "未完成" if failed else {
+        "evidence_supports_claim": "支持",
+        "evidence_does_not_support_claim": "不支持",
+        "evidence_inconclusive": "待确认",
+    }.get(conclusion_code, yes_no)
+    confidence_display = (
+        f"{round(float(confidence) * 100)}%"
+        if isinstance(confidence, (int, float))
+        else confidence
+    )
+    if challenging_evidence or risky_findings:
+        risk_panel = f"""
+  <section class="panel risk-panel">
+    <div class="section-head"><h2>反证与可疑帧</h2><p>红色内容会削弱当前结论，请优先回看原始图片或视频。</p></div>
+    <div class="evidence-grid">{_evidence_items(challenging_evidence, media_gallery, "需复核") if challenging_evidence else ''}</div>
+    <div class="evidence-grid">{_evidence_items(risky_findings, media_gallery, "风险画面") if risky_findings else ''}</div>
+  </section>"""
+    else:
+        risk_panel = """
+  <details class="panel risk-panel empty-panel">
+    <summary>反证与可疑帧：未发现</summary>
+    <p class="muted">本轮没有标记削弱当前结论的图片或视频画面。</p>
+  </details>"""
+    if issue_timestamps:
+        issue_panel = f"""
+  <section class="panel issue-panel">
+    <div class="section-head"><h2>问题时间点</h2><p>点击证据卡可回看对应画面或原视频片段。</p></div>
+    <div class="evidence-grid">{_evidence_items(issue_timestamps, media_gallery, "重点复核")}</div>
+  </section>"""
+    else:
+        issue_panel = """
+  <details class="panel issue-panel empty-panel video-only">
+    <summary>问题时间点：未发现</summary>
+    <p class="muted">本轮没有额外标记问题时间点。</p>
+  </details>"""
+    visual_verdict = ({
+        "evidence_supports_claim": "五类材料与可见字段初审通过",
+        "evidence_does_not_support_claim": "材料字段存在明确冲突",
+        "evidence_inconclusive": "材料或可见字段仍待确认",
+    } if is_minor_report else {
         "evidence_supports_claim": "证据支持本次事实诉求",
         "evidence_does_not_support_claim": "现有证据不支持本次事实诉求",
         "evidence_inconclusive": "证据不足，建议按流程补充或复核",
-    }.get(conclusion_code, _public_verdict(parsed, scenario_label))
+    }).get(conclusion_code, _public_verdict(parsed, scenario_label))
+    if workflow == "request_more_material":
+        visual_verdict = "需要补充缺失材料"
     latency = runtime.get("latency_seconds") or "-"
     video_count = len(evidence_package.get("videos") or [])
     def effective_sample_fps(item: Dict[str, Any]) -> Any:
@@ -644,6 +701,13 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
             f'<p><b>客服动作：</b>{_h(next_step)}</p>'
             "</section>"
         )
+    internal_metrics_html = ""
+    if inference:
+        estimated_cost = f"${inference.get('estimated_usd')}" if inference.get("estimated_usd") not in (None, "") else "-"
+        internal_metrics_html = f"""
+      <div class="metric"><small>估算 Token</small><b>{_h(inference.get('total_tokens') or '-')}</b></div>
+      <div class="metric"><small>估算成本</small><b>{_h(estimated_cost)}</b></div>
+      <div class="metric"><small>识别次数</small><b>{_h(inference.get('segment_count') or 1)}</b></div>"""
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -652,18 +716,18 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
   <title>{_h(scenario_label)} Agent 报告</title>
   <style>{_REPORT_CSS}</style>
 </head>
-<body>
+<body class="{report_class}">
 <main class="shell">
-  <section class="hero">
+  <section class="hero tone-{tone}">
     <div>
       <span class="badge">{_h(scenario_label)} Agent 报告</span>
       <h1>{_h(conclusion)}</h1>
       <p class="lead">{_h(core_reason or "审核Agent已完成视觉证据整理，请结合下方证据链复核。")}</p>
     </div>
     <aside class="verdict-card">
-      <small>系统参考</small>
-      <b>{_h(yes_no)}</b>
-      <span>置信度 {_h(confidence)}</span>
+      <small>审核建议</small>
+      <b>{_h(verdict_text)}</b>
+      <span>证据分数 {_h(confidence_display)}</span>
     </aside>
   </section>
 
@@ -676,26 +740,24 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 
 	  <section class="metrics">
 		    <div class="metric hot"><small>视觉质检</small><b>{_h("审核未完成" if failed else visual_verdict)}</b></div>
-	    <div class="metric"><small>连续性分数</small><b>{_h(video.get("continuity_score") or "-")}</b></div>
-	    <div class="metric"><small>调包风险</small><b>{_h(video.get("swap_risk_level") or "-")}</b></div>
-	    <div class="metric"><small>耗时</small><b>{_h(latency)}s</b></div>
-	    <div class="metric"><small>送审视频</small><b>{_h(video_count or "-")}</b></div>
-	    <div class="metric"><small>送审帧数</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
+	    <div class="metric video-only"><small>商品连续性分数</small><b>{_h(video.get("continuity_score") or "-")}</b></div>
+	    <div class="metric video-only"><small>疑似调包风险</small><b>{_h(video.get("swap_risk_level") or "-")}</b></div>
+	    <div class="metric"><small>本次审核用时</small><b>{_h(latency)} 秒</b></div>
+	    <div class="metric video-only"><small>审核视频</small><b>{_h(video_count or "-")}</b></div>
+	    <div class="metric video-only"><small>查看画面</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
 	    <div class="metric"><small>补充图片</small><b>{_h(evidence_package.get("supplemental_images_sent") or "-")}</b></div>
-	    <div class="metric"><small>官方参考图</small><b>{_h(evidence_package.get("official_reference_images_sent") or "-")}</b></div>
-	    <div class="metric"><small>估算 Token</small><b>{_h(inference.get("total_tokens") or "-")}</b></div>
-	    <div class="metric"><small>估算成本</small><b>{_h((f"${inference.get('estimated_usd')}" if inference.get("estimated_usd") not in (None, "") else "-"))}</b></div>
-		    <div class="metric"><small>模型调用</small><b>{_h(inference.get("segment_count") or 1)}</b></div>
-		    <div class="metric"><small>报告属性</small><b>审核建议参考</b></div>
+	    <div class="metric product-only"><small>官方参考图</small><b>{_h(evidence_package.get("official_reference_images_sent") or "-")}</b></div>
+	    {internal_metrics_html}
+		    <div class="metric"><small>报告用途</small><b>客服审核建议</b></div>
 		  </section>
-		  <section class="panel inference-channels-panel">
-			    <div class="section-head"><h2>分通道调用统计</h2><p>墙钟耗时与累计模型耗时分开统计；成本与 Token 包含所有模型调用。</p></div>
-		    <p><b>墙钟耗时：</b>{_h(runtime.get("latency_seconds") or "-")} 秒；<b>累计模型耗时：</b>{_h(runtime.get("model_latency_seconds_sum") or "-")} 秒。</p>
+		  <details class="panel inference-channels-panel" {'open' if inference else 'hidden'}>
+			    <summary>系统处理明细</summary>
+		    <p><b>本次总用时：</b>{_h(runtime.get("latency_seconds") or "-")} 秒；<b>各次识别累计用时：</b>{_h(runtime.get("model_latency_seconds_sum") or "-")} 秒（并行任务会重叠）。</p>
 		    <div class="boundary-grid">{channel_cards or '<p class="muted">本轮没有分通道统计。</p>'}</div>
-		  </section>
-		  <section class="panel">
-		    <div class="section-head"><h2>视频抽帧强度</h2><p>请求 FPS 是审核策略；有效抽样 FPS 按实际帧数/源视频时长计算。</p></div>
-		    <div class="table-wrap"><table><thead><tr><th>视频</th><th>时长</th><th>原生 FPS</th><th>请求 FPS</th><th>实际帧数</th><th>有效抽样 FPS</th></tr></thead><tbody>{sampling_rows or '<tr><td colspan="6">本轮没有视频。</td></tr>'}</tbody></table></div>
+		  </details>
+		  <section class="panel video-only">
+		    <div class="section-head"><h2>视频查看密度</h2><p>这里说明系统每秒实际查看多少个画面。</p></div>
+		    <div class="table-wrap"><table><thead><tr><th>视频</th><th>时长</th><th>原视频每秒帧数</th><th>计划每秒查看</th><th>实际查看画面</th><th>实际每秒查看</th></tr></thead><tbody>{sampling_rows or '<tr><td colspan="6">本轮没有视频。</td></tr>'}</tbody></table></div>
 		  </section>
 	  {diagnostic_panel}
 
@@ -704,20 +766,10 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    <div class="evidence-grid">{_evidence_items(supporting_evidence, media_gallery)}</div>
 	  </section>
 
-	  <section class="panel risk-panel">
-	    <div class="section-head"><h2>反证与可疑帧</h2><p>这里集中展示削弱当前结论的证据，以及逐帧审查中被标记为风险的画面。</p></div>
-	    <h3>反证与风险证据</h3>
-	    <div class="evidence-grid">{_evidence_items(challenging_evidence, media_gallery, "需复核") if challenging_evidence else '<p class="muted">本轮没有输出明确反证。</p>'}</div>
-	    <h3>可疑帧</h3>
-	    <div class="evidence-grid">{_evidence_items(risky_findings, media_gallery, "风险帧") if risky_findings else '<p class="muted">逐帧结果未标记额外可疑帧。</p>'}</div>
-	  </section>
+  {risk_panel}
+  {issue_panel}
 
-	  <section class="panel issue-panel">
-	    <div class="section-head"><h2>问题时间点</h2><p>来自 issue_timestamps 的重点复核位置，可按时间戳回链抽帧和原视频。</p></div>
-	    <div class="evidence-grid">{_evidence_items(issue_timestamps, media_gallery, "重点复核") if issue_timestamps else '<p class="muted">本轮没有标记问题时间点。</p>'}</div>
-	  </section>
-
-  <section class="panel proof">
+  <section class="panel proof video-only">
     <h2>视频审核论证</h2>
     <div class="causality-grid">
       <article><small>抽帧首尾覆盖</small><b>{_h({"covered": "已覆盖", "incomplete": "未完整覆盖", "unknown": "未知"}.get(video.get("sampling_boundary_status"), video.get("sampling_boundary_status") or "未知"))}</b></article>
@@ -735,7 +787,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    <div class="section-head"><h2>置信度与已知边界</h2><p>帮助VIP客服理解分数依据、缺失材料和本轮视觉判断无法覆盖的范围。</p></div>
 	    <div class="boundary-grid">
 	      <article class="boundary-card"><h3>置信度理由</h3><p>{_h(confidence_reason or "本轮没有输出明确的置信度理由，需结合证据卡片人工复核。")}</p></article>
-	      <article class="boundary-card"><h3>材料缺口</h3>{_list_html(material_gaps, "本轮未声明额外材料缺口；最终处置仍需核对订单、库存和售后规则。")}</article>
+	      <article class="boundary-card"><h3>材料缺口</h3>{_list_html(material_gaps, "本轮未声明额外材料缺口；" + ("最终退款决定仍由授权人员按 SOP 执行。" if is_minor_report else "最终处置仍需核对订单、库存和售后规则。"))}</article>
 	      <article class="boundary-card"><h3>模型局限</h3>{_list_html(model_limitations, "本轮未单独声明模型局限；报告结论仍仅作为VIP客服复核参考。")}</article>
 	    </div>
 	  </section>
@@ -746,14 +798,14 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
   {object_continuity_panel}
   {fulfillment_panel}
 
-  <section class="panel">
+  <section class="panel product-only">
     <div class="section-head"><h2>系统订单基线</h2><p>这里展示服务实际送审的受信任订单字段，不依赖模型复述。</p></div>
     <p><b>基线版本：</b>{_h(order_baseline.get("baseline_version") or "未提供")}；<b>承运商：</b>{_h(order_baseline.get("carrier") or "未提供")}；<b>物流引用：</b>{_h(order_baseline.get("tracking_ref") or "未提供")}</p>
     <p><b>抽赏规则：</b>{_h("完整" if order_baseline.get("selection_rules_complete") else "不完整或待确认")}；<b>赠品/特典规则：</b>{_h("完整" if order_baseline.get("benefit_rules_complete") else "不完整或待确认")}；<b>分包映射：</b>{_h(order_baseline.get("package_mapping_status") or "未提供")}</p>
     <div class="table-wrap"><table><thead><tr><th>行项目</th><th>SKU</th><th>商品</th><th>规格</th><th>应发数量</th></tr></thead><tbody>{order_rows or '<tr><td colspan="5">本轮未提供订单商品基线。</td></tr>'}</tbody></table></div>
   </section>
 
-  <section class="panel boundary-panel">
+  <section class="panel boundary-panel product-only">
     <div class="section-head"><h2>官方商品参考图</h2><p>仅作为订单商品标准外观基准，不属于用户提交证据，也不能单独证明实际收货、漏发或损伤。</p></div>
     <p><b>读取状态：</b>{_h(official_status_label)}；请求 {_h(official_reference_status.get("requested_count") or 0)} 张，可用 {_h(official_reference_status.get("available_count") or 0)} 张，失败 {_h(official_reference_status.get("failed_count") or 0)} 张；{_h(official_fallback)}。</p>
     <div class="media-grid">{_gallery_items(media_gallery.get("official_references") or [], "官方商品参考图")}</div>
@@ -761,8 +813,8 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 
 			  <section class="panel">
     <div class="section-head"><h2>送审证据画廊</h2><p>用于快速复核审核Agent看到的帧图和用户补充图片。</p></div>
-    <h3>视频帧</h3>
-    <div class="media-grid">{_gallery_items(media_gallery.get("frames") or [], "视频帧")}</div>
+    <h3 class="video-only">视频画面</h3>
+    <div class="media-grid video-only">{_gallery_items(media_gallery.get("frames") or [], "视频帧")}</div>
     <h3>补充图片</h3>
     <div class="media-grid">{_gallery_items(media_gallery.get("images") or [], "补充图片")}</div>
 	  </section>
@@ -881,6 +933,14 @@ button { font:inherit; color:inherit; cursor:pointer; }
   height:10px;
   background:linear-gradient(90deg,var(--lime),var(--gold),var(--rose),var(--violet),var(--cyan));
 }
+.hero.tone-green::after { background:#2eaf5d; }
+.hero.tone-amber::after { background:#f0a31a; }
+.hero.tone-red::after { background:#df4b4b; }
+.hero.tone-gray::after { background:#6b7280; }
+.hero.tone-green .verdict-card { background:#e9f8ee; border-color:#78c895; }
+.hero.tone-amber .verdict-card { background:#fff5d9; border-color:#e8bd59; }
+.hero.tone-red .verdict-card { background:#fff0f0; border-color:#e29292; }
+.hero.tone-gray .verdict-card { background:#f1f3f5; border-color:#aeb4bd; }
 .badge {
   display:inline-flex;
   align-items:center;
@@ -1013,6 +1073,27 @@ p { line-height:1.75; }
 }
 .boundary-card h3 { margin-top:0; }
 .boundary-card p { margin:0; overflow-wrap:anywhere; }
+.status-card { border-left:6px solid #d3d8df; }
+.status-green { border-left-color:#2eaf5d; background:#f2fbf5; }
+.status-amber { border-left-color:#f0a31a; background:#fffaf0; }
+.status-red { border-left-color:#df4b4b; background:#fff5f5; }
+.evidence-link {
+  display:inline-flex;
+  margin:2px 4px 2px 0;
+  padding:4px 8px;
+  border:1px solid #9bc7bd;
+  border-radius:6px;
+  color:#11665b;
+  font-weight:800;
+  text-decoration:none;
+}
+.evidence-link:hover, .evidence-link:focus-visible { background:#e8f8f4; outline:2px solid #12a895; outline-offset:2px; }
+.human-action { margin-top:16px; padding:18px; border:1px solid var(--line); border-left-width:8px; border-radius:8px; }
+.human-action h3 { margin:0 0 6px; }
+.human-action p { margin:0; font-size:17px; font-weight:750; }
+.empty-panel summary, .inference-channels-panel summary { cursor:pointer; font-size:18px; font-weight:900; }
+.inference-channels-panel summary { margin-bottom:12px; }
+.minor-report .video-only, .minor-report .product-only { display:none !important; }
 .boundary-list { margin:0; padding-left:20px; }
 .boundary-list li { margin:7px 0; line-height:1.65; overflow-wrap:anywhere; }
 .evidence-media { display:grid; gap:8px; margin:8px 0 10px; }
@@ -1153,6 +1234,6 @@ p { line-height:1.75; }
   .panel { padding:16px; border-radius:20px; }
 }
 @media (max-width:520px) {
-  .shell { width:min(370px, calc(100vw - 20px)); max-width:none; margin-left:10px; margin-right:10px; }
+  .shell { width:calc(100% - 20px); max-width:370px; margin-inline:auto; }
 }
 """

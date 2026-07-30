@@ -269,18 +269,31 @@ def render_fulfillment_reconciliation_panel(value: Any, escape: Callable[[Any], 
 def render_confidence_components_panel(value: Any, escape: Callable[[Any], str]) -> str:
     if not isinstance(value, dict):
         return ""
-    labels = (
-        ("main_segment_mean", "主审核分段均值"),
-        ("damage_origin", "损伤成因假设"),
-        ("fulfillment_reconciliation", "履约对账识别"),
-        ("continuity_visibility_coverage", "主体可见覆盖率"),
-        ("final_decision", "规则降级后决策分"),
-    )
+    if "material_image_coverage" in value:
+        labels = (
+            ("material_image_coverage", "图片处理完成度"),
+            ("required_category_completeness", "五类材料完整度"),
+            ("final_decision", "本轮证据分数"),
+        )
+    else:
+        labels = (
+            ("main_segment_mean", "主要证据分数"),
+            ("damage_origin", "损伤来源判断"),
+            ("fulfillment_reconciliation", "应发与实收对账"),
+            ("continuity_visibility_coverage", "商品持续可见程度"),
+            ("final_decision", "本轮证据分数"),
+        )
+
+    def display(raw: Any) -> str:
+        if isinstance(raw, (int, float)) and 0 <= raw <= 1:
+            return f"{round(raw * 100, 1)}%"
+        return str(raw if raw is not None else "-")
+
     cards = "".join(
-        f'<article><small>{escape(label)}</small><b>{escape(value.get(key) if value.get(key) is not None else "-")}</b></article>'
+        f'<article><small>{escape(label)}</small><b>{escape(display(value.get(key)))}</b></article>'
         for key, label in labels
     )
-    calibrated = value.get("calibration_status") != "uncalibrated_model_score"
+    calibrated = not str(value.get("calibration_status") or "").startswith("uncalibrated")
     return f"""
   <section class="panel confidence-components-panel">
     <div class="section-head"><h2>置信度分解与口径</h2><p>不同分数不可相互替代，也不可直接解释为样本正确率。</p></div>
@@ -293,6 +306,22 @@ def render_confidence_components_panel(value: Any, escape: Callable[[Any], str])
 def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str:
     if not isinstance(value, dict):
         return ""
+    def evidence_links(indices: Any) -> str:
+        links = []
+        for raw in indices or []:
+            try:
+                index = int(raw)
+            except (TypeError, ValueError):
+                continue
+            links.append(f'<a class="evidence-link" href="#image-{index}">图片 {index}</a>')
+        return " ".join(links) or '<span class="muted">无</span>'
+
+    def item_tone(item: dict) -> str:
+        if item.get("status") == "not_observed_after_full_scan" or item.get("validation_status") == "visual_consistency_mismatched":
+            return "status-red"
+        if item.get("status") == "present" and item.get("validation_status") == "visual_consistency_matched":
+            return "status-green"
+        return "status-amber"
     status_labels = {
         "present": "已识别到候选材料",
         "needs_manual_confirmation": "已观察到，待人工确认",
@@ -317,32 +346,39 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
     for item in (value.get("checklist") or [])[:10]:
         if not isinstance(item, dict):
             continue
-        image_indices = "、".join(str(index) for index in item.get("evidence_image_indices") or []) or "无"
         checklist_cards.append(
-            '<article class="boundary-card">'
+            f'<article class="boundary-card status-card {item_tone(item)}">'
             f'<h3>{escape(item.get("label") or item.get("requirement_id") or "未命名材料")}</h3>'
             f'<p><b>材料状态：</b>{escape(status_labels.get(item.get("status"), item.get("status") or "未知"))}</p>'
             f'<p><b>材料质量：</b>{escape(status_labels.get(item.get("quality_status"), item.get("quality_status") or "未知"))}</p>'
-            f'<p><b>验证状态：</b>{escape(status_labels.get(item.get("validation_status"), item.get("validation_status") or "未知"))}</p>'
-            f'<p><b>证据图片：</b>{escape(image_indices)}</p>'
+            f'<p><b>核对结果：</b>{escape(status_labels.get(item.get("validation_status"), item.get("validation_status") or "未知"))}</p>'
+            f'<p><b>点击回看：</b>{evidence_links(item.get("evidence_image_indices"))}</p>'
             f'<p>{escape(item.get("rule_note") or "")}</p></article>'
         )
     process_items = []
+    process_type_labels = {
+        "invoice_generation": "发票或凭证生成过程",
+        "document_capture": "资料拍摄过程",
+        "payment_record": "支付记录展示",
+        "other": "其他过程",
+        "uncertain": "过程待确认",
+    }
+    quality_labels = {"clear": "清晰", "partial": "部分可见", "unreadable": "无法辨认"}
     for item in (value.get("process_evidence") or [])[:20]:
         if not isinstance(item, dict):
             continue
         process_items.append(
             f'<li>视频 {escape(item.get("video_index") or "-")} / 帧 {escape(item.get("global_frame_index") or "-")} / '
-            f'{escape(item.get("timestamp") or "-")}：{escape(item.get("process_type") or "uncertain")}，'
-            f'质量 {escape(item.get("evidence_quality") or "-")}</li>'
+            f'{escape(item.get("timestamp") or "-")}：{escape(process_type_labels.get(item.get("process_type"), "过程待确认"))}，'
+            f'画面{escape(quality_labels.get(item.get("evidence_quality"), "待确认"))}</li>'
         )
     unclassified = "、".join(str(index) for index in value.get("unclassified_image_indices") or []) or "无"
     check_labels = {
-        "identity_age": "身份与年龄",
-        "guardian_relationship": "监护关系",
-        "commitment_signatures": "承诺书签署主体",
-        "order_payment": "订单与支付",
-        "mobile_realname": "手机号实名归属",
+        "identity_age": "身份与年龄是否对得上",
+        "guardian_relationship": "监护关系是否对得上",
+        "commitment_signatures": "承诺书签署主体是否正确",
+        "order_payment": "订单与支付材料是否对得上",
+        "mobile_realname": "手机号实名归属材料是否对得上",
     }
     risk_labels = {
         "no_obvious_risk": "未发现明显编辑风险",
@@ -357,51 +393,78 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
     for item in consistency.get("checks") or []:
         if not isinstance(item, dict):
             continue
-        evidence = "、".join(str(index) for index in item.get("evidence_image_indices") or []) or "无"
         risks = "、".join(
             risk_labels.get(str(code), str(code)) for code in item.get("risk_reason_codes") or []
         ) or "无"
+        tone = "status-green" if item.get("status") == "matched" else "status-red" if item.get("status") == "mismatched" else "status-amber"
         consistency_cards.append(
-            '<article class="boundary-card">'
+            f'<article class="boundary-card status-card {tone}">'
             f'<h3>{escape(check_labels.get(item.get("check_id"), item.get("check_id") or "未命名检查"))}</h3>'
-            f'<p><b>初审状态：</b>{escape(status_labels.get(item.get("status"), item.get("status") or "未知"))}</p>'
-            f'<p><b>证据图片：</b>{escape(evidence)}</p>'
-            f'<p><b>风险提示：</b>{escape(risks)}</p>'
+            f'<p><b>结果：</b>{escape(status_labels.get(item.get("status"), item.get("status") or "未知"))}</p>'
+            f'<p><b>点击回看：</b>{evidence_links(item.get("evidence_image_indices"))}</p>'
+            f'<p><b>需要注意：</b>{escape(risks)}</p>'
             f'<p>{escape(item.get("message") or "")}</p></article>'
         )
     authoritative = value.get("authoritative_verification") or {}
-    authoritative_text = (
-        "待甲方权威接口联调"
-        if authoritative.get("status") == "customer_integration_required"
-        else str(authoritative.get("status") or "未配置")
-    )
+    authoritative_status = str(authoritative.get("status") or "")
+    if authoritative_status == "customer_integration_required":
+        authoritative_text = "本单已启用严格在线验真，尚待甲方核验能力"
+        authoritative_tone = "status-red"
+    elif authoritative_status == "not_configured_advisory":
+        authoritative_text = "在线验真未配置，仅作非阻断提醒"
+        authoritative_tone = "status-amber"
+    else:
+        authoritative_text = "在线验真默认关闭，不影响本轮视觉初审"
+        authoritative_tone = "status-green"
     precheck_text = {
-        "passed": "通过（仍需权威校验）",
-        "needs_review": "发现冲突或不确定，需复核",
-        "incomplete": "证据处理未完成",
+        "passed": "视觉初审通过",
+        "failed": "视觉初审不通过",
+        "needs_review": "有存疑项，请看标黄或标红图片",
+        "incomplete": "资料未处理完整",
+        "processing_incomplete": "系统处理未完成，请重试",
     }.get(value.get("visual_precheck_status"), "未完成")
+    authenticity = value.get("authenticity_assessment") or {}
+    authenticity_tone = {
+        "critical": "status-red",
+        "warning": "status-amber",
+        "clear": "status-green",
+    }.get(str(authenticity.get("severity") or ""), "status-amber")
+    action_text = {
+        "passed": "五类材料和可见字段均未发现明显问题，可按甲方现行一审流程继续。",
+        "failed": "先打开标红图片确认冲突，再按 SOP 要求用户更正或补交对应材料。",
+        "needs_review": "只检查标黄或标红项目；能确认一致时继续，不能确认时只补对应材料。",
+        "processing_incomplete": "先重试系统处理，不要据此要求用户重复提交材料。",
+    }.get(value.get("visual_precheck_status"), "按上方材料卡逐项处理，不要跳过未完成项目。")
+    action_tone = {
+        "passed": "status-green",
+        "failed": "status-red",
+        "needs_review": "status-amber",
+        "processing_incomplete": "status-amber",
+    }.get(value.get("visual_precheck_status"), "status-amber")
     return f"""
   <section class="panel minor-material-panel">
-    <div class="section-head"><h2>未成年人退款五类材料核对</h2><p>材料存在性、字段一致性和最终退款裁决分开表达；报告不展示任何个人号码或OCR原文。</p></div>
+    <div class="section-head"><h2>未成年人退款五类材料核对</h2><p>绿色可继续，黄色只看存疑项，红色优先复核；报告不展示姓名、号码或 OCR 原文。</p></div>
     <div class="causality-grid">
       <article><small>申报图片</small><b>{escape(value.get("declared_image_count") or 0)}</b></article>
       <article><small>接收图片</small><b>{escape(value.get("accepted_image_count") or 0)}</b></article>
       <article><small>已处理图片</small><b>{escape(value.get("processed_image_count") or 0)}</b></article>
-      <article><small>覆盖率</small><b>{escape(value.get("coverage_ratio") or 0)}</b></article>
+      <article><small>图片处理完成度</small><b>{escape(round(float(value.get("coverage_ratio") or 0) * 100, 1))}%</b></article>
       <article><small>覆盖是否完整</small><b>{escape("是" if value.get("coverage_complete") else "否")}</b></article>
       <article><small>视觉初审结论</small><b>{escape(precheck_text)}</b></article>
     </div>
     <p><b>未分类图片编号：</b>{escape(unclassified)}</p>
     <div class="boundary-grid">{"".join(checklist_cards) or '<p class="muted">本轮未形成材料清单。</p>'}</div>
-    <div class="section-head"><h2>视觉字段一致性初审</h2><p>只比较所提供图片中的可见字段，不代表证件、实名、订单或支付已经权威验真。</p></div>
+    <div class="section-head"><h2>视觉字段一致性初审</h2><p>五项内容是否互相对得上；只比较图片中能看清的内容，不冒充政府、运营商或支付系统验真。</p></div>
     <p><b>总体状态：</b>{escape(status_labels.get(consistency.get("verdict"), consistency.get("verdict") or "未完成"))}</p>
     <div class="boundary-grid">{"".join(consistency_cards) or '<p class="muted">本轮未完成字段一致性初审。</p>'}</div>
     <div class="boundary-grid">
-      <article class="boundary-card"><h3>权威真伪验证</h3><p><b>{escape(authoritative_text)}</b></p><p>{escape(authoritative.get("boundary") or "视觉一致性不等于法定真实性，最终核验由甲方权威系统和授权人员完成。")}</p></article>
+      <article class="boundary-card status-card {authenticity_tone}"><h3>图片真实性风险</h3><p><b>{escape(f'疑似修改风险 {authenticity["risk_percent"]}%' if authenticity.get("risk_percent") is not None else "本轮未形成可用风险分数")}</b></p><p>{escape(authenticity.get("conclusion") or "本轮没有可用的图片风险结果。")}</p><p><b>需优先回看：</b>{evidence_links(authenticity.get("evidence_image_indices"))}</p><p><b>缺少拍摄信息：</b>{evidence_links((authenticity.get("missing_exif_image_indices") or [])[:20])}</p><p>{escape(authenticity.get("boundary") or "缺少拍摄信息不等于图片造假。")}</p></article>
+      <article class="boundary-card status-card {authoritative_tone}"><h3>外部在线验真</h3><p><b>{escape(authoritative_text)}</b></p><p>{escape(authoritative.get("boundary") or "视觉一致性不等于法定真实性，但未配置的接口不会阻断本轮初审。")}</p></article>
     </div>
     <h3>过程视频证据</h3><ul class="boundary-list">{"".join(process_items) or '<li>本轮没有形成可回链的过程视频证据。</li>'}</ul>
     <div class="boundary-grid">
       <article class="boundary-card"><h3>隐私边界</h3><p>{escape(value.get("privacy_boundary") or "公开报告不展示个人敏感信息。")}</p></article>
       <article class="boundary-card"><h3>业务边界</h3><p>{escape(value.get("business_boundary") or "最终业务动作由授权人员执行。")}</p></article>
     </div>
+    <section class="human-action {action_tone}"><h3>客服接下来怎么做</h3><p>{escape(action_text)}</p></section>
   </section>"""

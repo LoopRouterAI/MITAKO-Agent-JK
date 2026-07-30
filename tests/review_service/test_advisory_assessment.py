@@ -236,13 +236,64 @@ class AdvisoryAssessmentTest(unittest.TestCase):
                     }
                 },
             ),
-            {"scenario": "minor_refund"},
+            {
+                "scenario": "minor_refund",
+                "minor_refund_policy": {"authoritative_verification": "required"},
+            },
             readiness={"full_review_ready": True, "missing_required": []},
         )
 
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "required")
         self.assertIn("authoritative_verification_pending", advisory["human_review"]["reason_codes"])
+
+    def test_minor_missing_authoritative_integration_is_non_blocking_by_default(self):
+        result = attach_advisory_assessment(
+            review_result(
+                confidence=0.88,
+                parsed_extra={
+                    "authoritative_verification": {
+                        "status": "not_configured_optional",
+                        "pending_checks": ["guardian_identity", "payment_ownership"],
+                    }
+                },
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["human_review"]["level"], "not_required")
+        self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
+        self.assertNotIn("authoritative_verification_pending", advisory["human_review"]["reason_codes"])
+
+    def test_minor_optional_review_does_not_claim_every_case_needs_vip(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="review",
+                confidence=0.69,
+                parsed_extra={"minor_material_assessment": {
+                    "declared_image_count": 20,
+                    "accepted_image_count": 20,
+                    "processed_image_count": 20,
+                }},
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["human_review"]["level"], "optional")
+        self.assertIn("不要求每单转VIP客服复审", advisory["assessment"]["conclusion"])
+
+    def test_minor_refund_policy_defaults_to_visual_review_without_external_verification(self):
+        metadata = ReviewCaseMetadata.model_validate({
+            "client_case_id": "MINOR-DEFAULT",
+            "scenario": "minor_refund",
+        })
+
+        self.assertEqual(metadata.minor_refund_policy.authoritative_verification, "disabled")
+        self.assertEqual(metadata.minor_refund_policy.review_mode, "standard")
 
     def test_minor_internal_processing_gap_retries_system_without_asking_user_for_material(self):
         result = attach_advisory_assessment(

@@ -444,7 +444,10 @@ def sampling_plan(
     causality_chunk_frames = max(8, min(int(effective_causality.get("dedicated_chunk_frames") or 20), 24))
     causality_segments = math.ceil(total_frames / causality_chunk_frames) if causality_enabled else 0
     estimated_total_calls = segments + continuity_segments + causality_segments
-    chunk_workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4))
+    worker_env = "REVIEW_MINOR_WORKERS" if scenario == "minor_refund" else "REVIEW_CHUNK_WORKERS"
+    worker_default = "6" if scenario == "minor_refund" else "2"
+    worker_cap = 8 if scenario == "minor_refund" else 4
+    chunk_workers = max(1, min(int(os.getenv(worker_env, worker_default) or worker_default), worker_cap))
     return {
         "preset": policy.get("preset") or "adaptive",
         "sampling_mode": mode,
@@ -512,6 +515,7 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         "continuity_policy": json.dumps(continuity_policy, ensure_ascii=False),
         "damage_causality_policy": json.dumps(damage_causality_policy, ensure_ascii=False),
         "review_routing_policy": json.dumps(metadata.get("review_routing_policy") or {}, ensure_ascii=False),
+        "minor_refund_policy": json.dumps(metadata.get("minor_refund_policy") or {}, ensure_ascii=False),
         "defer_postprocess": "true",
         "include_html_report": "false",
         **_sampling_fields(metadata),
@@ -844,7 +848,9 @@ def run_job(job_id: str) -> Dict[str, Any]:
 def render_job_report(job: Dict[str, Any]) -> str:
     result = job.get("result") or {}
     review = result.get("review") or {}
-    agent_report = _job_media_urls(review.get("agent_report") or {}, str(job.get("job_id") or ""))
+    agent_report = deepcopy(review.get("agent_report") or {})
+    agent_report.pop("inference_estimate", None)
+    agent_report = _public_media_urls(agent_report)
     brief = review.get("agent_brief") or {}
     data = {
         "ok": job.get("status") == "SUCCEEDED",
@@ -981,7 +987,7 @@ def contract() -> Dict[str, Any]:
             "conversation_history", "sop_context", "asset_fields", "batch_id", "source_record",
             "claim_scope", "decision_policy", "fulfillment_baseline", "evidence_coverage",
             "sampling_policy", "continuity_policy", "damage_causality_policy",
-            "output_options", "review_routing_policy", "customer_risk_context",
+            "output_options", "review_routing_policy", "minor_refund_policy", "customer_risk_context",
         ],
         "customer_risk_context_policy": {
             "purpose": "仅用于服务端抽检优先级和人工复审路由，不参与本次事实证据结论。",
@@ -1032,6 +1038,10 @@ def contract() -> Dict[str, Any]:
             "required_below_confidence": "低于该证据分数时建议必须人工复审，默认 0.5。",
             "optional_below_confidence": "低于该证据分数时建议抽检，默认 0.8。",
             "out_of_frame_resubmit_seconds": "连续离镜达到该秒数时建议补充材料，默认 3 秒；离镜本身不等于剪辑、调包或欺诈。",
+        },
+        "minor_refund_policy": {
+            "review_mode": "standard 为 SOP 五类材料和视觉一致性初审；strict 保留更严格的人工抽检策略。",
+            "authoritative_verification": "disabled（默认，不因未接接口阻断）、advisory（仅提示）或 required（未完成则必须人工复审）。",
         },
         "decision_policy_fields": {
             "mode": "默认 conservative_review；只有甲方显式选择 classification_recommendation 才评估规则判负。",

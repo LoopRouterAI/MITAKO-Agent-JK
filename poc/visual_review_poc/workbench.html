@@ -1214,8 +1214,8 @@
       <button class="entry-card" type="button" data-scenario="minor_material" aria-pressed="false">
         <small>入口 03 / 未成年人资料</small>
         <strong>资料完整性审核</strong>
-        <span>面向监护关系、订单归属、承诺书、支付证明等材料完整性检查；始终VIP客服终审。</span>
-        <b>隐私边界</b>
+        <span>面向五类材料完整性、可见字段一致性和图片风险检查；默认不依赖外部在线验真。</span>
+        <b>视觉初审</b>
       </button>
     </nav>
 
@@ -1376,6 +1376,16 @@
                   </div>
                 </div>
 
+                <div id="minorRefundPolicyGroup" hidden>
+                  <label for="minorRefundPolicy">未成年人资料审核方式</label>
+                  <select name="minor_refund_policy" id="minorRefundPolicy">
+                    <option value='{"review_mode":"standard","authoritative_verification":"disabled"}' selected>标准视觉初审（默认，不依赖外部接口）</option>
+                    <option value='{"review_mode":"standard","authoritative_verification":"advisory"}'>视觉初审 + 在线验真提醒（不阻断）</option>
+                    <option value='{"review_mode":"strict","authoritative_verification":"required"}'>严格模式（必须完成甲方在线验真）</option>
+                  </select>
+                  <div class="hint">标准模式核对五类材料和图片中可见信息；只有甲方未来接入身份、运营商或订单验真能力后，才启用严格模式。</div>
+                </div>
+
                 <div class="row">
                   <div>
                     <label for="maxFrames" data-i18n="maxFramesLabel">最多证据帧</label>
@@ -1448,7 +1458,7 @@
             <div class="scenario-card">
               <span class="code">03</span>
               <strong data-i18n="case3Title">资料审核</strong>
-              <span data-i18n="case3Text">辅助识别资料完整性与风险线索，保留VIP客服终审边界。</span>
+              <span data-i18n="case3Text">核对五类材料、可见字段与风险线索，输出交通灯式视觉初审。</span>
             </div>
           </div>
 
@@ -1457,7 +1467,7 @@
             <div class="step"><b data-i18n="flow2">抽帧取证</b><span data-i18n="flow2Text">常规/严格取证可配</span></div>
             <div class="step"><b data-i18n="flow3">多轮特征</b><span data-i18n="flow3Text">画面、物体、资料线索拆解</span></div>
             <div class="step"><b data-i18n="flow4">交叉复核</b><span data-i18n="flow4Text">一致性、风险点、置信度汇总</span></div>
-            <div class="step"><b data-i18n="flow5">VIP客服复核</b><span data-i18n="flow5Text">摘要与复核建议</span></div>
+            <div class="step"><b data-i18n="flow5">客服使用</b><span data-i18n="flow5Text">结论、证据与下一步</span></div>
           </div>
 
 	          <div class="result-grid">
@@ -1529,6 +1539,7 @@
         const taskDesc = document.getElementById('taskDesc');
         const materialList = document.getElementById('materialList');
         const reviewModel = document.getElementById('reviewModel');
+        const minorRefundPolicyGroup = document.getElementById('minorRefundPolicyGroup');
         const fpsSelect = document.getElementById('fps');
         const probeSeconds = document.getElementById('probeSeconds');
         const maxFrames = document.getElementById('maxFrames');
@@ -1595,14 +1606,14 @@
           minor_material: {
             badge: '当前队列 03',
             title: '资料审核',
-            desc: '用于辅助检查材料完整性、脱敏状态和补件线索，最终结论必须由VIP客服复核确认。',
+            desc: '用于核对五类材料完整性、可见字段一致性和图片风险；默认不依赖甲方尚未提供的在线验真接口。',
             materials: ['资料画面或录屏', '关系/订单证明材料', '已脱敏的关键页面'],
             fps: '1',
             probe: '10',
             maxFrames: '6',
             apiFrames: '4',
             submit: '开始审核资料材料',
-            initialLog: '当前为资料审核入口：请提交已脱敏材料，系统只辅助整理风险和补件建议。',
+            initialLog: '当前为资料审核入口：系统会全量检查五类材料和可见字段，绿灯可继续、黄灯看存疑项、红灯优先复核。',
             claim: '例：监护人申请未成年人退款，提交身份证明、监护关系、承诺书和支付材料。',
             product: '退款涉及订单商品或订单集合',
             sku: '订单金额、已发货/未发货、是否定制或盲盒',
@@ -1700,6 +1711,7 @@
           complaintStage.placeholder = profile.stage;
           productMasterData.placeholder = profile.master;
           conversationHistory.placeholder = profile.history;
+          minorRefundPolicyGroup.hidden = scenario !== 'minor_material';
           sampleEvalCard.classList.remove('hidden');
           demoSampleBtn.textContent = profile.sampleLabel || '运行当前队列样本';
           demoSampleBtn.disabled = !profile.sampleId;
@@ -1776,15 +1788,20 @@
           }
           if (review.agent_brief) {
             const brief = review.agent_brief;
+            const confidence = Number(brief.confidence);
+            const confidenceText = Number.isFinite(confidence) ? Math.round(confidence * 100) + '%' : '暂不计算';
+            const verdictText = { YES: '证据支持', NO: '证据不支持', REVIEW: '待确认' }[brief.system_yes_no] || safeText(brief.system_yes_no);
+            const reviewLevel = { required: '必须人工复核', optional: '建议抽检', not_required: '无需逐单人工复核' }[brief.human_review_level];
             return [
               ...ingestionLines(data),
               ...mediaWarningLines(data),
               '结论：' + safeText(brief.conclusion),
-              '置信度：' + safeText(brief.confidence) + ' / 系统参考：' + safeText(brief.system_yes_no),
+              '证据分数：' + confidenceText + ' / 审核建议：' + verdictText,
+              reviewLevel ? '人工处理：' + reviewLevel : '',
               '下一步：' + safeText(brief.next_step),
               '取证：' + safeText(review.frame_strategy),
               '报告：点击下方按钮查看完整 Agent 报告。'
-            ].join('\n\n');
+            ].filter(Boolean).join('\n\n');
           }
           const summary = review.summary || {};
           const lines = [

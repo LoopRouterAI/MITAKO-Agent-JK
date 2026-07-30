@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import json
 import html
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
 from poc.visual_review_poc.minor_material_pipeline import (
+    _normalize_consistency_checks,
     aggregate_minor_material_results,
     run_minor_material_pipeline,
 )
@@ -21,6 +24,7 @@ def _image(index: int) -> dict:
         "api_mime_type": "image/jpeg",
         "width": 1600,
         "height": 1200,
+        "has_exif": False,
     }
 
 
@@ -164,9 +168,9 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         assessment = parsed["minor_material_assessment"]
 
         self.assertEqual(sorted(reviewed_image_indices), list(range(1, 21)))
-        self.assertEqual(parsed["predicted_label"], "review")
-        self.assertEqual(parsed["decision"], "manual_review")
-        self.assertEqual(parsed["system_yes_no"], "REVIEW")
+        self.assertEqual(parsed["predicted_label"], "positive")
+        self.assertEqual(parsed["decision"], "visual_precheck_passed")
+        self.assertEqual(parsed["system_yes_no"], "YES")
         self.assertTrue(assessment["coverage_complete"])
         self.assertEqual(assessment["visual_precheck_status"], "passed")
         self.assertEqual(assessment["processed_image_count"], 20)
@@ -180,10 +184,110 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         self.assertEqual(assessment["field_consistency"]["status"], "completed")
         self.assertEqual(len(assessment["field_consistency"]["checks"]), 5)
+        self.assertEqual(assessment["authoritative_verification"]["status"], "not_configured_optional")
+        self.assertEqual(assessment["authenticity_assessment"]["severity"], "warning")
+        self.assertFalse(assessment["authenticity_assessment"]["blocks_visual_precheck"])
         self.assertEqual(result["chunking"]["channels"]["minor_field_consistency"]["model_calls"], 5)
         serialized = json.dumps(parsed, ensure_ascii=False)
         self.assertNotIn("18012345678", serialized)
         self.assertNotIn("320000200801011234", serialized)
+
+    def test_explicit_authoritative_required_policy_keeps_minor_case_in_manual_review(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        case["structured_business_context"]["minor_refund_policy"] = {
+            "authoritative_verification": "required",
+            "review_mode": "strict",
+        }
+        rows = [(
+            list(range(1, 21)),
+            {"parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}},
+        )]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in ("identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname")
+        ]
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertTrue(parsed["human_required"])
+        self.assertEqual(parsed["minor_material_assessment"]["visual_precheck_status"], "needs_review")
+        self.assertEqual(
+            parsed["minor_material_assessment"]["authoritative_verification"]["status"],
+            "customer_integration_required",
+        )
+
+    def test_single_suspected_editing_signal_is_warning_not_blocking(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        observations = [_observation(index) for index in range(1, 21)]
+        observations[2]["quality_issues"] = ["suspected_editing"]
+        rows = [(list(range(1, 21)), {"parsed": {"material_observations": observations}})]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in ("identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname")
+        ]
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        authenticity = parsed["minor_material_assessment"]["authenticity_assessment"]
+
+        self.assertEqual(authenticity["severity"], "warning")
+        self.assertFalse(authenticity["blocks_visual_precheck"])
+        self.assertIn(3, authenticity["evidence_image_indices"])
+
+    def test_single_page_consistency_evidence_can_match(self) -> None:
+        result = _consistency_result("order_payment")
+        result["_expected_check_id"] = "order_payment"
+        result["_expected_image_indices"] = [1]
+        result["_required_image_indices"] = [1]
+        result["parsed"]["coverage_ack"] = {
+            "expected_image_indices": [1], "observed_image_indices": [1],
+        }
+        for field in result["parsed"]["consistency_check"]["field_results"]:
+            field["evidence_image_indices"] = [1]
+
+        normalized = _normalize_consistency_checks([result], [])
+
+        row = next(item for item in normalized["checks"] if item["check_id"] == "order_payment")
+        self.assertEqual(row["status"], "matched")
+
+    def test_minor_pipeline_uses_bounded_dedicated_parallelism(self) -> None:
+        case = _case(image_count=24, frame_count=0)
+        active = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def invoke(batch_case: dict) -> dict:
+            nonlocal active, peak
+            mode = batch_case["structured_business_context"]["analysis_mode"]
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            if mode == "minor_material_inventory":
+                indices = [item["image_index"] for item in batch_case["supplemental_images"]]
+                return {"status": "success", "parsed": {"material_observations": [_observation(i) for i in indices]}}
+            check_id = batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+            result = _consistency_result(check_id)
+            indices = [item["image_index"] for item in batch_case["supplemental_images"]]
+            result["parsed"]["coverage_ack"] = {
+                "expected_image_indices": indices,
+                "observed_image_indices": indices,
+            }
+            for field in result["parsed"]["consistency_check"]["field_results"]:
+                field["evidence_image_indices"] = indices[:2]
+            return result
+
+        with patch.dict("os.environ", {"REVIEW_MINOR_IMAGE_BATCH_SIZE": "4"}):
+            result = run_minor_material_pipeline(case, invoke=invoke, workers=6)
+
+        self.assertGreaterEqual(peak, 6)
+        self.assertLessEqual(result["chunking"]["effective_workers"], 8)
 
     def test_observed_but_partially_readable_material_still_runs_all_consistency_checks(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -249,9 +353,9 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         parsed = aggregate_minor_material_results(case, rows, [], [], [])
 
         self.assertEqual(parsed["predicted_label"], "review")
-        self.assertEqual(parsed["decision"], "manual_review")
+        self.assertEqual(parsed["decision"], "manual_consistency_review")
         self.assertEqual(parsed["minor_material_assessment"]["field_consistency"]["status"], "not_completed")
-        self.assertIn("不能只按资料齐全判定", parsed["overall_audit"]["conclusion"])
+        self.assertIn("字段仍不清楚", parsed["overall_audit"]["conclusion"])
 
     def test_consistency_mismatch_forces_review_without_exposing_raw_values(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -276,12 +380,12 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             consistency_failures=[],
         )
 
-        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["predicted_label"], "negative")
         self.assertEqual(parsed["minor_material_assessment"]["field_consistency"]["verdict"], "mismatched")
         serialized = json.dumps(parsed, ensure_ascii=False)
         self.assertNotIn("18012345678", serialized)
         self.assertNotIn("320000200801011234", serialized)
-        self.assertIn("customer_integration_required", serialized)
+        self.assertIn("not_configured_optional", serialized)
 
     def test_masked_field_cannot_be_promoted_to_explicit_mismatch(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -329,7 +433,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
 
         self.assertEqual(parsed["minor_material_assessment"]["field_consistency"]["verdict"], "matched")
-        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["predicted_label"], "positive")
         self.assertEqual(parsed["minor_material_assessment"]["visual_precheck_status"], "passed")
 
     def test_consistency_jobs_cover_all_related_images_and_any_uncertain_segment_downgrades(self) -> None:
@@ -427,6 +531,28 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         assessment = result["parsed"]["minor_material_assessment"]
         self.assertEqual(assessment["field_consistency"]["verdict"], "uncertain")
         self.assertNotEqual(assessment["visual_precheck_status"], "passed")
+        self.assertFalse(result["parsed"]["human_required"])
+
+    def test_uncertain_visible_field_is_advisory_in_default_policy(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [
+            (list(range(start, min(start + 4, 21))), {
+                "parsed": {"material_observations": [_observation(index) for index in range(start, min(start + 4, 21))]}
+            })
+            for start in range(1, 21, 4)
+        ]
+        checks = [_consistency_result(check_id) for check_id in (
+            "identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname"
+        )]
+        checks[-1] = _consistency_result("mobile_realname", "uncertain")
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["decision"], "continue_by_customer_policy")
+        self.assertFalse(parsed["human_required"])
 
     def test_failed_consistency_call_is_included_in_usage_and_cost(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -703,7 +829,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertIn("监护关系", prompt)
         self.assertIn("比较图片中可见字段", prompt)
         self.assertIn("不得输出任何字段原值", prompt)
-        self.assertIn("customer_integration_required", prompt)
+        self.assertIn("默认 disabled", prompt)
+        self.assertNotIn('"authoritative_verification": "customer_integration_required"', prompt)
         self.assertNotIn("expected_predicted_label", prompt)
 
     def test_report_renders_consistency_matrix_and_authoritative_boundary(self) -> None:
@@ -721,17 +848,34 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         parsed = aggregate_minor_material_results(
             case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
         )
+        parsed["minor_material_assessment"]["process_evidence"] = [{
+            "video_index": 1,
+            "global_frame_index": 2,
+            "timestamp": "00:08.00",
+            "process_type": "invoice_generation",
+            "evidence_quality": "clear",
+        }]
 
         panel = render_minor_material_panel(parsed["minor_material_assessment"], lambda value: html.escape(str(value)))
 
         self.assertIn("视觉字段一致性初审", panel)
         self.assertIn("视觉初审结论", panel)
-        self.assertIn("通过（仍需权威校验）", panel)
+        self.assertIn("视觉初审通过", panel)
         self.assertIn("身份与年龄", panel)
         self.assertIn("监护关系", panel)
         self.assertIn("订单与支付", panel)
         self.assertIn("材料质量", panel)
-        self.assertIn("待甲方权威接口联调", panel)
+        self.assertIn("在线验真默认关闭", panel)
+        self.assertIn('href="#image-', panel)
+        self.assertIn("图片真实性风险", panel)
+        self.assertIn("发票或凭证生成过程", panel)
+        self.assertIn("画面清晰", panel)
+        self.assertNotIn("invoice_generation", panel)
+        self.assertTrue(all(
+            "matched" not in item["description"]
+            for item in parsed["supporting_evidence"]
+        ))
+        self.assertIn("字段一致性未发现明显矛盾", parsed["overall_audit"]["core_reason"])
         self.assertNotIn("18012345678", panel)
         self.assertNotIn("320000200801011234", panel)
 

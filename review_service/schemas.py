@@ -74,6 +74,13 @@ class ReviewRoutingPolicy(BaseModel):
         return self
 
 
+class ReviewMinorRefundPolicy(BaseModel):
+    """未成年人资料视觉初审策略；权威验真未接入时默认不阻断。"""
+
+    review_mode: Literal["standard", "strict"] = "standard"
+    authoritative_verification: Literal["disabled", "advisory", "required"] = "disabled"
+
+
 class ReviewAtomicClaim(BaseModel):
     claim_id: str = Field(min_length=1, max_length=160)
     role: Literal["primary", "additional"] = "primary"
@@ -282,6 +289,7 @@ class ReviewCaseMetadata(BaseModel):
     damage_causality_policy: ReviewDamageCausalityPolicy = Field(default_factory=ReviewDamageCausalityPolicy)
     output_options: ReviewOutputOptions = Field(default_factory=ReviewOutputOptions)
     review_routing_policy: ReviewRoutingPolicy = Field(default_factory=ReviewRoutingPolicy)
+    minor_refund_policy: ReviewMinorRefundPolicy = Field(default_factory=ReviewMinorRefundPolicy)
 
     @field_validator("conversation_history", mode="before")
     @classmethod

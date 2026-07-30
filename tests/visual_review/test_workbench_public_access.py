@@ -24,6 +24,15 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertIn("expires", query)
         self.assertIn("sig", query)
 
+    def test_minor_material_workbench_defaults_to_visual_precheck(self) -> None:
+        workbench = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
+
+        self.assertIn('name="minor_refund_policy"', workbench)
+        self.assertIn('"authoritative_verification":"disabled"', workbench)
+        self.assertIn("标准视觉初审（默认，不依赖外部接口）", workbench)
+        self.assertNotIn("始终VIP客服终审", workbench)
+        self.assertNotIn("最终结论必须由VIP客服复核确认", workbench)
+
     def test_report_and_media_routes_require_path_bound_unexpired_signature(self) -> None:
         report_name = "signed-report.html"
         workbench_server.ALLOWED_REPORTS[report_name] = {
@@ -191,6 +200,18 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                     "verdict": "matched",
                     "unknown": "不得公开",
                 },
+                "authenticity_assessment": {
+                    "severity": "warning",
+                    "risk_score": 0.25,
+                    "risk_percent": 25,
+                    "blocks_visual_precheck": False,
+                    "evidence_image_indices": [3],
+                    "missing_exif_image_indices": [4],
+                    "unknown_exif_image_indices": [],
+                    "conclusion": "缺少拍摄信息不等于图片造假。",
+                    "boundary": "风险分数不是客观真伪概率。",
+                    "raw_ocr": "18012345678",
+                },
                 "unknown_assessment": "不得公开",
             },
             "ocr_text": "原始 OCR 18012345678",
@@ -228,6 +249,10 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             public_parsed["minor_material_assessment"]["checklist"][0]["quality_status"],
             "needs_manual_confirmation",
         )
+        authenticity = public_parsed["minor_material_assessment"]["authenticity_assessment"]
+        self.assertEqual(authenticity["risk_percent"], 25)
+        self.assertEqual(authenticity["missing_exif_image_indices"], [4])
+        self.assertNotIn("raw_ocr", authenticity)
         for forbidden in (
             "unknown_top_level",
             "unknown_nested",

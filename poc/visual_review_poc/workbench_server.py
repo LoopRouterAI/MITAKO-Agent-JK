@@ -33,7 +33,7 @@ load_dotenv(
 )
 
 from runtime_paths import app_root
-from review_service.service import postprocess_review
+from review_service.service import ensure_label_isolation, postprocess_review
 from review_service.decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
 from poc.visual_review_poc.media_registry import MediaRegistry
 from review_media_safety import (
@@ -110,6 +110,7 @@ except ValueError:
 MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
 MAX_FOLDER_FILES = max(1, int(os.getenv("VISUAL_MAX_FOLDER_FILES", "200") or 200))
+EVALUATION_CONTEXT_FILENAMES = {"annotation.json", "reply.json", "manifest.json", "sample_labels.json"}
 SUPPLEMENTAL_IMAGE_SOFT_LIMIT = min(
     max(1, int(os.getenv("VISUAL_SUPPLEMENTAL_IMAGE_SOFT_LIMIT", "40") or 40)),
     MAX_FOLDER_FILES,
@@ -223,7 +224,11 @@ def _safe_basename(name: str, fallback: str) -> str:
 def _save_folder_uploads(files: List[UploadFile]) -> tuple[Path, Dict[str, Any]]:
     if not files:
         raise HTTPException(status_code=400, detail="请选择工单素材文件夹")
-    accepted_candidates = [file for file in files if not ignored_upload_reason(file.filename or "")]
+    accepted_candidates = [
+        file for file in files
+        if not ignored_upload_reason(file.filename or "")
+        and Path((file.filename or "").replace("\\", "/")).name.lower() not in EVALUATION_CONTEXT_FILENAMES
+    ]
     if len(accepted_candidates) > MAX_FOLDER_FILES:
         raise HTTPException(status_code=413, detail={
             "code": "too_many_review_assets",
@@ -244,6 +249,9 @@ def _save_folder_uploads(files: List[UploadFile]) -> tuple[Path, Dict[str, Any]]
             suffix = Path(display_name).suffix.lower()
             if reason:
                 skipped.append({"name": display_name, "reason": reason})
+                continue
+            if display_name.lower() in EVALUATION_CONTEXT_FILENAMES:
+                skipped.append({"name": display_name, "reason": "evaluation_label_not_allowed"})
                 continue
             if suffix not in ALLOWED_FOLDER_SUFFIXES:
                 skipped.append({"name": display_name, "reason": "unsupported_suffix"})
@@ -272,6 +280,14 @@ def _save_folder_uploads(files: List[UploadFile]) -> tuple[Path, Dict[str, Any]]
                 target.unlink(missing_ok=True)
                 skipped.append({"name": display_name, "reason": "invalid_media_content"})
                 continue
+            if suffix in {".txt", ".json"}:
+                try:
+                    content = target.read_text(encoding="utf-8-sig")
+                    ensure_label_isolation(json.loads(content) if suffix == ".json" else content)
+                except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                    target.unlink(missing_ok=True)
+                    skipped.append({"name": display_name, "reason": "evaluation_label_not_allowed"})
+                    continue
             accepted.append({"name": name, "kind": "video" if suffix in ALLOWED_VIDEO_SUFFIXES else "image" if suffix in IMAGE_SUFFIXES else "context"})
         if not accepted:
             raise HTTPException(status_code=400, detail="文件夹内没有可用视频、图片或文本材料")
@@ -365,14 +381,14 @@ def _public_summary(raw_report: Dict[str, Any]) -> Dict[str, Any]:
             "successful_reviews": 1 if raw_report.get("ok", True) else 0,
             "predicted_label": summary.get("actual_predicted_label"),
             "report_evaluation": "命中" if summary.get("hit") else "未命中" if summary.get("available") else "未评测",
-            "needs_human_review": True,
+            "needs_human_review": bool(summary.get("needs_human_review")),
         }
     ok = bool(raw_report.get("ok"))
     return {
         "cases": summary.get("cases") or 1,
         "total_reviews": summary.get("total_reviews") or 1,
         "successful_reviews": summary.get("successful_reviews") if summary.get("successful_reviews") is not None else (1 if ok else 0),
-        "needs_human_review": True,
+        "needs_human_review": bool(summary.get("needs_human_review")),
         "review_status": "completed" if ok else "failed",
     }
 
@@ -450,6 +466,17 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
                 "coverage_complete": True,
                 "segment_count": True,
             }],
+        },
+        "authenticity_assessment": {
+            "severity": True,
+            "risk_score": True,
+            "risk_percent": True,
+            "blocks_visual_precheck": True,
+            "evidence_image_indices": [True],
+            "missing_exif_image_indices": [True],
+            "unknown_exif_image_indices": [True],
+            "conclusion": True,
+            "boundary": True,
         },
         "authoritative_verification": {
             "status": True,
@@ -1213,7 +1240,7 @@ def _agent_report_response(
             "successful_reviews": 1 if ok else 0,
             "predicted_label": parsed.get("predicted_label"),
             "confidence": parsed.get("confidence"),
-            "needs_human_review": True,
+            "needs_human_review": bool(parsed.get("human_required")),
             "review_status": "completed" if ok else "failed",
         },
         "conclusion": public_conclusion,
@@ -1249,6 +1276,7 @@ def _agent_report_response(
         "claim_scope": structured.get("claim_scope") or frontdesk.get("claim_scope") or {},
         "sop_context": structured.get("sop_context") or frontdesk.get("sop_context") or {},
         "review_routing_policy": structured.get("review_routing_policy") or {},
+        "minor_refund_policy": structured.get("minor_refund_policy") or {},
         "decision_policy": (
             {
                 "mode": "classification_recommendation",
@@ -1660,6 +1688,7 @@ def review_folder(
     fulfillment_baseline: str = Form(""),
     evidence_coverage: str = Form(""),
     review_routing_policy: str = Form(""),
+    minor_refund_policy: str = Form(""),
     defer_postprocess: bool = Form(False),
     include_html_report: bool = Form(True),
     sampling_mode: str = Form("adaptive"),
@@ -1703,6 +1732,7 @@ def review_folder(
         "fulfillment_baseline": fulfillment_baseline,
         "evidence_coverage": evidence_coverage,
         "review_routing_policy": review_routing_policy,
+        "minor_refund_policy": minor_refund_policy,
     }
     response = _run_folder_agent_review(
         folder_dir,
@@ -1729,6 +1759,7 @@ def review_folders_batch(
     product_master_data: str = Form(""),
     conversation_history: str = Form(""),
     review_routing_policy: str = Form(""),
+    minor_refund_policy: str = Form(""),
     include_html_report: bool = Form(True),
     sampling_mode: str = Form("adaptive"),
     fps: float = Form(1.0),
@@ -1751,6 +1782,7 @@ def review_folders_batch(
         "product_master_data": product_master_data,
         "conversation_history": conversation_history,
         "review_routing_policy": review_routing_policy,
+        "minor_refund_policy": minor_refund_policy,
     }
     cases = []
     for case_id, case_files in groups.items():
@@ -1816,6 +1848,7 @@ def review(
     fulfillment_baseline: str = Form(""),
     evidence_coverage: str = Form(""),
     review_routing_policy: str = Form(""),
+    minor_refund_policy: str = Form(""),
     include_html_report: bool = Form(True),
     fps: float = Form(1.0),
     max_frames: int = Form(24),
@@ -1894,6 +1927,7 @@ def review(
         "fulfillment_baseline": fulfillment_baseline,
         "evidence_coverage": evidence_coverage,
         "review_routing_policy": review_routing_policy,
+        "minor_refund_policy": minor_refund_policy,
     }
     result = _run_review(
         video,

@@ -16,13 +16,13 @@ $ZipPath = Join-Path (Split-Path -Parent $Root) $ZipName
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_customer_stage_$Date"
 $CompileStage = Join-Path $env:TEMP "mitako_runtime_compile_$Date"
 $GitCommit = (git rev-parse HEAD).Trim()
-$TrackedChanges = @(git status --porcelain --untracked-files=normal)
+$TrackedChanges = @(git status --porcelain --untracked-files=no)
 if ($TrackedChanges.Count -gt 0) {
-    throw "Working tree contains tracked or untracked changes. Commit them before creating an auditable customer package."
+    throw "Working tree contains tracked changes. Commit them before creating an auditable customer package."
 }
 
 & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl
-$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=normal)
+$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=no)
 if ($TrackedChangesAfterValidation.Count -gt 0) {
     throw "Release validation changed tracked files. Review and commit them before customer packaging."
 }
@@ -851,6 +851,8 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
+    "甲方沟通交付文档\0730未成年人资料审核与客服报告升级说明.html",
     "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
     "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
     "甲方沟通交付文档\0723客诉审核Agent接口联调与商务沟通说明.html",

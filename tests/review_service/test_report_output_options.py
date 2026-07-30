@@ -86,7 +86,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
             self.assertEqual(definition["schema"], {"type": "string", "format": "binary"})
         self.assertEqual(route.responses[206]["content"], responses)
 
-    def test_formal_report_uses_job_scoped_media_urls_instead_of_internal_workbench_host(self):
+    def test_formal_report_uses_fresh_signed_media_urls_that_browser_images_can_load(self):
         media_id = "a" * 32
         job = {
             "job_id": "RV-MEDIA-PROXY",
@@ -110,10 +110,35 @@ class ReportOutputOptionsTest(unittest.TestCase):
             }},
         }
 
+        with patch.dict("os.environ", {
+            "VISUAL_REPORT_SIGNING_SECRET": "shared-secret",
+            "VISUAL_WORKBENCH_PUBLIC_URL": "https://review.example.test",
+        }):
+            html = service.render_job_report(job)
+
+        self.assertIn(f"https://review.example.test/media-item/{media_id}?expires=", html)
+        self.assertIn("&amp;sig=", html)
+        self.assertNotIn("127.0.0.1:7861", html)
+
+    def test_formal_report_hides_internal_inference_costs(self):
+        job = {
+            "job_id": "RV-NO-INTERNAL-METRICS",
+            "status": "SUCCEEDED",
+            "completed_at": 1,
+            "result": {"review": {
+                "summary": {"review_status": "completed"},
+                "agent_report": {
+                    "scenario_label": "未成年人资料审核",
+                    "parsed": {"predicted_label": "review"},
+                    "inference_estimate": {"total_tokens": 987654, "estimated_usd": 12.34},
+                },
+            }},
+        }
+
         html = service.render_job_report(job)
 
-        self.assertIn(f"/api/v1/review/jobs/{job['job_id']}/media/{media_id}", html)
-        self.assertNotIn("127.0.0.1:7861", html)
+        self.assertNotIn("987654", html)
+        self.assertNotIn("12.34", html)
 
     def test_job_media_resolution_is_limited_to_media_referenced_by_that_job(self):
         media_id = "b" * 32

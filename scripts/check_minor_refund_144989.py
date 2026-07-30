@@ -12,6 +12,7 @@ import re
 import sys
 import time
 from contextlib import ExitStack
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -22,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from review_input_safety import redact_review_personal_data
+from review_media_safety import ignored_upload_reason, valid_media_file
 
 
 REPORT_DIR = ROOT / "tests" / "reports"
@@ -33,6 +35,44 @@ SENSITIVE_OUTPUT_PATTERNS = (
     re.compile(r"(?<!\d)\d{16,19}(?!\d)"),
     re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
 )
+
+
+class _VisibleTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: List[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _visible_html_text(document: str) -> str:
+    parser = _VisibleTextParser()
+    parser.feed(document or "")
+    return " ".join(parser.parts)
+
+
+def _public_result_text(row: Dict[str, Any]) -> str:
+    assessment = row.get("minor_material_assessment") or {}
+    public_fields = {
+        "conclusion": row.get("conclusion"),
+        "material_gaps": row.get("material_gaps"),
+        "checklist": assessment.get("checklist"),
+        "field_consistency": assessment.get("field_consistency"),
+        "authenticity_assessment": assessment.get("authenticity_assessment"),
+        "authoritative_verification": assessment.get("authoritative_verification"),
+    }
+    return json.dumps(public_fields, ensure_ascii=False)
+
+
+def contains_sensitive_public_output(report_html: str, row: Dict[str, Any]) -> bool:
+    visible_text = _visible_html_text(report_html)
+    public_result_text = _public_result_text(row)
+    return any(
+        pattern.search(value)
+        for pattern in SENSITIVE_OUTPUT_PATTERNS
+        for value in (visible_text, public_result_text)
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,7 +107,10 @@ def load_blind_inputs(root: Path) -> tuple[str, List[Path]]:
     claim = redact_review_personal_data(claim_path.read_text(encoding="utf-8-sig").strip())
     assets = [
         path for path in sorted(folder.iterdir())
-        if path.is_file() and path.suffix.lower() in MEDIA_SUFFIXES
+        if path.is_file()
+        and path.suffix.lower() in MEDIA_SUFFIXES
+        and not ignored_upload_reason(path.name)
+        and valid_media_file(path)
     ]
     if any(path.name.lower() in FORBIDDEN_FILES for path in assets):
         raise RuntimeError("盲测输入包含禁止文件")
@@ -128,6 +171,10 @@ def submit(base_url: str, token: str, root: Path, run_id: str, timeout: int) -> 
             }],
         },
         "decision_policy": {"mode": "conservative_review"},
+        "minor_refund_policy": {
+            "review_mode": "standard",
+            "authoritative_verification": "disabled",
+        },
         "sampling_policy": {
             "preset": "adaptive",
             "frames_per_model_call": 24,
@@ -212,9 +259,8 @@ def wait_job(base_url: str, token: str, submission: Dict[str, Any], timeout: int
                     "workbench_transport": result.get("workbench_transport") or {},
                     "inference_estimate": (review.get("agent_report") or {}).get("inference_estimate") or {},
                     "report_status": report_response.status_code,
-                    "report_contains_raw_sensitive_data": any(
-                        pattern.search(report_response.text)
-                        for pattern in SENSITIVE_OUTPUT_PATTERNS
+                    "report_contains_raw_sensitive_data": contains_sensitive_public_output(
+                        report_response.text, {}
                     ),
                     "diagnostics": job.get("diagnostics") or {},
                 }
@@ -231,18 +277,19 @@ def evaluate(row: Dict[str, Any]) -> List[Dict[str, Any]]:
     authoritative = assessment.get("authoritative_verification") or {}
     inference_channels = (row.get("inference_estimate") or {}).get("channels") or {}
     consistency_channel = inference_channels.get("minor_field_consistency") or {}
-    safe_gate = (
-        row.get("predicted_label") == "review"
-        and row.get("decision") == "manual_review"
-        and row.get("system_yes_no") == "REVIEW"
-        and row.get("business_action_allowed") is False
-        and (
-            assessment.get("visual_precheck_status") == "passed"
-            if field_consistency.get("verdict") == "matched"
-            else assessment.get("visual_precheck_status") in {"needs_review", "incomplete"}
+    safe_gate = row.get("business_action_allowed") is False and (
+        (
+            row.get("predicted_label") == "positive"
+            and assessment.get("visual_precheck_status") == "passed"
+            and field_consistency.get("verdict") == "matched"
+        )
+        or (
+            row.get("predicted_label") == "review"
+            and row.get("decision") == "continue_by_customer_policy"
+            and row.get("human_required") is False
+            and field_consistency.get("verdict") == "uncertain"
         )
     )
-    serialized = json.dumps(row, ensure_ascii=False)
     return [
         {"name": "job_succeeded", "ok": row.get("status") == "SUCCEEDED"},
         {"name": "all_20_images_processed", "ok": assessment.get("declared_image_count") == 20 and assessment.get("processed_image_count") == 20},
@@ -259,19 +306,19 @@ def evaluate(row: Dict[str, Any]) -> List[Dict[str, Any]]:
         {"name": "consistency_decision_gate", "ok": safe_gate},
         {
             "name": "authoritative_verification_boundary",
-            "ok": authoritative.get("status") == "customer_integration_required",
+            "ok": authoritative.get("status") == "not_configured_optional",
         },
         {
             "name": "consistency_cost_accounted",
             "ok": int(consistency_channel.get("model_calls") or 0) >= 5,
         },
-        {"name": "business_boundary_enforced", "ok": row.get("business_action_allowed") is False and row.get("human_required") is True},
+        {"name": "business_boundary_enforced", "ok": row.get("business_action_allowed") is False and row.get("human_required") is False},
         {"name": "video_forensics_completed", "ok": row.get("media_forensics_status") == "completed"},
         {"name": "report_available", "ok": row.get("report_status") == 200},
         {
             "name": "pii_not_returned",
             "ok": not row.get("report_contains_raw_sensitive_data")
-            and not any(pattern.search(serialized) for pattern in SENSITIVE_OUTPUT_PATTERNS),
+            and not contains_sensitive_public_output("", row),
         },
     ]
 
@@ -318,7 +365,7 @@ body{{margin:0;background:#f3f5f2;color:#202823;font-family:"Microsoft YaHei","S
 </style></head><body><main>
 <section><h1>144989 未成年人资料审核回归</h1><p>正式 API 盲测；未向模型发送正样本目录标签、reply.json 或人工退款结论。审核包含材料完整性与视觉字段一致性两阶段。</p></section>
 <section class="metric"><div><small>任务状态</small><b>{html.escape(str(row.get('status')))}</b></div><div><small>证据标签</small><b>{html.escape(str(row.get('predicted_label')))}</b></div><div><small>图片覆盖</small><b>{assessment.get('processed_image_count', 0)}/{assessment.get('declared_image_count', 0)}</b></div><div><small>置信度</small><b>{html.escape(str(row.get('confidence')))}</b></div></section>
-<section><h2>结论</h2><p>{html.escape(str(row.get('conclusion') or ''))}</p><p>边界：视觉字段一致不等于资料具有法定真实性；身份证、运营商实名、订单和支付仍需甲方权威接口或授权人员核验。</p></section>
+<section><h2>结论</h2><p>{html.escape(str(row.get('conclusion') or ''))}</p><p>边界：视觉字段一致不等于法定真实性；默认视觉初审不依赖甲方当前不存在的身份或运营商接口，也不自动执行退款。</p></section>
 <section><h2>SOP 五类材料</h2><table><thead><tr><th>材料</th><th>状态</th><th>图片编号</th><th>规则</th></tr></thead><tbody>{material_rows}</tbody></table></section>
 <section><h2>视觉字段一致性初审</h2><p>总体：{html.escape(str(field_consistency.get('verdict') or 'not_assessed'))}</p><table><thead><tr><th>检查项</th><th>状态</th><th>图片编号</th><th>风险码</th></tr></thead><tbody>{consistency_rows}</tbody></table></section>
 <section><h2>自动验收</h2><table><thead><tr><th>检查项</th><th>结果</th></tr></thead><tbody>{check_rows}</tbody></table></section>

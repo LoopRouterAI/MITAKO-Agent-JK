@@ -1040,7 +1040,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     policy = (case.get("structured_business_context") or {}).get("continuity_policy") or {}
     causality_policy = (case.get("structured_business_context") or {}).get("damage_causality_policy") or {}
     if scenario in {"minor_material", "minor_refund"}:
-        workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4))
+        workers = max(1, min(int(os.getenv("REVIEW_MINOR_WORKERS", "6") or 6), 8))
         output = run_minor_material_pipeline(
             case,
             invoke=lambda batch_case: call_model(cfg, batch_case, timeout, retries),
