@@ -14,6 +14,7 @@ from fastapi import UploadFile
 from starlette.datastructures import Headers
 
 from poc.visual_review_poc import workbench_server
+from poc.visual_review_poc.local_video_triage_demo import load_case_from_folder
 from poc.visual_review_poc.model_selection_e2e import load_case_bundle
 
 
@@ -72,6 +73,26 @@ class WorkbenchUploadSafetyTest(unittest.TestCase):
                 self.assertEqual([path.name for path in folder.iterdir()], ["evidence.mp4"])
             finally:
                 workbench_server.UPLOAD_DIR = original_upload_dir
+
+    def test_folder_loader_ignores_manifest_tag_but_keeps_customer_predecision_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            (folder / "content.txt").write_text("请复核本次售后", encoding="utf-8")
+            (folder / "manifest.json").write_text(
+                '{"tag":"负样本 未成年人资料","resources":[]}', encoding="utf-8"
+            )
+            (folder / "conversation_predecision.json").write_text(
+                '[{"from":"user","text":"之前审核不通过，我要补充证据申请复核"}]', encoding="utf-8"
+            )
+
+            case = load_case_from_folder(folder, 0)
+
+        self.assertEqual(case["scenario"], "video_unboxing")
+        self.assertNotIn("tag", case["order_context"])
+        self.assertEqual(
+            case["structured_business_context"]["conversation_history"][0]["text"],
+            "之前审核不通过，我要补充证据申请复核",
+        )
 
     def test_undecodable_video_is_isolated_when_valid_video_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

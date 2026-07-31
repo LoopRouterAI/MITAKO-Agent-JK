@@ -36,9 +36,27 @@ BUSINESS_ACTION_WORDS = (
 
 
 def _h(value: Any) -> str:
-    text = str(value if value is not None else "")
-    text = text.replace("外包装", "包装").replace("外包", "协作")
-    return html.escape(text)
+    return html.escape(str(value if value is not None else ""))
+
+
+def _playback_speed_evidence(media_forensics: Any) -> str:
+    if not isinstance(media_forensics, dict):
+        return '<li>本轮未获得可展示的播放速度取证结果。</li>'
+    rows = []
+    for asset in media_forensics.get("assets") or []:
+        if not isinstance(asset, dict):
+            continue
+        assessment = asset.get("playback_speed_assessment")
+        if not isinstance(assessment, dict):
+            continue
+        multiplier = assessment.get("constant_speed_multiplier")
+        speed = multiplier if assessment.get("status") == "known" and multiplier is not None else "未知"
+        method = "非模型推断" if assessment.get("is_model_inference") is False else "推断来源未声明"
+        rows.append(
+            f'<li>{_h(asset.get("file") or asset.get("asset_id") or "视频")}：'
+            f'恒定倍速：{_h(speed)}；{_h(assessment.get("reason") or "未提供原因")}；{method}。</li>'
+        )
+    return "".join(rows) or '<li>本轮未获得可展示的播放速度取证结果。</li>'
 
 
 def _has_business_action(text: Any) -> bool:
@@ -53,19 +71,18 @@ def safe_agent_conclusion(parsed: Dict[str, Any], scenario_label: str) -> str:
         return f"视觉证据支持{clean_label}诉求，置信度 {confidence}。"
     if label == "negative":
         return f"视觉证据暂不支持用户诉求，置信度 {confidence}。"
-    return f"证据不足，需要VIP客服复核，置信度 {confidence}。"
+    return f"本轮未形成明确事实倾向，证据分数 {confidence}。"
 
 
 def safe_agent_next_step(text: Any) -> str:
     if _has_business_action(text):
         return "将视觉证据摘要提交VIP客服复核；由客服系统结合订单、售后政策和库存记录决定后续业务动作。"
-    return str(text or "请VIP客服结合订单、售后规则和原始素材处理。")
+    return str(text or "请结合本页证据、订单资料和适用 SOP 继续处理。")
 
 
 def _safe_agent_reason(text: Any) -> str:
     chunks = [item.strip() for item in re.split(r"[。；;]\s*", str(text or "")) if item.strip()]
-    kept = [item for item in chunks if not _has_business_action(item)]
-    return "。".join(kept[:3]) + ("。" if kept else "")
+    return "。".join(chunks[:3]) + ("。" if chunks else "")
 
 
 def _public_verdict(parsed: Dict[str, Any], scenario_label: str) -> str:
@@ -78,7 +95,7 @@ def _public_verdict(parsed: Dict[str, Any], scenario_label: str) -> str:
         return "支持" + scenario_label.replace("审核", "") + "诉求"
     if label == "negative":
         return "暂不支持用户诉求"
-    return "需要VIP客服复核"
+    return "本轮未形成明确事实倾向"
 
 
 def _public_yes_no(parsed: Dict[str, Any]) -> str:
@@ -131,9 +148,9 @@ def _decision_policy_panel(value: Any) -> str:
     )
     return f"""
   <section class="panel boundary-panel">
-    <div class="section-head"><h2>版本化规则判定说明</h2><p>规则只生成分类建议，不自动拒绝、退款、补发、换货或定责。</p></div>
+    <div class="section-head"><h2>SOP 规则判定说明</h2><p>规则只生成审核倾向，不自动拒绝、退款、补发、换货或定责。</p></div>
     <div class="boundary-grid">
-      <article class="boundary-card"><h3>策略与结果</h3><p><b>{_h(value.get("policy_ref") or "未提供策略版本")}</b></p><p>{_h("已命中规则" if value.get("applied") else "未命中规则，保持复核")}</p><p>{_h(value.get("reason") or "")}</p></article>
+      <article class="boundary-card"><h3>规则结果</h3><p><b>{_h("已按 SOP 形成审核倾向" if value.get("applied") else "当前条件不足，保持复核")}</b></p><p>{_h(value.get("reason") or "")}</p></article>
       <article class="boundary-card"><h3>未通过的门槛</h3><ul class="boundary-list">{failed_html}</ul></article>
     </div>
     <p><b>关键阈值：</b>{threshold_text}</p>
@@ -481,6 +498,13 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     video = parsed.get("video_audit_conclusion") or parsed.get("continuity_assessment") or {}
     runtime = report.get("runtime") or {}
     inference = report.get("inference_estimate") or {}
+    media_forensics = data.get("media_forensics") or {}
+    playback_speed_evidence = _playback_speed_evidence(media_forensics)
+    visual_playback_speed = {
+        "normal": "未见明显加速",
+        "accelerated": "疑似加速",
+        "unknown": "无法判断",
+    }.get(str(video.get("playback_speed") or "unknown"), "无法判断")
     advisory = report.get("advisory_assessment") or data.get("advisory_assessment") or {}
     advisory_assessment = advisory.get("assessment") or {}
     human_review = advisory.get("human_review") or {}
@@ -513,14 +537,16 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     if advisory:
         advisory_panel = f"""
   <section class="panel boundary-panel advisory-panel decision-{_h(advisory_assessment.get('conclusion_code') or 'unknown')}">
-    <div class="section-head"><h2>审核建议与使用边界</h2><p>结论是证据判断建议，不是退款、换货、补发或拒绝决定。</p></div>
+    <div class="section-head"><h2>按照 SOP 的审核倾向</h2><p>这是审核建议，不是退款、换货、补发或拒绝决定。</p></div>
     <div class="causality-grid">
-      <article><small>事实结论</small><b>{_h(advisory_assessment.get("conclusion") or "未形成")}</b></article>
+      <article><small>SOP 审核倾向</small><b>{_h(advisory_assessment.get("conclusion") or "未形成")}</b></article>
       <article><small>证据分数</small><b>{_h(advisory_assessment.get("confidence") if advisory_assessment.get("confidence") is not None else "-")}</b></article>
       <article><small>人工复审建议</small><b>{_h(human_level_label)}</b></article>
       <article><small>流程建议</small><b>{_h(workflow_label)}</b></article>
     </div>
-    <p><b>为什么：</b>{_h(human_review.get("recommendation") or "-")}</p>
+    <div class="human-action status-{_h({'required': 'red', 'optional': 'amber', 'not_required': 'green'}.get(human_level, 'amber'))}">
+      <h3>建议进一步评估</h3><p>{_h(human_review.get("recommendation") or "本轮没有额外复核建议。")}</p>
+    </div>
     <p><b>分数怎么看：</b>这是证据充分程度，不是客观正确率。分数越高，表示本轮证据链越完整、矛盾越少。</p>
     <p><b>业务边界：</b>{_h(advisory_policy.get("boundary") or "本服务不直接决定退款、补发、换货、拒绝或最终定责。")}</p>
     <div class="boundary-grid">{signal_cards or '<p class="muted">本轮没有额外风险信号。</p>'}</div>
@@ -598,7 +624,12 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         next_step = diagnostics.get("operator_hint") or next_step
         confidence = "-"
     material_gaps = parsed.get("material_gaps") or []
-    model_limitations = parsed.get("model_limitations") or []
+    model_limitations = [
+        "本报告只说明送审证据支持什么结论，不能替代甲方的退款、换货、补偿或拒绝决定。",
+        "未接入的订单、仓库、物流或权威核验数据不会被假设为已核验。",
+    ]
+    if parsed.get("specialized_pass_warning"):
+        model_limitations.append(str(parsed["specialized_pass_warning"]))
     confidence_reason = _safe_agent_reason(parsed.get("confidence_reason") or overall.get("core_reason") or core_reason)
     supporting_evidence = parsed.get("adopted_evidence") or parsed.get("supporting_evidence") or []
     challenging_evidence = parsed.get("challenging_evidence") or []
@@ -778,6 +809,8 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
       <article><small>商品证据连续性</small><b>{_h({"continuous": "连续", "brief_occlusion": "短暂遮挡", "long_absence": "较长离镜", "indeterminate": "不确定"}.get(video.get("evidence_continuity_status"), video.get("evidence_continuity_status") or "未知"))}</b></article>
     </div>
     <p><b>口径说明：</b>视频时间轴完整不等于争议商品全程连续可见；抽帧覆盖、媒体技术取证、开箱过程和商品连续性是四个独立维度。</p>
+    <p><b>画面节奏判断：{_h(visual_playback_speed)}</b>。这是模型对画面节奏的观察，不是精确倍速测量。</p>
+    <p><b>播放速度技术取证：</b></p><ul class="boundary-list">{playback_speed_evidence}</ul>
     <p><b>连续性：</b>{_h(video.get("continuity_reason") or video.get("reason") or "本轮没有输出明确连续性理由。")}</p>
     <p><b>剪辑/调包风险：</b>{_h(video.get("edit_or_cut_risk") or "-")} / {_h(video.get("swap_risk_level") or "-")}</p>
   </section>

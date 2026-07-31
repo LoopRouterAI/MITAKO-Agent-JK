@@ -5,11 +5,29 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 
-DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-PD-ADVISORY@20260728.1"
+DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-PD-ADVISORY@20260731.1"
 
 
 APPROVED_POLICY_SNAPSHOTS: Dict[Any, Dict[str, Any]] = {
     ("mitako", DEFAULT_PRODUCT_DAMAGE_POLICY_REF): {
+        "mode": "classification_recommendation",
+        "opening_video_required": True,
+        "missing_required_opening_video": "negative",
+        "noncompliant_opening_video": "negative",
+        "complete_video_no_claimed_damage": "negative",
+        "require_claim_scope": True,
+        "minimum_visibility_coverage": 0.7,
+        "minimum_required_view_coverage": 0.6,
+        "minimum_confidence": 0.65,
+        "require_continuity_complete": False,
+        "require_fully_observable": False,
+        "require_claimed_region_closeup": False,
+        "require_same_item_linkage": False,
+        "require_media_forensics": False,
+        "maximum_forensic_risk": "medium",
+        "max_unobserved_seconds": 3.0,
+    },
+    ("mitako", "MITAKO-PD-ADVISORY@20260728.1"): {
         "mode": "classification_recommendation",
         "opening_video_required": True,
         "missing_required_opening_video": "negative",
@@ -92,6 +110,23 @@ def _claim_scope_ready(scope: Dict[str, Any], fallback_claim: str) -> bool:
     return scope.get("split_status") == "single_legacy" and bool(
         str(scope.get("claim_text") or fallback_claim or "").strip()
     ) and bool(scope.get("issue_types"))
+
+
+def _default_claim_scope(scope: Dict[str, Any], fallback_claim: str, scenario: str) -> Dict[str, Any]:
+    has_explicit_scope = bool(
+        scope.get("active_claim_ids")
+        or scope.get("claims")
+        or scope.get("issue_types")
+        or str(scope.get("claim_text") or "").strip()
+        or scope.get("split_status") in {"resolved", "single_legacy", "ambiguous"}
+    )
+    if has_explicit_scope or not fallback_claim.strip() or scenario != "product_damage":
+        return scope
+    return {
+        "split_status": "single_legacy",
+        "claim_text": fallback_claim,
+        "issue_types": ["product_damage"],
+    }
 
 
 def _visibility_coverage(continuity: Dict[str, Any]) -> Optional[float]:
@@ -183,8 +218,9 @@ def apply_review_decision_policy(
         if approved_policies is not None and not approved_snapshot:
             approved_snapshot = _dict(registry.get(policy_ref))
     policy = {**approved_snapshot, "policy_ref": policy_ref} if approved_snapshot else requested_policy
-    scope = _dict(metadata.get("claim_scope"))
+    fallback_claim = str(metadata.get("customer_claim") or "")
     scenario = str(job.get("scenario") or metadata.get("scenario") or "")
+    scope = _default_claim_scope(_dict(metadata.get("claim_scope")), fallback_claim, scenario)
     agent_report = _dict(review.get("agent_report"))
     parsed = _dict(agent_report.get("parsed"))
     damage = _dict(parsed.get("damage_causality_assessment"))
@@ -196,7 +232,7 @@ def apply_review_decision_policy(
     forensics = _dict(media_forensics)
     forensic_summary = _dict(forensics.get("summary"))
     has_video = _has_video(job.get("assets") or [])
-    scope_ready = _claim_scope_ready(scope, str(metadata.get("customer_claim") or ""))
+    scope_ready = _claim_scope_ready(scope, fallback_claim)
     coverage = _visibility_coverage(continuity)
     claimed_item_longest_absence = _claimed_item_longest_absence(continuity)
     model_confidence = _first_float(
@@ -270,15 +306,78 @@ def apply_review_decision_policy(
         audit["reason"] = "缺少策略要求的开箱视频，但甲方策略仍要求人工复核。"
         return output
 
+    opening_integrity = str(video_audit.get("opening_integrity") or "").strip().lower()
+    timeline_verified = video_audit.get("opening_integrity_source") == "full_timeline_continuity"
+    max_unobserved_seconds = _nonnegative_float(policy.get("max_unobserved_seconds"), 0.0)
+    explicitly_incomplete = timeline_verified and opening_integrity in {
+        "incomplete", "不完整", "开箱不完整", "invalid", "noncompliant"
+    }
+    long_unresolved_absence = (
+        claimed_item_longest_absence is not None
+        and claimed_item_longest_absence > max_unobserved_seconds
+        and continuity.get("continuity_verdict") in {"long_absence", "indeterminate"}
+        and continuity.get("claimed_item_timeline_complete") is True
+        and continuity.get("claimed_item_reference_status") == "available"
+    )
+    claimed_item_never_shown = (
+        continuity.get("claimed_item_never_exposed") is True
+        and continuity.get("claimed_item_timeline_complete") is True
+        and continuity.get("claimed_item_reference_status") == "available"
+        and video_audit.get("sampling_boundary_status") == "covered"
+    )
+    if policy.get("noncompliant_opening_video") == "negative" and claimed_item_never_shown:
+        audit.update(
+            {
+                "applied": True,
+                "rule_id": "PD-N-CLAIMED-ITEM-NOT-SHOWN",
+                "reason": "按照商品有伤 SOP，完整送审时间轴中未展示与订单 SKU 匹配的争议商品，当前视频不支持本次诉求。",
+            }
+        )
+        audit["evidence_gate"].update(
+            {
+                "opening_complete": False,
+                "claimed_item_never_exposed": True,
+                "claimed_item_reference_status": "available",
+            }
+        )
+        return _apply_negative(output, audit, model_confidence)
+    if (
+        policy.get("noncompliant_opening_video") == "negative"
+        and (
+        explicitly_incomplete or long_unresolved_absence
+        )
+    ):
+        supplemental_count = int(supplemental.get("provided_count") or 0)
+        note = (
+            "补充图片可作为损伤参考，但不能替代合规开箱视频；可供客服按 SOP 最低档补偿规则参考。"
+            if supplemental_count else
+            "本轮没有可替代合规开箱视频的补充损伤证据。"
+        )
+        audit.update(
+            {
+                "applied": True,
+                "rule_id": "PD-N-NONCOMPLIANT-OPENING-VIDEO",
+                "reason": "按照商品有伤 SOP，本案开箱视频不合规，当前证据倾向不支持本次诉求。",
+                "supplemental_evidence_note": note,
+            }
+        )
+        audit["evidence_gate"].update(
+            {
+                "opening_complete": False,
+                "max_unobserved_seconds": max_unobserved_seconds,
+                "claimed_item_longest_out_of_frame_seconds": claimed_item_longest_absence,
+            }
+        )
+        return _apply_negative(output, audit, model_confidence)
+
     if policy.get("complete_video_no_claimed_damage") == "negative":
         minimum_coverage = _float(policy.get("minimum_visibility_coverage"), 0.95)
         minimum_view_coverage = _float(policy.get("minimum_required_view_coverage"), 1.0)
-        minimum_confidence = max(0.8, _float(policy.get("minimum_confidence"), 0.8))
+        minimum_confidence = _float(policy.get("minimum_confidence"), 0.8)
         require_continuity_complete = policy.get("require_continuity_complete", True) is not False
         require_fully_observable = policy.get("require_fully_observable", True) is not False
         require_claimed_region_closeup = policy.get("require_claimed_region_closeup", True) is not False
         require_same_item_linkage = policy.get("require_same_item_linkage", True) is not False
-        max_unobserved_seconds = _nonnegative_float(policy.get("max_unobserved_seconds"), 0.0)
         continuity_complete = continuity.get("continuity_verdict") == "continuous"
         opening_complete = str(video_audit.get("opening_integrity") or "").lower() in {
             "complete", "完整", "完整开箱", "complete_opening"
@@ -306,9 +405,8 @@ def apply_review_decision_policy(
             and (not require_claimed_region_closeup or closeup_complete)
         )
         pass_integrity = (
-            parsed.get("pass_integrity_status") in {None, "", "complete"}
+            parsed.get("pass_integrity_status") in {None, "", "complete", "partial_specialized"}
             and not parsed.get("specialized_pass_guard_reason")
-            and not (parsed.get("aggregation_warnings") or [])
         )
         sampling_boundary_covered = video_audit.get("sampling_boundary_status") == "covered"
         forensic_rank = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -323,10 +421,7 @@ def apply_review_decision_policy(
         )
         supplemental_count = int(supplemental.get("provided_count") or 0)
         supplemental_referenced = int(supplemental.get("referenced_count") or 0)
-        supplemental_resolved = supplemental_count == 0 or (
-            supplemental_referenced == supplemental_count
-            and supplemental.get("linkage_status") == "not_linked"
-        )
+        supplemental_resolved = supplemental_count == 0 or supplemental_referenced == supplemental_count
         conditions = {
             "opening_complete": opening_complete,
             "sampling_boundary_covered": sampling_boundary_covered,

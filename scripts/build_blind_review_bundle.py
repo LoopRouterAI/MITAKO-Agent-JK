@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -17,7 +18,7 @@ from review_input_safety import assert_review_input_safe, sanitize_review_input
 
 
 MEDIA_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv"}
-SAFE_MANIFEST_KEYS = {"id", "type", "order_no", "tag", "status", "admin_status", "created_at", "updated_at", "resources"}
+SAFE_MANIFEST_KEYS = {"id", "type", "order_no", "created_at", "updated_at", "resources"}
 
 
 def _customer_context(source: Path) -> dict:
@@ -68,7 +69,14 @@ def build_bundle(source: Path, output: Path) -> dict:
     copied = []
     for item in source.iterdir():
         if item.is_file() and (item.suffix.lower() in MEDIA_SUFFIXES or item.name == "content.txt"):
-            shutil.copy2(item, output / item.name)
+            target = output / item.name
+            if item.suffix.lower() in MEDIA_SUFFIXES:
+                try:
+                    os.link(item, target)
+                except OSError:
+                    shutil.copy2(item, target)
+            else:
+                shutil.copy2(item, target)
             copied.append(item.name)
 
     source_manifest = {}
@@ -87,6 +95,19 @@ def build_bundle(source: Path, output: Path) -> dict:
     ]
     assert_review_input_safe(safe_manifest)
     (output / "manifest.json").write_text(json.dumps(safe_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    order_path = source / "order_info_snapshot.json"
+    if order_path.exists():
+        try:
+            safe_order = sanitize_review_input(json.loads(order_path.read_text(encoding="utf-8-sig")))
+        except (OSError, json.JSONDecodeError):
+            safe_order = {}
+        if safe_order:
+            assert_review_input_safe(safe_order)
+            (output / "order_info_snapshot.json").write_text(
+                json.dumps(safe_order, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            copied.append("order_info_snapshot.json")
     customer_context = _customer_context(source)
     if customer_context["messages"]:
         assert_review_input_safe(customer_context)
@@ -94,9 +115,11 @@ def build_bundle(source: Path, output: Path) -> dict:
             json.dumps(customer_context, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+    included_files = sorted(item.name for item in output.iterdir() if item.is_file())
     audit = {
         "source_case_id": source.name,
         "copied_files": copied,
+        "included_files": included_files,
         "excluded_files": sorted(item.name for item in source.iterdir() if item.is_file() and item.name not in copied and item.name != "manifest.json"),
         "manifest_keys": sorted(safe_manifest),
         "customer_message_count": len(customer_context["messages"]),

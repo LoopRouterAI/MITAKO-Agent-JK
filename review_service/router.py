@@ -7,14 +7,15 @@ import json
 import logging
 import os
 from contextlib import suppress
-from typing import List
+from typing import Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import ValidationError
 
-from auth.middleware import require_roles
+from auth.jwt_utils import dev_auth_bypass_enabled, protected_api_auth_required
+from auth.middleware import get_current_user_optional, require_roles, tenant_allowed
 from auth.roles import ADMIN_MUTATE_ROLES
 
 from . import service, store
@@ -58,6 +59,13 @@ async def _recover_expired_jobs_forever() -> None:
 
 def _integration_user():
     return require_roles(ADMIN_MUTATE_ROLES)
+
+
+def _optional_integration_user(request: Request) -> Optional[Dict]:
+    user = get_current_user_optional(request)
+    if user and user.get("role") not in ADMIN_MUTATE_ROLES:
+        raise HTTPException(status_code=403, detail="权限不足")
+    return user
 
 
 @router.on_event("startup")
@@ -228,10 +236,28 @@ _BINARY_MEDIA_CONTENT = {
         502: {"model": ReviewErrorResponse},
     },
 )
-async def job_media(job_id: str, media_id: str, request: Request, user=_integration_user()):
+async def job_media(
+    job_id: str,
+    media_id: str,
+    request: Request,
+    expires: str = Query(""),
+    sig: str = Query(""),
+    user=Depends(_optional_integration_user),
+):
     job = store.get_job(job_id)
-    if not job or job.get("tenant_id") != (user.get("tenant_id") or "mitako"):
+    if not job:
         raise HTTPException(status_code=404, detail="review_job_not_found")
+    signed_request = bool(expires or sig)
+    if signed_request:
+        if not service.verify_job_media_signature(
+            str(job.get("tenant_id") or "mitako"), job_id, media_id, expires, sig
+        ):
+            raise HTTPException(status_code=403, detail="review_media_signature_invalid")
+    elif user:
+        if not tenant_allowed(user, str(job.get("tenant_id") or "mitako")):
+            raise HTTPException(status_code=404, detail="review_job_not_found")
+    elif protected_api_auth_required() or not dev_auth_bypass_enabled():
+        raise HTTPException(status_code=401, detail="protected_api_token_required")
     try:
         source_url = service.resolve_job_media_url(job, media_id)
     except ValueError as exc:

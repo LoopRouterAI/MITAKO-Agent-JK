@@ -1,6 +1,6 @@
 # 部署指南
 
-版本：2026-07-22
+版本：2026-07-31
 
 ## 1. 组件
 
@@ -85,8 +85,9 @@ venv/bin/python -m poc.visual_review_poc.workbench_server
 - `REVIEW_FFPROBE_PATH`：可选固定路径；为空时从主服务进程 `PATH` 查找。
 - `REVIEW_WORKBENCH_RETRIES`：内部工作台遇到 429/502/503/504 时的有限重试次数，默认 2。
 - `REVIEW_MODEL_TIMEOUT_SECONDS`：单次供应商请求超时，网页和正式审核 API 共用，默认 180 秒。
-- `REVIEW_MODEL_RETRIES`：单次供应商软失败重试次数，默认 1。
-- `REVIEW_CHUNK_WORKERS`：单案件分段并发数，必须按供应商限流压测后配置。
+- `REVIEW_MODEL_RETRIES`：单次供应商软失败重试次数，默认 1；优先遵守 `Retry-After`，否则指数退避并加入抖动。只有可重试错误才进入下一个已配置渠道。
+- `REVIEW_CHUNK_WORKERS`：单案件分段并发数，当前最大 4。执行器遇到 408/429/5xx 或软失败会降低后续波次并发，成功波次再逐步恢复；生产仍须按供应商限流压测配置。
+- `REVIEW_MINOR_WORKERS`：未成年人图片分批并发数，默认 6、最大 8；只影响单案资料识别，不改变主服务任务并发。
 - `REVIEW_CONTINUITY_FRAMES_PER_CALL`：连续性通道每次独立帧输入上限，当前最大为 24。模型逐张接收带帧序号与时间戳的 JPEG，不使用拼图作为审核证据；HTML 报告中的缩略图仅用于人工浏览。
 - `REVIEW_PRODUCT_IMAGE_BASE_URL`：甲方订单快照中相对商品主图路径的 HTTPS 基地址。
 - `REVIEW_PRODUCT_IMAGE_ALLOWED_HOSTS`：官方商品图主机白名单，多个主机用逗号分隔；禁止加入本机或内网主机。

@@ -541,21 +541,17 @@ New-Item -ItemType Directory -Path (Join-Path $Stage "runtime") -Force | Out-Nul
 Write-Host "[3/6] Prepare visual review workbench ..."
 New-Item -ItemType Directory -Path (Join-Path $Stage "visual_review_workbench\sample_videos") -Force | Out-Null
 Copy-File "poc\visual_review_poc\workbench.html" "visual_review_workbench\workbench.html"
-if (Test-Path (Join-Path $Root "poc\visual_review_poc\sample_videos")) {
-    $sampleIndex = 1
-    Get-ChildItem -LiteralPath (Join-Path $Root "poc\visual_review_poc\sample_videos") -File | Where-Object {
-        $_.Extension.ToLowerInvariant() -in @(".mp4", ".mov", ".m4v", ".webm", ".mkv")
-    } | ForEach-Object {
-        $stem = switch -Wildcard ($_.Name) {
-            "*unboxing*" { "unboxing_sample"; break }
-            "*damage*" { "damage_sample"; break }
-            "*minor*" { "material_sample"; break }
-            default { "review_sample"; break }
-        }
-        $safeName = "{0}_{1:D2}{2}" -f $stem, $sampleIndex, $_.Extension.ToLowerInvariant()
-        $sampleIndex += 1
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Stage "visual_review_workbench\sample_videos\$safeName") -Force
+$customerDemoVideos = [ordered]@{
+    "video_unboxing_fallback_sintel_trailer.mp4" = "unboxing_sample_01.mp4"
+    "product_damage_fallback_big_buck_bunny_trailer.mp4" = "damage_sample_02.mp4"
+    "minor_material_fallback_mdn_flower.mp4" = "material_sample_03.mp4"
+}
+foreach ($sourceName in $customerDemoVideos.Keys) {
+    $sourcePath = Join-Path $Root "poc\visual_review_poc\sample_videos\$sourceName"
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Approved customer demo video is missing: $sourceName"
     }
+    Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $Stage "visual_review_workbench\sample_videos\$($customerDemoVideos[$sourceName])") -Force
 }
 
 Write-Host "[4/6] Compile Python runtime ..."
@@ -851,6 +847,8 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",
+    "甲方沟通交付文档\0731商品有伤SOP与报告一致性更新说明.html",
     "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
     "甲方沟通交付文档\0730未成年人资料审核与客服报告升级说明.html",
     "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
@@ -871,6 +869,7 @@ $customerEvidenceFiles = @(
     "sample_data.json",
     "start-windows.bat"
 )
+$customerEvidenceFiles += $customerDemoVideos.Values | ForEach-Object { "visual_review_workbench\sample_videos\$_" }
 $customerEvidence = @()
 foreach ($relativePath in $customerEvidenceFiles) {
     $evidencePath = Join-Path $Stage $relativePath

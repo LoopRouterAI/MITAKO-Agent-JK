@@ -12,12 +12,36 @@ import httpx
 
 
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".txt", ".json"}
+FORBIDDEN_ANSWER_FILES = {"annotation.json", "reply.json"}
+
+
+def validate_label_isolation(audit: dict) -> None:
+    included = {str(name).lower() for name in audit.get("included_files") or []}
+    if included & FORBIDDEN_ANSWER_FILES:
+        raise ValueError("blind_bundle_isolation_failed")
+
+
+def submission_paths(bundle: Path, audit: dict) -> list[Path]:
+    included = {str(name) for name in audit.get("included_files") or []}
+    if not included:
+        raise ValueError("blind_bundle_missing_included_files")
+    allowed = {
+        path.name
+        for path in bundle.iterdir()
+        if path.is_file()
+        and path.name != "blind_bundle_audit.json"
+        and path.suffix.lower() in ALLOWED_SUFFIXES
+    }
+    unexpected = sorted(allowed - included)
+    missing = sorted(included - allowed)
+    if unexpected or missing:
+        raise ValueError(f"blind_bundle_file_set_mismatch: unexpected={unexpected}, missing={missing}")
+    return [bundle / name for name in sorted(included) if name != "blind_bundle_audit.json"]
 
 
 def run_case(base_url: str, bundle: Path, fps: float, max_frames: int, threshold: float) -> dict:
     audit = json.loads((bundle / "blind_bundle_audit.json").read_text(encoding="utf-8"))
-    if "annotation.json" not in audit.get("excluded_files", []) or "reply.json" not in audit.get("excluded_files", []):
-        raise ValueError("blind_bundle_isolation_failed")
+    validate_label_isolation(audit)
     claim = (bundle / "content.txt").read_text(encoding="utf-8-sig").strip() if (bundle / "content.txt").exists() else ""
     customer_context = {}
     context_path = bundle / "customer_context.json"
@@ -29,9 +53,7 @@ def run_case(base_url: str, bundle: Path, fps: float, max_frames: int, threshold
     ]
     with ExitStack() as stack:
         files = []
-        for path in sorted(bundle.iterdir()):
-            if not path.is_file() or path.name == "blind_bundle_audit.json" or path.suffix.lower() not in ALLOWED_SUFFIXES:
-                continue
+        for path in submission_paths(bundle, audit):
             handle = stack.enter_context(path.open("rb"))
             files.append(("files", (path.name, handle, mimetypes.guess_type(path.name)[0] or "application/octet-stream")))
         data = {
@@ -64,8 +86,13 @@ def run_case(base_url: str, bundle: Path, fps: float, max_frames: int, threshold
                 ensure_ascii=False,
             ),
         }
-        with httpx.Client(timeout=httpx.Timeout(3600, connect=10, write=3600, read=3600)) as client:
+        with httpx.Client(
+            timeout=httpx.Timeout(3600, connect=10, write=3600, read=3600),
+            trust_env=False,
+        ) as client:
             response = client.post(base_url.rstrip("/") + "/api/review-folder", data=data, files=files)
+        if response.is_error:
+            raise RuntimeError(f"visual_workbench_http_{response.status_code}: {response.text[:2000]}")
         response.raise_for_status()
         return response.json()
 
@@ -93,6 +120,10 @@ def main() -> int:
                 "object_continuity_assessment": parsed.get("object_continuity_assessment"),
                 "continuity_guard_reason": parsed.get("continuity_guard_reason"),
                 "causality_guard_reason": parsed.get("causality_guard_reason"),
+                "pass_integrity_status": parsed.get("pass_integrity_status"),
+                "specialized_pass_guard_reason": parsed.get("specialized_pass_guard_reason"),
+                "decision_policy_audit": parsed.get("decision_policy_audit")
+                or (payload.get("review") or {}).get("decision_policy_audit"),
                 "report": (payload.get("review") or {}).get("report"),
                 "diagnostics": payload.get("diagnostics") or (payload.get("review") or {}).get("diagnostics"),
             }

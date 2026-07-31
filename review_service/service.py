@@ -52,7 +52,7 @@ SCENARIO_LABELS = {
 }
 MAX_WORKERS = max(1, min(int(os.getenv("REVIEW_JOB_WORKERS", "2") or 2), 8))
 EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="mitako-review")
-REVIEW_CONTRACT_VERSION = "2026-07-28.2"
+REVIEW_CONTRACT_VERSION = "2026-07-31.1"
 
 
 class WorkbenchRequestError(RuntimeError):
@@ -293,8 +293,71 @@ def _job_media_urls(value: Any, job_id: str) -> Any:
     return value
 
 
+def _job_media_signature(tenant_id: str, job_id: str, media_id: str, expires: int) -> str:
+    secret = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
+    if not secret:
+        raise ValueError("review_media_signing_unavailable")
+    message = f"review-job-media-v1\n{tenant_id}\n{job_id}\n{media_id}\n{expires}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def signed_job_media_url(
+    tenant_id: str,
+    job_id: str,
+    media_id: str,
+    *,
+    expires: Optional[int] = None,
+) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", media_id):
+        raise ValueError("review_media_not_found")
+    expires_at = int(expires) if expires is not None else int(time.time()) + max(
+        60,
+        int(os.getenv("VISUAL_REPORT_URL_TTL_SECONDS", "900") or 900),
+    )
+    signature = _job_media_signature(tenant_id, job_id, media_id, expires_at)
+    path = f"/api/v1/review/jobs/{quote(job_id, safe='')}/media/{media_id}"
+    return f"{path}?expires={expires_at}&sig={signature}"
+
+
+def verify_job_media_signature(
+    tenant_id: str,
+    job_id: str,
+    media_id: str,
+    expires: Any,
+    signature: str,
+) -> bool:
+    try:
+        expires_at = int(expires)
+        if expires_at < int(time.time()) or not signature:
+            return False
+        expected = _job_media_signature(tenant_id, job_id, media_id, expires_at)
+    except (TypeError, ValueError):
+        return False
+    return hmac.compare_digest(signature, expected)
+
+
+def _signed_job_media_urls(value: Any, tenant_id: str, job_id: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _signed_job_media_urls(item, tenant_id, job_id) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_signed_job_media_urls(item, tenant_id, job_id) for item in value]
+    if isinstance(value, str):
+        split = urlsplit(value)
+        match = re.fullmatch(r"/media-item/([0-9a-f]{32})", split.path)
+        if match:
+            fragment = f"#{split.fragment}" if split.fragment else ""
+            return signed_job_media_url(tenant_id, job_id, match.group(1)) + fragment
+    return value
+
+
 def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
     output = deepcopy(job)
+    inference = (
+        (((output.get("result") or {}).get("review") or {}).get("agent_report") or {}).get("inference_estimate")
+        or {}
+    )
+    if isinstance(inference, dict):
+        inference.pop("channel_route_attempts", None)
     output["result"] = _job_media_urls(output.get("result") or {}, str(output.get("job_id") or ""))
     return output
 
@@ -759,8 +822,10 @@ def postprocess_review(
     """网页工作台和正式 API 共用的审核后处理顺序。"""
     metadata = job.get("metadata") or {}
     resolved_readiness = readiness if readiness is not None else assess_input_readiness(metadata)
-    output = _apply_input_readiness_guard(review, resolved_readiness)
-    output = apply_review_decision_policy(job, output, media_forensics=media_forensics)
+    output = dict(review)
+    if succeeded:
+        output = _apply_input_readiness_guard(output, resolved_readiness)
+        output = apply_review_decision_policy(job, output, media_forensics=media_forensics)
     return attach_advisory_assessment(
         output,
         metadata,
@@ -768,6 +833,34 @@ def postprocess_review(
         media_forensics=media_forensics,
         succeeded=succeeded,
     )
+
+
+def _sync_final_advisory_brief(review: Dict[str, Any]) -> Dict[str, Any]:
+    output = dict(review)
+    advisory = output.get("advisory_assessment") if isinstance(output.get("advisory_assessment"), dict) else {}
+    assessment = advisory.get("assessment") if isinstance(advisory.get("assessment"), dict) else {}
+    human_review = advisory.get("human_review") if isinstance(advisory.get("human_review"), dict) else {}
+    conclusion = str(assessment.get("conclusion") or "").strip()
+    next_step = str(human_review.get("recommendation") or "").strip()
+    if not conclusion and not next_step:
+        return output
+
+    brief = dict(output.get("agent_brief") or {})
+    if conclusion:
+        brief["conclusion"] = conclusion
+    if next_step:
+        brief["next_step"] = next_step
+    output["agent_brief"] = brief
+
+    agent_report = dict(output.get("agent_report") or {})
+    public_brief = dict(agent_report.get("public_brief") or {})
+    if conclusion:
+        public_brief["conclusion"] = conclusion
+    if next_step:
+        public_brief["next_step"] = next_step
+    agent_report["public_brief"] = public_brief
+    output["agent_report"] = agent_report
+    return output
 
 
 def run_job(job_id: str) -> Dict[str, Any]:
@@ -797,6 +890,7 @@ def run_job(job_id: str) -> Dict[str, Any]:
             media_forensics=forensics,
             succeeded=payload.get("ok") is True,
         )
+        review = _sync_final_advisory_brief(review)
         review.pop("report", None)
         if html_report_requested(job):
             review["report"] = {
@@ -847,10 +941,14 @@ def run_job(job_id: str) -> Dict[str, Any]:
 
 def render_job_report(job: Dict[str, Any]) -> str:
     result = job.get("result") or {}
-    review = result.get("review") or {}
+    review = _sync_final_advisory_brief(result.get("review") or {})
     agent_report = deepcopy(review.get("agent_report") or {})
     agent_report.pop("inference_estimate", None)
-    agent_report = _public_media_urls(agent_report)
+    agent_report = _signed_job_media_urls(
+        agent_report,
+        str(job.get("tenant_id") or "mitako"),
+        str(job.get("job_id") or ""),
+    )
     brief = review.get("agent_brief") or {}
     data = {
         "ok": job.get("status") == "SUCCEEDED",
@@ -860,6 +958,7 @@ def render_job_report(job: Dict[str, Any]) -> str:
         "advisory_assessment": review.get("advisory_assessment") or {},
         "conclusion": brief.get("conclusion") or "本轮审核尚未形成可复核结论。",
         "agent_report": agent_report,
+        "media_forensics": result.get("media_forensics") or {},
         "diagnostics": job.get("diagnostics") or review.get("diagnostics") or {},
     }
     return render_public_report(data)

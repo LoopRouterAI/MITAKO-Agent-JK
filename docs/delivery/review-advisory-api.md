@@ -1,6 +1,6 @@
 # 审核建议结果 API 使用说明
 
-版本：2026-07-30
+版本：2026-07-31
 
 ## 1. 使用目的
 
@@ -147,7 +147,7 @@
 
 - `policy.policy_ref` 用于记录本次建议规则版本。
 - `policy.business_action_allowed` 永远为 `false`。
-- 商品有伤默认策略为 `classification_recommendation + MITAKO-PD-ADVISORY@20260728.1`。它只输出事实建议：完整审查未见主诉伤情可建议 `negative`，明确伤情可建议 `positive`，证据冲突或关键基准缺失为 `review`；不授权退款、换货、补偿或拒绝。
+- 商品有伤默认策略为 `classification_recommendation + MITAKO-PD-ADVISORY@20260731.1`。该版本把主视频、补充图片和官方 SKU 图分层，并加入不合规开箱视频的 SOP 倾向；旧 `20260728.1` 快照行为保持不变。它只输出事实建议，不授权退款、换货、补偿或拒绝。
 - `signals` 记录信号代码、程度、影响和可用持续时间，方便甲方后续配置抽检规则。
 - 旧字段 `human_required`、`decision`、`system_yes_no` 会镜像新主契约，避免新旧客户端得到相反分流；新开发仍应只以 `advisory_assessment` 为准。
 - 人工标签、标准答案和评测目录名不得进入审核请求；只能在审核完成后离线比对。
@@ -189,3 +189,12 @@
 ```
 
 该脚本会过滤人工标签、最终回复、隐藏资源文件和无效媒体，只把用户诉求与真实媒体送入正式异步 API。
+
+## 12. 0731 结构化证据与能力边界
+
+- 审核输入中的自然语言可以包含用户对历史处理的转述；服务只按 `annotation`、`label`、`ground_truth` 等评测字段和禁止文件隔离答案，不靠普通文本关键词删消息。
+- `damage_causality_assessment.damage_presence` 只表示主视频内是否有可回链的伤情证据；补充图片所见位于 `evidence_source_summary.supplemental_images`，不得改写主视频结论。
+- `object_continuity_assessment.tracked_subjects[].out_of_frame_events[]` 提供离镜前、离镜、重新入镜证据以及按源时间戳估算的持续时间。该时间是采样边界估计，不单独证明调包或剪辑。
+- `media_forensics.assets[].playback_speed_assessment` 只在有可信技术依据时返回倍速；一般用户上传视频缺少原始时钟基准时返回 `status=unknown`、`constant_speed_multiplier=null`。画面节奏疑似加速是另一项模型观察，两者不得混用。
+- 未成年人资料中的护照可以输出非敏感的 `document_type`、`issuing_country_or_region`、身份角色与关系一致性状态；证件号、手机号、地址和 OCR 原文不在公开响应中返回。
+- `pass_integrity_status=partial_specialized` 表示某个专项证据维度存在局部缺口，不等于主审核失败，也不自动强制整案人工复审；调用方应读取 `advisory_assessment` 作为最终分流主契约。

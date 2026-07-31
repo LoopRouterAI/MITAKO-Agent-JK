@@ -88,6 +88,7 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 7. 样本目录名、人工结论、expected_predicted_label 没有提供给你；你只能根据本证据包独立判断。
 8. 如果 structured_business_context.review_chunk 存在，本次只看到全视频的一个分段；分段最后一帧绝不等于视频结束，不得据此声称“视频结束于当前时间点”。
 9. 不得把抽帧首尾覆盖写成“视频文件/时间轴完整”；抽帧只能说明送审首尾边界，容器、码流、时间戳和剪辑风险必须引用独立媒体取证结果。
+10. 播放加速本身不等于拼接剪辑或视频不合规：一镜到底、关键开箱过程完整且降速后仍可复核时，应记录“存在加速”但不得据此判负；只有跳切、拼接、时间轴异常或关键过程缺失才能形成剪辑/不合规证据。
 
 请严格输出 JSON 对象，字段：
 - decision: pass / manual_review / request_more_material / fail。只表示 POC 流转，不代表业务裁决。
@@ -98,7 +99,7 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 - visual_evidence_verdict: 一句话视觉质检结论。
 - visual_qc_conclusion: 视觉质检结论，必须包含 verdict、confidence、core_reason。
 - confidence_reason: 置信度理由。
-- video_audit_conclusion: 视频审核结论，必须包含 continuity_score、continuity_reason、swap_risk_level(high/medium/low)、edit_or_cut_risk、opening_integrity。
+- video_audit_conclusion: 视频审核结论，必须包含 continuity_score、continuity_reason、swap_risk_level(high/medium/low)、edit_or_cut_risk、opening_integrity、playback_speed(normal/accelerated/unknown)。playback_speed 只表示从画面节奏观察到的正常、疑似加速或无法判断，不得猜测精确倍速。
 - object_continuity_assessment: 有视频时必填。必须分别定义并跟踪 shipping_package、product_package、claimed_item 等主体；包含 tracked_subjects 数组，每项含 subject_id、description、tracking_start、tracking_end、first_exposed_timestamp、visibility_coverage、out_of_frame_events。每个离镜事件必须含 start_timestamp、end_timestamp、duration_seconds、visibility(out_of_frame/occluded/unknown)、before_evidence、after_evidence、identity_reestablished、reason。顶层还要给 continuity_verdict(continuous/brief_occlusion/long_absence/indeterminate)、longest_out_of_frame_seconds、total_unobserved_seconds、critical_events。未从不透明包装中拆出的阶段写 not_yet_exposed，不算离镜；不能因为前后都再次出现就声称全程未离镜。
 - customer_claim_parse: expected_item、claimed_received_item、claimed_mismatch_type。
 - expected_order_item: 订单要求的商品/角色/SKU/规格/数量。
@@ -120,7 +121,7 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 - business_follow_up_reason: 人工跟进原因。
 - next_step: 后续VIP客服建议，不直接退款、拒赔、补发或定责。
 - model_limitations: 局限。
-- damage_causality_assessment: 仅商品有伤场景必填，其他场景写 null。必须包含 damage_presence(confirmed/not_visible/uncertain)、damage_type_and_location、first_visible_evidence(对象，含 video_index/global_frame_index/timestamp/asset_ref 或 image_index)、pre_opening_state_visible、opening_action_visible、damage_change_observed、damage_timing(pre_opening_visible/appears_during_opening/post_opening_only/unknown)、possible_origins(数组，每项含 origin、confidence、supporting_evidence、challenging_evidence)、most_likely_origin(manufacturing_or_original_packaging/logistics_transport/customer_opening_or_handling/mixed/indeterminate)、origin_confidence、causal_evidence_level(direct/indirect/insufficient)、claim_support(supported/not_supported/insufficient)、before_action_evidence/action_evidence/after_action_evidence(均为证据对象数组，每项含 video_index/global_frame_index/timestamp/subject/location/chain_id/fact，三段必须同对象同部位同 chain_id 且帧序递增)、alternative_explanations、cannot_conclude_reason。不得仅凭“看见有伤”或布尔自报推断损伤成因。
+- damage_causality_assessment: 仅商品有伤场景必填，其他场景写 null。必须包含 damage_presence(confirmed/not_visible/uncertain)、damage_type_and_location、first_visible_evidence(对象，含 video_index/global_frame_index/timestamp/asset_ref 或 image_index，以及明确的 damage_visible 布尔值)、pre_opening_state_visible、opening_action_visible、damage_change_observed、damage_timing(pre_opening_visible/appears_during_opening/post_opening_only/unknown)、possible_origins(数组，每项含 origin、confidence、supporting_evidence、challenging_evidence)、most_likely_origin(manufacturing_or_original_packaging/logistics_transport/customer_opening_or_handling/mixed/indeterminate)、origin_confidence、causal_evidence_level(direct/indirect/insufficient)、claim_support(supported/not_supported/insufficient)、before_action_evidence/action_evidence/after_action_evidence(均为证据对象数组，每项含 video_index/global_frame_index/timestamp/subject/location/chain_id/fact，损伤帧还必须含 damage_visible，三段必须同对象同部位同 chain_id 且帧序递增)、alternative_explanations、cannot_conclude_reason。不得根据描述文字猜测损伤是否存在，也不得仅凭“看见有伤”或布尔自报推断损伤成因。
 - damage_observability: 仅商品有伤场景必填。包含 status(fully_observable/partial/not_observable/unknown)、same_item_linkage、claimed_region_closeup、required_view_coverage(0-1)、conflicting_evidence、missing_views。只有争议部位特写清晰、与开箱商品确认同物、必检视角全部覆盖且视频/图片不冲突时，才可写 fully_observable。
 - fulfillment_reconciliation: 仅发错货/漏发货必填，其他场景写 null。必须包含 baseline_version、expected_items、observed_items、suspected_missing_items、unexpected_items、unconfirmed_items、package_observations、package_coverage、all_packages_uploaded、all_items_displayed、evidence_timestamps、confidence、decision_boundary。每个清单项写 item_ref/SKU/名称/规格/应发数量/已识别数量/证据时间点；每个 package_observations 项写 package_ref、opening_complete、all_contents_laid_out、evidence_timestamps。缺少唯一应发基准、赠品或特典规则、分包关联，或视频未完整展示全部包裹和物品时，predicted_label 必须是 review，decision_boundary 必须明确“证据不足，人工复核”，不得直接认定发错或漏发。
 """

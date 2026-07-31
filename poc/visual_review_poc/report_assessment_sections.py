@@ -81,6 +81,8 @@ def render_damage_causality_panel(
     source_summary = assessment.get("evidence_source_summary") or {}
     primary_video = source_summary.get("primary_video") or {}
     supplemental = source_summary.get("supplemental_images") or {}
+    main_video_presence = primary_video.get("damage_presence") or assessment.get("damage_presence")
+    supplemental_presence = assessment.get("supplemental_damage_presence")
     supplemental_status = {
         "verified": "已建立关联，必须与主视频共同复核",
         "not_linked": "已明确未建立同物或过程关联",
@@ -122,7 +124,7 @@ def render_damage_causality_panel(
   <section class="panel causality-panel">
     <div class="section-head"><h2>损伤来源与发生阶段</h2><p>损伤事实、形成时点和责任归属分开表达；本区不代表业务定责。</p></div>
     <div class="causality-grid">
-      <article><small>损伤存在性</small><b>{escape(_label(assessment.get("damage_presence")))}</b></article>
+      <article><small>主视频损伤存在性</small><b>{escape(_label(main_video_presence))}</b></article>
       <article><small>首次出现阶段</small><b>{escape(_label(assessment.get("damage_timing")))}</b></article>
       <article><small>最可能原因</small><b>{escape(_label(assessment.get("most_likely_origin")))}</b></article>
       <article><small>因果证据等级</small><b>{escape(_label(assessment.get("causal_evidence_level")))}</b></article>
@@ -134,7 +136,7 @@ def render_damage_causality_panel(
     <h3>主视频与补充证据分层</h3>
     <div class="boundary-grid">
       <article class="boundary-card"><h3>主视频</h3><p>范围：{escape(primary_video.get("scope") or "未完成主视频审查")}</p><p>损伤存在性：{escape(_label(primary_video.get("damage_presence")))}</p><p>诉求支持度：{escape(_label(primary_video.get("claim_support")))}</p></article>
-      <article class="boundary-card"><h3>用户补充证据</h3><p>补充图片 {escape(supplemental.get("provided_count") or 0)} 张；报告引用 {escape(supplemental.get("referenced_count") or 0)} 张。</p><p>{escape(supplemental_status)}</p></article>
+      <article class="boundary-card"><h3>用户补充证据</h3><p>补充图片 {escape(supplemental.get("provided_count") or 0)} 张；报告引用 {escape(supplemental.get("referenced_count") or 0)} 张。</p><p>补充图损伤所见：{escape(_label(supplemental_presence))}</p><p>{escape(supplemental_status)}</p></article>
     </div>
     <p><b>证据权重边界：</b>{escape(source_summary.get("decision_boundary") or "补充图片与主视频必须分别说明证据作用。")}</p>
     {supplemental_findings_html}
@@ -159,6 +161,23 @@ def render_object_continuity_panel(
 ) -> str:
     if not isinstance(assessment, dict):
         return ""
+
+    def event_duration_text(event: Dict[str, Any]) -> str:
+        estimate = event.get("duration_seconds") or 0
+        if event.get("duration_basis") != "sampled_source_timestamps":
+            return f"{escape(estimate)} 秒"
+        lower = event.get("duration_lower_bound_seconds")
+        upper = event.get("duration_upper_bound_seconds")
+        resolution = event.get("sampling_resolution_seconds")
+        if lower is None:
+            bounds = "边界未知"
+        elif upper is None:
+            bounds = f"至少 {escape(lower)} 秒，上界未知"
+        else:
+            bounds = f"{escape(lower)} 至 {escape(upper)} 秒"
+        resolution_text = f"；采样分辨率 {escape(resolution)} 秒" if resolution is not None else ""
+        return f"{escape(estimate)} 秒（采样边界估计；范围 {bounds}{resolution_text}）"
+
     subjects = []
     for subject in (assessment.get("tracked_subjects") or [])[:10]:
         if not isinstance(subject, dict):
@@ -171,7 +190,7 @@ def render_object_continuity_panel(
             identity = "已核对同一性" if event.get("identity_reestablished") else "未确认重新入镜同一性"
             events.append(
                 f'<li>{escape(event.get("start_timestamp") or "-")} 至 {escape(event.get("end_timestamp") or "-")}，'
-                f'{escape(event.get("duration_seconds") or 0)} 秒，{escape(event.get("visibility") or "unknown")}，{identity}。'
+                f'{event_duration_text(event)}，{escape(event.get("visibility") or "unknown")}，{identity}。'
                 f'{escape(event.get("reason") or "")}</li>'
             )
             for key, title, fallback_timestamp in (
@@ -206,7 +225,7 @@ def render_object_continuity_panel(
             f'<p><b>跟踪区间：</b>{escape(subject.get("tracking_start") or "-")} 至 {escape(subject.get("tracking_end") or "-")}</p>'
             f'<p><b>首次曝光：</b>{escape(subject.get("first_exposed_timestamp") or "-")}</p>'
             f'<p><b>可见覆盖率：</b>{escape(subject.get("visibility_coverage") if subject.get("visibility_coverage") is not None else "-")}</p>'
-            f'<p><b>最长离镜：</b>{escape(subject.get("longest_out_of_frame_seconds") or 0)} 秒</p>'
+            f'<p><b>最长离镜估计：</b>{escape(subject.get("longest_out_of_frame_seconds") or 0)} 秒</p>'
             f'<ul class="boundary-list">{"".join(events) or "<li>未记录离镜事件。</li>"}</ul></article>'
             f'{evidence_html}'
         )
@@ -216,10 +235,11 @@ def render_object_continuity_panel(
     <div class="section-head"><h2>主体连续性与离镜时间轴</h2><p>快递包装、商品包装和争议商品分别跟踪；尚未拆出不算离镜。</p></div>
     <div class="causality-grid">
       <article><small>连续性结论</small><b>{escape(_label(assessment.get("continuity_verdict")))}</b></article>
-      <article><small>最长连续离镜</small><b>{escape(assessment.get("longest_out_of_frame_seconds") or 0)} 秒</b></article>
-      <article><small>累计不可观察</small><b>{escape(assessment.get("total_unobserved_seconds") or 0)} 秒</b></article>
+      <article><small>最长连续离镜估计</small><b>{escape(assessment.get("longest_out_of_frame_seconds") or 0)} 秒</b></article>
+      <article><small>累计不可观察估计</small><b>{escape(assessment.get("total_unobserved_seconds") or 0)} 秒</b></article>
       <article><small>复核阈值</small><b>{escape(policy.get("out_of_frame_warning_seconds") or "-")} 秒</b></article>
     </div>
+    <p>离镜秒数来自送审帧源时间戳，是采样边界估计，不是逐毫秒精确时长。</p>
     <div class="boundary-grid">{"".join(subjects) or '<p class="muted">本轮没有定义可跟踪主体，不能声称全程未离镜。</p>'}</div>
   </section>"""
 
@@ -355,6 +375,33 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
             f'<p><b>点击回看：</b>{evidence_links(item.get("evidence_image_indices"))}</p>'
             f'<p>{escape(item.get("rule_note") or "")}</p></article>'
         )
+    passport_cards = []
+    passport_role_labels = {
+        "guardian": "监护人",
+        "minor": "未成年人",
+        "unknown": "角色未知",
+        "not_applicable": "不适用",
+    }
+    passport_readability_labels = {
+        "clear": "清晰",
+        "partial": "部分可读",
+        "unknown": "unknown",
+    }
+    for item in (value.get("material_inventory") or [])[:50]:
+        if not isinstance(item, dict) or item.get("document_type") != "passport":
+            continue
+        country_or_region = str(item.get("issuing_country_or_region") or "unknown")
+        readability = str(item.get("readability") or "unknown")
+        passport_cards.append(
+            '<article class="boundary-card status-card status-amber">'
+            '<h3>护照</h3>'
+            f'<p><b>材料角色：</b>{escape(passport_role_labels.get(str(item.get("subject_role") or "unknown"), "角色未知"))}</p>'
+            f'<p><b>签发国家/地区：</b>{escape(country_or_region)}</p>'
+            f'<p><b>可读性：</b>{escape(passport_readability_labels.get(readability, "unknown"))}</p>'
+            f'<p><b>点击回看：</b>{evidence_links([item.get("image_index")])}</p>'
+            '<p>仅作视觉/OCR 初审并参与身份、年龄和监护关系一致性比较；不替代身份证必交项，不代表权威验真。</p>'
+            '</article>'
+        )
     process_items = []
     process_type_labels = {
         "invoice_generation": "发票或凭证生成过程",
@@ -454,6 +501,8 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
     </div>
     <p><b>未分类图片编号：</b>{escape(unclassified)}</p>
     <div class="boundary-grid">{"".join(checklist_cards) or '<p class="muted">本轮未形成材料清单。</p>'}</div>
+    <div class="section-head"><h2>护照视觉识别</h2><p>仅展示证件类型、签发国家/地区、可读性和图片编号。</p></div>
+    <div class="boundary-grid">{"".join(passport_cards) or '<p class="muted">本轮未识别到护照材料。</p>'}</div>
     <div class="section-head"><h2>视觉字段一致性初审</h2><p>五项内容是否互相对得上；只比较图片中能看清的内容，不冒充政府、运营商或支付系统验真。</p></div>
     <p><b>总体状态：</b>{escape(status_labels.get(consistency.get("verdict"), consistency.get("verdict") or "未完成"))}</p>
     <div class="boundary-grid">{"".join(consistency_cards) or '<p class="muted">本轮未完成字段一致性初审。</p>'}</div>

@@ -64,6 +64,55 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
         self.assertEqual(response["agent_report"]["parsed"]["predicted_label"], "review")
         self.assertNotIn("advisory_assessment", response)
 
+    def test_direct_workbench_runs_media_forensics_once_before_shared_postprocess(self) -> None:
+        case = {
+            "case_id": "CASE-FORENSICS",
+            "scenario": "product_damage",
+            "scenario_label": "商品有伤审核",
+            "customer_claim": "商品存在折痕",
+            "videos": [{"video_index": 1, "file": "evidence.mp4"}],
+            "frames": [],
+            "supplemental_images": [],
+            "structured_business_context": {"business_scenario": "product_damage"},
+        }
+        model_result = {
+            "status": "success",
+            "parsed": {
+                "predicted_label": "review",
+                "confidence": 0.72,
+                "overall_audit": {"conclusion": "模型原始结论"},
+            },
+        }
+        forensics = {"status": "completed", "summary": {"risk_level": "low"}, "assets": []}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sample_dir = Path(temp_dir)
+            (sample_dir / "evidence.mp4").write_bytes(b"video")
+            normalized = {
+                "summary": {"review_status": "completed", "predicted_label": "review", "confidence": 0.72},
+                "agent_report": {"parsed": model_result["parsed"]},
+                "advisory_assessment": {},
+                "agent_brief": {"conclusion": "模型原始结论"},
+            }
+            with patch.object(workbench_server, "score_result", return_value={}), patch.object(
+                workbench_server, "inspect_job_media", return_value=forensics
+            ) as inspect, patch.object(
+                workbench_server, "postprocess_review", return_value=normalized
+            ) as postprocess:
+                response = workbench_server._agent_report_response(
+                    case,
+                    sample_dir,
+                    model_result,
+                    "forensics",
+                    include_html_report=False,
+                )
+
+        inspect.assert_called_once()
+        inspected_assets = inspect.call_args.args[1]
+        self.assertEqual(inspected_assets[0]["stored_name"], "evidence.mp4")
+        self.assertEqual(postprocess.call_args.kwargs["media_forensics"], forensics)
+        self.assertEqual(response["media_forensics"], forensics)
+
     def test_product_damage_default_can_recommend_negative_when_full_evidence_sees_no_damage(self) -> None:
         metadata = ReviewCaseMetadata(
             client_case_id="CASE-NO-DAMAGE",
@@ -178,6 +227,39 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
         self.assertEqual(
             response["advisory_assessment"]["workflow_recommendation"],
             "request_more_material",
+        )
+
+    def test_failed_review_is_not_reclassified_by_business_policy(self) -> None:
+        metadata = ReviewCaseMetadata(
+            client_case_id="CASE-SERVICE-FAILURE",
+            scenario="product_damage",
+            customer_claim="商品存在划痕",
+        ).model_dump(mode="json")
+        review = {
+            "summary": {"review_status": "failed", "predicted_label": "review"},
+            "agent_brief": {"conclusion": "审核未完成，系统复核服务繁忙。"},
+            "agent_report": {"parsed": {"predicted_label": "review"}},
+            "diagnostics": {"failure_stage": "系统复核"},
+        }
+
+        result = postprocess_review(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "image/jpeg"}],
+            },
+            review,
+            succeeded=False,
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertNotIn("decision_policy_audit", result)
+        self.assertNotIn("input_readiness_guard", result)
+        self.assertIn("审核未完成", result["agent_brief"]["conclusion"])
+        self.assertIn(
+            "review_service_failure",
+            result["advisory_assessment"]["human_review"]["reason_codes"],
         )
 
 

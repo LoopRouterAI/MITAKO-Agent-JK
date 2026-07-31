@@ -28,23 +28,6 @@ EVALUATION_LABEL_KEYS = {
     "标准答案",
     "样本标签",
 }
-EVALUATION_LABEL_MARKERS = (
-    "expected_predicted_label",
-    "human_conclusion",
-    "ground_truth",
-    "标准答案：",
-    "标准答案=",
-    "正确答案：",
-    "正确答案=",
-    "正向样本",
-    "负向样本",
-    "正样本",
-    "负样本",
-    "人工拒绝",
-    "审核不通过",
-)
-
-
 SENSITIVE_KEY_MARKERS = (
     "phone",
     "mobile",
@@ -65,11 +48,6 @@ SENSITIVE_TEXT_PATTERNS = (
 
 def is_evaluation_key(value: Any) -> bool:
     return str(value or "").strip().lower() in EVALUATION_LABEL_KEYS
-
-
-def contains_evaluation_marker(value: Any) -> bool:
-    lowered = str(value or "").lower()
-    return any(marker in lowered for marker in EVALUATION_LABEL_MARKERS)
 
 
 def redact_review_personal_data(value: str) -> str:
@@ -96,10 +74,6 @@ def assert_review_input_safe(value: Any) -> None:
         for item in value:
             assert_review_input_safe(item)
         return
-    if isinstance(value, str) and contains_evaluation_marker(value):
-        raise ValueError("evaluation_label_not_allowed")
-
-
 def sanitize_review_input(value: Any) -> Any:
     """最终送模前再次删除评测字段，防止绕过 API 的本地调用泄题。"""
     if isinstance(value, dict):
@@ -112,8 +86,6 @@ def sanitize_review_input(value: Any) -> Any:
         return [sanitize_review_input(item) for item in value]
     if isinstance(value, tuple):
         return [sanitize_review_input(item) for item in value]
-    if isinstance(value, str) and contains_evaluation_marker(value):
-        return "[评测标签已隔离]"
     if isinstance(value, str):
         return redact_review_personal_data(value)
     return value

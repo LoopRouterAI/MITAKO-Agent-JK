@@ -39,29 +39,32 @@ def action_chain():
 
 
 class DamageCausalityTest(unittest.TestCase):
-    def test_visible_damage_supports_fact_even_when_origin_is_unresolved(self):
+    def test_evidence_guard_does_not_rewrite_case_classification(self):
         result = apply_damage_causality_guard(
             {
-                "predicted_label": "positive",
+                "predicted_label": "review",
+                "system_yes_no": "REVIEW",
                 "confidence": 0.95,
                 "damage_causality_assessment": assessment(claim_support="supported"),
             },
             "product_damage",
         )
-        self.assertEqual(result["predicted_label"], "positive")
-        self.assertEqual(result["system_yes_no"], "YES")
+        self.assertEqual(result["predicted_label"], "review")
+        self.assertEqual(result["system_yes_no"], "REVIEW")
         self.assertEqual(result["confidence"], 0.95)
-        self.assertIn("伤情事实", result["causality_guard_reason"])
+        self.assertEqual(result["damage_evidence_tendency"], "supports_claim")
+        self.assertIn("证据层", result["causality_guard_reason"])
 
-    def test_visible_damage_without_resolved_origin_stays_positive(self):
+    def test_visible_damage_without_resolved_origin_stays_supporting_evidence(self):
         result = apply_damage_causality_guard(
             {"predicted_label": "positive", "confidence": 0.95, "damage_causality_assessment": assessment()},
             "product_damage",
         )
         self.assertEqual(result["predicted_label"], "positive")
-        self.assertIn("责任归属", result["causality_guard_reason"])
+        self.assertEqual(result["damage_evidence_tendency"], "supports_claim")
+        self.assertIn("版本化 SOP", result["causality_guard_reason"])
 
-    def test_linked_high_confidence_supplemental_image_confirms_visible_damage(self):
+    def test_linked_supplemental_image_does_not_overwrite_main_video_damage_presence(self):
         result = apply_damage_causality_guard(
             {
                 "predicted_label": "review",
@@ -79,10 +82,25 @@ class DamageCausalityTest(unittest.TestCase):
             "product_damage",
         )
 
-        self.assertEqual(result["damage_causality_assessment"]["damage_presence"], "confirmed")
-        self.assertEqual(result["predicted_label"], "positive")
+        resolved = result["damage_causality_assessment"]
+        self.assertEqual(resolved["damage_presence"], "uncertain")
+        self.assertEqual(resolved["supplemental_damage_presence"], "confirmed")
+        self.assertEqual(result["predicted_label"], "review")
 
-    def test_transport_is_only_positive_with_direct_preopening_evidence(self):
+    def test_uncertain_damage_keeps_evidence_score_for_later_sop_policy(self):
+        result = apply_damage_causality_guard(
+            {
+                "predicted_label": "review",
+                "confidence": 0.93,
+                "damage_causality_assessment": assessment(damage_presence="not_visible", claim_support="not_supported"),
+            },
+            "product_damage",
+        )
+
+        self.assertEqual(result["predicted_label"], "review")
+        self.assertEqual(result["confidence"], 0.93)
+
+    def test_transport_direct_preopening_chain_supports_claim_without_rewriting_case(self):
         result = apply_damage_causality_guard(
             {
                 "confidence": 0.92,
@@ -98,8 +116,9 @@ class DamageCausalityTest(unittest.TestCase):
             },
             "product_damage",
         )
-        self.assertEqual(result["predicted_label"], "positive")
-        self.assertEqual(result["confidence"], 0.87)
+        self.assertNotIn("predicted_label", result)
+        self.assertEqual(result["damage_evidence_tendency"], "supports_claim")
+        self.assertEqual(result["confidence"], 0.92)
 
     def test_customer_damage_requires_visible_action_and_observed_change(self):
         base = assessment(
@@ -125,10 +144,11 @@ class DamageCausalityTest(unittest.TestCase):
             },
             "product_damage",
         )
-        self.assertEqual(without_change["predicted_label"], "positive")
-        self.assertEqual(with_change["predicted_label"], "negative")
+        self.assertEqual(without_change["damage_evidence_tendency"], "supports_claim")
+        self.assertEqual(with_change["damage_evidence_tendency"], "does_not_support_claim")
+        self.assertNotIn("predicted_label", with_change)
 
-    def test_customer_damage_without_structured_frame_chain_keeps_visible_fact_positive(self):
+    def test_customer_damage_without_structured_frame_chain_keeps_visible_fact_support(self):
         result = apply_damage_causality_guard(
             {
                 "confidence": 0.95,
@@ -143,7 +163,8 @@ class DamageCausalityTest(unittest.TestCase):
             },
             "product_damage",
         )
-        self.assertEqual(result["predicted_label"], "positive")
+        self.assertEqual(result["damage_evidence_tendency"], "supports_claim")
+        self.assertNotIn("predicted_label", result)
 
     def test_conflicting_direct_chunk_origins_are_not_forced(self):
         rows = [
@@ -229,6 +250,157 @@ class DamageCausalityTest(unittest.TestCase):
         self.assertFalse(combined["opening_action_visible"])
         self.assertFalse(combined["damage_change_observed"])
         self.assertEqual(combined["alternative_explanations"], ["另一种解释"])
+
+    def test_aggregate_cannot_confirm_main_video_damage_without_a_replayable_frame(self):
+        combined = aggregate_damage_causality([
+            {
+                "damage_causality_assessment": assessment(
+                    damage_presence="confirmed",
+                    claim_support="insufficient",
+                    first_visible_evidence="none",
+                    damage_type_and_location="补充图片可见折痕",
+                )
+            }
+        ])
+
+        self.assertEqual(combined["damage_presence"], "uncertain")
+        self.assertEqual(combined["claim_support"], "insufficient")
+        self.assertIn("可回链", combined["cannot_conclude_reason"])
+
+    def test_aggregate_rejects_negated_damage_frame_as_visible_damage(self):
+        combined = aggregate_damage_causality([
+            {
+                "damage_causality_assessment": assessment(
+                    damage_presence="confirmed",
+                    claim_support="insufficient",
+                    first_visible_evidence={
+                        "video_index": 1,
+                        "global_frame_index": 60,
+                        "timestamp": "03:55.63",
+                        "damage_visible": False,
+                        "fact": "视频未拍摄到明信片表面的损伤，无法识别用户所诉划痕。",
+                    },
+                )
+            }
+        ])
+
+        self.assertEqual(combined["damage_presence"], "uncertain")
+        self.assertIsNone(combined.get("first_visible_evidence"))
+
+    def test_aggregate_rejects_uncertain_whether_damage_exists(self):
+        combined = aggregate_damage_causality([
+            {
+                "damage_causality_assessment": assessment(
+                    damage_presence="confirmed",
+                    first_visible_evidence={
+                        "video_index": 2,
+                        "global_frame_index": 158,
+                        "timestamp": "00:37.70",
+                        "subject": "扭蛋公仔",
+                        "location": "本体",
+                        "fact": "取出商品后，受限于视频画质无法直接肉眼确认是否存在划痕或瑕疵。",
+                    },
+                )
+            }
+        ])
+
+        self.assertEqual(combined["damage_presence"], "uncertain")
+        self.assertIsNone(combined.get("first_visible_evidence"))
+
+    def test_aggregate_requires_same_item_linkage_for_visible_damage(self):
+        combined = aggregate_damage_causality([
+            {
+                "damage_causality_assessment": assessment(
+                    damage_presence="confirmed",
+                    claim_support="supported",
+                    first_visible_evidence={
+                        "video_index": 1,
+                        "global_frame_index": 167,
+                        "timestamp": "02:45.76",
+                        "subject": "争议商品",
+                        "location": "争议部位",
+                        "damage_visible": True,
+                        "fact": "该帧直接可见损伤。",
+                    },
+                ),
+                "damage_observability": {"same_item_linkage": False},
+            }
+        ])
+
+        self.assertEqual(combined["damage_presence"], "uncertain")
+        self.assertIsNone(combined.get("first_visible_evidence"))
+
+    def test_aggregate_accepts_structured_visible_damage_for_linked_item(self):
+        combined = aggregate_damage_causality([
+            {
+                "damage_causality_assessment": assessment(
+                    damage_presence="confirmed",
+                    claim_support="supported",
+                    first_visible_evidence={
+                        "video_index": 1,
+                        "global_frame_index": 20,
+                        "timestamp": "00:19.00",
+                        "subject": "争议商品",
+                        "location": "争议部位",
+                        "damage_visible": True,
+                        "fact": "该帧直接可见损伤。",
+                    },
+                ),
+                "damage_observability": {"same_item_linkage": True},
+            }
+        ])
+
+        self.assertEqual(combined["damage_presence"], "confirmed")
+
+    def test_aggregate_keeps_only_the_strongest_hypothesis_per_origin(self):
+        rows = [
+            {
+                "damage_causality_assessment": assessment(
+                    possible_origins=[
+                        {"origin": "indeterminate", "confidence": 0.3, "supporting_evidence": "weak"},
+                        {"origin": "logistics_transport", "confidence": 0.4, "supporting_evidence": "box"},
+                    ]
+                )
+            },
+            {
+                "damage_causality_assessment": assessment(
+                    possible_origins=[
+                        {"origin": "indeterminate", "confidence": 0.8, "supporting_evidence": "strong"},
+                    ]
+                )
+            },
+        ]
+
+        combined = aggregate_damage_causality(rows)
+
+        self.assertEqual(len(combined["possible_origins"]), 2)
+        hypotheses = {item["origin"]: item for item in combined["possible_origins"]}
+        self.assertEqual(hypotheses["indeterminate"]["supporting_evidence"], "strong")
+        self.assertEqual(hypotheses["logistics_transport"]["supporting_evidence"], "box")
+
+    def test_uncovered_chunk_does_not_override_a_concrete_origin_hypothesis(self):
+        rows = [
+            {
+                "damage_causality_assessment": assessment(
+                    most_likely_origin="indeterminate",
+                    origin_confidence=1.0,
+                    causal_evidence_level="insufficient",
+                )
+            },
+            {
+                "damage_causality_assessment": assessment(
+                    most_likely_origin="manufacturing_or_original_packaging",
+                    origin_confidence=0.7,
+                    causal_evidence_level="indirect",
+                )
+            },
+        ]
+
+        combined = aggregate_damage_causality(rows)
+
+        self.assertEqual(combined["most_likely_origin"], "manufacturing_or_original_packaging")
+        self.assertEqual(combined["origin_confidence"], 0.7)
+        self.assertEqual(combined["causal_evidence_level"], "indirect")
 
 
 if __name__ == "__main__":

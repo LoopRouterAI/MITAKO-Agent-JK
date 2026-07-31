@@ -187,6 +187,19 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                 "readiness": "needs_human_gap_confirmation",
                 "processing_status": "technical_processing_incomplete",
                 "system_action": "system_retry",
+                "material_inventory": [{
+                    "image_index": 1,
+                    "asset_ref": "supplemental_image_1",
+                    "document_type": "passport",
+                    "document_types": ["passport"],
+                    "subject_role": "minor",
+                    "document_side": "page",
+                    "issuing_country_or_region": "中国",
+                    "readability": "clear",
+                    "quality_issues": ["blur"],
+                    "ocr_text": "张三 320000200801011234",
+                    "passport_number": "E12345678",
+                }],
                 "checklist": [{
                     "requirement_id": "identity",
                     "label": "身份证明",
@@ -249,6 +262,16 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             public_parsed["minor_material_assessment"]["checklist"][0]["quality_status"],
             "needs_manual_confirmation",
         )
+        passport = public_parsed["minor_material_assessment"]["material_inventory"][0]
+        self.assertEqual(passport, {
+            "image_index": 1,
+            "asset_ref": "supplemental_image_1",
+            "document_type": "passport",
+            "subject_role": "minor",
+            "document_side": "page",
+            "issuing_country_or_region": "中国",
+            "readability": "clear",
+        })
         authenticity = public_parsed["minor_material_assessment"]["authenticity_assessment"]
         self.assertEqual(authenticity["risk_percent"], 25)
         self.assertEqual(authenticity["missing_exif_image_indices"], [4])
@@ -260,8 +283,11 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             "unknown_item",
             "ocr_text",
             "raw_value",
+            "passport_number",
+            "quality_issues",
             "18012345678",
             "320000200801011234",
+            "model_limitations",
         ):
             self.assertNotIn(forbidden, serialized)
 
@@ -272,6 +298,15 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             "customer_phone": "18012345678",
             "custom_business_field": {"address": "上海市某路1号"},
             "supporting_evidence": [{"source_type": "image", "fact": "联系电话 18012345678"}],
+            "decision_policy_audit": {
+                "rule_id": "PD-N-NONCOMPLIANT-OPENING-VIDEO",
+                "evidence_verdict_before_policy": {
+                    "predicted_label": "positive",
+                    "confidence": 0.65,
+                    "conclusion": "视频事实层发现疑似损伤。",
+                    "internal_prompt": "不得公开",
+                },
+            },
         }
         payload = workbench_server._public_agent_report_payload(
             case={
@@ -294,6 +329,9 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertNotIn("custom_business_field", serialized)
         self.assertNotIn("18012345678", serialized)
         self.assertIn("[已脱敏]", serialized)
+        before_policy = payload["parsed"]["decision_policy_audit"]["evidence_verdict_before_policy"]
+        self.assertEqual(before_policy["predicted_label"], "positive")
+        self.assertNotIn("internal_prompt", before_policy)
 
     def test_public_free_text_redacts_labeled_names_and_addresses(self) -> None:
         parsed = {

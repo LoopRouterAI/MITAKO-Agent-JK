@@ -2,8 +2,19 @@
 """视觉审核公开报告的证据展示与媒体回链测试。"""
 
 import unittest
+from pathlib import Path
 
-from poc.visual_review_poc.report_renderer import _decision_policy_panel, _evidence_items, render_public_report
+from poc.visual_review_poc.report_renderer import (
+    _decision_policy_panel,
+    _evidence_items,
+    _h,
+    _public_verdict,
+    _safe_agent_reason,
+    render_public_report,
+    safe_agent_conclusion,
+    safe_agent_next_step,
+)
+from poc.visual_review_poc.workbench_server import _public_agent_report_payload
 
 
 def _report_data():
@@ -246,6 +257,55 @@ def _report_data():
 
 
 class ReportEvidenceRenderingTest(unittest.TestCase):
+    def test_public_agent_report_preserves_timeline_coverage_metadata(self):
+        report = _public_agent_report_payload(
+            case={
+                "case_id": "CASE-1",
+                "scenario": "product_damage",
+                "scenario_label": "商品有伤审核",
+                "videos": [{
+                    "video_index": 1,
+                    "duration_seconds": 10.0,
+                    "sampled_frames": 11,
+                    "sampling_strategy": "full_timeline_dense",
+                    "timeline_coverage_ratio": 1.0,
+                }],
+                "frames": [],
+                "supplemental_images": [],
+            },
+            sample_dir=Path("."),
+            parsed={"predicted_label": "review"},
+            result={},
+            quality={},
+            public_conclusion="本轮未形成明确事实倾向。",
+            public_next_step="请结合证据继续处理。",
+        )
+
+        video = report["evidence_package"]["videos"][0]
+        self.assertEqual(video["sampling_strategy"], "full_timeline_dense")
+        self.assertEqual(video["timeline_coverage_ratio"], 1.0)
+
+    def test_report_escapes_but_does_not_rewrite_evidence_terms(self):
+        self.assertEqual(_h("外包装破损 <可见>"), "外包装破损 &lt;可见&gt;")
+
+    def test_review_fallback_does_not_invent_evidence_gap_or_required_handoff(self):
+        conclusion = safe_agent_conclusion({"predicted_label": "review", "confidence": 0.76}, "商品有伤审核")
+
+        self.assertIn("未形成明确事实倾向", conclusion)
+        self.assertNotIn("证据不足", conclusion)
+        self.assertNotIn("VIP客服", conclusion)
+
+    def test_report_fallbacks_do_not_invent_handoff_or_delete_reason_sentences(self):
+        self.assertEqual(
+            _public_verdict({"predicted_label": "review"}, "商品有伤审核"),
+            "本轮未形成明确事实倾向",
+        )
+        self.assertNotIn("VIP客服", safe_agent_next_step(""))
+        self.assertEqual(
+            _safe_agent_reason("SOP 不直接拒绝；外包装可见压痕。建议结合订单处理。"),
+            "SOP 不直接拒绝。外包装可见压痕。建议结合订单处理。",
+        )
+
     def test_non_product_damage_report_hides_product_damage_policy_panel(self):
         panel = _decision_policy_panel({
             "applied": False,
@@ -316,7 +376,8 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         report_html = render_public_report(data)
 
-        self.assertIn("审核建议与使用边界", report_html)
+        self.assertIn("按照 SOP 的审核倾向", report_html)
+        self.assertIn("建议进一步评估", report_html)
         self.assertIn("建议抽检", report_html)
         self.assertIn("按甲方规则继续", report_html)
         self.assertIn("短暂离镜仅降低证据强度", report_html)
@@ -342,12 +403,15 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("3.5 秒", report_html)
         self.assertIn("未确认重新入镜同一性", report_html)
         self.assertIn("离镜前 / 离镜起点 / 重新入镜证据", report_html)
-        self.assertIn("反光可能影响细微划痕判断", report_html)
+        self.assertIn("本报告只说明送审证据支持什么结论", report_html)
+        self.assertNotIn("反光可能影响细微划痕判断", report_html)
         self.assertIn("尚未使用独立留出集校准", report_html)
         self.assertIn("这些分数不是正确率", report_html)
         self.assertIn("动作前争议部位被包装遮挡", report_html)
         self.assertIn("动作后压痕首次可见", report_html)
         self.assertIn("主视频与补充证据分层", report_html)
+        self.assertIn("主视频损伤存在性", report_html)
+        self.assertNotIn("<small>损伤存在性</small><b>已确认可见损伤</b>", report_html)
         self.assertIn("补充图片 1 张", report_html)
         self.assertIn("关键审查帧未见主诉折痕", report_html)
         self.assertIn("补充特写可见疑似压痕", report_html)
@@ -357,7 +421,8 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("媒体技术取证", report_html)
         self.assertIn("视频时间轴完整不等于争议商品全程连续可见", report_html)
         self.assertNotIn("requires_media_forensics", report_html)
-        self.assertIn("版本化规则判定说明", report_html)
+        self.assertIn("SOP 规则判定说明", report_html)
+        self.assertNotIn("MITAKO-PD-20260720@2", report_html)
         self.assertIn("争议商品离镜时间超过策略阈值", report_html)
         self.assertIn("补充证据关联尚未解决", report_html)
         self.assertIn("ORDER-1@V1", report_html)
@@ -383,6 +448,57 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertNotIn("internal-provider-name", report_html)
         self.assertNotIn("SECRET-KEY-MUST-NOT-LEAK", report_html)
         self.assertNotIn("不得出现在公开报告中的内部提示词", report_html)
+
+    def test_report_marks_speed_unknown_and_out_of_frame_duration_as_sampled_estimate(self):
+        data = _report_data()
+        data["agent_report"]["parsed"]["video_audit_conclusion"]["playback_speed"] = "accelerated"
+        continuity = data["agent_report"]["parsed"]["object_continuity_assessment"]
+        continuity.update({
+            "longest_out_of_frame_lower_bound_seconds": 3.0,
+            "longest_out_of_frame_upper_bound_seconds": 6.0,
+        })
+        continuity["tracked_subjects"][0]["out_of_frame_events"][0].update({
+            "duration_basis": "sampled_source_timestamps",
+            "duration_is_exact": False,
+            "duration_lower_bound_seconds": 3.0,
+            "duration_upper_bound_seconds": 6.0,
+            "sampling_resolution_seconds": 2.0,
+        })
+        data["media_forensics"] = {
+            "assets": [{
+                "file": "audit.mp4",
+                "playback_speed_assessment": {
+                    "status": "unknown",
+                    "constant_speed_multiplier": None,
+                    "reason_code": "source_clock_reference_unavailable",
+                    "reason": "重编码视频缺少拍摄现场时钟或原始素材基准，不能可靠反推恒定加速倍数。",
+                    "is_model_inference": False,
+                },
+            }]
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("恒定倍速：未知", report_html)
+        self.assertIn("画面节奏判断：疑似加速", report_html)
+        self.assertIn("不能可靠反推恒定加速倍数", report_html)
+        self.assertIn("非模型推断", report_html)
+        self.assertIn("采样边界估计", report_html)
+        self.assertIn("3.0 至 6.0 秒", report_html)
+        self.assertIn("采样分辨率 2.0 秒", report_html)
+
+    def test_report_discloses_partial_specialized_coverage_without_overriding_verdict(self):
+        data = _report_data()
+        data["agent_report"]["parsed"].update({
+            "pass_integrity_status": "partial_specialized",
+            "specialized_pass_warning": "连续性专项存在局部缺口；缺口只使对应证据维度保持未知。",
+        })
+
+        report_html = render_public_report(data)
+
+        self.assertIn("缺口只使对应证据维度保持未知", report_html)
+        self.assertIn("本轮未形成明确事实倾向", report_html)
+        self.assertNotIn("证据不足，需要VIP客服复核", report_html)
 
     def test_multi_video_frame_mapping_uses_video_index_and_rejects_ambiguous_fallback(self):
         gallery = {

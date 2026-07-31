@@ -34,6 +34,25 @@ def _events(value: Any) -> List[Dict[str, Any]]:
                 **raw,
                 "visibility": _enum(raw.get("visibility") or "out_of_frame", VALID_VISIBILITY, "unknown"),
                 "duration_seconds": duration,
+                "duration_basis": str(
+                    raw.get("duration_basis") or "reported_without_deterministic_timestamp_derivation"
+                ),
+                "duration_is_exact": raw.get("duration_is_exact") is True,
+                "duration_lower_bound_seconds": (
+                    _float(raw.get("duration_lower_bound_seconds"))
+                    if raw.get("duration_lower_bound_seconds") not in (None, "")
+                    else None
+                ),
+                "duration_upper_bound_seconds": (
+                    _float(raw.get("duration_upper_bound_seconds"))
+                    if raw.get("duration_upper_bound_seconds") not in (None, "")
+                    else None
+                ),
+                "sampling_resolution_seconds": (
+                    _float(raw.get("sampling_resolution_seconds"))
+                    if raw.get("sampling_resolution_seconds") not in (None, "")
+                    else None
+                ),
             }
         )
     return result
@@ -62,12 +81,31 @@ def normalize_object_continuity(value: Any) -> Dict[str, Any]:
             }
         )
     longest = max((event["duration_seconds"] for event in all_events), default=0.0)
+    lower_bounds = [
+        event["duration_lower_bound_seconds"]
+        for event in all_events
+        if event.get("duration_lower_bound_seconds") is not None
+    ]
+    upper_bounds = [
+        event["duration_upper_bound_seconds"]
+        for event in all_events
+        if event.get("duration_upper_bound_seconds") is not None
+    ]
+    has_unbounded_event = any(
+        event.get("duration_upper_bound_seconds") is None
+        for event in all_events
+        if event.get("duration_basis") == "sampled_source_timestamps"
+    )
     return {
         **source,
         "tracked_subjects": subjects,
         "tracked_subject_defined": bool(subjects),
         "continuity_verdict": _enum(source.get("continuity_verdict"), VALID_VERDICTS, "indeterminate"),
         "longest_out_of_frame_seconds": longest,
+        "longest_out_of_frame_lower_bound_seconds": max(lower_bounds) if lower_bounds else None,
+        "longest_out_of_frame_upper_bound_seconds": (
+            None if has_unbounded_event else max(upper_bounds) if upper_bounds else None
+        ),
         "total_unobserved_seconds": _float(source.get("total_unobserved_seconds")),
         "out_of_frame_events": all_events,
     }
@@ -78,7 +116,7 @@ def _review_output(output: Dict[str, Any], reason: str) -> Dict[str, Any]:
     output["system_yes_no"] = "REVIEW"
     output["decision"] = "manual_review"
     try:
-        output["confidence"] = min(float(output.get("confidence") or 0.5), 0.69)
+        output["confidence"] = max(0.0, min(float(output.get("confidence") or 0.5), 1.0))
     except (TypeError, ValueError):
         output["confidence"] = 0.5
     output["continuity_guard_reason"] = reason
@@ -202,10 +240,22 @@ def _visibility_rows(
                         "local_timestamp": registered.get("timestamp"),
                         "global_frame_index": frame_index,
                         "state": state,
+                        "identity_match": str(item.get("identity_match") or "").strip().lower(),
                     }
                 )
-    for values in timelines.values():
+    for (video_index, subject_id), values in timelines.items():
         values.sort(key=lambda item: (item["timestamp"], int(item.get("global_frame_index") or 0)))
+        if subject_id != "claimed_item" or not any(item.get("identity_match") for item in values):
+            continue
+        matched_seen = False
+        for item in values:
+            identity_match = item.get("identity_match")
+            if identity_match == "matched" and item["state"] in {"visible", "partial", "occluded"}:
+                matched_seen = True
+            elif identity_match == "not_matched":
+                item["state"] = "out_of_frame" if matched_seen else "not_yet_exposed"
+            elif identity_match != "matched" and item["state"] in {"visible", "partial", "occluded"}:
+                item["state"] = "unknown"
     return timelines
 
 
@@ -222,7 +272,17 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
         elif item["state"] in {"visible", "partial"} and start_index is not None:
             start = tracked[start_index]
             before = tracked[start_index - 1] if start_index > 0 else None
+            last_out = tracked[index - 1]
             duration = max(0.0, item["timestamp"] - start["timestamp"])
+            lower_bound = max(0.0, last_out["timestamp"] - start["timestamp"])
+            upper_bound = (
+                max(0.0, item["timestamp"] - before["timestamp"])
+                if before is not None
+                else None
+            )
+            boundary_gaps = [item["timestamp"] - last_out["timestamp"]]
+            if before is not None:
+                boundary_gaps.append(start["timestamp"] - before["timestamp"])
             events.append(
                 {
                     "start_timestamp": start["timestamp_label"],
@@ -230,6 +290,11 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
                     "local_start_timestamp": start.get("local_timestamp"),
                     "local_end_timestamp": item.get("local_timestamp"),
                     "duration_seconds": round(duration, 3),
+                    "duration_basis": "sampled_source_timestamps",
+                    "duration_is_exact": False,
+                    "duration_lower_bound_seconds": round(lower_bound, 3),
+                    "duration_upper_bound_seconds": round(upper_bound, 3) if upper_bound is not None else None,
+                    "sampling_resolution_seconds": round(max(boundary_gaps), 3),
                     "visibility": "out_of_frame",
                     "before_evidence": before,
                     "out_of_frame_evidence": start,
@@ -243,6 +308,7 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
     if start_index is not None:
         start = tracked[start_index]
         end = tracked[-1]
+        before = tracked[start_index - 1] if start_index > 0 else None
         events.append(
             {
                 "start_timestamp": start["timestamp_label"],
@@ -250,8 +316,19 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
                 "local_start_timestamp": start.get("local_timestamp"),
                 "local_end_timestamp": end.get("local_timestamp"),
                 "duration_seconds": round(max(0.0, end["timestamp"] - start["timestamp"]), 3),
+                "duration_basis": "sampled_source_timestamps",
+                "duration_is_exact": False,
+                "duration_lower_bound_seconds": round(
+                    max(0.0, end["timestamp"] - start["timestamp"]), 3
+                ),
+                "duration_upper_bound_seconds": None,
+                "sampling_resolution_seconds": (
+                    round(max(0.0, start["timestamp"] - before["timestamp"]), 3)
+                    if before is not None
+                    else None
+                ),
                 "visibility": "out_of_frame",
-                "before_evidence": tracked[start_index - 1] if start_index > 0 else None,
+                "before_evidence": before,
                 "out_of_frame_evidence": start,
                 "after_evidence": None,
                 "identity_reestablished": False,
@@ -288,6 +365,28 @@ def aggregate_object_continuity(
     frames = list(frames or [])
     assessments = [normalize_object_continuity(row.get("object_continuity_assessment")) for row in rows]
     timelines = _visibility_rows(rows, frames)
+    claimed_rows = [
+        item
+        for (video_index, subject_id), values in timelines.items()
+        if subject_id == "claimed_item"
+        for item in values
+    ]
+    expected_claimed_frames = sum(1 for frame in frames if frame.get("global_frame_index") is not None)
+    claimed_reference_status = (
+        "available"
+        if any(
+            assessment.get("claimed_item_reference_status") == "available"
+            for assessment in assessments
+        )
+        else "not_provided"
+    )
+    claimed_timeline_complete = bool(expected_claimed_frames) and len(claimed_rows) == expected_claimed_frames
+    claimed_item_never_exposed = (
+        claimed_reference_status == "available"
+        and claimed_timeline_complete
+        and bool(claimed_rows)
+        and all(item.get("state") == "not_yet_exposed" for item in claimed_rows)
+    )
     derived = [
         _derived_subject(video_index, subject_id, values)
         for (video_index, subject_id), values in timelines.items()
@@ -297,17 +396,24 @@ def aggregate_object_continuity(
     longest = max((subject.get("longest_out_of_frame_seconds") or 0 for subject in subjects), default=0.0)
     warning_seconds = max(0.5, _float((policy or {}).get("out_of_frame_warning_seconds"), 3.0))
     verdicts = {item["continuity_verdict"] for item in assessments}
-    unresolved = any(
-        event.get("identity_reestablished") is False
+    events = [
+        event
         for subject in subjects
         for event in subject.get("out_of_frame_events") or []
-    ) or any(int(subject.get("unknown_frame_count") or 0) > 0 for subject in subjects)
-    if unresolved:
+    ]
+    trailing_absence = any(
+        event.get("source") == "deterministic_frame_timeline"
+        and event.get("after_evidence") is None
+        for event in events
+    )
+    if trailing_absence:
         verdict = "indeterminate"
-    elif longest > warning_seconds:
+    elif longest >= warning_seconds:
         verdict = "long_absence"
-    elif longest > 0:
+    elif events:
         verdict = "brief_occlusion"
+    elif derived_subjects:
+        verdict = "continuous"
     elif "indeterminate" in verdicts or not subjects:
         verdict = "indeterminate"
     elif "brief_occlusion" in verdicts:
@@ -326,5 +432,8 @@ def aggregate_object_continuity(
             ), 3),
             "segment_assessments": assessments,
             "timeline_derivation": "deterministic_frame_timeline" if derived_subjects else "model_segment_summary",
+            "claimed_item_reference_status": claimed_reference_status,
+            "claimed_item_timeline_complete": claimed_timeline_complete,
+            "claimed_item_never_exposed": claimed_item_never_exposed,
         }
     )

@@ -13,6 +13,7 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
@@ -64,7 +65,7 @@ from poc.visual_review_poc.fulfillment_reconciliation import (
     aggregate_fulfillment_reconciliation,
     apply_fulfillment_guard,
 )
-from poc.visual_review_poc.specialized_model_pass import run_specialized_frame_pass
+from poc.visual_review_poc.specialized_model_pass import run_adaptive_tasks, run_specialized_frame_pass
 from poc.visual_review_poc.minor_material_pipeline import run_minor_material_pipeline
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
@@ -282,6 +283,34 @@ def classify_error(status: Optional[int], text: str) -> str:
     return "soft" if any(t in lowered for t in ("timeout", "rate limit", "overloaded", "temporarily")) else "hard"
 
 
+def is_retryable_failure(result: Dict[str, Any]) -> bool:
+    return result.get("error_type") == "soft" or result.get("status_code") in {
+        408, 409, 425, 429, 500, 502, 503, 504
+    }
+
+
+def collect_channel_route_attempts(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        dict(attempt)
+        for row in rows
+        for attempt in row.get("_channel_route_attempts") or []
+        if isinstance(attempt, dict)
+    ]
+
+
+def _retry_delay(retry_after: Any, attempt: int) -> float:
+    text = str(retry_after or "").strip()
+    if text:
+        try:
+            return min(max(float(text), 0.0), 30.0)
+        except ValueError:
+            try:
+                return min(max(parsedate_to_datetime(text).timestamp() - time.time(), 0.0), 30.0)
+            except (TypeError, ValueError, OverflowError):
+                pass
+    return min(2 ** (attempt - 1), 8) + random.uniform(0.1, 0.4)
+
+
 def estimate_model_cost(cfg: Dict[str, Any], usage: Dict[str, Any]) -> Dict[str, Any]:
     input_tokens = int(usage.get("input_tokens") or 0)
     output_tokens = int(usage.get("output_tokens") or 0)
@@ -339,9 +368,7 @@ def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str,
         )
         if last["error_type"] != "soft" or attempt > retries:
             return last
-        retry_after = last.get("retry_after")
-        delay = min(float(retry_after), 30) if retry_after and str(retry_after).replace(".", "", 1).isdigit() else min(2 ** (attempt - 1), 8) + random.uniform(0.1, 0.4)
-        time.sleep(delay)
+        time.sleep(_retry_delay(last.get("retry_after"), attempt))
     return last
 
 
@@ -386,19 +413,44 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
     system_prompt = build_system_prompt(business_scenario or case["scenario"])
     user_prompt = build_selection_prompt(case)
     failures: List[Dict[str, Any]] = []
+    channel_attempts: List[Dict[str, Any]] = []
     if cfg["provider"] == "gemini_native":
         options = gemini_request_options(cfg)
         if not options:
             return {"status": "skipped", "error": "missing_api_key", "cost_status": "not_incurred"}
         payload = gemini_payload(system_prompt, user_prompt, case)
         response: Dict[str, Any] = {}
-        for option in options:
+        for option_index, option in enumerate(options):
             response = post_with_retries(option["endpoint"], option["headers"], payload, timeout, retries)
             if response.get("ok"):
+                channel_attempts.append({
+                    "channel": option.get("channel") or "configured",
+                    "model": option.get("model") or cfg["model"],
+                    "status_code": response.get("status_code"),
+                    "decision": "selected",
+                })
                 break
             failures.append({key: response.get(key) for key in ("status_code", "latency_seconds", "error_type", "attempt")})
+            retryable = is_retryable_failure(response)
+            channel_attempts.append({
+                "channel": option.get("channel") or "configured",
+                "model": option.get("model") or cfg["model"],
+                "status_code": response.get("status_code"),
+                "error_type": response.get("error_type"),
+                "decision": "fallback_retryable" if retryable and option_index + 1 < len(options) else (
+                    "exhausted" if retryable else "stop_non_retryable"
+                ),
+            })
+            if not retryable:
+                break
         if not response.get("ok"):
-            return {"status": "failed", **response, "attempts": failures, "cost_status": "unknown"}
+            return {
+                "status": "failed",
+                **response,
+                "attempts": failures,
+                "_channel_route_attempts": channel_attempts,
+                "cost_status": "unknown",
+            }
         text = "\n".join(p.get("text", "") for p in (((response["data"].get("candidates") or [{}])[0].get("content") or {}).get("parts") or []) if isinstance(p, dict))
         usage = extract_usage(response["data"])
     else:
@@ -460,6 +512,7 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
         "unknown_cost_calls": len(failures),
         "estimated_cost_calls": 1,
         "attempts": failures,
+        "_channel_route_attempts": channel_attempts if cfg["provider"] == "gemini_native" else [],
         "raw_text": text,
         "raw_response": compact_response(response.get("data") or {}),
         "parsed_before_boundary": parsed_before_boundary,
@@ -657,6 +710,17 @@ def _apply_global_timeline_summary(
         for item in parsed_rows
         if str((item.get("video_audit_conclusion") or {}).get("opening_integrity") or "").strip()
     })
+    playback_speed_values = sorted({
+        str((item.get("video_audit_conclusion") or {}).get("playback_speed") or "").strip().lower()
+        for item in parsed_rows
+        if str((item.get("video_audit_conclusion") or {}).get("playback_speed") or "").strip().lower()
+        in {"normal", "accelerated", "unknown"}
+    })
+    playback_speed = (
+        "accelerated"
+        if "accelerated" in playback_speed_values
+        else "normal" if playback_speed_values == ["normal"] else "unknown"
+    )
     opening_integrity, opening_integrity_source = _opening_integrity_from_continuity(
         list(output.get("continuity_frame_findings") or []),
         sampling_boundary_status,
@@ -680,15 +744,6 @@ def _apply_global_timeline_summary(
 
     label = str(output.get("predicted_label") or "review")
     label_text = {"positive": "当前证据支持本次诉求", "negative": "当前证据不支持本次诉求", "review": "当前证据仍需复核"}.get(label, "当前证据仍需复核")
-    if contradictions:
-        label = "review"
-        output.update({
-            "predicted_label": "review",
-            "system_yes_no": "REVIEW",
-            "decision": "manual_review",
-            "confidence": min(float(output.get("confidence") or 0.5), 0.69),
-        })
-        label_text = "检测到分段叙述与全局时间轴冲突，当前结论需复核"
     output["video_audit_conclusion"] = {
         "continuity_score": None,
         "continuity_reason": continuity_reason,
@@ -697,6 +752,8 @@ def _apply_global_timeline_summary(
         "opening_integrity": opening_integrity,
         "opening_integrity_source": opening_integrity_source,
         "segment_opening_claims": opening_values,
+        "playback_speed": playback_speed,
+        "segment_playback_speed_values": playback_speed_values,
         "sampling_boundary_status": sampling_boundary_status,
         "technical_timeline_status": "requires_media_forensics",
         "evidence_continuity_status": continuity.get("continuity_verdict") or "indeterminate",
@@ -756,18 +813,13 @@ def _aggregate_chunk_results(
     confidences = [float(item.get("confidence") or 0) for item in parsed_rows]
     best_index = max(range(len(parsed_rows)), key=lambda index: confidences[index])
     parsed = dict(parsed_rows[best_index])
-    label_scores = {"positive": 0.0, "negative": 0.0, "review": 0.0}
-    for item, confidence in zip(parsed_rows, confidences):
-        label = str(item.get("predicted_label") or "review")
-        label_scores[label if label in label_scores else "review"] = max(label_scores.get(label, 0.0), confidence)
-    ranked = sorted(label_scores.items(), key=lambda item: item[1], reverse=True)
-    predicted = "review" if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < 0.1 else ranked[0][0]
+    predicted = "review"
     confidence = round(sum(confidences) / max(len(confidences), 1), 4)
     for key in ("frame_findings", "adopted_evidence", "supporting_evidence", "challenging_evidence", "issue_timestamps", "material_gaps", "skeptical_questions", "audit_methods"):
         parsed[key] = [entry for item in parsed_rows for entry in (item.get(key) or [])][:120]
     business_scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or case.get("scenario") or "")
     causality_complete = bool(causality_results) and not causality_failures
-    causality_rows = [item.get("parsed") or {} for item in (causality_results or [])] if causality_complete else []
+    causality_rows = [item.get("parsed") or {} for item in (causality_results or [])]
     if business_scenario == "product_damage":
         damage_rows = causality_rows or parsed_rows
         damage_assessment = aggregate_damage_causality(damage_rows)
@@ -851,7 +903,7 @@ def _aggregate_chunk_results(
                 for finding in (row.get("frame_findings") or [])
             ][:2400]
     continuity_complete = bool(continuity_results) and not continuity_failures
-    continuity_rows = [item.get("parsed") or {} for item in (continuity_results or [])] if continuity_complete else []
+    continuity_rows = [item.get("parsed") or {} for item in (continuity_results or [])]
     continuity_coverage_gaps = [
         {
             "chunk_index": index + 1,
@@ -934,14 +986,13 @@ def _aggregate_chunk_results(
         (case.get("structured_business_context") or {}).get("continuity_policy"),
     )
     parsed = apply_fulfillment_guard(parsed, business_scenario)
-    incomplete_passes = (
-        (main_failures or [])
-        + (continuity_failures or [])
+    specialized_incomplete = (
+        (continuity_failures or [])
         + (causality_failures or [])
         + continuity_coverage_gaps
         + causality_coverage_gaps
     )
-    if incomplete_passes:
+    if main_failures:
         parsed.update({
             "predicted_label": "review",
             "system_yes_no": "REVIEW",
@@ -949,9 +1000,12 @@ def _aggregate_chunk_results(
             "confidence": min(float(parsed.get("confidence") or 0.5), 0.69),
             "business_action_allowed": False,
             "human_required": True,
-            "specialized_pass_guard_reason": "主审核或专项审核存在失败（硬失败）、模型输出缺口或结构不完整；已返回的有效证据和缺失帧清单予以保留，但不能使用部分结果形成确定结论。",
+            "specialized_pass_guard_reason": "主审核存在失败、模型输出缺口或结构不完整；已返回的有效证据予以保留，但不能使用不完整的主审核结果形成确定结论。",
             "pass_integrity_status": "degraded",
         })
+    elif specialized_incomplete:
+        parsed["pass_integrity_status"] = "partial_specialized"
+        parsed["specialized_pass_warning"] = "连续性或损伤成因专项存在局部缺口；成功返回的证据继续有效，缺口只使对应证据维度保持未知。"
     else:
         parsed["pass_integrity_status"] = "complete"
     parsed = _apply_global_timeline_summary(case, parsed, parsed_rows, conclusions)
@@ -983,6 +1037,7 @@ def _aggregate_chunk_results(
         "usage": usage,
         "cost": {"estimated_usd": estimated_usd},
         **cost_observability,
+        "_channel_route_attempts": collect_channel_route_attempts(billed_results),
         "parsed": parsed,
         "evaluation": evaluate(parsed, label),
         "policy_decision": policy_decision(parsed),
@@ -1030,6 +1085,35 @@ def _representative_frames(frames: List[Dict[str, Any]], max_frames: int) -> Lis
     last_index = len(frames) - 1
     indices = [round(position * last_index / (max_frames - 1)) for position in range(max_frames)]
     return [frames[index] for index in indices]
+
+
+def derive_claim_identity(results: List[Dict[str, Any]], case: Dict[str, Any]) -> Dict[str, Any]:
+    def parsed_dict(item: Any) -> Dict[str, Any]:
+        value = item.get("parsed") if isinstance(item, dict) else None
+        return value if isinstance(value, dict) else {}
+
+    identity: Dict[str, Any] = {"customer_claim": str(case.get("customer_claim") or "").strip()}
+    for result in sorted(
+        results,
+        key=lambda item: float(parsed_dict(item).get("confidence") or 0),
+        reverse=True,
+    ):
+        parsed = parsed_dict(result)
+        claim = parsed.get("customer_claim_parse") if isinstance(parsed.get("customer_claim_parse"), dict) else {}
+        order_item = parsed.get("expected_order_item") if isinstance(parsed.get("expected_order_item"), dict) else {}
+        actual_item = parsed.get("actual_received_item") if isinstance(parsed.get("actual_received_item"), dict) else {}
+        candidates = {
+            "item_ref": order_item.get("item_ref") or actual_item.get("item_ref"),
+            "sku": order_item.get("sku") or actual_item.get("sku"),
+            "product_name": order_item.get("product_name") or actual_item.get("product_name"),
+            "specification": order_item.get("specification") or actual_item.get("specification"),
+            "expected_item": claim.get("expected_item"),
+            "claimed_received_item": claim.get("claimed_received_item"),
+        }
+        for key, value in candidates.items():
+            if key not in identity and value not in (None, "", [], {}):
+                identity[key] = value
+    return {key: value for key, value in identity.items() if value not in (None, "", [], {})}
 
 
 def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
@@ -1100,16 +1184,11 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         chunk_case["structured_business_context"] = structured
         return call_model(cfg, chunk_case, timeout, retries)
 
-    results: List[Optional[Dict[str, Any]]] = [None] * len(chunks)
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(review_chunk, index, chunk): index for index, chunk in enumerate(chunks)}
-        for future in as_completed(futures):
-            index = futures[future]
-            try:
-                results[index] = future.result()
-            except Exception as exc:
-                results[index] = {"status": "failed", "error": str(exc)[:500]}
-    completed = [item or {"status": "failed", "error": "empty_chunk_result"} for item in results]
+    completed, concurrency_audit = run_adaptive_tasks(
+        list(enumerate(chunks)),
+        workers=workers,
+        invoke=lambda item: review_chunk(item[0], item[1]),
+    )
     failures = [
         {
             "chunk_index": index + 1,
@@ -1121,6 +1200,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             "cost": item.get("cost") or {},
             "cost_status": item.get("cost_status") or "",
             "latency_seconds": item.get("latency_seconds") or 0,
+            "_channel_route_attempts": item.get("_channel_route_attempts") or [],
         }
         for index, item in enumerate(completed)
         if item.get("status") != "success"
@@ -1150,6 +1230,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
                 "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in completed), 6)
             },
             **_cost_observability(completed),
+            "_channel_route_attempts": collect_channel_route_attempts(completed),
             "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in completed), 2),
             "latency_seconds": round(time.time() - wall_started, 2),
             "chunking": {
@@ -1157,6 +1238,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
                 "total_frames": len(frames),
                 "main_review_frames": len(main_frames),
                 "total_model_calls": incurred_calls,
+                "concurrency": concurrency_audit,
                 "channels": {"main_review": {
                     "model_calls": incurred_calls,
                     "total_tokens": usage["total_tokens"],
@@ -1164,6 +1246,12 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
                 }},
             },
         }
+    specialized_case = dict(case)
+    specialized_structured = dict(case.get("structured_business_context") or {})
+    claim_identity = derive_claim_identity(successful, case)
+    if claim_identity:
+        specialized_structured["continuity_claim_identity"] = claim_identity
+    specialized_case["structured_business_context"] = specialized_structured
     continuity_results: List[Dict[str, Any]] = []
     continuity_failures: List[Dict[str, Any]] = []
     if policy.get("force_dense_scan") and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}:
@@ -1172,7 +1260,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             min(int(os.getenv("REVIEW_CONTINUITY_FRAMES_PER_CALL", "24") or 24), 24),
         )
         continuity_results, continuity_failures = run_specialized_frame_pass(
-            case,
+            specialized_case,
             mode="object_continuity_only",
             target_index_key="continuity_target_frame_indices",
             chunk_size=configured_continuity_limit,
@@ -1186,7 +1274,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     causality_failures: List[Dict[str, Any]] = []
     if scenario == "product_damage" and causality_policy.get("force_action_scan"):
         causality_results, causality_failures = run_specialized_frame_pass(
-            case,
+            specialized_case,
             mode="damage_causality_only",
             target_index_key="causality_target_frame_indices",
             chunk_size=max(8, min(int(causality_policy.get("dedicated_chunk_frames") or 20), 24)),
@@ -1197,7 +1285,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             preserve_partial_coverage=True,
         )
     aggregated = _aggregate_chunk_results(
-        case,
+        specialized_case,
         successful,
         failures,
         continuity_results,
@@ -1207,6 +1295,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         len(main_frames),
     )
     chunking = aggregated.setdefault("chunking", {})
+    chunking["concurrency"] = concurrency_audit
     chunking["official_reference_segments"] = len(reference_segment_indices)
     chunking["official_reference_model_sends"] = (
         len(case.get("official_reference_images") or []) * len(reference_segment_indices)

@@ -600,6 +600,9 @@ class InputReadinessTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "evaluation_label_not_allowed"):
             ensure_label_isolation({"annotation": {"正/负样本": "负样本"}})
 
+    def test_customer_can_quote_previous_review_result_without_being_treated_as_gold_label(self):
+        ensure_label_isolation({"customer_claim": "之前审核不通过，我要补充证据申请复核"})
+
 
 if __name__ == "__main__":
     unittest.main()

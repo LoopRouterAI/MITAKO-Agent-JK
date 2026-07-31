@@ -71,6 +71,13 @@ def _context_sources(case: Dict[str, Any]) -> list[Dict[str, Any]]:
 def _claimed_item_refs(case: Dict[str, Any]) -> set[str]:
     refs: set[str] = set()
     for source in _context_sources(case):
+        identity = source.get("continuity_claim_identity") or {}
+        if isinstance(identity, dict):
+            refs.update(
+                str(identity.get(key) or "").strip()
+                for key in ("item_ref", "sku")
+                if str(identity.get(key) or "").strip()
+            )
         scope = source.get("claim_scope") or {}
         if not isinstance(scope, dict):
             continue
@@ -126,7 +133,15 @@ def collect_official_image_references(case: Dict[str, Any]) -> list[Dict[str, st
                     if value and value not in entry[key]:
                         entry[key].append(value)
     collected.extend(by_url.values())
-    collected.sort(key=lambda item: (0 if claimed_refs.intersection(item.get("item_refs") or []) else 1))
+    collected.sort(
+        key=lambda item: (
+            0
+            if claimed_refs.intersection(
+                set(item.get("item_refs") or []) | set(item.get("skus") or [])
+            )
+            else 1
+        )
+    )
     return collected
 
 
@@ -313,8 +328,9 @@ def prepare_official_reference_images(
 ) -> Dict[str, Any]:
     cache_dir = Path(cache_dir).resolve() if cache_dir else official_reference_cache_dir()
     references = collect_official_image_references(case)
+    claimed_refs = sorted(_claimed_item_refs(case))
     reference_fingerprint = hashlib.sha256(
-        "\n".join(item["url"] for item in references).encode("utf-8")
+        "\n".join([*claimed_refs, *(item["url"] for item in references)]).encode("utf-8")
     ).hexdigest()[:16]
     existing_status = case.get("official_reference_status") or {}
     if (

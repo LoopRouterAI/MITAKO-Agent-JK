@@ -506,8 +506,6 @@ paths:
       - review-service
       summary: Job Media
       operationId: job_media_api_v1_review_jobs__job_id__media__media_id__get
-      security:
-      - HTTPBearer: []
       parameters:
       - name: job_id
         in: path
@@ -521,6 +519,20 @@ paths:
         schema:
           type: string
           title: Media Id
+      - name: expires
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Expires
+      - name: sig
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Sig
       responses:
         '200':
           description: Successful Response
@@ -3235,7 +3247,7 @@ components:
           type: string
           maxLength: 160
           title: Policy Ref
-          default: MITAKO-PD-ADVISORY@20260728.1
+          default: MITAKO-PD-ADVISORY@20260731.1
         opening_video_required:
           type: boolean
           title: Opening Video Required
@@ -3246,6 +3258,13 @@ components:
           - review
           - negative
           title: Missing Required Opening Video
+          default: review
+        noncompliant_opening_video:
+          type: string
+          enum:
+          - review
+          - negative
+          title: Noncompliant Opening Video
           default: review
         complete_video_no_claimed_damage:
           type: string

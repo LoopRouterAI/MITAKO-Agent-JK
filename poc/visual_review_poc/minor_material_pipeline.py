@@ -8,10 +8,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 from poc.visual_review_poc.model_catalog import summarize_cost_observability
+from review_service.schemas import ReviewMinorMaterialObservation
 
 
 ALLOWED_DOCUMENT_TYPES = {
     "identity_card",
+    "passport",
     "household_register",
     "birth_certificate",
     "signed_commitment",
@@ -19,10 +21,11 @@ ALLOWED_DOCUMENT_TYPES = {
     "mobile_realname_proof",
     "carrier_invoice",
     "other",
+    "unknown",
 }
 ALLOWED_ROLES = {"guardian", "minor", "unknown", "not_applicable"}
 ALLOWED_SIDES = {"front", "back", "page", "multiple", "unknown"}
-ALLOWED_READABILITY = {"clear", "partial", "unreadable"}
+ALLOWED_READABILITY = {"clear", "partial", "unknown"}
 ALLOWED_QUALITY_ISSUES = {
     "blur",
     "glare",
@@ -222,23 +225,32 @@ def _normalize_observations(
                 for value in raw.get("document_types") or []
                 if str(value) in ALLOWED_DOCUMENT_TYPES
             ]
+            document_type = str(raw.get("document_type") or "")
+            if document_type not in ALLOWED_DOCUMENT_TYPES:
+                document_type = document_types[0] if document_types else "unknown"
+            document_types = list(dict.fromkeys([document_type, *document_types]))[:4]
             role = str(raw.get("subject_role") or "unknown")
             side = str(raw.get("document_side") or "unknown")
-            readability = str(raw.get("readability") or "unreadable")
+            readability = str(raw.get("readability") or "unknown")
+            if readability == "unreadable" or readability not in ALLOWED_READABILITY:
+                readability = "unknown"
             quality_issues = [
                 str(value)
                 for value in raw.get("quality_issues") or []
                 if str(value) in ALLOWED_QUALITY_ISSUES
-            ]
-            by_index[image_index] = {
+            ][:8]
+            observation = ReviewMinorMaterialObservation.model_validate({
                 "image_index": image_index,
                 "asset_ref": f"supplemental_image_{image_index}",
-                "document_types": document_types or ["other"],
+                "document_type": document_type,
+                "document_types": document_types,
                 "subject_role": role if role in ALLOWED_ROLES else "unknown",
                 "document_side": side if side in ALLOWED_SIDES else "unknown",
-                "readability": readability if readability in ALLOWED_READABILITY else "unreadable",
+                "issuing_country_or_region": raw.get("issuing_country_or_region") or "unknown",
+                "readability": readability,
                 "quality_issues": quality_issues,
-            }
+            }).model_dump(mode="json")
+            by_index[image_index] = observation
     observations = [by_index[index] for index in sorted(by_index)]
     unclassified = sorted(expected - set(by_index))
     return observations, unclassified
@@ -397,26 +409,42 @@ def _consistency_image_jobs(
 
     guardian = indices("identity_card", role="guardian")
     minor = indices("identity_card", role="minor")
+    guardian_passport = indices("passport", role="guardian")
+    minor_passport = indices("passport", role="minor")
     relationship = indices("household_register", "birth_certificate")
     commitment = indices("signed_commitment")
     payment = indices("order_payment_proof")
     mobile = indices("mobile_realname_proof", "carrier_invoice")
     plans = {
-        "identity_age": guardian + minor + relationship,
-        "guardian_relationship": guardian + minor + relationship,
+        "identity_age": guardian + guardian_passport + minor + minor_passport + relationship,
+        "guardian_relationship": guardian + guardian_passport + minor + minor_passport + relationship,
         "commitment_signatures": guardian + minor + relationship + commitment,
         "order_payment": guardian + payment,
         "mobile_realname": guardian + mobile + payment,
     }
     clear_guardian = indices("identity_card", role="guardian", usable_only=True)
     clear_minor = indices("identity_card", role="minor", usable_only=True)
+    clear_guardian_passport = indices("passport", role="guardian", usable_only=True)
+    clear_minor_passport = indices("passport", role="minor", usable_only=True)
     clear_relationship = indices("household_register", "birth_certificate", usable_only=True)
     clear_commitment = indices("signed_commitment", usable_only=True)
     clear_payment = indices("order_payment_proof", usable_only=True)
     clear_mobile = indices("mobile_realname_proof", "carrier_invoice", usable_only=True)
     anchors = {
-        "identity_age": (clear_guardian or guardian)[:1] + ((clear_minor or minor)[:1] or (clear_relationship or relationship)[:1]),
-        "guardian_relationship": (clear_guardian or guardian)[:1] + (clear_minor or minor)[:1] + (clear_relationship or relationship)[:1],
+        "identity_age": (
+            (clear_guardian or guardian)[:1]
+            + (clear_guardian_passport or guardian_passport)[:1]
+            + (clear_minor or minor)[:1]
+            + (clear_minor_passport or minor_passport)[:1]
+            + (clear_relationship or relationship)[:1]
+        ),
+        "guardian_relationship": (
+            (clear_guardian or guardian)[:1]
+            + (clear_guardian_passport or guardian_passport)[:1]
+            + (clear_minor or minor)[:1]
+            + (clear_minor_passport or minor_passport)[:1]
+            + (clear_relationship or relationship)[:1]
+        ),
         "commitment_signatures": (clear_guardian or guardian)[:1] + ((clear_minor or minor)[:1] or (clear_relationship or relationship)[:1]) + (clear_commitment or commitment)[:1],
         "order_payment": (clear_guardian or guardian)[:1] + (clear_payment or payment)[:1],
         "mobile_realname": (clear_guardian or guardian)[:1] + (clear_mobile or mobile)[:1] + (clear_payment or payment)[:1],
@@ -892,7 +920,7 @@ def aggregate_minor_material_results(
             ),
         },
         "process_evidence": process_observations,
-        "privacy_boundary": "报告只保留材料类型、图片编号、清晰度和一致性待核点，不输出姓名、手机号、证件号、住址或OCR原文。",
+        "privacy_boundary": "报告只保留材料类型、护照签发国家/地区、图片编号、清晰度和一致性待核点，不输出姓名、手机号、证件号、住址或OCR原文。",
         "business_boundary": "Agent输出资料初审建议，不自动退款、自动通过、自动拒绝或注销账号；最终业务动作仍由甲方规则执行。",
     }
     return {

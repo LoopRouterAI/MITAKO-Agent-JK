@@ -336,6 +336,14 @@ def _packet_timeline_facts(
     deltas = [right - left for left, right in zip(timestamps, timestamps[1:])]
     positive = sorted(delta for delta in deltas if delta > 0)
     baseline_delta = positive[int((len(positive) - 1) * 0.25)] if positive else None
+    median_delta = None
+    if positive:
+        middle = len(positive) // 2
+        median_delta = (
+            positive[middle]
+            if len(positive) % 2
+            else (positive[middle - 1] + positive[middle]) / 2
+        )
     gap_threshold = max(1.0, (baseline_delta or 0.04) * 20)
     large_gaps = [delta for delta in deltas if delta > gap_threshold]
     non_monotonic = [delta for delta in deltas if delta < -0.01]
@@ -347,11 +355,62 @@ def _packet_timeline_facts(
         "keyframes": keyframes,
         "coverage_seconds": _round_number(max(0.0, coverage), 3),
         "baseline_packet_delta_seconds": _round_number(baseline_delta, 6),
+        "minimum_packet_delta_seconds": _round_number(positive[0], 6) if positive else None,
+        "median_packet_delta_seconds": _round_number(median_delta, 6),
+        "maximum_packet_delta_seconds": _round_number(positive[-1], 6) if positive else None,
         "gap_threshold_seconds": _round_number(gap_threshold, 3),
         "large_gap_count": len(large_gaps),
         "largest_gap_seconds": _round_number(max(large_gaps), 3) if large_gaps else None,
         "non_monotonic_count": len(non_monotonic),
         "truncated_at_packet_limit": len(all_rows) >= packet_limit,
+    }
+
+
+def _playback_speed_assessment(
+    format_data: Optional[Dict[str, Any]] = None,
+    video_stream: Optional[Dict[str, Any]] = None,
+    packet_timeline: Optional[Dict[str, Any]] = None,
+    *,
+    reason_code: str = "source_clock_reference_unavailable",
+) -> Dict[str, Any]:
+    format_data = format_data or {}
+    video_stream = video_stream or {}
+    packet_timeline = packet_timeline or {}
+    reasons = {
+        "source_clock_reference_unavailable": (
+            "重编码视频的 PTS、帧率和容器时长只描述编码后的播放时间轴；"
+            "缺少拍摄现场时钟或原始素材基准，不能可靠反推恒定加速倍数。"
+        ),
+        "ffprobe_not_available": "ffprobe 不可用，未获得编码时间轴；恒定加速倍数无法判断。",
+        "media_file_missing": "媒体文件不可用，未获得编码时间轴；恒定加速倍数无法判断。",
+        "ffprobe_execution_failed": "ffprobe 执行失败，未获得编码时间轴；恒定加速倍数无法判断。",
+        "ffprobe_could_not_parse_media": "ffprobe 无法解析媒体，恒定加速倍数无法判断。",
+        "ffprobe_invalid_output": "ffprobe 输出无效，恒定加速倍数无法判断。",
+        "forensic_checks_disabled": "媒体取证已关闭，恒定加速倍数未判断。",
+    }
+    encoded_timeline = {
+        "container_duration_seconds": _round_number(_number(format_data.get("duration")), 3),
+        "video_stream_duration_seconds": _round_number(_number(video_stream.get("duration")), 3),
+        "average_fps": _round_number(_fraction(video_stream.get("avg_frame_rate")), 6),
+        "declared_fps": _round_number(_fraction(video_stream.get("r_frame_rate")), 6),
+        "frame_count": (
+            int(video_stream["nb_frames"])
+            if str(video_stream.get("nb_frames") or "").isdigit()
+            else None
+        ),
+        "packet_coverage_seconds": packet_timeline.get("coverage_seconds"),
+        "packet_delta_minimum_seconds": packet_timeline.get("minimum_packet_delta_seconds"),
+        "packet_delta_median_seconds": packet_timeline.get("median_packet_delta_seconds"),
+        "packet_delta_maximum_seconds": packet_timeline.get("maximum_packet_delta_seconds"),
+    }
+    return {
+        "status": "unknown",
+        "constant_speed_multiplier": None,
+        "reason_code": reason_code,
+        "reason": reasons.get(reason_code, "编码时间轴不可用，恒定加速倍数无法判断。"),
+        "method": "ffprobe_encoded_timeline_only",
+        "is_model_inference": False,
+        "encoded_timeline": encoded_timeline,
     }
 
 
@@ -396,6 +455,17 @@ def inspect_job_media(
         return base
     if not selected:
         base["status"] = "disabled"
+        base["assets"] = [
+            {
+                "asset_id": str(item.get("asset_id") or ""),
+                "file": str(item.get("original_name") or ""),
+                "status": "disabled",
+                "playback_speed_assessment": _playback_speed_assessment(
+                    reason_code="forensic_checks_disabled"
+                ),
+            }
+            for item in video_assets
+        ]
         return base
 
     ffprobe = resolve_ffprobe()
@@ -409,6 +479,9 @@ def inspect_job_media(
                 "file": str(item.get("original_name") or ""),
                 "status": "unavailable",
                 "reason": "ffprobe_not_available",
+                "playback_speed_assessment": _playback_speed_assessment(
+                    reason_code="ffprobe_not_available"
+                ),
             }
             for item in video_assets
         ]
@@ -433,13 +506,25 @@ def inspect_job_media(
         }
         path = job_dir / str(asset.get("stored_name") or "")
         if not path.is_file():
-            public_asset.update({"status": "unavailable", "reason": "media_file_missing"})
+            public_asset.update({
+                "status": "unavailable",
+                "reason": "media_file_missing",
+                "playback_speed_assessment": _playback_speed_assessment(
+                    reason_code="media_file_missing"
+                ),
+            })
             unavailable += 1
             results.append(public_asset)
             continue
         probed = _probe_file(ffprobe, path, timeout)
         if probed["status"] != "completed":
-            public_asset.update({"status": "unavailable", "reason": probed["reason"]})
+            public_asset.update({
+                "status": "unavailable",
+                "reason": probed["reason"],
+                "playback_speed_assessment": _playback_speed_assessment(
+                    reason_code=str(probed["reason"])
+                ),
+            })
             unavailable += 1
             results.append(public_asset)
             continue
@@ -450,6 +535,10 @@ def inspect_job_media(
         first_video_index = next(
             (item.get("index") for item in streams if item.get("codec_type") == "video"),
             None,
+        )
+        first_video_stream = next(
+            (item for item in streams if item.get("codec_type") == "video"),
+            {},
         )
         packet_timeline = (
             _packet_timeline_facts(payload.get("packets"), stream_index=first_video_index)
@@ -477,6 +566,11 @@ def inspect_job_media(
                 },
                 "streams": [_stream_facts(item) for item in streams],
                 "packet_timeline": packet_timeline,
+                "playback_speed_assessment": _playback_speed_assessment(
+                    format_data,
+                    first_video_stream,
+                    packet_timeline,
+                ),
                 "risk_level": asset_risk,
                 "risk_signals": risks,
             }

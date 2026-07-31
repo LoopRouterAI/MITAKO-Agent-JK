@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 DOCUMENT_TYPES = (
     "identity_card",
+    "passport",
     "household_register",
     "birth_certificate",
     "signed_commitment",
@@ -15,6 +16,7 @@ DOCUMENT_TYPES = (
     "mobile_realname_proof",
     "carrier_invoice",
     "other",
+    "unknown",
 )
 
 CONSISTENCY_FIELDS = {
@@ -59,31 +61,38 @@ SOP 版本：minor_refund_2_0
 4. 购买订单证明、支付流水或支付账单。
 5. 账号绑定手机号实名归属证明。运营商话费账单或电子发票属于已提交的候选证明：能确认实名主体及购物手机号/备注信息时同时归为 mobile_realname_proof；只能确认运营商发票时归为 carrier_invoice，并留给人工核对主体一致性。
 
+护照识别边界：
+- 护照作为可识别证件，document_type 必须输出 passport，并输出签发国家/地区 issuing_country_or_region 与可读性 readability。
+- 护照只做视觉/OCR 初审，可参与身份、年龄和监护关系的可见字段一致性比较，不宣称权威验真。
+- 护照不自动替代现有 SOP 的身份证必交项；身份证清单是否满足仍按上述五类材料规则判断。
+
 严格要求：
 - 必须逐张返回，不能漏掉本批任何 image_index。
 - 只判断本批图片实际可见的文档类型、角色、页/正反面和清晰度，不得根据文件顺序猜测。
-- 看不清写 uncertain 或 unreadable，不得写“用户未提交”“缺少其他批次材料”。
+- 任一结构化字段缺失或不可读时统一输出 unknown，不得猜测，也不得写“用户未提交”“缺少其他批次材料”。
 - 不得输出姓名、手机号、证件号、住址、订单号、付款账号、二维码内容或任何 OCR 原文。
 - 不执行退款、拒绝、通过等业务动作。
 
 只输出 JSON：
 {{
+  "schema_version": "minor_inventory_v2",
   "coverage_ack": {{"expected_image_indices": [], "observed_image_indices": []}},
   "material_observations": [
     {{
       "image_index": 1,
       "asset_ref": "supplemental_image_1",
-      "document_types": ["identity_card"],
+      "document_type": "passport",
       "subject_role": "guardian|minor|unknown|not_applicable",
       "document_side": "front|back|page|multiple|unknown",
-      "readability": "clear|partial|unreadable",
+      "issuing_country_or_region": "国家或地区名称|unknown",
+      "readability": "clear|partial|unknown",
       "quality_issues": ["blur|glare|occlusion|excessive_redaction|incomplete_page|suspected_editing|other"]
     }}
   ],
   "batch_limitations": []
 }}
 
-document_types 只能从以下枚举选择：{json.dumps(DOCUMENT_TYPES, ensure_ascii=False)}。
+document_type 只能从以下枚举选择：{json.dumps(DOCUMENT_TYPES, ensure_ascii=False)}。
 """
 
 
@@ -169,8 +178,8 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
    matched 表示所给图片中的该字段彼此一致；mismatched 表示存在明确冲突；uncertain 表示看不清或证据不足；not_assessed 只用于图片不包含该字段。
    matched 可用于至少两张图片中足够的可见字段片段一致，即使 SOP 允许的证件号中段已打码；但完全遮盖、手写难辨或缺字段必须输出 uncertain。
    mismatched 仅允许用于至少两张图片中的同一字段均完整清晰可见且明确不同；部分遮盖、打码、裁切或主副卡关系不明时不得输出 mismatched。
-2. 身份与年龄：比较监护人、未成年人主体及年龄是否满足未成年人申请条件。
-3. 监护关系：比较身份证明与户口本或出生证明中的双方主体及关系链。
+2. 身份与年龄：比较监护人、未成年人主体及年龄是否满足未成年人申请条件；护照可作为视觉/OCR 一致性证据参与比较。
+3. 监护关系：比较身份证、护照与户口本或出生证明中的双方主体及关系链；护照签发国家/地区仅作可见字段初审。
 4. 承诺书：比较监护人与未成年人签署主体标注及双方签字是否存在；不得声称签名具有法律真实性。
 5. 订单与支付：比较订单引用、付款主体、金额和交易范围在所给凭证中是否一致；不得声称平台订单或支付记录真实。
 6. 手机号实名：比较运营商材料中的实名主体、账号绑定手机号和发票抬头/备注是否与其他材料一致；不得声称运营商实名状态真实有效。
@@ -181,6 +190,7 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
 - 模型可以在本次推理中读取字段用于比较，但不得输出任何字段原值、部分值、尾号、姓名、号码、金额、地址、OCR原文或哈希。
 - 输出不得包含自由文本说明，只能使用下面的枚举和图片编号。
 - 本检查只表示视觉字段一致性，不得声称已完成政府、运营商、平台订单或支付系统的在线验真。
+- 护照不自动替代现有 SOP 的身份证必交项，也不得声称护照或签发国家/地区已被权威验真。
 - 在线验真是否阻断由服务端策略决定：默认 disabled，不得仅因没有外部接口把视觉初审降级为人工复核。
 - 不执行退款、通过、拒绝或定责。
 

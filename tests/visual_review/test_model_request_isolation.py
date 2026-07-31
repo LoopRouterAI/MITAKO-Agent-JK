@@ -11,6 +11,22 @@ from poc.visual_review_poc.review_model_prompt import build_selection_prompt
 
 
 class ModelRequestIsolationTest(unittest.TestCase):
+    def test_prompt_distinguishes_acceleration_from_editing_or_missing_process(self):
+        prompt = build_selection_prompt({
+            "scenario_label": "商品有伤审核",
+            "customer_claim": "商品有伤",
+            "order_context": {},
+            "structured_business_context": {},
+            "evidence_assets": [],
+            "videos": [],
+            "frames": [],
+            "supplemental_images": [],
+        })
+
+        self.assertIn("播放加速本身不等于拼接剪辑或视频不合规", prompt)
+        self.assertIn("一镜到底", prompt)
+        self.assertIn("跳切、拼接、时间轴异常或关键过程缺失", prompt)
+
     def test_original_media_names_and_fields_never_enter_final_requests(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             media = Path(temp_dir) / "02_负样本__人工拒绝_审核不通过.jpg"

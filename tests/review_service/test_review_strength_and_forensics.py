@@ -70,6 +70,14 @@ class MediaForensicsTest(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["unavailable_reason"], "ffprobe_not_available")
         self.assertEqual(result["assets"][0]["status"], "unavailable")
+        self.assertEqual(result["assets"][0]["playback_speed_assessment"]["status"], "unknown")
+        self.assertIsNone(
+            result["assets"][0]["playback_speed_assessment"]["constant_speed_multiplier"]
+        )
+        self.assertEqual(
+            result["assets"][0]["playback_speed_assessment"]["reason_code"],
+            "ffprobe_not_available",
+        )
         self.assertIn("不能单独证明", result["interpretation"])
         self.assertEqual(result["summary"]["risk_signal_count"], 0)
 
@@ -132,6 +140,54 @@ class MediaForensicsTest(unittest.TestCase):
         serialized = json.dumps(result, ensure_ascii=False)
         self.assertNotIn("private text", serialized)
         self.assertNotIn(str(path), serialized)
+
+    def test_reencoded_timeline_never_claims_a_constant_speed_multiplier(self) -> None:
+        probe_payload = {
+            "format": {
+                "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                "duration": "5.0",
+                "start_time": "0.0",
+            },
+            "streams": [{
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "h264",
+                "duration": "5.0",
+                "start_time": "0.0",
+                "avg_frame_rate": "60/1",
+                "r_frame_rate": "60/1",
+                "time_base": "1/90000",
+                "nb_frames": "300",
+            }],
+            "packets": [
+                {"stream_index": 0, "dts_time": value, "flags": "K_" if index == 0 else "__"}
+                for index, value in enumerate(("0.000", "0.017", "0.033", "0.050", "0.067"))
+            ],
+        }
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(probe_payload).encode("utf-8"),
+            stderr=b"",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "stored.mp4"
+            path.write_bytes(b"test")
+            with patch.object(media_forensics.shutil, "which", return_value="ffprobe"), patch.object(
+                media_forensics.subprocess, "run", return_value=completed
+            ):
+                result = media_forensics.inspect_job_media(Path(temp_dir), [self._asset()])
+
+        assessment = result["assets"][0]["playback_speed_assessment"]
+        self.assertEqual(assessment["status"], "unknown")
+        self.assertIsNone(assessment["constant_speed_multiplier"])
+        self.assertEqual(assessment["reason_code"], "source_clock_reference_unavailable")
+        self.assertEqual(assessment["method"], "ffprobe_encoded_timeline_only")
+        self.assertFalse(assessment["is_model_inference"])
+        self.assertEqual(assessment["encoded_timeline"]["average_fps"], 60.0)
+        self.assertEqual(assessment["encoded_timeline"]["container_duration_seconds"], 5.0)
+        self.assertEqual(assessment["encoded_timeline"]["packet_delta_median_seconds"], 0.017)
+        self.assertIn("重编码", assessment["reason"])
 
     def test_forensic_checks_can_be_disabled_without_running_ffprobe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

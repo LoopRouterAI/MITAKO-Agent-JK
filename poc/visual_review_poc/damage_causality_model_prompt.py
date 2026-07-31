@@ -21,12 +21,13 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
     return f"""你正在执行商品有伤场景的独立动作因果复核。本轮只判断主视频中的损伤是否存在、何时出现以及可能由什么阶段造成，不作退款、拒赔或责任裁决。补充图片由主审核通道独立记录，本专项结果不得声称补充图片不存在。
 
 用户诉求：{case.get("customer_claim") or "未提供"}
+争议商品身份锚点：{json.dumps(structured.get("continuity_claim_identity") or {}, ensure_ascii=False)}
 清洗后的用户消息：{json.dumps(frontdesk.get("conversation_history") or {}, ensure_ascii=False)}
 视频窗口与原视频时间映射：{json.dumps(frontdesk.get("asset_manifest") or {}, ensure_ascii=False)}
 按发送顺序排列的帧：{json.dumps(frames, ensure_ascii=False)}
 
 审查纪律：
-1. 先明确用户具体投诉的对象与部位，例如撕拉片、包装角、毛绒缝线或商品表面；不同部位不得混成一条因果链。
+1. 先按争议商品身份锚点明确用户具体投诉的准确对象与部位，例如撕拉片、包装角、毛绒缝线或商品表面；若请求附带官方商品参考图，必须先核对主体图案、形状和规格。同品类但非同一件商品的损伤不得计入本次诉求；无法确认同物时只能写 uncertain。
 2. 主动查找剪刀切割、手指撕扯、拉拽、挤压、碰撞、刮擦等动作，但仅看见工具或动作不能直接判定用户造成损伤。
 3. 只有同一对象同一部位在动作前完好、动作中受到作用、动作后首次出现对应损伤，才可写 damage_change_observed=true 和 direct。
 4. 若损伤在动作前已可见，不能归因于该动作；若前态被遮挡或分辨率不足，只能 indirect/insufficient。
@@ -52,7 +53,7 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
   "damage_causality_assessment": {{
     "damage_presence": "confirmed/not_visible/uncertain",
     "damage_type_and_location": "对象与具体部位",
-    "first_visible_evidence": "可回链帧",
+    "first_visible_evidence": {{"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00", "subject": "准确商品", "location": "具体部位", "fact": "该帧直接可见的损伤事实", "damage_visible": true}},
     "pre_opening_state_visible": false,
     "opening_action_visible": false,
     "damage_change_observed": false,
@@ -64,7 +65,7 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
     "claim_support": "supported/not_supported/insufficient",
     "before_action_evidence": [{{"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00", "subject": "对象", "location": "具体部位", "chain_id": "chain-1", "fact": "动作前状态"}}],
     "action_evidence": [{{"video_index": 1, "global_frame_index": 2, "timestamp": "00:01.00", "subject": "对象", "location": "具体部位", "chain_id": "chain-1", "fact": "作用动作"}}],
-    "after_action_evidence": [{{"video_index": 1, "global_frame_index": 3, "timestamp": "00:02.00", "subject": "对象", "location": "具体部位", "chain_id": "chain-1", "fact": "动作后状态"}}],
+    "after_action_evidence": [{{"video_index": 1, "global_frame_index": 3, "timestamp": "00:02.00", "subject": "对象", "location": "具体部位", "chain_id": "chain-1", "fact": "动作后直接可见的损伤", "damage_visible": true}}],
     "alternative_explanations": [],
     "cannot_conclude_reason": "无法闭环时明确缺口"
   }},
@@ -77,4 +78,10 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
     "missing_views": []
   }}
 }}
+
+判定纪律：
+- first_visible_evidence.damage_visible 必须明确填写 true 或 false，不得省略；描述文字只用于人工阅读，不能替代该布尔字段。
+- claim_support 表示证据是否支持用户诉求；确认损伤由用户操作造成时可写 not_supported，它与“损伤是否存在”是两个独立字段。
+- same_item_linkage 只有在争议商品与开箱过程中的同一商品已由画面证据关联时才可写 true。
+- damage_visible 或 same_item_linkage 任一条件不成立时，damage_presence 必须写 uncertain 或 not_visible，不得输出已确认伤情。
 """

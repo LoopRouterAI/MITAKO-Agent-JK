@@ -33,6 +33,7 @@ load_dotenv(
 )
 
 from runtime_paths import app_root
+from review_service.media_forensics import inspect_job_media
 from review_service.service import ensure_label_isolation, postprocess_review
 from review_service.decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
 from poc.visual_review_poc.media_registry import MediaRegistry
@@ -56,7 +57,7 @@ except ImportError:
     from url_video_fetcher import detect_platform, download_video_url, extract_video_url, fetch_metadata
 
 try:
-    from poc.visual_review_poc.model_selection_e2e import MODEL_CONFIGS, call_model_chunked, load_case_bundle, score_result
+    from poc.visual_review_poc.model_selection_e2e import MODEL_CONFIGS, call_model_chunked, derive_claim_identity, is_retryable_failure, load_case_bundle, score_result
     from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
     from poc.visual_review_poc.report_renderer import (
@@ -66,7 +67,7 @@ try:
     )
     from poc.visual_review_poc.sample_evaluation import evaluate_sample_rows, read_sample_rows
 except ImportError:
-    from model_selection_e2e import MODEL_CONFIGS, call_model_chunked, load_case_bundle, score_result
+    from model_selection_e2e import MODEL_CONFIGS, call_model_chunked, derive_claim_identity, is_retryable_failure, load_case_bundle, score_result
     from local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from official_reference_images import prepare_official_reference_images
     from report_renderer import (
@@ -102,7 +103,7 @@ REPORT_SIGNING_SECRET = _configured_signing_secret.encode("utf-8") if _configure
 REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET = os.getenv(
     "VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET", "1"
 ).strip().lower() in {"1", "true", "yes", "on"}
-REVIEW_CONTRACT_VERSION = "2026-07-28.2"
+REVIEW_CONTRACT_VERSION = "2026-07-31.1"
 try:
     REPORT_URL_TTL_SECONDS = max(1, int(os.getenv("VISUAL_REPORT_URL_TTL_SECONDS", "900") or 900))
 except ValueError:
@@ -435,6 +436,15 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
         "ingestion_complete": True,
         "processing_status": True,
         "system_action": True,
+        "material_inventory": [{
+            "image_index": True,
+            "asset_ref": True,
+            "document_type": True,
+            "subject_role": True,
+            "document_side": True,
+            "issuing_country_or_region": True,
+            "readability": True,
+        }],
         "checklist": [{
             "requirement_id": True,
             "label": True,
@@ -519,9 +529,10 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
     "audit_methods": [True],
     "business_action_allowed": True,
     "human_required": True,
+    "pass_integrity_status": True,
+    "specialized_pass_warning": True,
     "business_follow_up_reason": True,
     "next_step": True,
-    "model_limitations": [True],
     "confidence_components": {
         "material_image_coverage": True,
         "required_category_completeness": True,
@@ -552,9 +563,14 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "technical_timeline_status", "evidence_continuity_status", "object_continuity_assessment",
     "tracked_subjects", "subject_id", "description", "tracking_start", "tracking_end",
     "first_exposed_timestamp", "visibility_coverage", "out_of_frame_events", "start_timestamp",
-    "end_timestamp", "duration_seconds", "visibility", "before_evidence", "out_of_frame_evidence",
+    "end_timestamp", "duration_seconds", "duration_basis", "duration_is_exact",
+    "duration_lower_bound_seconds", "duration_upper_bound_seconds", "sampling_resolution_seconds",
+    "visibility", "before_evidence", "out_of_frame_evidence",
     "after_evidence", "identity_reestablished", "reason", "continuity_verdict",
-    "longest_out_of_frame_seconds", "total_unobserved_seconds", "critical_events", "policy",
+    "longest_out_of_frame_seconds", "longest_out_of_frame_lower_bound_seconds",
+    "longest_out_of_frame_upper_bound_seconds", "total_unobserved_seconds", "critical_events", "policy",
+    "claimed_item_reference_status", "claimed_item_timeline_complete", "claimed_item_never_exposed",
+    "identity_match", "identity_basis", "damage_visible",
     "out_of_frame_warning_seconds", "customer_claim_parse", "expected_item", "claimed_received_item",
     "claimed_mismatch_type", "expected_order_item", "actual_received_item", "audit_methods",
     "frame_findings", "video_index", "global_frame_index", "frame_index", "timestamp", "visible_facts",
@@ -563,7 +579,7 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "same_item_linkage", "temporal_linkage", "authenticity_assessment", "size_sku_assessment",
     "issue_timestamps", "skeptical_questions", "material_gaps", "conclusion_argument", "support",
     "challenge", "why_not_final_business_decision", "business_action_allowed", "human_required",
-    "human_required_for_business_action", "business_follow_up_reason", "next_step", "model_limitations",
+    "human_required_for_business_action", "business_follow_up_reason", "next_step",
     "damage_causality_assessment", "damage_presence", "damage_type_and_location", "first_visible_evidence",
     "pre_opening_state_visible", "opening_action_visible", "damage_change_observed", "damage_timing",
     "possible_origins", "origin", "most_likely_origin", "origin_confidence", "causal_evidence_level",
@@ -580,12 +596,13 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "confidence_components", "main_segment_mean", "damage_origin", "continuity_visibility_coverage",
     "final_decision", "calibration_status", "interpretation", "decision_policy_audit", "version", "mode",
     "policy_ref", "policy_source", "requested_overrides_ignored", "applied", "rule_id", "claim_scope",
+    "evidence_verdict_before_policy",
     "stage", "issue_types", "excluded_issue_types", "active_claim_ids", "split_status", "ready",
     "evidence_gate", "video_present", "model_confidence", "media_forensics_status",
     "media_forensics_risk_level", "supplemental_linkage_status", "business_boundary", "failed_conditions",
     "minimum_visibility_coverage", "minimum_confidence", "minimum_required_view_coverage", "fully_observable",
     "max_unobserved_seconds", "claimed_item_longest_out_of_frame_seconds", "maximum_forensic_risk",
-    "pass_integrity_status", "specialized_pass_guard_reason",
+    "pass_integrity_status", "specialized_pass_guard_reason", "specialized_pass_warning",
     "aggregation_warnings", "code", "chunk_index", "alleged_end", "later_sampled_evidence_seconds",
     "global_review_summary", "sampled_start_seconds", "sampled_end_seconds", "source_duration_seconds",
     "claimed_item_first_exposed_timestamp", "timeline_coverage_ratio",
@@ -707,7 +724,15 @@ def _public_agent_report_payload(
     for item in case.get("videos") or []:
         video = {
             key: item.get(key)
-            for key in ("video_index", "duration_seconds", "native_fps", "fps_requested", "sampled_frames")
+            for key in (
+                "video_index",
+                "duration_seconds",
+                "native_fps",
+                "fps_requested",
+                "sampled_frames",
+                "sampling_strategy",
+                "timeline_coverage_ratio",
+            )
             if item.get(key) not in (None, "")
         }
         duration = float(item.get("duration_seconds") or 0)
@@ -971,23 +996,24 @@ def _call_model_chunked_with_fallback(
     prior_unknown_calls = 0
     prior_model_calls = 0
     prior_model_latency = 0.0
-    blocked_providers = set()
+    channel_route_attempts: List[Dict[str, Any]] = []
     last_result: Dict[str, Any] = {"status": "skipped", "error": "no_available_review_model"}
     for route_index, model_key in enumerate(model_keys, start=1):
         config = MODEL_CONFIGS[model_key]
-        if config.get("provider") in blocked_providers:
-            attempts.append({"route_index": route_index, "status": "skipped", "reason": "transport_circuit_open"})
-            continue
         current = call_model_chunked(config, case, timeout=timeout, retries=retries)
         current_chunking = current.get("chunking") if isinstance(current.get("chunking"), dict) else {}
         current_calls = int(current_chunking.get("total_model_calls") or 0)
         current_unknown = int(current.get("unknown_cost_calls") or 0)
+        channel_route_attempts.extend(
+            item for item in current.get("_channel_route_attempts") or [] if isinstance(item, dict)
+        )
         attempts.append({
             "route_index": route_index,
             "status": str(current.get("status") or "failed"),
             "status_code": current.get("status_code"),
             "error_type": str(current.get("error_type") or ""),
             "model_calls": current_calls,
+            "decision": "selected" if current.get("status") == "success" else "pending",
         })
         if current.get("status") == "success":
             result = dict(current)
@@ -1004,13 +1030,18 @@ def _call_model_chunked_with_fallback(
             result["latency_seconds"] = round(time.time() - wall_started, 2)
             result["route_fallback_count"] = sum(1 for item in attempts[:-1] if item.get("status") != "skipped")
             result["route_attempts"] = attempts
+            result["_channel_route_attempts"] = channel_route_attempts
             return result
         last_result = current
         prior_model_calls += current_calls
         prior_unknown_calls += current_unknown
         prior_model_latency += float(current.get("model_latency_seconds_sum") or current.get("latency_seconds") or 0)
-        if current.get("status_code") is None and current.get("error_type") == "hard":
-            blocked_providers.add(config.get("provider"))
+        retryable = is_retryable_failure(current)
+        attempts[-1]["decision"] = "fallback_retryable" if retryable and route_index < len(model_keys) else (
+            "exhausted" if retryable else "stop_non_retryable"
+        )
+        if not retryable:
+            break
     result = dict(last_result)
     chunking = dict(result.get("chunking") or {})
     chunking["total_model_calls"] = prior_model_calls
@@ -1021,6 +1052,7 @@ def _call_model_chunked_with_fallback(
     result["latency_seconds"] = round(time.time() - wall_started, 2)
     result["route_fallback_count"] = max(0, sum(1 for item in attempts if item.get("status") != "skipped") - 1)
     result["route_attempts"] = attempts
+    result["_channel_route_attempts"] = channel_route_attempts
     return result
 
 
@@ -1072,10 +1104,24 @@ def _internal_inference_estimate(result: Dict[str, Any]) -> Dict[str, Any]:
         "unknown_cost_calls": int(result.get("unknown_cost_calls") or 0),
         "route_fallback_count": int(result.get("route_fallback_count") or 0),
         "route_attempts": result.get("route_attempts") if isinstance(result.get("route_attempts"), list) else [],
+        "channel_route_attempts": [
+            {
+                key: item.get(key)
+                for key in ("channel", "model", "status_code", "error_type", "decision")
+                if item.get(key) not in (None, "")
+            }
+            for item in (
+                result.get("_channel_route_attempts")
+                if isinstance(result.get("_channel_route_attempts"), list)
+                else []
+            )
+            if isinstance(item, dict)
+        ],
         "total_frames": int(chunking.get("total_frames") or 0),
         "main_review_frames": int(chunking.get("main_review_frames") or 0),
         "total_model_calls": int(chunking.get("total_model_calls") or 1),
         "segment_count": int(chunking.get("segment_count") or 1),
+        "concurrency": chunking.get("concurrency") if isinstance(chunking.get("concurrency"), dict) else {},
         "channels": {
             key: {
                 "model_calls": int((value or {}).get("model_calls") or 0),
@@ -1171,6 +1217,7 @@ def _run_review(
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
+    case.setdefault("structured_business_context", {})["continuity_claim_identity"] = derive_claim_identity([], case)
     prepare_official_reference_images(case)
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
@@ -1299,7 +1346,18 @@ def _agent_report_response(
         "system_yes_no": parsed.get("system_yes_no"),
         "next_step": public_next_step,
     }
+    media_forensics = None
     if not defer_postprocess:
+        forensic_assets = [
+            {
+                "asset_id": f"video-{index}",
+                "original_name": Path(str(item.get("file") or "")).name,
+                "stored_name": Path(str(item.get("file") or "")).name,
+            }
+            for index, item in enumerate(case.get("videos") or [], start=1)
+            if Path(str(item.get("file") or "")).name
+        ]
+        media_forensics = inspect_job_media(sample_dir, forensic_assets)
         normalized = postprocess_review(
             {
                 "tenant_id": "mitako",
@@ -1313,12 +1371,18 @@ def _agent_report_response(
                 "agent_brief": raw_brief,
                 "diagnostics": data.get("diagnostics") or {},
             },
+            media_forensics=media_forensics,
             succeeded=ok,
         )
         data["summary"] = normalized["summary"]
         data["agent_report"] = normalized["agent_report"]
         data["advisory_assessment"] = normalized["advisory_assessment"]
         raw_brief = normalized["agent_brief"]
+        data["conclusion"] = raw_brief.get("conclusion") or data["conclusion"]
+        public_brief = data["agent_report"].setdefault("public_brief", {})
+        public_brief["conclusion"] = data["conclusion"]
+        public_brief["next_step"] = raw_brief.get("next_step") or public_brief.get("next_step") or ""
+        data["media_forensics"] = media_forensics
     data = _sanitize_public_report_data(data)
     if include_html_report:
         ALLOWED_REPORTS[report_name] = data
@@ -1343,6 +1407,8 @@ def _agent_report_response(
         "media_warnings": data.get("media_warnings") or [],
         "agent_brief": raw_brief,
     }
+    if media_forensics is not None:
+        response["media_forensics"] = media_forensics
     if data.get("advisory_assessment"):
         response["advisory_assessment"] = data["advisory_assessment"]
     if include_internal_metrics:
@@ -1459,6 +1525,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
+    case.setdefault("structured_business_context", {})["continuity_claim_identity"] = derive_claim_identity([], case)
     prepare_official_reference_images(case)
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))

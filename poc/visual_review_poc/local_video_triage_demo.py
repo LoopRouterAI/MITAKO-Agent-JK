@@ -31,7 +31,7 @@ from poc.visual_review_poc.order_info_adapter import build_order_info_context
 from poc.visual_review_poc.model_auth import DEFAULT_GEMINI_MODEL, gemini_channel_options, resolve_gemini_model
 from poc.visual_review_poc.model_catalog import MODEL_CONFIGS
 from poc.visual_review_poc.observability import log_visual_event
-from review_input_safety import contains_evaluation_marker, redact_review_personal_data
+from review_input_safety import redact_review_personal_data
 
 ROOT = app_root()
 POC_DIR = ROOT / "poc" / "visual_review_poc"
@@ -293,9 +293,7 @@ def _blind_review_conversation(folder: Path) -> List[Dict[str, Any]]:
         if not isinstance(item, dict) or str(item.get("from") or "").lower() not in {"user", "customer"}:
             continue
         text = _redact_conversation_text(item.get("text"))
-        if text and not contains_evaluation_marker(text) and not any(
-            marker in text for marker in ("人工最终", "最终决定", "同意退款", "已退款", "拒绝退款", "审核通过", "审核不通过")
-        ):
+        if text:
             messages.append({
                 "role": "user",
                 "text": text,
@@ -321,7 +319,7 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
         if item.get("local_file")
     ]
     resource_fields = {str(item.get("local_file")): item.get("fields") or [] for item in (manifest.get("resources") or []) if item.get("local_file")}
-    scenario = infer_scenario("\n".join((claim, str(manifest.get("tag") or ""))))
+    scenario = infer_scenario(claim)
     order_snapshot = order_info_context(folder / "order_info_snapshot.json")
     conversation_history = _blind_review_conversation(folder)
     structured_business_context = {
@@ -351,7 +349,6 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
         "order_context": {
             "ticket_id": manifest.get("id"),
             "order_no": manifest.get("order_no"),
-            "tag": manifest.get("tag"),
             "created_at": manifest.get("created_at"),
         },
         "evidence_assets": evidence_assets,

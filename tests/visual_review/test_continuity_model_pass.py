@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from poc.visual_review_poc.model_selection_e2e import call_model_chunked, gemini_payload, openai_messages, post_with_retries
+from poc.visual_review_poc.model_selection_e2e import _aggregate_chunk_results, call_model_chunked, gemini_payload, openai_messages, post_with_retries
 from poc.visual_review_poc.review_model_prompt import build_selection_prompt
 from poc.visual_review_poc.specialized_model_pass import run_specialized_frame_pass
 
@@ -21,6 +21,23 @@ def _visibility(index: int, subject_id: str) -> str:
 
 
 class ContinuityModelPassTest(unittest.TestCase):
+    def test_chunk_labels_are_not_promoted_without_structured_whole_case_evidence(self):
+        case = {
+            "case_id": "segment-label-isolation",
+            "scenario": "generic_review",
+            "frames": [],
+            "videos": [],
+            "structured_business_context": {"business_scenario": "generic_review"},
+        }
+        results = [
+            {"parsed": {"predicted_label": "positive", "confidence": 0.94, "overall_audit": {}}},
+            {"parsed": {"predicted_label": "positive", "confidence": 0.91, "overall_audit": {}}},
+        ]
+
+        aggregated = _aggregate_chunk_results(case, results)
+
+        self.assertEqual(aggregated["parsed"]["predicted_label"], "review")
+
     def test_provider_connect_timeout_is_bounded_separately_from_inference_timeout(self):
         client = MagicMock()
         client.__enter__.return_value.post.side_effect = TimeoutError("connect timeout")
@@ -223,7 +240,15 @@ class ContinuityModelPassTest(unittest.TestCase):
                     "possible_origins": [],
                     "before_action_evidence": [{**common, "global_frame_index": 1, "timestamp": "00:00.00", "fact": "动作前完整"}],
                     "action_evidence": [{**common, "global_frame_index": 2, "timestamp": "00:01.00", "fact": "用户撕拉"}],
-                    "after_action_evidence": [{**common, "global_frame_index": 3, "timestamp": "00:02.00", "fact": "动作后断裂"}],
+                    "after_action_evidence": [{**common, "global_frame_index": 3, "timestamp": "00:02.00", "fact": "动作后断裂", "damage_visible": True}],
+                },
+                "damage_observability": {
+                    "status": "fully_observable",
+                    "same_item_linkage": True,
+                    "claimed_region_closeup": True,
+                    "required_view_coverage": 1.0,
+                    "conflicting_evidence": False,
+                    "missing_views": [],
                 },
             }
         else:
@@ -232,6 +257,16 @@ class ContinuityModelPassTest(unittest.TestCase):
                 "system_yes_no": "YES",
                 "confidence": 0.9,
                 "overall_audit": {"conclusion": "主通道结论"},
+                "customer_claim_parse": {
+                    "expected_item": "哪吒盛装舞步系列明信片",
+                    "claimed_received_item": "右上角有划痕的明信片",
+                },
+                "expected_order_item": {
+                    "item_ref": "ORDER-LINE-008",
+                    "sku": "mddfrzszmxp013",
+                    "product_name": "哪吒 非人哉 盛装舞步系列 明信片",
+                    "specification": "105x148mm",
+                },
                 "frame_findings": [],
                 "damage_causality_assessment": {},
                 "damage_observability": {
@@ -269,6 +304,169 @@ class ContinuityModelPassTest(unittest.TestCase):
             "cost": {"estimated_usd": 0.001},
             "latency_seconds": 0.1,
         }
+
+    def test_specialized_passes_reuse_main_review_claimed_item_identity(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured["damage_causality_policy"] = {"force_action_scan": True}
+        case["structured_business_context"] = structured
+        observed = {"object_continuity_only": [], "damage_causality_only": []}
+
+        def recording_call(cfg, current_case, timeout, retries):
+            structured = current_case.get("structured_business_context") or {}
+            mode = structured.get("analysis_mode")
+            if mode in observed:
+                observed[mode].append(structured.get("continuity_claim_identity"))
+            return self._fake_call(cfg, current_case, timeout, retries)
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=recording_call):
+            call_model_chunked({}, case, timeout=30, retries=0)
+
+        self.assertTrue(observed["object_continuity_only"])
+        self.assertTrue(observed["damage_causality_only"])
+        for items in observed.values():
+            self.assertTrue(all(item["sku"] == "mddfrzszmxp013" for item in items))
+            self.assertTrue(all("盛装舞步系列" in item["product_name"] for item in items))
+
+    def test_specialized_passes_do_not_guess_order_item_when_main_identity_is_missing(self):
+        case = dict(self.case)
+        case["customer_claim"] = "Nezha postcard has scratches"
+        structured = dict(self.case["structured_business_context"])
+        structured["damage_causality_policy"] = {"force_action_scan": True}
+        structured["order_items"] = [
+            {"item_ref": "ORDER-LINE-001", "sku": "badge-1", "product_name": "Nezha badge"},
+            {"item_ref": "ORDER-LINE-002", "sku": "postcard-1", "product_name": "Nezha postcard"},
+        ]
+        case["structured_business_context"] = structured
+        observed = []
+
+        def recording_call(cfg, current_case, timeout, retries):
+            current_structured = current_case.get("structured_business_context") or {}
+            if current_structured.get("analysis_mode") in {"object_continuity_only", "damage_causality_only"}:
+                observed.append(current_structured.get("continuity_claim_identity"))
+            result = self._fake_call(cfg, current_case, timeout, retries)
+            if not current_structured.get("analysis_mode"):
+                result["parsed"].pop("customer_claim_parse", None)
+                result["parsed"].pop("expected_order_item", None)
+            return result
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=recording_call):
+            call_model_chunked({}, case, timeout=30, retries=0)
+
+        self.assertTrue(observed)
+        self.assertTrue(all("sku" not in item for item in observed))
+        self.assertTrue(all("item_ref" not in item for item in observed))
+        self.assertTrue(all(item["customer_claim"] == "Nezha postcard has scratches" for item in observed))
+
+    def test_specialized_passes_receive_only_the_claimed_item_reference(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured["damage_causality_policy"] = {"force_action_scan": True}
+        structured["continuity_claim_identity"] = {
+            "item_ref": "ORDER-LINE-008",
+            "sku": "mddfrzszmxp013",
+        }
+        case["structured_business_context"] = structured
+        case["official_reference_images"] = [
+            {"item_ref": "ORDER-LINE-001", "sku": "badge-1", "api_path": "badge.jpg"},
+            {"item_ref": "ORDER-LINE-008", "sku": "mddfrzszmxp013", "api_path": "postcard.jpg"},
+        ]
+        observed = []
+
+        def recording_call(cfg, current_case, timeout, retries):
+            current_structured = current_case.get("structured_business_context") or {}
+            if current_structured.get("analysis_mode") in {"object_continuity_only", "damage_causality_only"}:
+                observed.append(current_case.get("official_reference_images") or [])
+            return self._fake_call(cfg, current_case, timeout, retries)
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=recording_call):
+            result = call_model_chunked({}, case, timeout=30, retries=0)
+
+        self.assertTrue(observed)
+        self.assertTrue(all(len(items) == 1 for items in observed))
+        self.assertTrue(all(items[0]["sku"] == "mddfrzszmxp013" for items in observed))
+        self.assertEqual(
+            result["parsed"]["object_continuity_assessment"]["claimed_item_reference_status"],
+            "available",
+        )
+
+    def test_continuity_prompt_forbids_using_same_category_as_claimed_item(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured["analysis_mode"] = "object_continuity_only"
+        structured["continuity_claim_identity"] = {
+            "sku": "mddfrzszmxp013",
+            "product_name": "哪吒 非人哉 盛装舞步系列 明信片",
+            "claimed_received_item": "右上角有划痕的明信片",
+        }
+        case["structured_business_context"] = structured
+
+        prompt = build_selection_prompt(case)
+
+        self.assertIn("mddfrzszmxp013", prompt)
+        self.assertIn("同品类但非同一件商品", prompt)
+        self.assertIn("不得标记为 claimed_item 可见", prompt)
+        self.assertIn("identity_match", prompt)
+        self.assertIn("官方商品参考图", prompt)
+
+        structured["analysis_mode"] = "damage_causality_only"
+        case["structured_business_context"] = structured
+        damage_prompt = build_selection_prompt(case)
+        self.assertIn("mddfrzszmxp013", damage_prompt)
+        self.assertIn("同品类但非同一件商品的损伤", damage_prompt)
+        self.assertIn("damage_visible", damage_prompt)
+
+    def test_unmatched_product_cannot_be_counted_as_the_claimed_item(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured.update({
+            "analysis_mode": "object_continuity_only",
+            "continuity_target_frame_indices": [1],
+            "continuity_claim_identity": {"item_ref": "ORDER-LINE-008", "sku": "mddfrzszmxp013"},
+        })
+        case["structured_business_context"] = structured
+        case["frames"] = self.frames[:1]
+        case["official_reference_images"] = [
+            {"item_ref": "ORDER-LINE-008", "sku": "mddfrzszmxp013", "api_path": "postcard.jpg"},
+        ]
+
+        def invoke(current_case):
+            return {
+                "status": "success",
+                "parsed": {
+                    "frame_findings": [{
+                        "video_index": 1,
+                        "global_frame_index": 1,
+                        "timestamp": "00:00.00",
+                        "opening_stage": "item_exposed",
+                        "visible_facts": "画面中是另一款商品",
+                        "subject_visibility": [
+                            {"subject_id": "shipping_package", "state": "visible"},
+                            {"subject_id": "product_package", "state": "visible"},
+                            {"subject_id": "claimed_item", "state": "visible", "identity_match": "not_matched"},
+                        ],
+                    }],
+                    "object_continuity_assessment": {"continuity_verdict": "continuous"},
+                },
+            }
+
+        results, failures = run_specialized_frame_pass(
+            case,
+            mode="object_continuity_only",
+            target_index_key="continuity_target_frame_indices",
+            chunk_size=1,
+            context_frame_count=0,
+            workers=1,
+            invoke=invoke,
+        )
+
+        self.assertFalse(failures)
+        claimed = next(
+            item for item in results[0]["parsed"]["frame_findings"][0]["subject_visibility"]
+            if item["subject_id"] == "claimed_item"
+        )
+        self.assertEqual(claimed["state"], "unknown")
+        self.assertEqual(results[0]["parsed"]["object_continuity_assessment"]["claimed_item_reference_status"], "available")
 
     def test_dedicated_pass_overrides_missing_main_timeline(self):
         with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=self._fake_call):
@@ -375,7 +573,7 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertIn("仅补充图片证据填写", prompt)
         self.assertIn("视频文件/时间轴完整", prompt)
 
-    def test_damage_causality_pass_can_override_main_positive(self):
+    def test_damage_causality_pass_exposes_tendency_without_overriding_case_label(self):
         case = dict(self.case)
         structured = dict(self.case["structured_business_context"])
         structured["continuity_policy"] = {"force_dense_scan": False}
@@ -389,7 +587,8 @@ class ContinuityModelPassTest(unittest.TestCase):
             result = call_model_chunked({}, case, timeout=30, retries=0)
 
         self.assertEqual(result["chunking"]["damage_causality_pass"]["status"], "completed")
-        self.assertEqual(result["parsed"]["predicted_label"], "negative")
+        self.assertEqual(result["parsed"]["predicted_label"], "review")
+        self.assertEqual(result["parsed"]["damage_evidence_tendency"], "does_not_support_claim")
         self.assertEqual(
             result["parsed"]["damage_causality_assessment"]["most_likely_origin"],
             "customer_opening_or_handling",
@@ -419,7 +618,7 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(source_summary["supplemental_images"]["referenced_count"], 1)
         self.assertIn("不能单独推翻", source_summary["decision_boundary"])
 
-    def test_partial_specialized_failure_is_degraded_and_forces_review(self):
+    def test_partial_specialized_failure_only_degrades_its_evidence_dimension(self):
         case = dict(self.case)
         case["frames"] = [
             {
@@ -454,7 +653,10 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(result["chunking"]["damage_causality_pass"]["status"], "degraded")
         self.assertTrue(result["chunking"]["damage_causality_pass"]["failures"])
         self.assertEqual(result["parsed"]["predicted_label"], "review")
-        self.assertIn("专项审核存在失败", result["parsed"]["specialized_pass_guard_reason"])
+        self.assertEqual(result["parsed"]["damage_evidence_tendency"], "does_not_support_claim")
+        self.assertEqual(result["parsed"]["pass_integrity_status"], "partial_specialized")
+        self.assertNotIn("specialized_pass_guard_reason", result["parsed"])
+        self.assertIn("对应证据维度", result["parsed"]["specialized_pass_warning"])
         self.assertEqual(result["usage"]["total_tokens"], 50)
         self.assertEqual(result["cost"]["estimated_usd"], 0.007)
         self.assertEqual(result["chunking"]["damage_causality_pass"]["failures"][0]["usage"]["total_tokens"], 20)
@@ -697,6 +899,53 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(
             [item["global_frame_index"] for item in results[0]["parsed"]["frame_findings"]],
             [1, 2, 3, 4],
+        )
+
+    def test_specialized_pass_normalizes_invalid_semantic_fields_to_unknown(self):
+        frames = self.frames[:2]
+
+        def invalid_semantics(current_case):
+            targets = (current_case.get("structured_business_context") or {}).get(
+                "continuity_target_frame_indices"
+            ) or []
+            return {
+                "status": "success",
+                "parsed": {
+                    "frame_findings": [
+                        {
+                            "global_frame_index": index,
+                            "timestamp": "00:00.00",
+                            "opening_stage": "maybe_open",
+                            "visible_facts": "画面已审查",
+                            "subject_visibility": [
+                                {"subject_id": "shipping_package", "state": "in_view"},
+                            ],
+                        }
+                        for index in targets
+                    ]
+                },
+                "usage": {},
+                "cost": {},
+            }
+
+        results, failures = run_specialized_frame_pass(
+            {**self.case, "frames": frames},
+            mode="object_continuity_only",
+            target_index_key="continuity_target_frame_indices",
+            chunk_size=2,
+            context_frame_count=1,
+            workers=1,
+            invoke=invalid_semantics,
+            preserve_partial_coverage=True,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(results[0]["coverage_status"], "partial_unknown")
+        finding = results[0]["parsed"]["frame_findings"][0]
+        self.assertEqual(finding["opening_stage"], "unknown")
+        self.assertEqual(
+            {item["subject_id"]: item["state"] for item in finding["subject_visibility"]},
+            {"claimed_item": "unknown", "product_package": "unknown", "shipping_package": "unknown"},
         )
 
     def test_partial_specialized_output_preserves_valid_findings_and_marks_missing_unknown(self):

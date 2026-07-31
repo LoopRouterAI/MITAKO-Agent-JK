@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from poc.visual_review_poc.minor_material_pipeline import (
+    _consistency_image_jobs,
     _normalize_consistency_checks,
     aggregate_minor_material_results,
     run_minor_material_pipeline,
@@ -815,6 +816,193 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertNotIn("expected_predicted_label", prompt)
         self.assertNotIn("人工认可", prompt)
 
+    def test_inventory_prompt_defines_passport_fields_and_unknown_fallback(self) -> None:
+        case = _case(image_count=1, frame_count=0)
+        case["structured_business_context"].update({
+            "analysis_mode": "minor_material_inventory",
+            "minor_material_batch": {
+                "index": 1,
+                "total": 1,
+                "expected_image_indices": [1],
+                "global_image_count": 1,
+            },
+        })
+
+        prompt = build_selection_prompt(case)
+
+        self.assertIn('"document_type": "passport"', prompt)
+        self.assertIn('"issuing_country_or_region"', prompt)
+        self.assertIn('"readability": "clear|partial|unknown"', prompt)
+        self.assertIn("不自动替代现有 SOP 的身份证必交项", prompt)
+        self.assertIn("只做视觉/OCR 初审", prompt)
+
+    def test_passport_observation_is_structured_and_unreadable_values_become_unknown(self) -> None:
+        case = _case(image_count=3, frame_count=0)
+        rows = [([1, 2, 3], {"parsed": {"material_observations": [
+            {
+                "image_index": 1,
+                "document_type": "passport",
+                "subject_role": "guardian",
+                "document_side": "page",
+                "issuing_country_or_region": "中国",
+                "readability": "clear",
+                "quality_issues": [],
+            },
+            {
+                "image_index": 2,
+                "document_type": "passport",
+                "subject_role": "minor",
+                "document_side": "page",
+                "readability": "unreadable",
+                "quality_issues": ["blur"],
+            },
+            {
+                "image_index": 3,
+            },
+        ]}})]
+
+        parsed = aggregate_minor_material_results(case, rows, [], [], [])
+        inventory = parsed["minor_material_assessment"]["material_inventory"]
+
+        self.assertEqual(inventory[0]["document_type"], "passport")
+        self.assertEqual(inventory[0]["document_types"], ["passport"])
+        self.assertEqual(inventory[0]["issuing_country_or_region"], "中国")
+        self.assertEqual(inventory[0]["readability"], "clear")
+        self.assertEqual(inventory[1]["issuing_country_or_region"], "unknown")
+        self.assertEqual(inventory[1]["readability"], "unknown")
+        self.assertEqual(inventory[2]["document_type"], "unknown")
+        self.assertEqual(inventory[2]["subject_role"], "unknown")
+        self.assertEqual(inventory[2]["document_side"], "unknown")
+        self.assertEqual(inventory[2]["issuing_country_or_region"], "unknown")
+        self.assertEqual(inventory[2]["readability"], "unknown")
+
+    def test_passport_participates_in_identity_and_guardianship_checks_only(self) -> None:
+        images = [_image(index) for index in range(1, 5)]
+        observations = [
+            {
+                "image_index": 1,
+                "document_type": "passport",
+                "document_types": ["passport"],
+                "subject_role": "guardian",
+                "readability": "clear",
+                "quality_issues": [],
+            },
+            {
+                "image_index": 2,
+                "document_type": "passport",
+                "document_types": ["passport"],
+                "subject_role": "minor",
+                "readability": "clear",
+                "quality_issues": [],
+            },
+            {
+                "image_index": 3,
+                "document_type": "birth_certificate",
+                "document_types": ["birth_certificate"],
+                "subject_role": "not_applicable",
+                "readability": "clear",
+                "quality_issues": [],
+            },
+            {
+                "image_index": 4,
+                "document_type": "order_payment_proof",
+                "document_types": ["order_payment_proof"],
+                "subject_role": "not_applicable",
+                "readability": "clear",
+                "quality_issues": [],
+            },
+        ]
+
+        jobs = _consistency_image_jobs(observations, images)
+        selected = {
+            item["check_id"]: [image["image_index"] for image in item["selected"]]
+            for item in jobs
+        }
+
+        self.assertIn(1, selected["identity_age"])
+        self.assertIn(2, selected["identity_age"])
+        self.assertIn(1, selected["guardian_relationship"])
+        self.assertIn(2, selected["guardian_relationship"])
+        self.assertNotIn(1, selected["order_payment"])
+
+    def test_passport_does_not_replace_required_identity_card_or_force_authoritative_review(self) -> None:
+        case = _case(image_count=7, frame_count=0)
+        observations = [
+            {
+                "image_index": 1,
+                "document_type": "passport",
+                "subject_role": "guardian",
+                "document_side": "page",
+                "issuing_country_or_region": "中国",
+                "readability": "clear",
+                "quality_issues": [],
+            },
+            {
+                "image_index": 2,
+                "document_type": "passport",
+                "subject_role": "minor",
+                "document_side": "page",
+                "issuing_country_or_region": "unknown",
+                "readability": "clear",
+                "quality_issues": [],
+            },
+            {**_observation(5), "image_index": 3},
+            {**_observation(7), "image_index": 4},
+            {**_observation(8), "image_index": 5},
+            {**_observation(16), "image_index": 6},
+            {**_observation(18), "image_index": 7},
+        ]
+        rows = [(list(range(1, 8)), {"parsed": {"material_observations": observations}})]
+
+        parsed = aggregate_minor_material_results(case, rows, [], [], [])
+        assessment = parsed["minor_material_assessment"]
+        identity = next(item for item in assessment["checklist"] if item["requirement_id"] == "identity")
+
+        self.assertEqual(identity["status"], "not_observed_after_full_scan")
+        self.assertEqual(assessment["authoritative_verification"]["status"], "not_configured_optional")
+        self.assertNotIn("authoritative_verification_pending", parsed.get("human_review_reason_codes") or [])
+
+    def test_extra_passport_does_not_force_review_when_required_materials_match(self) -> None:
+        case = _case(image_count=21, frame_count=0)
+        passport = {
+            "image_index": 21,
+            "document_type": "passport",
+            "subject_role": "minor",
+            "document_side": "page",
+            "issuing_country_or_region": "中国",
+            "readability": "clear",
+            "quality_issues": [],
+        }
+        observations = [_observation(index) for index in range(1, 21)] + [passport]
+        rows = [(list(range(1, 22)), {"parsed": {"material_observations": observations}})]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age",
+                "guardian_relationship",
+                "commitment_signatures",
+                "order_payment",
+                "mobile_realname",
+            )
+        ]
+
+        parsed = aggregate_minor_material_results(
+            case,
+            rows,
+            [],
+            [],
+            [],
+            consistency_results=checks,
+            consistency_failures=[],
+        )
+
+        self.assertEqual(parsed["predicted_label"], "positive")
+        self.assertFalse(parsed["human_required"])
+        self.assertEqual(
+            parsed["minor_material_assessment"]["authoritative_verification"]["status"],
+            "not_configured_optional",
+        )
+
     def test_consistency_prompt_compares_fields_but_forbids_raw_pii_output(self) -> None:
         case = _case(image_count=4, frame_count=0)
         case["structured_business_context"].update({
@@ -830,6 +1018,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertIn("比较图片中可见字段", prompt)
         self.assertIn("不得输出任何字段原值", prompt)
         self.assertIn("默认 disabled", prompt)
+        self.assertIn("护照", prompt)
+        self.assertIn("签发国家/地区", prompt)
         self.assertNotIn('"authoritative_verification": "customer_integration_required"', prompt)
         self.assertNotIn("expected_predicted_label", prompt)
 
@@ -877,6 +1067,36 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         ))
         self.assertIn("字段一致性未发现明显矛盾", parsed["overall_audit"]["core_reason"])
         self.assertNotIn("18012345678", panel)
+        self.assertNotIn("320000200801011234", panel)
+
+    def test_report_renders_safe_passport_fields_without_raw_ocr(self) -> None:
+        assessment = {
+            "material_inventory": [{
+                "image_index": 1,
+                "asset_ref": "supplemental_image_1",
+                "document_type": "passport",
+                "document_types": ["passport"],
+                "subject_role": "minor",
+                "document_side": "page",
+                "issuing_country_or_region": "中国",
+                "readability": "clear",
+                "quality_issues": [],
+                "ocr_text": "张三 320000200801011234",
+            }],
+            "checklist": [],
+            "field_consistency": {},
+            "authoritative_verification": {"status": "not_configured_optional"},
+            "authenticity_assessment": {},
+        }
+
+        panel = render_minor_material_panel(assessment, lambda value: html.escape(str(value)))
+
+        self.assertIn("护照", panel)
+        self.assertIn("签发国家/地区", panel)
+        self.assertIn("中国", panel)
+        self.assertIn("清晰", panel)
+        self.assertIn("不替代身份证必交项", panel)
+        self.assertNotIn("张三", panel)
         self.assertNotIn("320000200801011234", panel)
 
 

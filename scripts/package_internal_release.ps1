@@ -154,6 +154,8 @@ Copy-Path "tests\reports\dynamic_material_capacity_http_latest.json"
 Copy-Path "tests\reports\dynamic_material_capacity_http_51_20260730.json"
 Copy-Path "tests\reports\dynamic_material_capacity_http_62_20260730.json"
 Copy-Path "tests\reports\minor_refund_144989_20260730_223430.json"
+Copy-Path "tests\reports\blind_damage_0731_case_001_latest.json"
+Copy-Path "tests\reports\blind_damage_0731_cases_002_004_latest.json"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
 Copy-LatestReport "auth_strict_*.html" "tests\reports\auth_strict_latest.html"
 Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_deployment_api_smoke_latest.json"
@@ -162,6 +164,9 @@ $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",
+    "甲方沟通交付文档\0731商品有伤SOP与报告一致性更新说明.html",
+    "我方内部开发文档\升级日志-2026-07-31-商品有伤SOP与报告一致性.md",
     "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
     "甲方沟通交付文档\0730未成年人资料审核与客服报告升级说明.html",
     "我方内部开发文档\升级日志-2026-07-30-未成年人策略与客服报告.md",
@@ -208,6 +213,8 @@ $evidenceFiles = @(
     "tests\reports\dynamic_material_capacity_http_51_20260730.json",
     "tests\reports\dynamic_material_capacity_http_62_20260730.json",
     "tests\reports\minor_refund_144989_20260730_223430.json",
+    "tests\reports\blind_damage_0731_case_001_latest.json",
+    "tests\reports\blind_damage_0731_cases_002_004_latest.json",
     "tests\reports\full_pipeline_latest.html",
     "tests\reports\auth_strict_latest.html",
     "tests\reports\private_deployment_api_smoke_latest.json"
@@ -254,6 +261,9 @@ $required = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",
+    "甲方沟通交付文档\0731商品有伤SOP与报告一致性更新说明.html",
+    "我方内部开发文档\升级日志-2026-07-31-商品有伤SOP与报告一致性.md",
     "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
     "docs\delivery\java-client-sample.md",
     "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
@@ -286,7 +296,9 @@ $required = @(
     "tests\reports\dynamic_material_capacity_http_latest.json",
     "tests\reports\dynamic_material_capacity_http_51_20260730.json",
     "tests\reports\dynamic_material_capacity_http_62_20260730.json",
-    "tests\reports\minor_refund_144989_20260730_223430.json"
+    "tests\reports\minor_refund_144989_20260730_223430.json",
+    "tests\reports\blind_damage_0731_case_001_latest.json",
+    "tests\reports\blind_damage_0731_cases_002_004_latest.json"
 )
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {

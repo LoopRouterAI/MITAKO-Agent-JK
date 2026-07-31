@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+import html as html_module
+import re
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
 from poc.visual_review_poc import workbench_server
 from review_service import router, service
@@ -34,6 +39,35 @@ def successful_workbench_review() -> dict:
 
 
 class ReportOutputOptionsTest(unittest.TestCase):
+    def test_formal_report_receives_media_forensics_contract(self):
+        forensics = {
+            "assets": [{
+                "file": "evidence.mp4",
+                "playback_speed_assessment": {
+                    "status": "unknown",
+                    "constant_speed_multiplier": None,
+                    "reason_code": "source_clock_reference_unavailable",
+                },
+            }]
+        }
+        job = {
+            "job_id": "RJ-FORENSIC-REPORT",
+            "tenant_id": "mitako",
+            "status": "SUCCEEDED",
+            "result": {
+                "media_forensics": forensics,
+                "review": {
+                    "summary": {"review_status": "completed"},
+                    "agent_report": {"parsed": {"predicted_label": "review"}},
+                },
+            },
+        }
+
+        with patch.object(service, "render_public_report", side_effect=lambda data: data):
+            rendered_data = service.render_job_report(job)
+
+        self.assertEqual(rendered_data["media_forensics"], forensics)
+
     def test_job_json_rewrites_media_to_authenticated_job_route(self):
         media_id = "d" * 32
         job = {
@@ -49,6 +83,24 @@ class ReportOutputOptionsTest(unittest.TestCase):
             public["result"]["review"]["agent_report"]["media_gallery"]["frames"][0]["url"],
             f"/api/v1/review/jobs/{job['job_id']}/media/{media_id}",
         )
+
+    def test_job_json_hides_model_channel_attempts_but_keeps_usage_summary(self):
+        job = {
+            "job_id": "RJ-PUBLIC-METRICS",
+            "result": {"review": {"agent_report": {"inference_estimate": {
+                "total_tokens": 120,
+                "estimated_usd": 0.01,
+                "channel_route_attempts": [{"channel": "internal", "model": "internal-model"}],
+                "concurrency": {"configured_workers": 2},
+            }}}},
+        }
+
+        public = service.public_job(job)
+        estimate = public["result"]["review"]["agent_report"]["inference_estimate"]
+
+        self.assertEqual(estimate["total_tokens"], 120)
+        self.assertEqual(estimate["concurrency"]["configured_workers"], 2)
+        self.assertNotIn("channel_route_attempts", estimate)
 
     def test_batch_json_rewrites_media_to_authenticated_job_route(self):
         media_id = "e" * 32
@@ -86,7 +138,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
             self.assertEqual(definition["schema"], {"type": "string", "format": "binary"})
         self.assertEqual(route.responses[206]["content"], responses)
 
-    def test_formal_report_uses_fresh_signed_media_urls_that_browser_images_can_load(self):
+    def test_formal_report_uses_tenant_job_and_media_bound_api_urls(self):
         media_id = "a" * 32
         job = {
             "job_id": "RV-MEDIA-PROXY",
@@ -110,15 +162,103 @@ class ReportOutputOptionsTest(unittest.TestCase):
             }},
         }
 
-        with patch.dict("os.environ", {
-            "VISUAL_REPORT_SIGNING_SECRET": "shared-secret",
-            "VISUAL_WORKBENCH_PUBLIC_URL": "https://review.example.test",
-        }):
+        with patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}):
             html = service.render_job_report(job)
 
-        self.assertIn(f"https://review.example.test/media-item/{media_id}?expires=", html)
-        self.assertIn("&amp;sig=", html)
+        match = re.search(
+            rf'src="([^"]*/api/v1/review/jobs/{job["job_id"]}/media/{media_id}\?[^"]+)"',
+            html,
+        )
+        self.assertIsNotNone(match)
+        media_url = html_module.unescape(match.group(1))
+        query = parse_qs(urlsplit(media_url).query)
+        expires = query["expires"][0]
+        signature = query["sig"][0]
+        with patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}):
+            self.assertTrue(service.verify_job_media_signature(
+                job["tenant_id"], job["job_id"], media_id, expires, signature
+            ))
+            self.assertFalse(service.verify_job_media_signature(
+                "other-tenant", job["job_id"], media_id, expires, signature
+            ))
+            self.assertFalse(service.verify_job_media_signature(
+                job["tenant_id"], "other-job", media_id, expires, signature
+            ))
+            self.assertFalse(service.verify_job_media_signature(
+                job["tenant_id"], job["job_id"], "b" * 32, expires, signature
+            ))
+        self.assertNotIn("review.example.test", html)
         self.assertNotIn("127.0.0.1:7861", html)
+
+    def test_formal_media_signature_rejects_expired_url(self):
+        with patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}):
+            media_url = service.signed_job_media_url(
+                "mitako",
+                "RV-EXPIRED",
+                "a" * 32,
+                expires=int(time.time()) - 1,
+            )
+            query = parse_qs(urlsplit(media_url).query)
+
+            self.assertFalse(service.verify_job_media_signature(
+                "mitako",
+                "RV-EXPIRED",
+                "a" * 32,
+                query["expires"][0],
+                query["sig"][0],
+            ))
+
+    def test_formal_media_proxy_accepts_valid_signature_without_bearer(self):
+        media_id = "c" * 32
+        job = {
+            "job_id": "RV-SIGNED-MEDIA",
+            "tenant_id": "mitako",
+            "result": {"review": {"agent_report": {"media_gallery": {
+                "images": [{"url": f"/media-item/{media_id}"}],
+            }}}},
+        }
+
+        class Upstream:
+            status_code = 200
+            headers = {"content-type": "image/jpeg", "content-length": "5"}
+
+            async def aiter_bytes(self):
+                yield b"image"
+
+            async def aclose(self):
+                return None
+
+        class Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def build_request(self, method, url, headers=None):
+                return {"method": method, "url": url, "headers": headers or {}}
+
+            async def send(self, request, stream=False):
+                return Upstream()
+
+            async def aclose(self):
+                return None
+
+        app = FastAPI()
+        app.include_router(router.router)
+        with patch.dict("os.environ", {
+            "MITAKO_PROTECTED_API_AUTH_REQUIRED": "1",
+            "VISUAL_REPORT_SIGNING_SECRET": "shared-secret",
+        }), patch.object(router.store, "get_job", return_value=job), patch.object(
+            router.service, "resolve_job_media_url", return_value="http://workbench/media-item/source"
+        ), patch.object(router.httpx, "AsyncClient", Client):
+            signed_url = service.signed_job_media_url(job["tenant_id"], job["job_id"], media_id)
+            client = TestClient(app)
+            unsigned = client.get(urlsplit(signed_url).path)
+            response = client.get(signed_url)
+            tampered = client.get(signed_url.replace(media_id, "d" * 32))
+
+        self.assertEqual(unsigned.status_code, 401)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"image")
+        self.assertEqual(tampered.status_code, 403)
 
     def test_formal_report_hides_internal_inference_costs(self):
         job = {
@@ -255,6 +395,50 @@ class ReportOutputOptionsTest(unittest.TestCase):
         self.assertEqual(review["report"]["status"], "not_requested")
         self.assertIsNone(review["report"]["html_url"])
         self.assertEqual(review["advisory_assessment"]["human_review"]["level"], "not_required")
+
+    def test_formal_deferred_postprocess_replaces_stale_next_step_with_final_advisory(self):
+        stale_next_step = "必须进入VIP人工复核。"
+        job = {
+            "job_id": "RV-FINAL-NEXT-STEP",
+            "tenant_id": "mitako",
+            "client_case_id": "CASE-FINAL-NEXT-STEP",
+            "scenario": "video_unboxing",
+            "metadata": {
+                "scenario": "video_unboxing",
+                "output_options": {"include_html_report": True},
+            },
+            "assets": [],
+        }
+        upstream = successful_workbench_review()
+        upstream["review"]["agent_brief"]["next_step"] = stale_next_step
+        upstream["review"]["agent_report"]["scenario"] = "video_unboxing"
+        upstream["review"]["agent_report"]["scenario_label"] = "开箱审核"
+        upstream["review"]["agent_report"]["public_brief"] = {
+            "conclusion": "旧结论",
+            "next_step": stale_next_step,
+        }
+
+        def finish(job_id, *, status, result, diagnostics):
+            return {**job, "status": status, "completed_at": 1, "result": result, "diagnostics": diagnostics}
+
+        with patch.object(service.store, "claim_job", return_value=True), patch.object(
+            service.store, "get_job", return_value=job
+        ), patch.object(service.store, "finish_job", side_effect=finish), patch.object(
+            service, "_media_forensics", return_value={"summary": {"risk_signal_count": 0}}
+        ), patch.object(
+            service, "assess_input_readiness", return_value={"full_review_ready": True, "missing_required": []}
+        ), patch.object(service, "_call_workbench", return_value=upstream):
+            completed = service.run_job(job["job_id"])
+
+        review = completed["result"]["review"]
+        recommendation = review["advisory_assessment"]["human_review"]["recommendation"]
+        self.assertEqual(review["advisory_assessment"]["human_review"]["level"], "not_required")
+        self.assertEqual(review["advisory_assessment"]["workflow_recommendation"], "continue_by_customer_policy")
+        self.assertEqual(review["agent_brief"]["next_step"], recommendation)
+        self.assertEqual(review["agent_report"]["public_brief"]["next_step"], recommendation)
+        report_html = service.render_job_report(completed)
+        self.assertIn(recommendation, report_html)
+        self.assertNotIn(stale_next_step, report_html)
 
     def test_report_route_rejects_job_that_did_not_request_html(self):
         job = {

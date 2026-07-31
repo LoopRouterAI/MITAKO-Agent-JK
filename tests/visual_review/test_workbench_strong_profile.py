@@ -68,13 +68,16 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
     def test_auto_model_route_uses_configured_fallback_after_primary_transport_failure(self) -> None:
         failed = {
             "status": "failed",
-            "error_type": "hard",
-            "status_code": None,
+            "error_type": "soft",
+            "status_code": 503,
             "latency_seconds": 10.0,
             "model_latency_seconds_sum": 20.0,
             "cost_status": "unknown",
             "unknown_cost_calls": 2,
             "chunking": {"total_model_calls": 2},
+            "_channel_route_attempts": [
+                {"channel": "primary-channel", "status_code": 503, "decision": "exhausted"}
+            ],
         }
         succeeded = {
             "status": "success",
@@ -84,6 +87,9 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
             "unknown_cost_calls": 0,
             "chunking": {"total_model_calls": 5},
             "parsed": {"predicted_label": "review"},
+            "_channel_route_attempts": [
+                {"channel": "fallback-channel", "status_code": 200, "decision": "selected"}
+            ],
         }
         with patch.dict(
             "os.environ",
@@ -109,6 +115,42 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
         self.assertEqual(result["cost_status"], "partial_unknown")
         self.assertEqual(result["unknown_cost_calls"], 2)
         self.assertEqual(result["chunking"]["total_model_calls"], 7)
+        self.assertEqual(
+            [item["channel"] for item in result["_channel_route_attempts"]],
+            ["primary-channel", "fallback-channel"],
+        )
+
+    def test_auto_model_route_does_not_fallback_after_non_retryable_failure(self) -> None:
+        failed = {
+            "status": "failed",
+            "error_type": "hard",
+            "status_code": 400,
+            "latency_seconds": 1.0,
+            "model_latency_seconds_sum": 1.0,
+            "cost_status": "unknown",
+            "unknown_cost_calls": 1,
+            "chunking": {"total_model_calls": 1},
+        }
+        with patch.dict(
+            "os.environ",
+            {
+                "VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash",
+                "VISUAL_REVIEW_FALLBACK_MODELS": "qwen3.5-flash",
+            },
+            clear=False,
+        ), patch.object(
+            workbench_server,
+            "call_model_chunked",
+            return_value=failed,
+        ) as model:
+            result = workbench_server._call_model_chunked_with_fallback(
+                "auto", {"case_id": "CASE-HARD-FAIL"}, timeout=180, retries=0
+            )
+
+        self.assertEqual(model.call_count, 1)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["route_fallback_count"], 0)
+        self.assertEqual(result["route_attempts"][0]["decision"], "stop_non_retryable")
 
     def test_folder_review_uses_configured_model_timeout_and_retries(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

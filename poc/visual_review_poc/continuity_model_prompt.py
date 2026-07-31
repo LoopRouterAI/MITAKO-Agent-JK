@@ -27,12 +27,14 @@ def build_object_continuity_prompt(case: Dict[str, Any]) -> str:
 场景：{case.get("scenario_label")}
 用户诉求：{case.get("customer_claim") or "未提供"}
 连续性策略：{json.dumps((case.get("structured_business_context") or {}).get("continuity_policy") or {}, ensure_ascii=False)}
+争议商品身份锚点：{json.dumps((case.get("structured_business_context") or {}).get("continuity_claim_identity") or {}, ensure_ascii=False)}
 按发送顺序排列的帧：{json.dumps(frames, ensure_ascii=False)}
 
 主体定义必须保持稳定：
 1. shipping_package：外层快递箱、快递袋或运输包装。
 2. product_package：直接承载争议商品的最内层商品包装、扭蛋壳、密封袋或原包装；不能用外层快递箱替代。
 3. claimed_item：用户投诉所指向的商品本体；未从不透明包装中出现前是 not_yet_exposed。
+   必须按“争议商品身份锚点”的 SKU、商品名、规格和用户所述实收物跟踪准确对象；若请求附带官方商品参考图，必须逐帧与参考图的主体图案、形状和规格交叉核对。同品类但非同一件商品、同为明信片/徽章/卡片的其他商品，不得标记为 claimed_item 可见；无法区分准确对象时写 unknown，并说明缺少哪一项身份特征。
 
 逐帧状态规则：
 - visible：主体关键外观清楚可见。
@@ -41,6 +43,8 @@ def build_object_continuity_prompt(case: Dict[str, Any]) -> str:
 - out_of_frame：主体已经出现过，当前完整离开画面边界；不能因为之后重新出现就改写为持续可见。
 - not_yet_exposed：主体尚未首次从不透明包装中出现，不属于离镜。
 - unknown：无法区分以上状态。宁可写 unknown，不得把外层纸箱存在误写成商品包装存在。
+
+claimed_item 每帧必须额外输出 identity_match：matched 表示外观与身份锚点及官方商品参考图一致；not_matched 表示画面是其他商品；uncertain 表示清晰度或角度不足。只有 matched 才允许把 claimed_item 写为 visible/partial/occluded。
 
 每个目标帧还必须标注 opening_stage：
 - sealed_package：外层包裹仍保持封闭、尚未开始拆封。
@@ -64,7 +68,7 @@ def build_object_continuity_prompt(case: Dict[str, Any]) -> str:
       "subject_visibility": [
         {{"subject_id": "shipping_package", "state": "visible", "reason": "可见依据"}},
         {{"subject_id": "product_package", "state": "not_yet_exposed", "reason": "可见依据"}},
-        {{"subject_id": "claimed_item", "state": "not_yet_exposed", "reason": "可见依据"}}
+        {{"subject_id": "claimed_item", "state": "not_yet_exposed", "identity_match": "matched/not_matched/uncertain", "identity_basis": "与身份锚点或官方商品参考图的可见比对依据", "reason": "可见依据"}}
       ]
     }}
   ],

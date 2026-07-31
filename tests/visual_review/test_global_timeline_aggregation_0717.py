@@ -34,7 +34,8 @@ class GlobalTimelineAggregation0717Test(unittest.TestCase):
             rows,
             ["视频在 00:11.44 结束，未见异常"],
         )
-        self.assertEqual(result["predicted_label"], "review")
+        self.assertEqual(result["predicted_label"], "positive")
+        self.assertEqual(result["confidence"], 0.95)
         self.assertEqual(result["aggregation_warnings"][0]["code"], "chunk_end_before_later_evidence")
         self.assertNotIn("00:11.44 结束", result["overall_audit"]["conclusion"])
         self.assertIn("00:52.22", result["overall_audit"]["conclusion"])
@@ -55,6 +56,26 @@ class GlobalTimelineAggregation0717Test(unittest.TestCase):
         second = _apply_global_timeline_summary(case, parsed, list(reversed(rows)), ["局部 B", "局部 A"])
         self.assertEqual(first["overall_audit"], second["overall_audit"])
         self.assertEqual(first["video_audit_conclusion"], second["video_audit_conclusion"])
+
+    def test_global_summary_preserves_accelerated_playback_observation(self):
+        case = {"frames": [{"timestamp": "00:00.00"}, {"timestamp": "00:20.00"}], "videos": [{"duration_seconds": 20.0}]}
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        rows = [
+            {"video_audit_conclusion": {"playback_speed": "unknown"}},
+            {"video_audit_conclusion": {"playback_speed": "accelerated"}},
+        ]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, ["", ""])
+
+        self.assertEqual(result["video_audit_conclusion"]["playback_speed"], "accelerated")
+        self.assertEqual(
+            result["video_audit_conclusion"]["segment_playback_speed_values"],
+            ["accelerated", "unknown"],
+        )
 
     def test_segment_opening_claim_is_not_presented_as_deterministic_completeness(self):
         case = {

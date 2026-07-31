@@ -152,6 +152,41 @@ class OfficialReferenceImagesTest(unittest.TestCase):
         self.assertEqual(references[0]["url"], shared)
         self.assertEqual(references[0]["item_refs"], ["LINE-1", "LINE-2"])
 
+    def test_claim_identity_change_reselects_the_matching_reference(self) -> None:
+        case = {
+            "structured_business_context": {
+                "fulfillment_baseline": {"expected_items": [
+                    {
+                        "item_ref": "LINE-1",
+                        "sku": "SKU-1",
+                        "master_image_urls": ["https://cdn-qiniu.danhaotuan.com/first.png"],
+                    },
+                    {
+                        "item_ref": "LINE-2",
+                        "sku": "SKU-2",
+                        "master_image_urls": ["https://cdn-qiniu.danhaotuan.com/claimed.png"],
+                    },
+                ]},
+            },
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, headers={"content-type": "image/png"}, content=png_bytes())
+
+        with tempfile.TemporaryDirectory() as directory, httpx.Client(transport=httpx.MockTransport(handler)) as client, patch(
+            "poc.visual_review_poc.official_reference_images.socket.getaddrinfo",
+            return_value=self._public_dns(),
+        ):
+            prepare_official_reference_images(case, Path(directory), client=client, limit=1)
+            self.assertEqual(case["official_reference_images"][0]["item_ref"], "LINE-1")
+            case["structured_business_context"]["continuity_claim_identity"] = {
+                "item_ref": "LINE-2",
+                "sku": "SKU-2",
+            }
+            prepare_official_reference_images(case, Path(directory), client=client, limit=1)
+
+        self.assertEqual(case["official_reference_images"][0]["item_ref"], "LINE-2")
+
     def test_image_pixel_limit_falls_back_without_decoding_unbounded_image(self) -> None:
         payload = io.BytesIO()
         Image.new("RGB", (1100, 1100), "white").save(payload, format="PNG")

@@ -81,6 +81,64 @@ class ReviewMinorRefundPolicy(BaseModel):
     authoritative_verification: Literal["disabled", "advisory", "required"] = "disabled"
 
 
+MinorDocumentType = Literal[
+    "identity_card",
+    "passport",
+    "household_register",
+    "birth_certificate",
+    "signed_commitment",
+    "order_payment_proof",
+    "mobile_realname_proof",
+    "carrier_invoice",
+    "other",
+    "unknown",
+]
+MinorDocumentRole = Literal["guardian", "minor", "unknown", "not_applicable"]
+MinorDocumentSide = Literal["front", "back", "page", "multiple", "unknown"]
+MinorDocumentReadability = Literal["clear", "partial", "unknown"]
+MinorDocumentQualityIssue = Literal[
+    "blur",
+    "glare",
+    "occlusion",
+    "excessive_redaction",
+    "incomplete_page",
+    "suspected_editing",
+    "other",
+]
+
+
+class ReviewMinorMaterialObservation(BaseModel):
+    """未成年人材料的非敏感结构化观察；禁止携带 OCR 原文和证件号码。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    image_index: int = Field(ge=1)
+    asset_ref: str = Field(pattern=r"^supplemental_image_[1-9]\d*$")
+    document_type: MinorDocumentType = "unknown"
+    document_types: List[MinorDocumentType] = Field(default_factory=lambda: ["unknown"], min_length=1, max_length=4)
+    subject_role: MinorDocumentRole = "unknown"
+    document_side: MinorDocumentSide = "unknown"
+    issuing_country_or_region: str = Field(default="unknown", min_length=1, max_length=80)
+    readability: MinorDocumentReadability = "unknown"
+    quality_issues: List[MinorDocumentQualityIssue] = Field(default_factory=list, max_length=8)
+
+    @field_validator("issuing_country_or_region", mode="before")
+    @classmethod
+    def normalize_issuing_country_or_region(cls, value: Any) -> str:
+        text = str(value or "").strip()
+        if text.lower() in {"", "unknown", "unreadable", "uncertain", "none", "null", "n/a"}:
+            return "unknown"
+        if re.search(r"\d", text) or not re.fullmatch(r"[A-Za-z\u3400-\u9fff .,'()\-/]{1,80}", text):
+            return "unknown"
+        return text
+
+    @model_validator(mode="after")
+    def enforce_passport_country_boundary(self) -> "ReviewMinorMaterialObservation":
+        if self.document_type != "passport" or self.readability == "unknown":
+            self.issuing_country_or_region = "unknown"
+        return self
+
+
 class ReviewAtomicClaim(BaseModel):
     claim_id: str = Field(min_length=1, max_length=160)
     role: Literal["primary", "additional"] = "primary"
@@ -116,6 +174,7 @@ class ReviewDecisionPolicy(BaseModel):
     policy_ref: str = Field(default=DEFAULT_PRODUCT_DAMAGE_POLICY_REF, max_length=160)
     opening_video_required: bool = False
     missing_required_opening_video: Literal["review", "negative"] = "review"
+    noncompliant_opening_video: Literal["review", "negative"] = "review"
     complete_video_no_claimed_damage: Literal["review", "negative"] = "review"
     require_claim_scope: bool = True
     minimum_visibility_coverage: float = Field(default=0.85, ge=0.5, le=1.0)

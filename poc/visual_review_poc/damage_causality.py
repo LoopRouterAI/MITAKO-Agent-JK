@@ -91,6 +91,27 @@ def _has_preopening_reference(item: Dict[str, Any], valid_frames: set[tuple[int,
     return bool(reference.get("timestamp")) and _reference_allowed(reference, valid_frames)
 
 
+def _replayable_damage_reference(
+    item: Dict[str, Any],
+    damage_observability: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    if not isinstance(damage_observability, dict) or damage_observability.get("same_item_linkage") is not True:
+        return {}
+    reference = item.get("first_visible_evidence")
+    candidates = [reference] + list(item.get("after_action_evidence") or [])
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        try:
+            int(candidate.get("video_index"))
+            int(candidate.get("global_frame_index"))
+        except (TypeError, ValueError):
+            continue
+        if candidate.get("timestamp") and candidate.get("damage_visible") is True:
+            return candidate
+    return {}
+
+
 def _has_direct_chain(item: Dict[str, Any]) -> bool:
     if item["causal_evidence_level"] != "direct" or item["damage_presence"] != "confirmed":
         return False
@@ -168,9 +189,8 @@ def apply_damage_causality_guard(
         return output
 
     assessment = normalize_damage_causality(output.get("damage_causality_assessment"))
-    if assessment["damage_presence"] != "confirmed" and _has_linked_supplemental_damage(output.get("adopted_evidence")):
-        assessment["damage_presence"] = "confirmed"
-        assessment["presence_reconciliation"] = "linked_high_confidence_supplemental_image"
+    if _has_linked_supplemental_damage(output.get("adopted_evidence")):
+        assessment["supplemental_damage_presence"] = "confirmed"
     output["damage_causality_assessment"] = assessment
     presence = assessment["damage_presence"]
     timing = assessment["damage_timing"]
@@ -204,35 +224,23 @@ def apply_damage_causality_guard(
     )
     visible_damage_confirmed = presence == "confirmed"
 
-    if direct_customer_damage:
-        label = "negative"
-    elif direct_preexisting_damage:
-        label = "positive"
-    elif visible_damage_confirmed:
-        label = "positive"
+    if direct_customer_damage or (presence == "not_visible" and claim_support == "not_supported"):
+        tendency = "does_not_support_claim"
+    elif direct_preexisting_damage or visible_damage_confirmed:
+        tendency = "supports_claim"
     else:
-        label = "review"
-
-    output["predicted_label"] = label
-    output["system_yes_no"] = {"positive": "YES", "negative": "NO"}.get(label, "REVIEW")
-    if label == "review":
-        output["decision"] = "manual_review"
-        output["confidence"] = min(_float(output.get("confidence"), 0.5), 0.69)
-        output["causality_guard_reason"] = (
-            "伤情存在性与损伤成因必须分开判断；当前缺少足以证明损伤在拆封前已存在，"
-            "或由用户操作直接造成的连续前后证据。"
-        )
-    elif direct_customer_damage or direct_preexisting_damage:
-        output["confidence"] = min(_float(output.get("confidence"), origin_confidence), origin_confidence or 1.0)
-        output["causality_guard_reason"] = "已形成拆封/操作前后可回链的直接因果证据。"
-    else:
-        output["confidence"] = _float(output.get("confidence"), 0.5)
-        output["causality_guard_reason"] = "可见伤情事实已获证据支持；损伤发生阶段和责任归属仍单独保持不确定。"
+        tendency = "inconclusive"
+    output["damage_evidence_tendency"] = tendency
+    output["causality_guard_reason"] = (
+        "证据层只记录伤情存在性、发生阶段和因果链，不改写整案标签、置信度或人工路由；"
+        "最终分类建议由版本化 SOP 策略统一生成。"
+    )
     return output
 
 
 def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
-    assessments = [normalize_damage_causality(row.get("damage_causality_assessment")) for row in rows]
+    source_rows = list(rows)
+    assessments = [normalize_damage_causality(row.get("damage_causality_assessment")) for row in source_rows]
     direct = [item for item in assessments if _has_direct_chain(item)]
     direct_origins = {item["most_likely_origin"] for item in direct if item["most_likely_origin"] != "indeterminate"}
     reported_direct_origins = {
@@ -253,18 +261,38 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
         best = max(assessments, key=lambda item: item["origin_confidence"], default=normalize_damage_causality({}))
         origin = "indeterminate"
     else:
-        best = max(assessments, key=lambda item: item["origin_confidence"], default=normalize_damage_causality({}))
+        concrete = [item for item in assessments if item["most_likely_origin"] != "indeterminate"]
+        best = max(concrete or assessments, key=lambda item: item["origin_confidence"], default=normalize_damage_causality({}))
         origin = best["most_likely_origin"]
 
-    first_visible = next((item.get("first_visible_evidence") for item in assessments if item.get("first_visible_evidence")), None)
-    damage_locations = [item.get("damage_type_and_location") for item in assessments if item.get("damage_type_and_location")]
-    possible_origins = [origin_item for item in assessments for origin_item in item.get("possible_origins") or []]
+    replayable = [
+        (item, reference)
+        for row, item in zip(source_rows, assessments)
+        if (reference := _replayable_damage_reference(item, row.get("damage_observability")))
+    ]
+    first_visible = replayable[0][1] if replayable else None
+    damage_locations = [
+        item.get("damage_type_and_location")
+        for item, _ in replayable
+        if item.get("damage_type_and_location")
+    ]
+    origin_hypotheses: Dict[str, Dict[str, Any]] = {}
+    for item in assessments:
+        for hypothesis in item.get("possible_origins") or []:
+            origin_key = str(hypothesis.get("origin") or "indeterminate")
+            current = origin_hypotheses.get(origin_key)
+            if current is None or _float(hypothesis.get("confidence")) > _float(current.get("confidence")):
+                origin_hypotheses[origin_key] = hypothesis
+    possible_origins = sorted(
+        origin_hypotheses.values(),
+        key=lambda item: (-_float(item.get("confidence")), str(item.get("origin") or "")),
+    )
     alternatives = [entry for item in assessments for entry in _text_list(item.get("alternative_explanations"))]
     gaps = [str(item.get("cannot_conclude_reason")) for item in assessments if item.get("cannot_conclude_reason")]
 
     presence_values = {item["damage_presence"] for item in assessments}
     claim_support_values = {item["claim_support"] for item in assessments}
-    aggregate_presence = "confirmed" if "confirmed" in presence_values else (
+    aggregate_presence = "confirmed" if "confirmed" in presence_values and first_visible else (
         "not_visible" if presence_values == {"not_visible"} else "uncertain"
     )
     aggregate_claim_support = best["claim_support"] if not conflicting else "insufficient"
@@ -289,10 +317,19 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
                 )
             ),
             "claim_support": aggregate_claim_support,
-            "possible_origins": possible_origins[:20],
+            "possible_origins": possible_origins,
             "alternative_explanations": list(dict.fromkeys(map(str, alternatives)))[:12],
-            "cannot_conclude_reason": (str(best.get("cannot_conclude_reason") or "") if best in direct and not conflicting else "；".join(dict.fromkeys(gaps)))[:1000]
-            or ("不同时间分段对损伤成因给出冲突的直接判断。" if conflicting else ""),
+            "cannot_conclude_reason": (
+                str(best.get("cannot_conclude_reason") or "")
+                if best in direct and not conflicting
+                else "；".join(dict.fromkeys(gaps))
+            )[:1000]
+            or ("不同时间分段对损伤成因给出冲突的直接判断。" if conflicting else "")
+            or (
+                "主视频没有返回可回链的损伤帧，不能聚合为已确认损伤。"
+                if "confirmed" in presence_values and not first_visible
+                else ""
+            ),
             "segment_assessments": assessments,
         }
     )
