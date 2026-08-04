@@ -67,6 +67,38 @@ def html_report_requested(metadata_or_job: Dict[str, Any]) -> bool:
     return options.get("include_html_report") is not False
 
 
+def _sop_recommendation(
+    label: str,
+    workflow: str,
+    parsed: Dict[str, Any],
+    conclusion: str,
+) -> Dict[str, str]:
+    audit = _dict(parsed.get("decision_policy_audit"))
+    basis = str(audit.get("reason") or conclusion or "本轮未形成可用依据。")
+    if workflow == "system_retry":
+        code = "system_retry"
+        recommendation = "本轮先由系统重试，不要求用户重复提交材料。"
+    elif workflow == "request_more_material":
+        code = "request_more_material"
+        recommendation = "按照 SOP，只补充报告明确列出的缺失或看不清材料。"
+    elif label == "positive":
+        code = "support_claim"
+        recommendation = "按照 SOP，当前证据倾向支持用户诉求。"
+    elif label == "negative" and (
+        audit.get("rule_id") == "PD-N-NONCOMPLIANT-OPENING-VIDEO"
+        and audit.get("supplemental_evidence_note")
+    ):
+        code = "comfort_compensation"
+        recommendation = "按照 SOP，当前证据不支持用户诉求；补充证据可供最低档安慰性补偿参考。"
+    elif label == "negative":
+        code = "not_support_claim"
+        recommendation = "按照 SOP，当前证据倾向不支持用户诉求。"
+    else:
+        code = "further_assessment"
+        recommendation = "当前证据仍无法明确支持或不支持用户诉求，请按报告中的具体疑点继续评估。"
+    return {"code": code, "recommendation": recommendation, "basis": basis}
+
+
 def attach_advisory_assessment(
     review: Dict[str, Any],
     metadata: Dict[str, Any],
@@ -332,6 +364,7 @@ def attach_advisory_assessment(
                 else "uncalibrated_evidence_score"
             ),
         },
+        "sop_recommendation": _sop_recommendation(label, workflow, parsed, conclusion),
         "human_review": {
             "level": level,
             "reason_codes": reason_codes,
@@ -344,7 +377,7 @@ def attach_advisory_assessment(
             "effective_thresholds": policy,
             "advisory_only": True,
             "business_action_allowed": False,
-            "boundary": "本服务不直接决定退款、补发、换货、拒绝或最终定责。",
+            "boundary": "本服务负责输出明确的证据结论和SOP处理建议；退款、补发、换货等业务动作由甲方系统执行，是否需要人工复核由单独的复核等级决定。",
         },
     }
 
@@ -374,6 +407,16 @@ def attach_advisory_assessment(
     brief["conclusion"] = conclusion
     brief["human_review_level"] = level
     brief["workflow_recommendation"] = workflow
+    if workflow == "request_more_material":
+        brief["next_step"] = "只补交报告明确列出的缺失或看不清材料，补齐后在同一工单继续审核。"
+    elif workflow == "human_review":
+        brief["next_step"] = recommendation
+    elif workflow == "system_retry":
+        brief["next_step"] = "由系统重试本轮技术处理，不要求用户重复补材料。"
+    elif level == "not_required":
+        brief["next_step"] = "按 SOP 审核倾向继续处理，本轮无需人工复审；具体业务动作由甲方系统执行。"
+    else:
+        brief["next_step"] = "按 SOP 审核倾向继续处理；仅按甲方抽检规则回看风险项，不要求逐单人工复审。"
     output["summary"] = summary
     output["agent_report"] = agent_report
     output["agent_brief"] = brief

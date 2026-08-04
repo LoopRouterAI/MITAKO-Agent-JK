@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from review_input_safety import assert_review_input_safe, sanitize_review_input
+from review_media_safety import ignored_upload_reason
 
 
 MEDIA_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv"}
@@ -68,7 +69,11 @@ def build_bundle(source: Path, output: Path) -> dict:
 
     copied = []
     for item in source.iterdir():
-        if item.is_file() and (item.suffix.lower() in MEDIA_SUFFIXES or item.name == "content.txt"):
+        if (
+            item.is_file()
+            and ignored_upload_reason(item.name) is None
+            and (item.suffix.lower() in MEDIA_SUFFIXES or item.name == "content.txt")
+        ):
             target = output / item.name
             if item.suffix.lower() in MEDIA_SUFFIXES:
                 try:

@@ -44,7 +44,45 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["human_review"]["level"], "not_required")
         self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
         self.assertFalse(advisory["policy"]["business_action_allowed"])
+        self.assertIn("是否需要人工复核由单独的复核等级决定", advisory["policy"]["boundary"])
         self.assertEqual(advisory["assessment"]["calibration_status"], "uncalibrated_evidence_score")
+        self.assertEqual(advisory["sop_recommendation"]["code"], "support_claim")
+        self.assertIn("无需人工复审", result["agent_brief"]["next_step"])
+        self.assertNotIn("VIP客服复核", result["agent_brief"]["next_step"])
+
+    def test_comfort_compensation_is_independent_from_negative_evidence_verdict(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="negative",
+                confidence=0.82,
+                parsed_extra={
+                    "decision_policy_audit": {
+                        "rule_id": "PD-N-NONCOMPLIANT-OPENING-VIDEO",
+                        "reason": "开箱视频不合规，当前证据不支持用户诉求。",
+                        "supplemental_evidence_note": "补充图片可供最低档安慰性补偿参考。",
+                    }
+                },
+            ),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_does_not_support_claim")
+        self.assertEqual(advisory["sop_recommendation"]["code"], "comfort_compensation")
+        self.assertFalse(advisory["policy"]["business_action_allowed"])
+        ReviewAdvisoryAssessment.model_validate(advisory)
+
+    def test_legacy_advisory_without_sop_recommendation_remains_readable(self):
+        advisory = attach_advisory_assessment(
+            review_result(),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )["advisory_assessment"]
+        advisory.pop("sop_recommendation")
+
+        parsed = ReviewAdvisoryAssessment.model_validate(advisory)
+        self.assertIsNone(parsed.sop_recommendation)
 
     def test_short_out_of_frame_is_optional_signal_not_mandatory_review(self):
         result = attach_advisory_assessment(
@@ -66,6 +104,8 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["human_review"]["level"], "optional")
         self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
         self.assertIn("short_out_of_frame", [item["code"] for item in advisory["signals"]])
+        self.assertIn("不要求逐单", result["agent_brief"]["next_step"])
+        self.assertNotIn("VIP客服复核", result["agent_brief"]["next_step"])
 
     def test_confirmed_fact_with_unresolved_continuity_is_optional_not_forced_review(self):
         result = attach_advisory_assessment(

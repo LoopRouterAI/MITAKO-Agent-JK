@@ -11,9 +11,11 @@ DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-PD-ADVISORY@20260731.1"
 APPROVED_POLICY_SNAPSHOTS: Dict[Any, Dict[str, Any]] = {
     ("mitako", DEFAULT_PRODUCT_DAMAGE_POLICY_REF): {
         "mode": "classification_recommendation",
+        "recommendation_gate_mode": "core_sop",
         "opening_video_required": True,
         "missing_required_opening_video": "negative",
         "noncompliant_opening_video": "negative",
+        "confirmed_visible_damage": "positive",
         "complete_video_no_claimed_damage": "negative",
         "require_claim_scope": True,
         "minimum_visibility_coverage": 0.7,
@@ -200,6 +202,59 @@ def _apply_negative(review: Dict[str, Any], audit: Dict[str, Any], confidence: f
     return output
 
 
+def _apply_positive(review: Dict[str, Any], audit: Dict[str, Any], confidence: float) -> Dict[str, Any]:
+    output = dict(review)
+    agent_report = _dict(output.get("agent_report"))
+    parsed = _dict(agent_report.get("parsed"))
+    previous_overall = _dict(parsed.get("overall_audit"))
+    audit["evidence_verdict_before_policy"] = {
+        "predicted_label": parsed.get("predicted_label"),
+        "confidence": parsed.get("confidence"),
+        "conclusion": previous_overall.get("conclusion") or "",
+    }
+    parsed.update(
+        {
+            "predicted_label": "positive",
+            "system_yes_no": "YES",
+            "decision": "pass",
+            "confidence": round(confidence, 4),
+            "business_action_allowed": False,
+            "human_required": False,
+            "human_required_for_business_action": True,
+            "decision_policy_audit": audit,
+            "overall_audit": {
+                "conclusion": audit.get("reason") or "当前可见证据支持商品有伤诉求。",
+                "confidence": round(confidence, 4),
+                "core_reason": "该建议只确认可见伤情支持诉求，不自动认定损伤责任，也不触发赔付动作。",
+                "business_follow_up_suggestion": "可按甲方 SOP 继续处理；责任、比例和最终业务动作由甲方系统或授权人员决定。",
+            },
+        }
+    )
+    agent_report["parsed"] = parsed
+    output["agent_report"] = agent_report
+    summary = _dict(output.get("summary"))
+    summary.update(
+        {
+            "predicted_label": "positive",
+            "system_yes_no": "YES",
+            "confidence": round(confidence, 4),
+            "decision_policy_applied": True,
+        }
+    )
+    output["summary"] = summary
+    brief = _dict(output.get("agent_brief"))
+    brief.update(
+        {
+            "conclusion": audit.get("reason") or "当前可见证据支持商品有伤诉求。",
+            "next_step": "按甲方 SOP 继续处理，并由授权人员决定具体业务动作。",
+            "confidence": round(confidence, 4),
+        }
+    )
+    output["agent_brief"] = brief
+    output["decision_policy_audit"] = audit
+    return output
+
+
 def apply_review_decision_policy(
     job: Dict[str, Any],
     review: Dict[str, Any],
@@ -370,6 +425,20 @@ def apply_review_decision_policy(
         )
         return _apply_negative(output, audit, model_confidence)
 
+    if (
+        policy.get("confirmed_visible_damage") == "positive"
+        and damage.get("damage_presence") == "confirmed"
+        and bool(_dict(damage.get("first_visible_evidence")))
+    ):
+        audit.update(
+            {
+                "applied": True,
+                "rule_id": "PD-P-CONFIRMED-VISIBLE-DAMAGE",
+                "reason": "按照商品有伤 SOP，本轮可见证据已确认所诉损伤，当前证据倾向支持用户的有伤诉求；损伤责任和具体业务动作仍由甲方规则决定。",
+            }
+        )
+        return _apply_positive(output, audit, model_confidence)
+
     if policy.get("complete_video_no_claimed_damage") == "negative":
         minimum_coverage = _float(policy.get("minimum_visibility_coverage"), 0.95)
         minimum_view_coverage = _float(policy.get("minimum_required_view_coverage"), 1.0)
@@ -381,9 +450,12 @@ def apply_review_decision_policy(
         continuity_complete = continuity.get("continuity_verdict") == "continuous"
         opening_complete = str(video_audit.get("opening_integrity") or "").lower() in {
             "complete", "完整", "完整开箱", "complete_opening"
-        } and video_audit.get("opening_integrity_source") == "full_timeline_continuity"
-        damage_not_visible = damage.get("damage_presence") == "not_visible"
-        support_not_found = damage.get("claim_support") == "not_supported"
+        }
+        damage_not_visible = (
+            damage.get("damage_presence") in {"not_visible", "uncertain"}
+            and not _dict(damage.get("first_visible_evidence"))
+        )
+        support_not_found = damage.get("claim_support") in {"not_supported", "insufficient"}
         enough_coverage = coverage is not None and coverage >= minimum_coverage
         enough_confidence = model_confidence >= minimum_confidence
         fully_observable = observability.get("status") == "fully_observable"
@@ -436,17 +508,34 @@ def apply_review_decision_policy(
             "supplemental_evidence_resolved": supplemental_resolved,
             "pass_integrity": pass_integrity,
         }
-        if all(conditions.values()):
+        strict_recommendation = policy.get("recommendation_gate_mode") != "core_sop"
+        recommendation_conditions = (
+            dict(conditions)
+            if strict_recommendation
+            else {
+                key: conditions[key]
+                for key in (
+                    "opening_complete",
+                    "damage_not_visible",
+                    "claim_not_supported",
+                    "pass_integrity",
+                )
+            }
+        )
+        audit["failed_conditions"] = [key for key, passed in conditions.items() if not passed]
+        if all(recommendation_conditions.values()):
             audit.update(
                 {
                     "applied": True,
                     "rule_id": "PD-N-COMPLETE-NO-CLAIMED-DAMAGE",
-                    "reason": "视频技术时间轴与开箱过程完整，争议商品展示达到版本化策略门槛，主视频未观察到本次诉求范围内所述损伤。",
+                    "reason": "按照商品有伤 SOP，开箱过程完整且主视频在有效展示范围内未观察到本次诉求所述损伤，当前证据倾向不支持诉求；未通过的辅助技术项仅用于抽检提示，不抹掉该审核建议。",
                 }
             )
             return _apply_negative(output, audit, min(model_confidence, coverage or model_confidence))
-        audit["reason"] = "完整性、可见度、损伤不支持或置信度门槛未全部满足，保持人工复核。"
-        audit["failed_conditions"] = [key for key, passed in conditions.items() if not passed]
+        audit["reason"] = "主视频尚未同时满足完整开箱、未见所诉损伤、诉求不受支持和聚合过程完整，保持人工复核。"
+        audit["recommendation_failed_conditions"] = [
+            key for key, passed in recommendation_conditions.items() if not passed
+        ]
         audit["evidence_gate"].update(
             {
                 "opening_complete": opening_complete,
@@ -465,6 +554,7 @@ def apply_review_decision_policy(
                 "max_unobserved_seconds": max_unobserved_seconds,
                 "claimed_item_longest_out_of_frame_seconds": claimed_item_longest_absence,
                 "maximum_forensic_risk": maximum_forensic_risk,
+                "strict_recommendation": strict_recommendation,
             }
         )
     return output

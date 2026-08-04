@@ -444,6 +444,10 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
             "document_side": True,
             "issuing_country_or_region": True,
             "readability": True,
+            "document_state": True,
+            "sop_eligibility": True,
+            "quality_issues": [True],
+            "editing_evidence_codes": [True],
         }],
         "checklist": [{
             "requirement_id": True,

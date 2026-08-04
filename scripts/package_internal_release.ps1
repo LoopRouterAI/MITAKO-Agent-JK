@@ -10,7 +10,8 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Date = Get-Date -Format "yyyyMMdd"
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_internal_stage_$Date"
-$ZipPath = Join-Path (Split-Path -Parent $Root) "MITAKO_Agent-internal-dev-$Date.zip"
+$DeliveryDir = Join-Path $Root "dist"
+$ZipPath = Join-Path $DeliveryDir "MITAKO_Agent-internal-dev-$Date.zip"
 $PythonCandidates = @(
     (Join-Path $Root ".venv\Scripts\python.exe"),
     (Join-Path $Root "venv\Scripts\python.exe")
@@ -156,6 +157,10 @@ Copy-Path "tests\reports\dynamic_material_capacity_http_62_20260730.json"
 Copy-Path "tests\reports\minor_refund_144989_20260730_223430.json"
 Copy-Path "tests\reports\blind_damage_0731_case_001_latest.json"
 Copy-Path "tests\reports\blind_damage_0731_cases_002_004_latest.json"
+Copy-Path "tests\reports\review_0804_blind_acceptance_latest.json"
+Copy-Path "tests\reports\blind_product_damage_positive_0804_final.json"
+Copy-Path "tests\reports\blind_product_damage_0804_final.json"
+Copy-Path "tests\reports\blind_minor_material_0804_final.json"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
 Copy-LatestReport "auth_strict_*.html" "tests\reports\auth_strict_latest.html"
 Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_deployment_api_smoke_latest.json"
@@ -164,6 +169,9 @@ $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0805-blind-evidence-acceptance-20260805.html",
+    "甲方沟通交付文档\0805审核建议、盲测与完整功能说明.html",
+    "我方内部开发文档\升级日志-2026-08-05-证据语义与客服决策收敛.md",
     "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",
     "甲方沟通交付文档\0731商品有伤SOP与报告一致性更新说明.html",
     "我方内部开发文档\升级日志-2026-07-31-商品有伤SOP与报告一致性.md",
@@ -215,6 +223,10 @@ $evidenceFiles = @(
     "tests\reports\minor_refund_144989_20260730_223430.json",
     "tests\reports\blind_damage_0731_case_001_latest.json",
     "tests\reports\blind_damage_0731_cases_002_004_latest.json",
+    "tests\reports\review_0804_blind_acceptance_latest.json",
+    "tests\reports\blind_product_damage_positive_0804_final.json",
+    "tests\reports\blind_product_damage_0804_final.json",
+    "tests\reports\blind_minor_material_0804_final.json",
     "tests\reports\full_pipeline_latest.html",
     "tests\reports\auth_strict_latest.html",
     "tests\reports\private_deployment_api_smoke_latest.json"
@@ -317,6 +329,7 @@ foreach ($blocked in @(".venv", "venv", "node_modules", ".git", ".codegraph", "t
 }
 
 Write-Host "[5/5] Create internal development ZIP ..." -ForegroundColor Cyan
+New-Item -ItemType Directory -Path $DeliveryDir -Force | Out-Null
 if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
 Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $ZipPath -CompressionLevel Optimal
 Remove-Item -LiteralPath $Stage -Recurse -Force

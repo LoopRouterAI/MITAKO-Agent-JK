@@ -271,6 +271,7 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             "document_side": "page",
             "issuing_country_or_region": "中国",
             "readability": "clear",
+            "quality_issues": ["blur"],
         })
         authenticity = public_parsed["minor_material_assessment"]["authenticity_assessment"]
         self.assertEqual(authenticity["risk_percent"], 25)
@@ -284,7 +285,6 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             "ocr_text",
             "raw_value",
             "passport_number",
-            "quality_issues",
             "18012345678",
             "320000200801011234",
             "model_limitations",

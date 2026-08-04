@@ -467,14 +467,14 @@ def scenario_rules(scenario: str) -> str:
         return """商品有伤专项规则：
 - 必须把“当前能看见损伤”和“损伤在何时、由什么原因形成”拆成两个问题。看见损伤不等于证明商品在原包装内已经有伤，也不等于可以给商家、物流或用户定责。
 - 按时间顺序寻找三个锚点：拆封/操作前状态、撕拉/挤压/取出等动作、动作后状态；记录损伤首次清晰可见的帧或图片。只有连续前后画面能证明变化时，才可使用 direct 因果证据等级。
-- 开箱视频优先核验一镜到底、未拆封快递盒与面单、瑕疵位置清晰可见；任一项不满足时只能标记材料不足或转人工，不得自动拒赔。
+- 开箱视频优先核验一镜到底、未拆封快递盒与面单、瑕疵位置清晰可见。若甲方提供的版本化 SOP 材料合规规则明确规定某项不合规会导致诉求不被支持，可以输出 negative 审核倾向；这仍只是建议，不是自动拒赔。
 - 判断图片/视频是否能看到真实破损、折痕、划痕、压痕、掉漆或污损，并说明位置、数量、严重程度。
 - 伤情按 SOP 描述：轻伤为 2 处及以内且不超过 5mm 的细划痕或较轻压痕；中伤包括 3 处及以内细划痕、锈点或明显压痕；重伤包括大面积划痕、凹陷、破损、锈迹或爆膜。
 - 区分原包装/生产品控、物流运输、用户拆封或后续操作、混合原因和无法判断。外箱严重受压、撞角或浸水只支持“物流原因可能性”，没有连续开箱和内外伤情对应关系时不得直接认定。
 - 若损伤在用户撕拉、弯折、挤压或使用工具之后首次出现，只有连续画面清楚展示动作前无伤、动作过程和动作后出现同位置损伤，才能判断为用户操作导致；静态结果图不能证明是谁造成。
 - 判断证据是否像真实手机/相机拍摄：看纹理、光影、透视、噪点、EXIF 是否缺失、分辨率是否过低、是否存在 Gemini/OpenAI/豆包等 AI 水印或生成痕迹。
 - 缺 EXIF 不能单独否定用户，但应作为可信度因素；如果图像疑似 AI 生成、过度锐化、局部纹理异常或只给裁剪局部，应降低置信度并要求补拍。
-- positive 只用于直接证据证明损伤在拆封/用户操作前已经存在且支持用户诉求；negative 只用于直接证据证明诉求不成立或损伤由用户操作形成；其他情况一律 review，并明确缺少哪段因果证据。"""
+- positive 用于当前证据与 SOP 共同支持用户诉求；negative 用于直接证据反驳诉求、确认用户操作造成损伤，或版本化 SOP 的材料合规条件明确不支持诉求。只有证据实质冲突、关键材料缺失或系统处理未完成时才输出 review，并明确具体原因。"""
     if scenario in {"minor_material", "minor_refund"}:
         return """未成年人资料审核专项规则：
 - 只判断材料是否完整、清晰、前后一致，不识别或暴露真实身份。
@@ -526,7 +526,7 @@ def build_system_prompt(scenario: str = "video_unboxing") -> str:
 
 硬边界：
 - 不自动退款、不自动拒赔、不自动补发、不自动定责。
-- business_action_allowed 必须为 false，human_required 必须为 true。
+- business_action_allowed 必须为 false。human_required 只表示证据是否必须人工复核，不能因为业务动作由甲方执行就强制转人工。
 - 只能使用提供的帧编号和时间戳，不能编造未提供的视频时间点。
 - 不要输出隐藏思维链；但必须输出可审计的审核方法、证据、反证、时间戳、结论论证和不确定性。
 
@@ -588,9 +588,9 @@ def build_user_prompt(case: Dict[str, Any], frame_sample: Dict[str, Any], frames
 - material_gaps: 还缺什么材料。
 - conclusion_argument: 包含 support、challenge、why_not_final_business_decision。
 - business_action_allowed: false。
-- human_required: true。
-- business_follow_up_reason: 说明为什么还需要VIP客服做业务跟进；如果视觉证据已经很强，要明确“人工跟进不是因为证据不足，而是因为业务动作需要客服系统执行”。
-- next_step: 给VIP客服的下一步业务跟进建议，不能直接退款、拒赔、补发或定责。高置信 positive 时不要写得像“还没判断出来”，应写“按高度支持用户诉求的证据进入人工售后处理，并补充核对订单/SKU/仓库/物流记录用于业务闭环”。
+- human_required: true / false。只表示证据是否必须人工复核；明确正负且没有阻断冲突时应为 false。
+- business_follow_up_reason: 分开说明证据复核需求和后续业务流转需求。
+- next_step: 给甲方的 SOP 处理建议，可以明确建议支持、不支持、补件或安慰性补偿，但不得声称已经执行退款、拒赔、补发或定责。
 - model_limitations: 本次判断的局限。
 """
 
@@ -728,11 +728,14 @@ def parse_model_json(text: str) -> Dict[str, Any]:
 def enforce_boundary(result: Dict[str, Any]) -> Dict[str, Any]:
     output = dict(result)
     output["business_action_allowed"] = False
-    output["human_required"] = True
+    output["human_required"] = bool(output.get("human_required"))
     next_step = str(output.get("next_step") or "")
-    risky = ("退款", "退货", "退换", "理赔", "补偿", "赔付", "拒赔", "拒绝", "补发", "同意")
-    if any(word in next_step for word in risky):
-        output["next_step"] = "输出证据摘要并转VIP客服复核，不直接退款、拒赔、补发或定责。"
+    executed_action = re.search(
+        r"(?:已经|已完成|已|立即|直接)(?:执行)?(?:退款|退货|退换|理赔|补偿|赔付|拒赔|拒绝|补发|换货)",
+        next_step,
+    )
+    if executed_action:
+        output["next_step"] = "输出明确的证据结论和SOP处理建议；具体业务动作由甲方系统执行。"
         output["boundary_enforced"] = True
     return output
 

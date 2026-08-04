@@ -78,6 +78,9 @@ def _observation(index: int) -> dict:
         "subject_role": role,
         "document_side": side,
         "readability": "clear",
+        "document_state": "filled" if document_type != "other" else "unknown",
+        "sop_eligibility": "valid" if document_type != "other" else "unknown",
+        "editing_evidence": [],
         "quality_issues": [],
         "ocr_text": "不应进入聚合结果的个人信息 18012345678 320000200801011234",
     }
@@ -238,6 +241,97 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(authenticity["severity"], "warning")
         self.assertFalse(authenticity["blocks_visual_precheck"])
         self.assertIn(3, authenticity["evidence_image_indices"])
+
+    def test_blank_template_does_not_satisfy_mobile_realname_requirement(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        observations = [_observation(index) for index in range(1, 21)]
+        observations[15]["document_state"] = "blank_template"
+        observations[15]["sop_eligibility"] = "invalid"
+        rows = [(list(range(1, 21)), {"parsed": {"material_observations": observations}})]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in ("identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname")
+        ]
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        checklist = {
+            item["requirement_id"]: item
+            for item in parsed["minor_material_assessment"]["checklist"]
+        }
+
+        self.assertEqual(checklist["mobile_realname"]["status"], "not_observed_after_full_scan")
+        self.assertTrue(any("绑定手机号实名归属证明" in item for item in parsed["material_gaps"]))
+
+    def test_recognized_identity_with_unknown_sop_state_is_present_but_requires_quality_check(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        observations = [_observation(index) for index in range(1, 21)]
+        for item in observations[:4]:
+            item["document_state"] = "unknown"
+            item["sop_eligibility"] = "unknown"
+            item["quality_issues"] = ["incomplete_page"]
+
+        parsed = aggregate_minor_material_results(
+            case,
+            [(list(range(1, 21)), {"parsed": {"material_observations": observations}})],
+            [],
+            [],
+            [],
+        )
+        identity = next(
+            item for item in parsed["minor_material_assessment"]["checklist"]
+            if item["requirement_id"] == "identity"
+        )
+
+        self.assertEqual(identity["status"], "present")
+        self.assertEqual(identity["quality_status"], "needs_manual_confirmation")
+
+    def test_operator_account_screenshot_is_supporting_evidence_only(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        observations = [_observation(index) for index in range(1, 21)]
+        observations[15].update({
+            "document_type": "mobile_realname_proof",
+            "document_types": ["mobile_realname_proof"],
+            "document_state": "filled",
+            "sop_eligibility": "supporting_only",
+        })
+        rows = [(list(range(1, 21)), {"parsed": {"material_observations": observations}})]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in ("identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname")
+        ]
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        checklist = {
+            item["requirement_id"]: item
+            for item in parsed["minor_material_assessment"]["checklist"]
+        }
+
+        self.assertEqual(checklist["mobile_realname"]["status"], "not_observed_after_full_scan")
+        self.assertTrue(any("绑定手机号实名归属证明" in item for item in parsed["material_gaps"]))
+
+    def test_repeated_generic_edit_warnings_do_not_become_critical(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        observations = [_observation(index) for index in range(1, 21)]
+        for item in observations[:6]:
+            item["quality_issues"] = ["suspected_editing"]
+            item["editing_evidence"] = []
+        rows = [(list(range(1, 21)), {"parsed": {"material_observations": observations}})]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in ("identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname")
+        ]
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        authenticity = parsed["minor_material_assessment"]["authenticity_assessment"]
+
+        self.assertEqual(authenticity["severity"], "warning")
+        self.assertFalse(authenticity["blocks_visual_precheck"])
 
     def test_single_page_consistency_evidence_can_match(self) -> None:
         result = _consistency_result("order_payment")
@@ -413,7 +507,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
 
         self.assertEqual(mobile_check["status"], "uncertain")
-        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["predicted_label"], "positive")
+        self.assertEqual(parsed["minor_material_assessment"]["visual_precheck_status"], "passed")
 
     def test_partial_but_sufficient_visible_fields_can_match(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -437,7 +532,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(parsed["predicted_label"], "positive")
         self.assertEqual(parsed["minor_material_assessment"]["visual_precheck_status"], "passed")
 
-    def test_consistency_jobs_cover_all_related_images_and_any_uncertain_segment_downgrades(self) -> None:
+    def test_consistency_jobs_cover_all_related_images_and_uncertain_segment_is_non_blocking(self) -> None:
         case = _case(image_count=20, frame_count=0)
         consistency_segments = []
 
@@ -494,9 +589,9 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         self.assertTrue(set(range(9, 21)).issubset(set(mobile_check["evidence_image_indices"])))
         self.assertEqual(mobile_check["status"], "uncertain")
-        self.assertEqual(result["parsed"]["predicted_label"], "review")
+        self.assertEqual(result["parsed"]["predicted_label"], "positive")
 
-    def test_partially_readable_related_image_is_covered_and_blocks_visual_precheck_pass(self) -> None:
+    def test_partially_readable_related_image_is_covered_as_non_blocking_warning(self) -> None:
         case = _case(image_count=20, frame_count=0)
         consistency_segments = []
 
@@ -531,7 +626,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertIn(2, related_coverage)
         assessment = result["parsed"]["minor_material_assessment"]
         self.assertEqual(assessment["field_consistency"]["verdict"], "uncertain")
-        self.assertNotEqual(assessment["visual_precheck_status"], "passed")
+        self.assertEqual(assessment["visual_precheck_status"], "passed")
         self.assertFalse(result["parsed"]["human_required"])
 
     def test_uncertain_visible_field_is_advisory_in_default_policy(self) -> None:
@@ -551,8 +646,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
         )
 
-        self.assertEqual(parsed["predicted_label"], "review")
-        self.assertEqual(parsed["decision"], "continue_by_customer_policy")
+        self.assertEqual(parsed["predicted_label"], "positive")
+        self.assertEqual(parsed["decision"], "visual_precheck_passed_with_warnings")
         self.assertFalse(parsed["human_required"])
 
     def test_failed_consistency_call_is_included_in_usage_and_cost(self) -> None:

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""通过公开工作台接口执行商品有伤盲测包，不读取人工标签。"""
+"""通过公开工作台接口执行视觉审核盲测包，不读取人工标签。"""
 from __future__ import annotations
 
 import argparse
@@ -39,7 +39,14 @@ def submission_paths(bundle: Path, audit: dict) -> list[Path]:
     return [bundle / name for name in sorted(included) if name != "blind_bundle_audit.json"]
 
 
-def run_case(base_url: str, bundle: Path, fps: float, max_frames: int, threshold: float) -> dict:
+def run_case(
+    base_url: str,
+    bundle: Path,
+    scenario: str,
+    fps: float,
+    max_frames: int,
+    threshold: float,
+) -> dict:
     audit = json.loads((bundle / "blind_bundle_audit.json").read_text(encoding="utf-8"))
     validate_label_isolation(audit)
     claim = (bundle / "content.txt").read_text(encoding="utf-8-sig").strip() if (bundle / "content.txt").exists() else ""
@@ -57,8 +64,8 @@ def run_case(base_url: str, bundle: Path, fps: float, max_frames: int, threshold
             handle = stack.enter_context(path.open("rb"))
             files.append(("files", (path.name, handle, mimetypes.guess_type(path.name)[0] or "application/octet-stream")))
         data = {
-            "scenario": "product_damage",
-            "business_scenario": "product_damage",
+            "scenario": scenario,
+            "business_scenario": scenario,
             "ticket_id": bundle.name,
             "customer_claim": claim,
             "conversation_history": json.dumps(customer_context, ensure_ascii=False) if customer_context else "",
@@ -98,8 +105,13 @@ def run_case(base_url: str, bundle: Path, fps: float, max_frames: int, threshold
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="执行商品有伤盲测回归")
+    parser = argparse.ArgumentParser(description="执行视觉审核盲测回归")
     parser.add_argument("bundles", nargs="+", type=Path)
+    parser.add_argument(
+        "--scenario",
+        choices=("product_damage", "wrong_item", "missing_item", "minor_refund", "minor_material"),
+        default="product_damage",
+    )
     parser.add_argument("--base-url", default="http://127.0.0.1:7864")
     parser.add_argument("--fps", type=float, default=1.0)
     parser.add_argument("--max-frames", type=int, default=1200)
@@ -108,14 +120,43 @@ def main() -> int:
     args = parser.parse_args()
     results = []
     for bundle in args.bundles:
-        payload = run_case(args.base_url, bundle, args.fps, args.max_frames, args.out_of_frame_threshold)
+        payload = run_case(
+            args.base_url,
+            bundle,
+            args.scenario,
+            args.fps,
+            args.max_frames,
+            args.out_of_frame_threshold,
+        )
         parsed = (((payload.get("review") or {}).get("agent_report") or {}).get("parsed") or {})
+        advisory = (
+            parsed.get("advisory_assessment")
+            or ((payload.get("review") or {}).get("agent_report") or {}).get("advisory_assessment")
+            or (payload.get("review") or {}).get("advisory_assessment")
+            or {}
+        )
+        minor = parsed.get("minor_material_assessment") or {}
         results.append(
             {
                 "case_id": bundle.name,
                 "ok": payload.get("ok"),
                 "predicted_label": parsed.get("predicted_label"),
                 "confidence": parsed.get("confidence"),
+                "conclusion": (parsed.get("overall_audit") or {}).get("conclusion"),
+                "workflow_recommendation": advisory.get("workflow_recommendation"),
+                "human_review": advisory.get("human_review"),
+                "minor_material_assessment": {
+                    "readiness": minor.get("readiness"),
+                    "visual_precheck_status": minor.get("visual_precheck_status"),
+                    "declared_image_count": minor.get("declared_image_count"),
+                    "accepted_image_count": minor.get("accepted_image_count"),
+                    "processed_image_count": minor.get("processed_image_count"),
+                    "checklist": minor.get("checklist"),
+                    "field_consistency": minor.get("field_consistency"),
+                    "authenticity_assessment": minor.get("authenticity_assessment"),
+                }
+                if minor
+                else None,
                 "damage_causality_assessment": parsed.get("damage_causality_assessment"),
                 "object_continuity_assessment": parsed.get("object_continuity_assessment"),
                 "continuity_guard_reason": parsed.get("continuity_guard_reason"),
@@ -132,6 +173,7 @@ def main() -> int:
     report = {
         "label_isolation": "推理阶段不读取 annotation、reply 原文件、管理员消息或人工标签；只使用盲测包内清洗后的用户本人消息，本文件不计算命中率。",
         "base_url": args.base_url,
+        "scenario": args.scenario,
         "fps": args.fps,
         "out_of_frame_threshold_seconds": args.out_of_frame_threshold,
         "results": results,

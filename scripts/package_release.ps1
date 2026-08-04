@@ -12,7 +12,9 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Root = Split-Path -Parent $PSScriptRoot
 $Date = Get-Date -Format "yyyyMMdd"
 $ZipName = "MITAKO_Agent-customer-preview-$Date.zip"
-$ZipPath = Join-Path (Split-Path -Parent $Root) $ZipName
+$DeliveryDir = Join-Path $Root "dist"
+$ZipPath = Join-Path $DeliveryDir $ZipName
+$CustomerHtmlPath = Join-Path $DeliveryDir "MITAKO_Agent-customer-delivery.html"
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_customer_stage_$Date"
 $CompileStage = Join-Path $env:TEMP "mitako_runtime_compile_$Date"
 $GitCommit = (git rev-parse HEAD).Trim()
@@ -490,6 +492,10 @@ $deliveryEngineer = Join-Path $Stage "docs\delivery\engineer-onboarding.md"
 if (Test-Path $deliveryEngineer) { Remove-Item -LiteralPath $deliveryEngineer -Force }
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
+$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0805审核建议、盲测与完整功能说明.html"
+if (-not (Test-Path -LiteralPath $CustomerHtmlSource -PathType Leaf)) {
+    throw "Customer delivery HTML is missing: $CustomerHtmlSource"
+}
 if (Test-Path (Join-Path $Root $customerDocsName)) {
     Copy-Dir $customerDocsName $customerDocsName
 
@@ -847,6 +853,10 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0805-blind-evidence-acceptance-20260805.html",
+    "甲方沟通交付文档\0805审核建议、盲测与完整功能说明.html",
+    "docs\delivery\mitako-0803-review-advice-acceptance-20260803.html",
+    "甲方沟通交付文档\0803完整功能测试与联调说明.html",
     "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",
     "甲方沟通交付文档\0731商品有伤SOP与报告一致性更新说明.html",
     "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
@@ -897,10 +907,13 @@ Write-Host "[5/6] Run customer package gate ..."
 Assert-NoCustomerLeak $Stage
 
 Write-Host "[6/6] Create ZIP ..."
+New-Item -ItemType Directory -Path $DeliveryDir -Force | Out-Null
 if (Test-Path $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
 Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $ZipPath -CompressionLevel Optimal
+Copy-Item -LiteralPath $CustomerHtmlSource -Destination $CustomerHtmlPath -Force
 Remove-Item -LiteralPath $Stage -Recurse -Force
 
 $sizeMb = [math]::Round((Get-Item $ZipPath).Length / 1MB, 2)
 Write-Host ("[OK] Created " + $ZipPath + " (" + $sizeMb + " MB)") -ForegroundColor Green
+Write-Host ("[OK] Customer HTML: " + $CustomerHtmlPath) -ForegroundColor Green
 Write-Host "Customer package gate passed." -ForegroundColor Yellow

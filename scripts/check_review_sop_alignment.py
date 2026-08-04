@@ -42,7 +42,10 @@ def main() -> int:
     }
     boundaries = all(
         "business_action_allowed 必须为 false" in build_system_prompt(scenario)
-        and "human_required 必须为 true" in build_system_prompt(scenario)
+        and "human_required 只表示证据是否必须人工复核" in build_system_prompt(scenario)
+        and "不能因为业务动作由甲方执行就强制转人工" in build_system_prompt(scenario)
+        and "证据足够时要敢于输出 positive 或 negative" in build_system_prompt(scenario)
+        and "不自动退款、不自动拒赔、不自动补发、不自动定责" in build_system_prompt(scenario)
         for scenario in REQUIRED
     )
     report = {"ok": all(checks.values()) and boundaries, "scenarios": checks, "business_boundary": boundaries}

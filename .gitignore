@@ -48,6 +48,7 @@ poc/visual_review_poc/downloaded_videos/
 poc/visual_review_poc/sample_videos/
 docs/三大审核场景的小量样本/
 dist/memes/
+dist/MITAKO_Agent-customer-delivery.html
 
 # 打包与大模型文件
 release/

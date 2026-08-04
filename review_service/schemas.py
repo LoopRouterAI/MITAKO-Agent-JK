@@ -96,6 +96,8 @@ MinorDocumentType = Literal[
 MinorDocumentRole = Literal["guardian", "minor", "unknown", "not_applicable"]
 MinorDocumentSide = Literal["front", "back", "page", "multiple", "unknown"]
 MinorDocumentReadability = Literal["clear", "partial", "unknown"]
+MinorDocumentState = Literal["filled", "blank_template", "example", "unknown"]
+MinorDocumentSopEligibility = Literal["valid", "supporting_only", "invalid", "unknown"]
 MinorDocumentQualityIssue = Literal[
     "blur",
     "glare",
@@ -104,6 +106,13 @@ MinorDocumentQualityIssue = Literal[
     "incomplete_page",
     "suspected_editing",
     "other",
+]
+MinorEditingEvidenceCode = Literal[
+    "inconsistent_text_edge",
+    "duplicated_region",
+    "local_resampling_artifact",
+    "impossible_geometry",
+    "other_specific_anomaly",
 ]
 
 
@@ -120,7 +129,10 @@ class ReviewMinorMaterialObservation(BaseModel):
     document_side: MinorDocumentSide = "unknown"
     issuing_country_or_region: str = Field(default="unknown", min_length=1, max_length=80)
     readability: MinorDocumentReadability = "unknown"
+    document_state: MinorDocumentState = "unknown"
+    sop_eligibility: MinorDocumentSopEligibility = "unknown"
     quality_issues: List[MinorDocumentQualityIssue] = Field(default_factory=list, max_length=8)
+    editing_evidence_codes: List[MinorEditingEvidenceCode] = Field(default_factory=list, max_length=8)
 
     @field_validator("issuing_country_or_region", mode="before")
     @classmethod
@@ -171,6 +183,7 @@ class ReviewDecisionPolicy(BaseModel):
     """甲方可选的规则判定策略；默认不把证据不足自动判为不支持。"""
 
     mode: Literal["conservative_review", "classification_recommendation"] = "classification_recommendation"
+    recommendation_gate_mode: Literal["strict", "core_sop"] = "strict"
     policy_ref: str = Field(default=DEFAULT_PRODUCT_DAMAGE_POLICY_REF, max_length=160)
     opening_video_required: bool = False
     missing_required_opening_video: Literal["review", "negative"] = "review"
@@ -409,6 +422,19 @@ class ReviewHumanReviewAdvice(BaseModel):
     recommendation: str
 
 
+class ReviewSopRecommendation(BaseModel):
+    code: Literal[
+        "support_claim",
+        "not_support_claim",
+        "comfort_compensation",
+        "request_more_material",
+        "further_assessment",
+        "system_retry",
+    ]
+    recommendation: str
+    basis: str
+
+
 class ReviewAdvisorySignal(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -430,6 +456,7 @@ class ReviewAdvisoryPolicy(BaseModel):
 class ReviewAdvisoryAssessment(BaseModel):
     scenario: str
     assessment: ReviewAssessmentDetails
+    sop_recommendation: Optional[ReviewSopRecommendation] = None
     human_review: ReviewHumanReviewAdvice
     workflow_recommendation: Literal[
         "human_review",

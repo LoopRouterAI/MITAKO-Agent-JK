@@ -507,6 +507,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     }.get(str(video.get("playback_speed") or "unknown"), "无法判断")
     advisory = report.get("advisory_assessment") or data.get("advisory_assessment") or {}
     advisory_assessment = advisory.get("assessment") or {}
+    sop_recommendation = advisory.get("sop_recommendation") or {}
     human_review = advisory.get("human_review") or {}
     advisory_policy = advisory.get("policy") or {}
     human_level = str(human_review.get("level") or "")
@@ -534,24 +535,6 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         if isinstance(item, dict)
     )
     advisory_panel = ""
-    if advisory:
-        advisory_panel = f"""
-  <section class="panel boundary-panel advisory-panel decision-{_h(advisory_assessment.get('conclusion_code') or 'unknown')}">
-    <div class="section-head"><h2>按照 SOP 的审核倾向</h2><p>这是审核建议，不是退款、换货、补发或拒绝决定。</p></div>
-    <div class="causality-grid">
-      <article><small>SOP 审核倾向</small><b>{_h(advisory_assessment.get("conclusion") or "未形成")}</b></article>
-      <article><small>证据分数</small><b>{_h(advisory_assessment.get("confidence") if advisory_assessment.get("confidence") is not None else "-")}</b></article>
-      <article><small>人工复审建议</small><b>{_h(human_level_label)}</b></article>
-      <article><small>流程建议</small><b>{_h(workflow_label)}</b></article>
-    </div>
-    <div class="human-action status-{_h({'required': 'red', 'optional': 'amber', 'not_required': 'green'}.get(human_level, 'amber'))}">
-      <h3>建议进一步评估</h3><p>{_h(human_review.get("recommendation") or "本轮没有额外复核建议。")}</p>
-    </div>
-    <p><b>分数怎么看：</b>这是证据充分程度，不是客观正确率。分数越高，表示本轮证据链越完整、矛盾越少。</p>
-    <p><b>业务边界：</b>{_h(advisory_policy.get("boundary") or "本服务不直接决定退款、补发、换货、拒绝或最终定责。")}</p>
-    <div class="boundary-grid">{signal_cards or '<p class="muted">本轮没有额外风险信号。</p>'}</div>
-  </section>
-"""
     channel_labels = {
         "main_review": "主审核",
         "object_continuity": "主体连续性",
@@ -618,6 +601,10 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         next_step = human_review.get("recommendation") or next_step
     elif workflow == "system_retry":
         next_step = "当前请求已完成结构修复和逐张恢复；仍未覆盖时可受控重跑整案，可能重复模型成本，且不要求用户补材料。"
+    elif workflow == "continue_by_customer_policy" and human_level == "not_required":
+        next_step = "按 SOP 审核倾向继续处理，本轮无需人工复审；具体业务动作由甲方系统执行。"
+    elif workflow == "continue_by_customer_policy" and human_level == "optional":
+        next_step = "按 SOP 审核倾向继续处理；仅按甲方抽检规则回看风险项，不要求逐单人工复审。"
     if failed:
         conclusion = data.get("conclusion") or conclusion
         core_reason = diagnostics.get("failure_reason") or "本轮审核没有完成，不能把该结果解释为业务证据不足。"
@@ -645,6 +632,31 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     minor_material_panel = render_minor_material_panel(parsed.get("minor_material_assessment"), _h)
     confidence_components_panel = render_confidence_components_panel(parsed.get("confidence_components"), _h)
     decision_policy_panel = _decision_policy_panel(parsed.get("decision_policy_audit") or data.get("decision_policy_audit"))
+    gap_items = material_gaps if isinstance(material_gaps, list) else [material_gaps] if material_gaps else []
+    gap_summary = "；".join(str(item) for item in gap_items[:3]) or "本轮未发现需要用户补充的明确材料。"
+    advisory_panel = f"""
+  <section class="panel advisory-panel decision-{_h(advisory_assessment.get('conclusion_code') or 'unknown')}">
+    <div class="section-head"><h2>客服审核摘要</h2><p>按照 SOP 的审核倾向，先看建议，再决定是否展开技术细节。</p></div>
+    <div class="causality-grid">
+      <article><small>证据结论</small><b>{_h(advisory_assessment.get("conclusion") or conclusion)}</b></article>
+      <article><small>SOP 处理建议</small><b>{_h(sop_recommendation.get("recommendation") or advisory_assessment.get("conclusion") or conclusion)}</b></article>
+      <article><small>证据分数</small><b>{_h(advisory_assessment.get("confidence") if advisory_assessment.get("confidence") is not None else confidence)}</b></article>
+      <article><small>人工复审</small><b>{_h(human_level_label)}</b></article>
+      <article><small>流程</small><b>{_h(workflow_label)}</b></article>
+    </div>
+    <p class="muted">证据分数表示本轮证据充分程度，不是客观正确率。</p>
+    <div class="summary-reason"><h3>为什么这样建议</h3><p>{_h(core_reason or advisory_assessment.get("reason") or conclusion)}</p></div>
+    <div class="summary-gaps"><h3>需要补什么</h3><p>{_h(gap_summary)}</p></div>
+    <div class="human-action status-{_h({'required': 'red', 'optional': 'amber', 'not_required': 'green'}.get(human_level, 'amber'))}">
+      <h3>客服下一步</h3><p>{_h(next_step)}</p>
+      <p class="muted">建议进一步评估：{_h(human_review.get("recommendation") or "本轮没有额外人工复核重点。")}</p>
+    </div>
+    <h3>关键证据</h3>
+    <div class="evidence-grid">{_evidence_items(list(supporting_evidence)[:6], media_gallery)}</div>
+    <p><b>业务边界：</b>{_h(advisory_policy.get("boundary") or "本服务输出证据结论和 SOP 处理建议；具体业务动作由甲方系统执行，人工复审等级独立判断。")}</p>
+    <details class="summary-signals"><summary>查看其他风险信号</summary><div class="boundary-grid">{signal_cards or '<p class="muted">本轮没有额外风险信号。</p>'}</div></details>
+  </section>
+"""
     conclusion_code = str(advisory_assessment.get("conclusion_code") or "")
     yes_no = "REVIEW" if failed else {
         "evidence_supports_claim": "YES",
@@ -764,11 +776,9 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 
   {advisory_panel}
 
-  <section class="panel next-step">
-    <h2>建议下一步</h2>
-    <p>{_h(next_step)}</p>
-  </section>
-
+	<details class="panel technical-details">
+	  <summary>展开完整技术分析</summary>
+	  <div class="technical-details-body">
 	  <section class="metrics">
 		    <div class="metric hot"><small>视觉质检</small><b>{_h("审核未完成" if failed else visual_verdict)}</b></div>
 	    <div class="metric video-only"><small>商品连续性分数</small><b>{_h(video.get("continuity_score") or "-")}</b></div>
@@ -792,7 +802,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 		  </section>
 	  {diagnostic_panel}
 
-			  <section class="panel">
+	  <section class="panel">
 	    <div class="section-head"><h2>审核Agent采信的证据</h2><p>每张图都可以在本页放大查看；带时间点的帧可以直接预览原视频片段。</p></div>
 	    <div class="evidence-grid">{_evidence_items(supporting_evidence, media_gallery)}</div>
 	  </section>
@@ -851,6 +861,8 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     <h3>补充图片</h3>
     <div class="media-grid">{_gallery_items(media_gallery.get("images") or [], "补充图片")}</div>
 	  </section>
+	  </div>
+	</details>
 </main>
 {_LIGHTBOX_HTML}
 </body>
@@ -1022,6 +1034,16 @@ p { line-height:1.75; }
 	.panel { margin-top:16px; padding:22px; }
 	.next-step { background:linear-gradient(135deg,#f2ffd9,#fff 72%); }
 	.failure-panel { background:linear-gradient(135deg,#fff2e7,#fff 74%); border-color:rgba(255,138,31,.35); }
+.technical-details > summary, .summary-signals > summary {
+  cursor:pointer;
+  font-weight:900;
+  list-style-position:inside;
+}
+.technical-details-body { margin-top:16px; }
+.technical-details-body > .panel { box-shadow:none; border-color:var(--line); }
+.summary-reason, .summary-gaps, .human-action { margin-top:12px; padding:14px; border-radius:8px; background:#f7faef; }
+.summary-reason h3, .summary-gaps h3, .human-action h3 { margin-top:0; }
+.summary-signals { margin-top:14px; }
 .metrics {
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(168px,1fr));

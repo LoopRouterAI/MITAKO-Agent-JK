@@ -64,6 +64,9 @@ python tests/e2e/run_desk_admin_screenshot_report.py
 
 | 文档 | 用途 |
 |---|---|
+| `甲方沟通交付文档/0805审核建议、盲测与完整功能说明.html` | 本轮审核建议、关键证据、盲测方法、完整功能和联调边界的人话版说明 |
+| `docs/delivery/mitako-0805-blind-evidence-acceptance-20260805.html` | 商品有伤与未成年人正负样本中立盲测、真实 API、报告和标签隔离验收 |
+| `我方内部开发文档/升级日志-2026-08-05-证据语义与客服决策收敛.md` | 事实识别、SOP 建议、人工复审分离及本轮回归证据 |
 | `甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html` | 审核结论、三级复审、离框补件与 JSON/HTML 选择的人话版说明 |
 | `docs/delivery/review-advisory-api.md` | Java/API 对接的统一审核建议字段说明 |
 | `我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md` | 本轮代码、调用链、兼容和回归记录 |
@@ -112,10 +115,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package_internal_rel
 
 内部包含敏感配置和业务数据，不得转发甲方或上传公开位置。详见 `我方内部开发文档/内部研发包交付说明.md`。
 
+所有可发送产物只允许位于 `dist/`：
+
+- `dist/MITAKO_Agent-customer-preview-YYYYMMDD.zip`：发送甲方的测试包。
+- `dist/MITAKO_Agent-customer-delivery.html`：可单独发送甲方的当前说明。
+- `dist/MITAKO_Agent-internal-dev-YYYYMMDD.zip`：仅限我方研发，禁止外发。
+
+项目父目录、`release/` 和其他目录中的同名 ZIP 均视为旧副本，不得继续交付。
+
 涉及审核提示词、抽帧或模型路由的正式候选版，还应额外执行真实多模态批次：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pre_release_internal_validation.ps1 -RunModelBatch
 ```
 
-打包脚本会按交付规则过滤本地密钥、数据库、日志、运行时缓存和大文件。不要手工压缩整个仓库交付给甲方。
+打包脚本会按交付规则过滤本地密钥、数据库、日志、运行时缓存和大文件。不要手工压缩整个仓库，也不要把发布物复制到 `dist/` 之外。

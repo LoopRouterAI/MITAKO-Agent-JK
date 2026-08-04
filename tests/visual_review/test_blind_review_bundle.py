@@ -19,6 +19,7 @@ class BlindReviewBundleTest(unittest.TestCase):
             source.mkdir()
             (source / "content.txt").write_text("商品到手有伤", encoding="utf-8")
             (source / "evidence.jpg").write_bytes(b"image")
+            (source / "._evidence.mp4").write_bytes(b"resource-fork")
             (source / "reply.json").write_text(
                 json.dumps(
                     [
@@ -68,6 +69,8 @@ class BlindReviewBundleTest(unittest.TestCase):
         self.assertTrue(media_reused)
         self.assertIn("annotation.json", audit["excluded_files"])
         self.assertIn("reply.json", audit["excluded_files"])
+        self.assertIn("._evidence.mp4", audit["excluded_files"])
+        self.assertFalse((output / "._evidence.mp4").exists())
         self.assertNotIn("annotation", manifest)
         self.assertNotIn("负样本", manifest)
         self.assertNotIn('"tag"', manifest)

@@ -7,10 +7,41 @@ from pathlib import Path
 from unittest.mock import patch
 
 from poc.visual_review_poc.model_selection_e2e import call_model_chunked, gemini_payload, openai_messages
+from poc.visual_review_poc.local_video_triage_demo import build_system_prompt, enforce_boundary
 from poc.visual_review_poc.review_model_prompt import build_selection_prompt
 
 
 class ModelRequestIsolationTest(unittest.TestCase):
+    def test_business_boundary_does_not_force_every_case_to_human_review(self):
+        prompt = build_system_prompt("product_damage")
+        selection_prompt = build_selection_prompt({
+            "scenario_label": "商品有伤审核",
+            "customer_claim": "商品有伤",
+            "order_context": {},
+            "structured_business_context": {},
+            "evidence_assets": [],
+            "videos": [],
+            "frames": [],
+            "supplemental_images": [],
+        })
+
+        self.assertNotIn("human_required 必须为 true", prompt)
+        self.assertNotIn("human_required: true。", selection_prompt)
+        self.assertNotIn("其他情况一律 review", prompt)
+        self.assertIn("SOP 材料合规规则", prompt)
+        self.assertIn("不能因为业务动作由甲方执行就强制转人工", prompt)
+
+    def test_boundary_preserves_advisory_compensation_without_claiming_execution(self):
+        result = enforce_boundary({
+            "predicted_label": "negative",
+            "human_required": False,
+            "next_step": "按照 SOP 可建议最低档安慰性补偿。",
+        })
+
+        self.assertFalse(result["business_action_allowed"])
+        self.assertFalse(result["human_required"])
+        self.assertIn("安慰性补偿", result["next_step"])
+
     def test_prompt_distinguishes_acceleration_from_editing_or_missing_process(self):
         prompt = build_selection_prompt({
             "scenario_label": "商品有伤审核",
@@ -36,7 +67,10 @@ class ModelRequestIsolationTest(unittest.TestCase):
                 "customer_claim": "商品包装有压痕",
                 "order_context": {},
                 "structured_business_context": {},
-                "evidence_assets": [],
+                "evidence_assets": [{
+                    "file": "reply.json",
+                    "fields": ["人工认可", "正样本", "annotation"],
+                }],
                 "videos": [
                     {
                         "video_index": 1,
@@ -76,7 +110,10 @@ class ModelRequestIsolationTest(unittest.TestCase):
                 openai_messages("系统", prompt, case),
             ]
         serialized = json.dumps(payloads, ensure_ascii=False)
-        for marker in ("负样本", "人工拒绝", "审核不通过", media.name):
+        for marker in (
+            "负样本", "正样本", "人工拒绝", "人工认可", "审核不通过",
+            "reply.json", "annotation", media.name,
+        ):
             self.assertNotIn(marker, serialized)
         self.assertIn("video_1_frame_1", serialized)
         self.assertIn("supplemental_image_1", serialized)

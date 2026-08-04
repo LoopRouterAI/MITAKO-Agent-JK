@@ -1,6 +1,6 @@
 # 审核建议结果 API 使用说明
 
-版本：2026-07-31
+版本：2026-08-05
 
 ## 1. 使用目的
 
@@ -179,6 +179,9 @@
 - `minor_material_assessment.authoritative_verification.status=not_configured_optional`：默认未配置且不阻断；不是接口故障。
 - 五类材料齐全、字段仅有非阻断存疑时允许 `decision=continue_by_customer_policy`、`human_required=false`，由甲方按风险偏好抽检。
 - 字段明确冲突、字段比对技术失败、多重疑似编辑证据或严格验真待完成时才 `human_required=true`。
+- `agent_brief.next_step` 与 `advisory_assessment` 同源：`optional` 只提示抽检，`not_required` 明确无需人工，不能沿用模型早期生成的逐单 VIP 复核文案。
+- `material_inventory[].document_state` 区分已填写资料、空白模板、示例和未知；`sop_eligibility` 区分有效、仅辅助、无效和未知。普通运营商账户截图不得替代用户特定的手机号实名归属证明。
+- `material_inventory[].quality_issues` 可以在脱敏公开响应中解释黄/红原因；OCR 原文、姓名、证件号、手机号、护照号和地址继续禁止公开。
 
 真实盲测命令：
 

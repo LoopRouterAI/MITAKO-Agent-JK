@@ -465,8 +465,8 @@ def _verify_internal_python(root: Path, python: Path) -> None:
 def main() -> int:
     date = time.strftime("%Y%m%d")
     parser = argparse.ArgumentParser(description="MITAKO 发布包解压后验收")
-    parser.add_argument("--internal-zip", type=Path, default=ROOT.parent / f"MITAKO_Agent-internal-dev-{date}.zip")
-    parser.add_argument("--customer-zip", type=Path, default=ROOT.parent / f"MITAKO_Agent-customer-preview-{date}.zip")
+    parser.add_argument("--internal-zip", type=Path, default=ROOT / "dist" / f"MITAKO_Agent-internal-dev-{date}.zip")
+    parser.add_argument("--customer-zip", type=Path, default=ROOT / "dist" / f"MITAKO_Agent-customer-preview-{date}.zip")
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     args = parser.parse_args()
 

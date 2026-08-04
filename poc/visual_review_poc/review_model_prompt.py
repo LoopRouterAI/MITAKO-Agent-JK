@@ -71,7 +71,6 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 用户诉求：{safe_case.get("customer_claim") or "未提供"}
 订单/工单上下文：{json.dumps(safe_case.get("order_context") or {}, ensure_ascii=False)}
 结构化业务上下文：{json.dumps(safe_case.get("structured_business_context") or {}, ensure_ascii=False)}
-证据资源字段说明：{json.dumps(safe_case.get("evidence_assets") or [], ensure_ascii=False)}
 视频清单：{json.dumps(videos, ensure_ascii=False)}
 送入模型的视频帧清单：{json.dumps(frames, ensure_ascii=False)}
 送入模型的补充图片清单：{json.dumps(images, ensure_ascii=False)}
@@ -117,9 +116,9 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 - material_gaps: 还缺什么材料。
 - conclusion_argument: support、challenge、why_not_final_business_decision。
 - business_action_allowed: false。
-- human_required: true。
-- business_follow_up_reason: 人工跟进原因。
-- next_step: 后续VIP客服建议，不直接退款、拒赔、补发或定责。
+- human_required: true / false。只表示证据是否必须人工复核；不能因为退款、拒赔、补发等业务动作由甲方执行就强制写 true。
+- business_follow_up_reason: 证据复核或业务流转原因；两者必须分开说明。
+- next_step: 给甲方的 SOP 处理建议，可以明确建议支持、不支持、补件或安慰性补偿，但不得声称已经执行退款、拒赔、补发或定责。
 - model_limitations: 局限。
 - damage_causality_assessment: 仅商品有伤场景必填，其他场景写 null。必须包含 damage_presence(confirmed/not_visible/uncertain)、damage_type_and_location、first_visible_evidence(对象，含 video_index/global_frame_index/timestamp/asset_ref 或 image_index，以及明确的 damage_visible 布尔值)、pre_opening_state_visible、opening_action_visible、damage_change_observed、damage_timing(pre_opening_visible/appears_during_opening/post_opening_only/unknown)、possible_origins(数组，每项含 origin、confidence、supporting_evidence、challenging_evidence)、most_likely_origin(manufacturing_or_original_packaging/logistics_transport/customer_opening_or_handling/mixed/indeterminate)、origin_confidence、causal_evidence_level(direct/indirect/insufficient)、claim_support(supported/not_supported/insufficient)、before_action_evidence/action_evidence/after_action_evidence(均为证据对象数组，每项含 video_index/global_frame_index/timestamp/subject/location/chain_id/fact，损伤帧还必须含 damage_visible，三段必须同对象同部位同 chain_id 且帧序递增)、alternative_explanations、cannot_conclude_reason。不得根据描述文字猜测损伤是否存在，也不得仅凭“看见有伤”或布尔自报推断损伤成因。
 - damage_observability: 仅商品有伤场景必填。包含 status(fully_observable/partial/not_observable/unknown)、same_item_linkage、claimed_region_closeup、required_view_coverage(0-1)、conflicting_evidence、missing_views。只有争议部位特写清晰、与开箱商品确认同物、必检视角全部覆盖且视频/图片不冲突时，才可写 fully_observable。

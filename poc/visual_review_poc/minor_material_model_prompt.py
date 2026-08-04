@@ -59,7 +59,7 @@ SOP 版本：minor_refund_2_0
 2. 监护关系证明：户口本相关页或出生证明二选一，不得同时要求二者。
 3. 监护人与未成年人亲笔签字的退款申请承诺书。
 4. 购买订单证明、支付流水或支付账单。
-5. 账号绑定手机号实名归属证明。运营商话费账单或电子发票属于已提交的候选证明：能确认实名主体及购物手机号/备注信息时同时归为 mobile_realname_proof；只能确认运营商发票时归为 carrier_invoice，并留给人工核对主体一致性。
+5. 账号绑定手机号实名归属证明。只有填写了本案用户信息、能看到实名主体和购物手机号或备注信息的运营商话费账单/电子发票，才属于有效证明。空白模板、示例图无效；只显示账号名和手机号的运营商 App 页面只能作为辅助线索，不能替代该证明。
 
 护照识别边界：
 - 护照作为可识别证件，document_type 必须输出 passport，并输出签发国家/地区 issuing_country_or_region 与可读性 readability。
@@ -70,6 +70,9 @@ SOP 版本：minor_refund_2_0
 - 必须逐张返回，不能漏掉本批任何 image_index。
 - 只判断本批图片实际可见的文档类型、角色、页/正反面和清晰度，不得根据文件顺序猜测。
 - 任一结构化字段缺失或不可读时统一输出 unknown，不得猜测，也不得写“用户未提交”“缺少其他批次材料”。
+- document_state 必须区分 filled、blank_template、example、unknown；模板和示例不得判为 filled。
+- sop_eligibility 必须区分 valid、supporting_only、invalid、unknown。材料类别识别正确不等于满足 SOP；运营商 App 账号页只能标 supporting_only。
+- suspected_editing 只允许在发现明确局部异常时使用，并同时填写 editing_evidence_codes。压缩、扫描、截图、水印、缺少 EXIF、轻微模糊或普通拍屏不能单独视为编辑证据。
 - 不得输出姓名、手机号、证件号、住址、订单号、付款账号、二维码内容或任何 OCR 原文。
 - 不执行退款、拒绝、通过等业务动作。
 
@@ -86,7 +89,10 @@ SOP 版本：minor_refund_2_0
       "document_side": "front|back|page|multiple|unknown",
       "issuing_country_or_region": "国家或地区名称|unknown",
       "readability": "clear|partial|unknown",
-      "quality_issues": ["blur|glare|occlusion|excessive_redaction|incomplete_page|suspected_editing|other"]
+      "document_state": "filled|blank_template|example|unknown",
+      "sop_eligibility": "valid|supporting_only|invalid|unknown",
+      "quality_issues": ["blur|glare|occlusion|excessive_redaction|incomplete_page|suspected_editing|other"],
+      "editing_evidence_codes": ["inconsistent_text_edge|duplicated_region|local_resampling_artifact|impossible_geometry|other_specific_anomaly"]
     }}
   ],
   "batch_limitations": []
@@ -184,7 +190,7 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
 5. 订单与支付：比较订单引用、付款主体、金额和交易范围在所给凭证中是否一致；不得声称平台订单或支付记录真实。
 6. 手机号实名：比较运营商材料中的实名主体、账号绑定手机号和发票抬头/备注是否与其他材料一致；不得声称运营商实名状态真实有效。
    主副卡并存、号码部分遮盖、发票备注不完整或无法建立主副卡关系时必须输出 uncertain，不得输出 mismatched。
-7. 同时检查明显裁切、拼接、涂改、遮挡或字段冲突风险。疑似编辑只能标风险，不能直接认定造假。
+7. 同时检查明显裁切、拼接、涂改、遮挡或字段冲突风险。疑似编辑只能标风险，不能直接认定造假。tamper_risk=high 必须有明确局部异常，并只在 tamper_evidence_image_indices 中引用直接支持该异常的图片；压缩、扫描、截图、水印、缺少 EXIF 或一般清晰度问题不得单独判 high。
 
 隐私与业务边界：
 - 模型可以在本次推理中读取字段用于比较，但不得输出任何字段原值、部分值、尾号、姓名、号码、金额、地址、OCR原文或哈希。
@@ -202,7 +208,8 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
     "check_id": "{check_id}",
     "field_results": {json.dumps(field_rows, ensure_ascii=False)},
     "tamper_risk": "low|medium|high|uncertain",
-    "risk_reason_codes": ["no_obvious_risk|suspected_editing|unreadable_fields|incomplete_document|conflicting_fields|evidence_gap"]
+    "risk_reason_codes": ["no_obvious_risk|suspected_editing|unreadable_fields|incomplete_document|conflicting_fields|evidence_gap"],
+    "tamper_evidence_image_indices": []
   }},
   "authoritative_verification": "disabled|advisory|required"
 }}

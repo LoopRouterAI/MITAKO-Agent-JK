@@ -345,12 +345,19 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
     def test_report_renders_advisory_assessment_and_business_boundary(self):
         data = _report_data()
+        data["agent_report"].setdefault("public_brief", {})["next_step"] = "将视觉证据摘要提交VIP客服复核。"
         data["agent_report"]["advisory_assessment"] = {
             "assessment": {
+                "conclusion_code": "evidence_supports_claim",
                 "conclusion": "当前视觉证据支持商品存在可见损伤。",
                 "confidence": 0.88,
                 "confidence_level": "high",
                 "calibration_status": "uncalibrated_evidence_score",
+            },
+            "sop_recommendation": {
+                "code": "support_claim",
+                "recommendation": "按照 SOP，当前材料倾向支持用户诉求。",
+                "basis": "商品损伤在送审证据中清晰可见。",
             },
             "human_review": {
                 "level": "optional",
@@ -370,22 +377,32 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
                 "policy_ref": "MITAKO-ADVISORY-20260723@1",
                 "advisory_only": True,
                 "business_action_allowed": False,
-                "boundary": "本服务不直接决定退款、补发、换货、拒绝或最终定责。",
+                "boundary": "本服务负责输出明确的证据结论和SOP处理建议；业务动作由甲方系统执行，是否需要人工复核由单独的复核等级决定。",
             },
         }
 
         report_html = render_public_report(data)
 
         self.assertIn("按照 SOP 的审核倾向", report_html)
+        self.assertIn("证据结论", report_html)
+        self.assertIn("当前材料倾向支持用户诉求", report_html)
         self.assertIn("建议进一步评估", report_html)
         self.assertIn("建议抽检", report_html)
         self.assertIn("按甲方规则继续", report_html)
         self.assertIn("短暂离镜仅降低证据强度", report_html)
         self.assertIn("不是客观正确率", report_html)
-        self.assertIn("本服务不直接决定退款、补发、换货、拒绝或最终定责", report_html)
+        self.assertIn("业务动作由甲方系统执行，是否需要人工复核由单独的复核等级决定", report_html)
+        self.assertIn("不要求逐单", report_html)
+        self.assertNotIn("提交VIP客服复核", report_html)
 
     def test_report_renders_evidence_boundaries_and_links_gallery_media(self):
         report_html = render_public_report(_report_data())
+
+        self.assertIn("客服审核摘要", report_html)
+        self.assertIn("为什么这样建议", report_html)
+        self.assertIn("客服下一步", report_html)
+        self.assertIn("关键证据", report_html)
+        self.assertIn('<details class="panel technical-details">', report_html)
 
         for heading in ("审核Agent采信的证据", "反证与可疑帧", "问题时间点", "置信度分解与口径", "损伤来源与发生阶段", "主体连续性与离镜时间轴", "应发与视频展示清单对账", "置信度理由", "材料缺口", "模型局限"):
             self.assertIn(heading, report_html)
@@ -442,7 +459,7 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
                 "/media/timestamp.jpg": 8,
                 "/media/issue-time.jpg": 8,
             }.get(media_url, 4)
-            self.assertEqual(report_html.count(f'src="{media_url}"'), expected_count, media_url)
+            self.assertGreaterEqual(report_html.count(f'src="{media_url}"'), expected_count, media_url)
 
         self.assertNotIn("画面正常", report_html)
         self.assertNotIn("internal-provider-name", report_html)

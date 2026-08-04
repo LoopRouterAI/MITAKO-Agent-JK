@@ -26,6 +26,8 @@ ALLOWED_DOCUMENT_TYPES = {
 ALLOWED_ROLES = {"guardian", "minor", "unknown", "not_applicable"}
 ALLOWED_SIDES = {"front", "back", "page", "multiple", "unknown"}
 ALLOWED_READABILITY = {"clear", "partial", "unknown"}
+ALLOWED_DOCUMENT_STATES = {"filled", "blank_template", "example", "unknown"}
+ALLOWED_SOP_ELIGIBILITY = {"valid", "supporting_only", "invalid", "unknown"}
 ALLOWED_QUALITY_ISSUES = {
     "blur",
     "glare",
@@ -34,6 +36,13 @@ ALLOWED_QUALITY_ISSUES = {
     "incomplete_page",
     "suspected_editing",
     "other",
+}
+ALLOWED_EDITING_EVIDENCE_CODES = {
+    "inconsistent_text_edge",
+    "duplicated_region",
+    "local_resampling_artifact",
+    "impossible_geometry",
+    "other_specific_anomaly",
 }
 PROCESS_TYPES = {"invoice_generation", "document_capture", "payment_record", "other", "uncertain"}
 PROCESS_QUALITY = {"clear", "partial", "unreadable"}
@@ -168,13 +177,25 @@ def _authenticity_assessment(
         for item in observations
         if "suspected_editing" in (item.get("quality_issues") or [])
     }
+    specific_editing = {
+        int(item["image_index"])
+        for item in observations
+        if item.get("editing_evidence_codes")
+    }
     corroborated_editing: set[int] = set()
     for check in field_consistency.get("checks") or []:
-        if str(check.get("tamper_risk") or "").lower() == "high":
-            corroborated_editing.update(int(index) for index in check.get("evidence_image_indices") or [])
+        if (
+            str(check.get("tamper_risk") or "").lower() == "high"
+            and "suspected_editing" in (check.get("risk_reason_codes") or [])
+        ):
+            corroborated_editing.update(
+                int(index) for index in check.get("tamper_evidence_image_indices") or []
+            )
+    confirmed_editing = specific_editing.intersection(corroborated_editing)
+    suspected_editing.update(specific_editing)
     suspected_editing.update(corroborated_editing)
     evidence_indices = sorted(suspected_editing)
-    if corroborated_editing or len(evidence_indices) >= 2:
+    if confirmed_editing:
         severity = "critical"
         risk_score = min(0.94, 0.78 + 0.04 * len(evidence_indices))
         conclusion = "发现较强的疑似编辑或修改线索，请优先回看标红图片。"
@@ -239,6 +260,13 @@ def _normalize_observations(
                 for value in raw.get("quality_issues") or []
                 if str(value) in ALLOWED_QUALITY_ISSUES
             ][:8]
+            document_state = str(raw.get("document_state") or "filled")
+            sop_eligibility = str(raw.get("sop_eligibility") or "valid")
+            editing_evidence_codes = [
+                str(value)
+                for value in (raw.get("editing_evidence_codes") or raw.get("editing_evidence") or [])
+                if str(value) in ALLOWED_EDITING_EVIDENCE_CODES
+            ][:8]
             observation = ReviewMinorMaterialObservation.model_validate({
                 "image_index": image_index,
                 "asset_ref": f"supplemental_image_{image_index}",
@@ -248,7 +276,14 @@ def _normalize_observations(
                 "document_side": side if side in ALLOWED_SIDES else "unknown",
                 "issuing_country_or_region": raw.get("issuing_country_or_region") or "unknown",
                 "readability": readability,
+                "document_state": (
+                    document_state if document_state in ALLOWED_DOCUMENT_STATES else "unknown"
+                ),
+                "sop_eligibility": (
+                    sop_eligibility if sop_eligibility in ALLOWED_SOP_ELIGIBILITY else "unknown"
+                ),
                 "quality_issues": quality_issues,
+                "editing_evidence_codes": editing_evidence_codes,
             }).model_dump(mode="json")
             by_index[image_index] = observation
     observations = [by_index[index] for index in sorted(by_index)]
@@ -292,6 +327,30 @@ def _usable(observation: Dict[str, Any]) -> bool:
     }.intersection(observation.get("quality_issues") or [])
 
 
+def _sop_usable(observation: Dict[str, Any]) -> bool:
+    return (
+        _usable(observation)
+        and observation.get("document_state") == "filled"
+        and observation.get("sop_eligibility") == "valid"
+    )
+
+
+def _sop_present(observation: Dict[str, Any]) -> bool:
+    document_types = set(observation.get("document_types") or [])
+    strict_mobile = bool(document_types.intersection({"mobile_realname_proof", "carrier_invoice"}))
+    if strict_mobile:
+        return (
+            observation.get("readability") in {"clear", "partial"}
+            and observation.get("document_state") == "filled"
+            and observation.get("sop_eligibility") == "valid"
+        )
+    return (
+        observation.get("readability") in {"clear", "partial"}
+        and observation.get("document_state") not in {"blank_template", "example"}
+        and observation.get("sop_eligibility") not in {"invalid", "supporting_only"}
+    )
+
+
 def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> List[Dict[str, Any]]:
     def candidates(*types: str) -> List[Dict[str, Any]]:
         selected = []
@@ -322,14 +381,18 @@ def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> L
             return "needs_manual_confirmation"
         return "not_observed" if coverage_complete else "not_assessed"
 
-    identity_present = bool(any(_usable(item) for item in guardian_identity)) and bool(
-        any(_usable(item) for item in minor_identity) or any(_usable(item) for item in relationship)
+    identity_present = bool(any(_sop_present(item) for item in guardian_identity)) and bool(
+        any(_sop_present(item) for item in minor_identity) or any(_sop_present(item) for item in relationship)
+    )
+    identity_usable = bool(any(_sop_usable(item) for item in guardian_identity)) and bool(
+        any(_sop_usable(item) for item in minor_identity) or any(_sop_usable(item) for item in relationship)
     )
     rows = [
         (
             "identity",
             "未成年人及监护人身份证明",
             identity_present,
+            identity_usable,
             bool(identity),
             identity,
             "未成年人无身份证时可由户口本信息页或出生证明替代；角色和正反面仍需人工核对。",
@@ -338,7 +401,8 @@ def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> L
         (
             "relationship",
             "监护关系证明",
-            any(_usable(item) for item in relationship),
+            any(_sop_present(item) for item in relationship),
+            any(_sop_usable(item) for item in relationship),
             bool(relationship),
             relationship,
             "户口本相关页或出生证明二选一。",
@@ -347,7 +411,8 @@ def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> L
         (
             "commitment",
             "双方签字退款申请承诺书",
-            any(_usable(item) for item in commitment),
+            any(_sop_present(item) for item in commitment),
+            any(_sop_usable(item) for item in commitment),
             bool(commitment),
             commitment,
             "签字真实性由人工终审确认。",
@@ -356,7 +421,8 @@ def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> L
         (
             "payment",
             "订单或支付凭证",
-            any(_usable(item) for item in payment),
+            any(_sop_present(item) for item in payment),
+            any(_sop_usable(item) for item in payment),
             bool(payment),
             payment,
             "金额、订单范围和付款主体由业务系统复核。",
@@ -365,19 +431,20 @@ def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> L
         (
             "mobile_realname",
             "绑定手机号实名归属证明",
-            any(_usable(item) for item in mobile),
+            any(_sop_present(item) for item in mobile),
+            any(_sop_usable(item) for item in mobile),
             bool(mobile),
             mobile,
-            "运营商话费账单或电子发票视为已提交候选证明；实名主体、购物手机号和备注信息仍需人工核对。",
-            "confirmed_by_visual_category" if any(_usable(item) for item in mobile_verified) else "needs_manual_consistency_check",
+            "仅填写了本案实名主体和购物手机号/备注信息的运营商账单或电子发票有效；空白模板、示例图和普通账号页不能替代。",
+            "confirmed_by_visual_category" if any(_sop_usable(item) for item in mobile_verified) else "needs_manual_consistency_check",
         ),
     ]
     return [
         {
             "requirement_id": requirement_id,
             "label": label,
-            "status": status(observed),
-            "quality_status": quality_status(present, observed),
+            "status": status(present),
+            "quality_status": quality_status(usable, observed),
             "evidence_refs": [item["asset_ref"] for item in evidence],
             "evidence_image_indices": [item["image_index"] for item in evidence],
             "rule_note": note,
@@ -387,7 +454,7 @@ def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> L
                 else "not_validated"
             ),
         }
-        for requirement_id, label, present, observed, evidence, note, validation_status in rows
+        for requirement_id, label, present, usable, observed, evidence, note, validation_status in rows
     ]
 
 
@@ -516,6 +583,7 @@ def _normalize_consistency_checks(
         }
         tamper_risks = []
         risk_reason_codes = set()
+        tamper_evidence_indices: set[int] = set()
         for result in check_results:
             parsed = result.get("parsed") or {}
             raw = parsed.get("consistency_check") or {}
@@ -571,6 +639,11 @@ def _normalize_consistency_checks(
                 str(value) for value in raw.get("risk_reason_codes") or []
                 if str(value) in RISK_REASON_CODES
             )
+            tamper_evidence_indices.update(
+                int(value)
+                for value in raw.get("tamper_evidence_image_indices") or []
+                if str(value).isdigit() and int(value) in expected_indices
+            )
 
         field_rows = []
         for field_name, candidates in field_candidates.items():
@@ -619,6 +692,7 @@ def _normalize_consistency_checks(
             "tamper_risk": tamper_risk,
             "risk_reason_codes": sorted(risk_reason_codes),
             "evidence_image_indices": sorted(required_indices),
+            "tamper_evidence_image_indices": sorted(tamper_evidence_indices),
             "coverage_complete": coverage_ok,
             "segment_count": len(check_results),
         }
@@ -632,6 +706,7 @@ def _normalize_consistency_checks(
             "tamper_risk": "uncertain",
             "risk_reason_codes": ["evidence_gap"] if check_id in failed_ids else [],
             "evidence_image_indices": [],
+            "tamper_evidence_image_indices": [],
         }))
     statuses = {item["status"] for item in checks}
     if statuses == {"matched"} and not failures:
@@ -768,21 +843,22 @@ def aggregate_minor_material_results(
         visual_precheck_status = "needs_review"
         conclusion = "五类材料已齐全，但字段仍不清楚或未完成比对；请回看标黄图片或受控重试，不能直接按本轮结果处理。"
     elif coverage_complete and present_count == len(checklist):
-        predicted_label = "review"
-        decision = "continue_by_customer_policy"
-        system_yes_no = "REVIEW"
-        confidence = 0.69
+        predicted_label = "positive"
+        decision = "visual_precheck_passed_with_warnings"
+        system_yes_no = "YES"
+        confidence = 0.78
         readiness = "ready_with_visual_warnings"
-        visual_precheck_status = "needs_review"
-        conclusion = "五类材料已齐全，部分可见字段仍不清楚或无法比较；可按甲方现行流程继续，标黄图片建议抽检。"
+        visual_precheck_status = "passed"
+        conclusion = "五类材料已齐全，未发现明确字段冲突或阻断性修改风险；可按甲方现行流程继续，标黄项仅供抽检。"
     elif not_observed:
         predicted_label = "review"
         decision = "request_more_material"
         system_yes_no = "REVIEW"
         confidence = 0.66
-        readiness = "needs_human_gap_confirmation"
+        readiness = "needs_specific_material"
         visual_precheck_status = "incomplete"
-        conclusion = "全量图片已处理，但部分材料类别尚未被可靠确认；应先由VIP客服回看对应图片，再决定是否要求补充。"
+        missing_labels = "、".join(item["label"] for item in not_observed)
+        conclusion = f"全量图片已处理，当前缺少可按 SOP 采信的{missing_labels}；请只补充这些材料。"
     else:
         predicted_label = "review"
         decision = "manual_review"
@@ -793,7 +869,7 @@ def aggregate_minor_material_results(
         conclusion = "材料包未完成全量可靠识别或仍有角色/清晰度待确认，不能据此声称用户缺少材料。"
 
     material_gaps = [
-        f"全量图片中尚未确认到“{item['label']}”；不得据此断言用户未提交，请VIP客服先回看未分类或低清图片。"
+        f"请补充：{item['label']}。已识别的空白模板、示例图或辅助截图不能替代该必交材料。"
         for item in not_observed
     ]
     if not coverage_complete and not technical_processing_incomplete:
@@ -831,7 +907,11 @@ def aggregate_minor_material_results(
     elif authoritative_required:
         next_step = "当前工单显式启用了严格验真，请完成甲方配置的核验步骤；没有可用接口时请改回默认策略。"
     else:
-        next_step = "请回看报告中标黄的字段或图片；能确认一致时按现行流程继续，不能确认时只补对应材料。"
+        next_step = (
+            "请用户只补充报告点名的材料；不要重复要求已经通过初审的资料。"
+            if not_observed else
+            "请回看报告中标黄的字段或图片；能确认一致时按现行流程继续，不能确认时只补对应材料。"
+        )
 
     supporting_evidence = [
         {

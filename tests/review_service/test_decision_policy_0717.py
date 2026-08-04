@@ -399,6 +399,48 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         self.assertIn("最低档补偿", audit["supplemental_evidence_note"])
         self.assertTrue(result["agent_report"]["parsed"]["human_required_for_business_action"])
 
+    def test_confirmed_visible_damage_forms_positive_sop_recommendation_without_business_action(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-visible-damage",
+                "scenario": "product_damage",
+                "customer_claim": "商品部件断裂",
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": DEFAULT_PRODUCT_DAMAGE_POLICY_REF,
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.65,
+            "damage_causality_assessment": {
+                "damage_presence": "confirmed",
+                "claim_support": "insufficient",
+                "first_visible_evidence": {
+                    "video_index": 1,
+                    "global_frame_index": 1,
+                    "timestamp": "00:00.00",
+                    "damage_visible": True,
+                },
+            },
+            "video_audit_conclusion": {"opening_integrity": "unknown"},
+        }
+
+        result = apply_review_decision_policy(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "video/mp4"}],
+            },
+            review(parsed),
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "positive")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-P-CONFIRMED-VISIBLE-DAMAGE")
+        self.assertFalse(result["agent_report"]["parsed"]["business_action_allowed"])
+
     def test_acceleration_alone_never_makes_opening_video_noncompliant(self):
         result = self._complete_no_damage_case(
             policy_overrides={"noncompliant_opening_video": "negative"},
@@ -576,7 +618,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         self.assertIn("视觉证明商品无损", parsed["overall_audit"]["core_reason"])
         self.assertIn("必须提交开箱视频", result["agent_brief"]["conclusion"])
 
-    def test_617911_missing_closeup_stays_review(self):
+    def test_missing_closeup_does_not_erase_clear_no_damage_sop_recommendation(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "case-617911",
@@ -589,6 +631,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 },
                 "decision_policy": {
                     "mode": "classification_recommendation",
+                    "recommendation_gate_mode": "core_sop",
                     "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST",
                     "complete_video_no_claimed_damage": "negative",
                 },
@@ -596,14 +639,14 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         ).model_dump(mode="json")
         parsed = {
             "predicted_label": "review",
-            "confidence": 0.9,
+            "confidence": 0.6,
             "damage_causality_assessment": {"damage_presence": "not_visible", "claim_support": "not_supported"},
             "damage_observability": {
                 "status": "partial",
                 "same_item_linkage": True,
                 "claimed_region_closeup": False,
-                "required_view_coverage": 0.8,
-                "conflicting_evidence": False,
+                "required_view_coverage": 0.5,
+                "conflicting_evidence": True,
             },
             "object_continuity_assessment": {
                 "continuity_verdict": "continuous",
@@ -623,11 +666,11 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST": metadata["decision_policy"],
             },
         )
-        self.assertEqual(result["summary"]["predicted_label"], "review")
-        self.assertFalse(result["decision_policy_audit"]["applied"])
+        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertTrue(result["decision_policy_audit"]["applied"])
         self.assertIn("damage_observability", result["agent_report"]["parsed"]["decision_policy_audit"]["failed_conditions"])
 
-    def test_unresolved_supplemental_image_linkage_blocks_negative_recommendation(self):
+    def test_unresolved_supplemental_image_linkage_does_not_erase_sop_recommendation(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "case-supplement-unresolved",
@@ -640,6 +683,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 },
                 "decision_policy": {
                     "mode": "classification_recommendation",
+                    "recommendation_gate_mode": "core_sop",
                     "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST",
                     "complete_video_no_claimed_damage": "negative",
                     "require_continuity_complete": False,
@@ -654,8 +698,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             "predicted_label": "review",
             "confidence": 0.9,
             "damage_causality_assessment": {
-                "damage_presence": "not_visible",
-                "claim_support": "not_supported",
+                "damage_presence": "uncertain",
+                "claim_support": "insufficient",
                 "evidence_source_summary": {
                     "supplemental_images": {"provided_count": 1, "linkage_status": "unresolved"},
                 },
@@ -664,14 +708,14 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "status": "partial",
                 "same_item_linkage": True,
                 "claimed_region_closeup": False,
-                "required_view_coverage": 0.8,
-                "conflicting_evidence": False,
+                "required_view_coverage": 0.5,
+                "conflicting_evidence": True,
             },
             "object_continuity_assessment": {
                 "continuity_verdict": "indeterminate",
                 "tracked_subjects": [{
                     "subject_id": "claimed_item",
-                    "visibility_coverage": 0.9,
+                    "visibility_coverage": 0.5,
                     "longest_out_of_frame_seconds": 1.0,
                 }],
             },
@@ -688,7 +732,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST": metadata["decision_policy"],
             },
         )
-        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["summary"]["predicted_label"], "negative")
         self.assertIn(
             "supplemental_evidence_resolved",
             result["agent_report"]["parsed"]["decision_policy_audit"]["failed_conditions"],
@@ -822,7 +866,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertIn("pass_integrity", result["decision_policy_audit"]["failed_conditions"])
 
-    def test_partial_supplemental_review_cannot_be_treated_as_all_not_linked(self):
+    def test_partial_supplemental_review_remains_audit_signal_without_erasing_sop_recommendation(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "case-partial-supplement",
@@ -835,6 +879,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 },
                 "decision_policy": {
                     "mode": "classification_recommendation",
+                    "recommendation_gate_mode": "core_sop",
                     "policy_ref": "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST",
                     "complete_video_no_claimed_damage": "negative",
                     "require_continuity_complete": False,
@@ -892,7 +937,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "MITAKO-PD-COMPLETE-NO-DAMAGE@TEST": metadata["decision_policy"],
             },
         )
-        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["summary"]["predicted_label"], "negative")
         self.assertIn("supplemental_evidence_resolved", result["decision_policy_audit"]["failed_conditions"])
 
     def test_production_policy_is_tenant_scoped(self):
