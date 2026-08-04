@@ -485,7 +485,12 @@ if (-not (Test-Path (Join-Path $Root "dist\index.html"))) {
 }
 
 Write-Host "[2/6] Copy customer-visible files ..."
-Copy-Dir "dist"
+Copy-File "dist\index.html"
+Copy-File "dist\admin.html"
+Copy-File "dist\desk.html"
+Copy-File "dist\xiaojiao_avatar.png"
+Copy-Dir "dist\assets"
+Copy-Dir "dist\memes"
 Copy-Dir "templates"
 Copy-Dir "docs\delivery"
 $deliveryEngineer = Join-Path $Stage "docs\delivery\engineer-onboarding.md"

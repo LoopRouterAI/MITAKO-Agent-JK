@@ -39,6 +39,22 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertIn("git_commit", script)
         self.assertIn("requested_count", script)
 
+    def test_customer_package_excludes_previous_release_archives(self) -> None:
+        customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")
+        verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")
+
+        self.assertNotIn('Copy-Dir "dist"', customer_script)
+        for expected in (
+            'Copy-File "dist\\index.html"',
+            'Copy-File "dist\\admin.html"',
+            'Copy-File "dist\\desk.html"',
+            'Copy-File "dist\\xiaojiao_avatar.png"',
+            'Copy-Dir "dist\\assets"',
+            'Copy-Dir "dist\\memes"',
+        ):
+            self.assertIn(expected, customer_script)
+        self.assertIn('name != "runtime/app_runtime.zip"', verifier)
+
 
 if __name__ == "__main__":
     unittest.main()

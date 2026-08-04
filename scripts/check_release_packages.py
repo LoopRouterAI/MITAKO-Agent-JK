@@ -180,6 +180,10 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
 
 def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[str, Any]:
     names = _zip_names(zip_path)
+    nested_release_zips = sorted(
+        name for name in names if name.lower().endswith(".zip") and name != "runtime/app_runtime.zip"
+    )
+    _assert(not nested_release_zips, f"甲方包包含嵌套发布 ZIP：{nested_release_zips[:20]}")
     required = {
         "start-windows.bat",
         "install-runtime-windows.bat",
