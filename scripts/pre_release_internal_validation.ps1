@@ -63,6 +63,28 @@ try {
     Invoke-Step "Order baseline and on-demand official image regression" { & $Python -m unittest tests.visual_review.test_order_info_sync tests.visual_review.test_order_info_reconcile tests.visual_review.test_order_info_adapter tests.visual_review.test_official_reference_images tests.review_service.test_input_readiness }
     Invoke-Step "Model authentication, observability, Celery and advisory routing regression" { & $Python -m unittest tests.visual_review.test_model_auth tests.visual_review.test_observability tests.review_service.test_celery_registration tests.review_service.test_advisory_assessment }
     Invoke-Step "Visual workbench smoke" { & $Python scripts\check_visual_workbench_smoke.py }
+    Invoke-Step "Dynamic 62-image evidence for current commit" {
+        $dynamicReportPath = Join-Path $Root "tests\reports\dynamic_material_capacity_http_latest.json"
+        $currentCommit = (git rev-parse HEAD).Trim()
+        $reuseDynamicReport = $false
+        if (Test-Path -LiteralPath $dynamicReportPath -PathType Leaf) {
+            try {
+                $dynamicReport = Get-Content -LiteralPath $dynamicReportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $reuseDynamicReport = (
+                    $dynamicReport.ok -eq $true -and
+                    [int]$dynamicReport.requested_count -eq 62 -and
+                    [string]$dynamicReport.git_commit -eq $currentCommit
+                )
+            } catch {
+                $reuseDynamicReport = $false
+            }
+        }
+        if ($reuseDynamicReport) {
+            Write-Host "Reusing current 62-image HTTP evidence: $currentCommit"
+        } else {
+            & $Python scripts\check_dynamic_material_capacity_http.py --base-url $BaseUrl --count 62
+        }
+    }
     Invoke-Step "Customer Agent 0709 regression" { & $Python scripts\check_customer_agent_0709_regression.py }
     Invoke-Step "Customer Agent 0714 regression" { & $Python scripts\check_customer_agent_0714_regression.py }
     Invoke-Step "Frontend user isolation" { node tests\frontend\check_0714_user_isolation.mjs }

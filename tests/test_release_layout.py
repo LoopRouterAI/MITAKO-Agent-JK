@@ -31,6 +31,14 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertNotIn('MITAKO_Agent-customer-delivery.html', package["scripts"]["prebuild"])
         self.assertIn('emptyOutDir: false', vite_config)
 
+    def test_pre_release_refreshes_dynamic_capacity_evidence_for_current_commit(self) -> None:
+        script = (ROOT / "scripts" / "pre_release_internal_validation.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertIn("dynamic_material_capacity_http_latest.json", script)
+        self.assertIn("check_dynamic_material_capacity_http.py", script)
+        self.assertIn("git_commit", script)
+        self.assertIn("requested_count", script)
+
 
 if __name__ == "__main__":
     unittest.main()
