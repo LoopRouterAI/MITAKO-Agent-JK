@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import mimetypes
 from contextlib import ExitStack
@@ -13,6 +14,25 @@ import httpx
 
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".txt", ".json"}
 FORBIDDEN_ANSWER_FILES = {"annotation.json", "reply.json"}
+BUSINESS_TO_TECHNICAL = {
+    "product_damage": "product_damage",
+    "wrong_item": "video_unboxing",
+    "missing_item": "video_unboxing",
+    "minor_refund": "minor_material",
+    "minor_material": "minor_material",
+}
+
+
+def technical_scenario(scenario: str) -> str:
+    try:
+        return BUSINESS_TO_TECHNICAL[scenario]
+    except KeyError as exc:
+        raise ValueError("unsupported_business_scenario") from exc
+
+
+def blind_case_id(bundle: Path) -> str:
+    digest = hashlib.sha256(str(bundle.resolve()).encode("utf-8")).hexdigest()[:12].upper()
+    return f"CASE-{digest}"
 
 
 def validate_label_isolation(audit: dict) -> None:
@@ -63,10 +83,11 @@ def run_case(
         for path in submission_paths(bundle, audit):
             handle = stack.enter_context(path.open("rb"))
             files.append(("files", (path.name, handle, mimetypes.guess_type(path.name)[0] or "application/octet-stream")))
+        business_scenario = "minor_refund" if scenario == "minor_material" else scenario
         data = {
-            "scenario": scenario,
-            "business_scenario": scenario,
-            "ticket_id": bundle.name,
+            "scenario": technical_scenario(scenario),
+            "business_scenario": business_scenario,
+            "ticket_id": blind_case_id(bundle),
             "customer_claim": claim,
             "conversation_history": json.dumps(customer_context, ensure_ascii=False) if customer_context else "",
             "asset_manifest": json.dumps({"video_windows": window_manifests}, ensure_ascii=False) if window_manifests else "",
@@ -138,7 +159,7 @@ def main() -> int:
         minor = parsed.get("minor_material_assessment") or {}
         results.append(
             {
-                "case_id": bundle.name,
+                "case_id": blind_case_id(bundle),
                 "ok": payload.get("ok"),
                 "predicted_label": parsed.get("predicted_label"),
                 "confidence": parsed.get("confidence"),

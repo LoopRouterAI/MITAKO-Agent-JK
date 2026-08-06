@@ -337,6 +337,8 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         return " ".join(links) or '<span class="muted">无</span>'
 
     def item_tone(item: dict) -> str:
+        if item.get("validation_status") == "visual_relationship_link_unresolved":
+            return "status-amber"
         if item.get("status") == "not_observed_after_full_scan" or item.get("validation_status") == "visual_consistency_mismatched":
             return "status-red"
         if item.get("status") == "present" and item.get("validation_status") == "visual_consistency_matched":
@@ -353,6 +355,7 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         "visual_consistency_matched": "视觉字段未发现明显矛盾",
         "visual_consistency_mismatched": "视觉字段存在冲突",
         "visual_consistency_uncertain": "视觉字段仍不确定",
+        "visual_relationship_link_unresolved": "未建立直接监护关系，需补关系证明",
         "matched": "一致",
         "mismatched": "存在冲突",
         "uncertain": "不确定",
@@ -476,6 +479,9 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         "warning": "status-amber",
         "clear": "status-green",
     }.get(str(authenticity.get("severity") or ""), "status-amber")
+    payment_capability = value.get("payment_capability_risk") or {}
+    payment_tone = "status-amber" if payment_capability.get("requires_more_material") else "status-green" if payment_capability.get("process_evidence_status") == "matched" else "status-amber"
+    payment_label = "需补支付过程说明" if payment_capability.get("requires_more_material") else "支付过程说明已核对" if payment_capability.get("process_evidence_status") == "matched" else "支付过程信息待确认"
     action_text = {
         "passed": "五类材料和可见字段均未发现明显问题，可按甲方现行一审流程继续。",
         "failed": "先打开标红图片确认冲突，再按 SOP 要求用户更正或补交对应材料。",
@@ -507,7 +513,8 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
     <p><b>总体状态：</b>{escape(status_labels.get(consistency.get("verdict"), consistency.get("verdict") or "未完成"))}</p>
     <div class="boundary-grid">{"".join(consistency_cards) or '<p class="muted">本轮未完成字段一致性初审。</p>'}</div>
     <div class="boundary-grid">
-      <article class="boundary-card status-card {authenticity_tone}"><h3>图片真实性风险</h3><p><b>{escape(f'疑似修改风险 {authenticity["risk_percent"]}%' if authenticity.get("risk_percent") is not None else "本轮未形成可用风险分数")}</b></p><p>{escape(authenticity.get("conclusion") or "本轮没有可用的图片风险结果。")}</p><p><b>需优先回看：</b>{evidence_links(authenticity.get("evidence_image_indices"))}</p><p><b>缺少拍摄信息：</b>{evidence_links((authenticity.get("missing_exif_image_indices") or [])[:20])}</p><p>{escape(authenticity.get("boundary") or "缺少拍摄信息不等于图片造假。")}</p></article>
+      <article class="boundary-card status-card {authenticity_tone}"><h3>图片真实性风险</h3><p><b>{escape(f'疑似修改风险 {authenticity["risk_percent"]}%' if authenticity.get("risk_percent") is not None else "本轮未形成可用风险分数")}</b></p><p>{escape(authenticity.get("conclusion") or "本轮没有可用的图片风险结果。")}</p><p><b>需优先回看：</b>{evidence_links(authenticity.get("evidence_image_indices"))}</p><p><b>编辑软件信息：</b>{evidence_links((authenticity.get("editor_metadata_image_indices") or [])[:20])}</p><p><b>缺少拍摄信息：</b>{evidence_links((authenticity.get("missing_exif_image_indices") or [])[:20])}</p><p>{escape(authenticity.get("boundary") or "缺少拍摄信息不等于图片造假。")}</p></article>
+      <article class="boundary-card status-card {payment_tone}"><h3>低龄支付过程核验</h3><p><b>{escape(payment_label)}</b></p><p>{escape(payment_capability.get("effect") or "该信号只用于核对支付密码来源和监护人发现消费过程，不自动决定退款结果。")}</p><p><b>点击回看：</b>{evidence_links(payment_capability.get("evidence_image_indices"))}</p></article>
       <article class="boundary-card status-card {authoritative_tone}"><h3>外部在线验真</h3><p><b>{escape(authoritative_text)}</b></p><p>{escape(authoritative.get("boundary") or "视觉一致性不等于法定真实性，但未配置的接口不会阻断本轮初审。")}</p></article>
     </div>
     <h3>过程视频证据</h3><ul class="boundary-list">{"".join(process_items) or '<li>本轮没有形成可回链的过程视频证据。</li>'}</ul>

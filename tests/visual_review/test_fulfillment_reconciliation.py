@@ -56,6 +56,15 @@ def row(quantity: int, package_ref: str = "PKG-1", complete: bool = True):
 
 
 class FulfillmentReconciliationTest(unittest.TestCase):
+    def test_non_numeric_observation_confidence_degrades_to_zero(self):
+        invalid = row(2)
+        invalid["fulfillment_reconciliation"]["confidence"] = "high"
+
+        result = aggregate_fulfillment_reconciliation([invalid], case(), "missing_item")
+
+        self.assertEqual(result["observation_confidence"], 0.0)
+        self.assertEqual(result["confidence"], 0.0)
+
     def test_same_package_repeated_across_chunks_uses_max_not_sum(self):
         result = aggregate_fulfillment_reconciliation([row(1), row(2)], case(), "missing_item")
         self.assertEqual(result["observed_items"][0]["observed_quantity"], 2)
@@ -69,6 +78,24 @@ class FulfillmentReconciliationTest(unittest.TestCase):
         self.assertEqual(result["suspected_missing_items"][0]["observed_quantity"], 1)
         guarded = apply_fulfillment_guard({"confidence": 0.88, "fulfillment_reconciliation": result}, "missing_item")
         self.assertEqual(guarded["predicted_label"], "positive")
+
+    def test_duplicate_sku_order_lines_are_summed_before_reconciliation(self):
+        current = case(expected_quantity=1)
+        baseline = current["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]
+        baseline["expected_items"].append({
+            "item_ref": "LINE-2",
+            "sku": "SKU-1",
+            "product_name": "徽章",
+            "expected_quantity": 1,
+        })
+        baseline["packages"][0]["expected_item_refs"].append("LINE-2")
+
+        result = aggregate_fulfillment_reconciliation([row(1)], current, "missing_item")
+
+        self.assertEqual(result["verdict"], "mismatched")
+        self.assertEqual(result["expected_items"][0]["expected_quantity"], 2)
+        self.assertEqual(result["expected_items"][0]["item_refs"], ["LINE-1", "LINE-2"])
+        self.assertEqual(result["suspected_missing_items"][0]["observed_quantity"], 1)
 
     def test_incomplete_visual_coverage_forces_review(self):
         result = aggregate_fulfillment_reconciliation([row(1, complete=False)], case(), "missing_item")

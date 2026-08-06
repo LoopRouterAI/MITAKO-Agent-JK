@@ -18,6 +18,7 @@ from poc.visual_review_poc.minor_material_pipeline import aggregate_minor_materi
 from review_service import router, service, store
 from review_service.advisory_assessment import attach_advisory_assessment
 from review_service.schemas import ReviewCaseMetadata
+from scripts.check_dynamic_material_capacity_http import release_gate_result
 
 
 PNG_BODY = base64.b64decode(
@@ -67,6 +68,26 @@ def _observation(index: int) -> dict:
 
 
 class DynamicAssetCapacityTest(unittest.IsolatedAsyncioTestCase):
+    def test_release_gate_accepts_only_complete_processing_or_explicit_system_retry(self) -> None:
+        capacity_checks = {
+            "all_assets_saved": True,
+            "expanded_capacity": True,
+            "all_images_accepted": True,
+            "job_succeeded": False,
+            "all_images_processed": False,
+            "coverage_complete": False,
+        }
+        safe_failure = release_gate_result(
+            capacity_checks,
+            {"processing_status": "technical_processing_incomplete", "system_action": "system_retry"},
+        )
+        unsafe_failure = release_gate_result(capacity_checks, {"processing_status": "completed"})
+
+        self.assertTrue(safe_failure["release_gate_ok"])
+        self.assertTrue(safe_failure["safe_external_failure"])
+        self.assertFalse(safe_failure["model_processing_ok"])
+        self.assertFalse(unsafe_failure["release_gate_ok"])
+
     async def test_sixty_two_assets_within_safe_limit_are_accepted_by_both_entries(self) -> None:
         metadata = ReviewCaseMetadata(client_case_id="CASE-62", scenario="minor_refund")
         with tempfile.TemporaryDirectory() as formal_dir, tempfile.TemporaryDirectory() as workbench_dir:

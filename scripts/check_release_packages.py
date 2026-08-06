@@ -116,6 +116,14 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
         "我方内部开发文档/升级日志-2026-07-16.md",
         "我方内部开发文档/升级日志-2026-07-15.md",
+        "我方内部开发文档/升级日志-2026-08-06-四场景与五类材料闭环.md",
+        "docs/delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
+        "甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html",
+        "tests/reports/blind_0806_final_product_p1.json",
+        "tests/reports/blind_0806_final_product_n1.json",
+        "tests/reports/blind_0806_final_product_rn.json",
+        "tests/reports/blind_0806_final_product_rp.json",
+        "tests/reports/blind_0806_final_minor_m1.json",
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
         "docs/delivery/mitako-0731-product-damage-sop-acceptance-20260731.html",
         "甲方沟通交付文档/0731商品有伤SOP与报告一致性更新说明.html",
@@ -171,7 +179,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     dynamic_report = json.loads(
         (root / "tests/reports/dynamic_material_capacity_http_latest.json").read_text(encoding="utf-8")
     )
-    _assert(dynamic_report.get("ok") is True, "动态素材真实 HTTP 证据未通过")
+    _assert(dynamic_report.get("release_gate_ok") is True, "动态素材真实 HTTP 容量与降级证据未通过")
     _assert(dynamic_report.get("requested_count") == 62, "动态素材证据不是 62 份资料")
     _assert(dynamic_report.get("git_commit") == expected_commit, "动态素材证据未绑定当前验收提交")
     _verify_hashes(root, list(manifest.get("evidence") or []))
@@ -192,6 +200,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/openapi.yaml",
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
+        "docs/delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
+        "甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html",
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
         "docs/delivery/mitako-0731-product-damage-sop-acceptance-20260731.html",
         "甲方沟通交付文档/0731商品有伤SOP与报告一致性更新说明.html",

@@ -1,13 +1,24 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List, Tuple
 
 
 def _int(value: Any) -> int:
     try:
         return max(0, int(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
+
+
+def _confidence(value: Any) -> float:
+    try:
+        parsed = float(value or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    if not math.isfinite(parsed):
+        return 0.0
+    return max(0.0, min(parsed, 1.0))
 
 
 def _item_key(item: Dict[str, Any]) -> str:
@@ -38,7 +49,24 @@ def aggregate_fulfillment_reconciliation(
     rows = [row.get("fulfillment_reconciliation") or {} for row in rows]
     rows = [row for row in rows if isinstance(row, dict)]
     baseline, coverage = _frontdesk(case)
-    expected = [dict(item) for item in baseline.get("expected_items") or [] if isinstance(item, dict)]
+    expected_by_key: Dict[str, Dict[str, Any]] = {}
+    unkeyed_expected: List[Dict[str, Any]] = []
+    for source_item in baseline.get("expected_items") or []:
+        if not isinstance(source_item, dict):
+            continue
+        item = dict(source_item)
+        key = _item_key(item)
+        if not key:
+            unkeyed_expected.append(item)
+            continue
+        current = expected_by_key.setdefault(
+            key,
+            {**item, "expected_quantity": 0, "item_refs": []},
+        )
+        current["expected_quantity"] += _int(item.get("expected_quantity") or item.get("quantity"))
+        if item.get("item_ref"):
+            current["item_refs"] = list(dict.fromkeys(current["item_refs"] + [str(item["item_ref"])]))
+    expected = list(expected_by_key.values()) + unkeyed_expected
     package_quantities: Dict[Tuple[str, str], Dict[str, Any]] = {}
     unconfirmed: List[Any] = []
     package_observations: Dict[str, Dict[str, Any]] = {}
@@ -139,7 +167,7 @@ def aggregate_fulfillment_reconciliation(
     )
     mismatch = bool(missing or unexpected)
     verdict = "mismatched" if evidence_sufficient and mismatch else "matched" if evidence_sufficient else "indeterminate"
-    observation_confidence = max((float(row.get("confidence") or 0) for row in rows), default=0.0)
+    observation_confidence = max((_confidence(row.get("confidence")) for row in rows), default=0.0)
     boundary = (
         "已完成版本化应发基准、全部包裹开箱和全部内容展示的视觉对账。"
         if evidence_sufficient
@@ -182,10 +210,7 @@ def apply_fulfillment_guard(result: Dict[str, Any], scenario: str) -> Dict[str, 
     output["system_yes_no"] = {"positive": "YES", "negative": "NO"}.get(label, "REVIEW")
     if label == "review":
         output["decision"] = "manual_review"
-        try:
-            output["confidence"] = min(float(output.get("confidence") or 0.5), 0.69)
-        except (TypeError, ValueError):
-            output["confidence"] = 0.5
+        output["confidence"] = min(_confidence(output.get("confidence")), 0.69)
         output["fulfillment_guard_reason"] = reconciliation.get("decision_boundary") or "履约证据不足，需人工复核。"
     else:
         output["fulfillment_guard_reason"] = "版本化应发基准与全部包裹视频展示已完成结构化对账。"

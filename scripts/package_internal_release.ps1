@@ -161,6 +161,11 @@ Copy-Path "tests\reports\review_0804_blind_acceptance_latest.json"
 Copy-Path "tests\reports\blind_product_damage_positive_0804_final.json"
 Copy-Path "tests\reports\blind_product_damage_0804_final.json"
 Copy-Path "tests\reports\blind_minor_material_0804_final.json"
+Copy-Path "tests\reports\blind_0806_final_product_p1.json"
+Copy-Path "tests\reports\blind_0806_final_product_n1.json"
+Copy-Path "tests\reports\blind_0806_final_product_rn.json"
+Copy-Path "tests\reports\blind_0806_final_product_rp.json"
+Copy-Path "tests\reports\blind_0806_final_minor_m1.json"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
 Copy-LatestReport "auth_strict_*.html" "tests\reports\auth_strict_latest.html"
 Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_deployment_api_smoke_latest.json"
@@ -169,6 +174,9 @@ $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
+    "甲方沟通交付文档\0806四场景与未成年人五类材料审核说明.html",
+    "我方内部开发文档\升级日志-2026-08-06-四场景与五类材料闭环.md",
     "docs\delivery\mitako-0805-blind-evidence-acceptance-20260805.html",
     "甲方沟通交付文档\0805审核建议、盲测与完整功能说明.html",
     "我方内部开发文档\升级日志-2026-08-05-证据语义与客服决策收敛.md",

@@ -33,6 +33,21 @@ BUSINESS_ACTION_WORDS = (
     "同意",
     "定责",
 )
+SIGNAL_LABELS = {
+    "material_gap": "材料缺口",
+    "technical_processing_incomplete": "系统处理未完成",
+    "short_out_of_frame": "短暂离镜",
+    "out_of_frame_over_threshold": "离镜超过补件阈值",
+    "identity_reestablishment_unresolved": "重新入镜后是否同一件商品尚未确认",
+    "continuity_unresolved": "商品连续性尚未完全确认",
+    "evidence_conflict": "证据冲突",
+    "media_forensic_risk": "视频技术风险",
+    "authoritative_verification_pending": "严格在线验真尚未完成",
+    "image_authenticity_risk": "图片真实性风险",
+    "minor_payment_process_evidence_gap": "低龄支付过程待补",
+    "minor_low_age_process_verified": "低龄支付过程已核对",
+    "customer_risk_context": "抽检优先级提示",
+}
 
 
 def _h(value: Any) -> str:
@@ -81,7 +96,10 @@ def safe_agent_next_step(text: Any) -> str:
 
 
 def _safe_agent_reason(text: Any) -> str:
-    chunks = [item.strip() for item in re.split(r"[。；;]\s*", str(text or "")) if item.strip()]
+    raw_text = str(text or "").strip()
+    if raw_text.startswith("未启用商品有伤规则"):
+        return ""
+    chunks = [item.strip() for item in re.split(r"[。；;]\s*", raw_text) if item.strip()]
     return "。".join(chunks[:3]) + ("。" if chunks else "")
 
 
@@ -510,6 +528,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     sop_recommendation = advisory.get("sop_recommendation") or {}
     human_review = advisory.get("human_review") or {}
     advisory_policy = advisory.get("policy") or {}
+    evidence_attention = advisory.get("evidence_attention") or {}
     human_level = str(human_review.get("level") or "")
     human_level_label = {
         "required": "必须人工复审",
@@ -524,7 +543,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     }.get(str(advisory.get("workflow_recommendation") or ""), "未给出")
     signal_cards = "".join(
         '<article class="boundary-card">'
-        f'<h3>{_h({"material_gap": "材料缺口", "technical_processing_incomplete": "系统处理未完成", "short_out_of_frame": "短暂离镜", "out_of_frame_over_threshold": "离镜超过补件阈值", "identity_reestablishment_unresolved": "重新入镜后是否同一件商品尚未确认", "continuity_unresolved": "商品连续性尚未完全确认", "media_forensic_risk": "视频技术风险", "authoritative_verification_pending": "严格在线验真尚未完成", "image_authenticity_risk": "图片真实性风险"}.get(str(item.get("code") or ""), item.get("code") or "风险信号"))}</h3>'
+        f'<h3>{_h(SIGNAL_LABELS.get(str(item.get("code") or ""), "风险信号"))}</h3>'
         f'<p>{_h(item.get("effect") or "-")}</p>'
         + (
             f'<p><b>持续时间：</b>{_h(item.get("duration_seconds"))} 秒</p>'
@@ -585,7 +604,9 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     confidence = advisory_assessment.get("confidence")
     if confidence is None:
         confidence = overall.get("confidence") or parsed.get("confidence") or "-"
-    core_reason = _safe_agent_reason(overall.get("core_reason") or parsed.get("confidence_reason") or "")
+    core_reason = _safe_agent_reason(sop_recommendation.get("basis"))
+    if not core_reason:
+        core_reason = _safe_agent_reason(overall.get("core_reason") or parsed.get("confidence_reason"))
     if not core_reason:
         core_reason = parsed.get("visual_evidence_verdict") or visual.get("reason") or ""
     next_step = public_brief.get("next_step") or safe_agent_next_step(overall.get("business_follow_up_suggestion") or parsed.get("next_step"))
@@ -632,8 +653,29 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     minor_material_panel = render_minor_material_panel(parsed.get("minor_material_assessment"), _h)
     confidence_components_panel = render_confidence_components_panel(parsed.get("confidence_components"), _h)
     decision_policy_panel = _decision_policy_panel(parsed.get("decision_policy_audit") or data.get("decision_policy_audit"))
-    gap_items = material_gaps if isinstance(material_gaps, list) else [material_gaps] if material_gaps else []
-    gap_summary = "；".join(str(item) for item in gap_items[:3]) or "本轮未发现需要用户补充的明确材料。"
+    raw_gap_items = material_gaps if isinstance(material_gaps, list) else [material_gaps] if material_gaps else []
+    gap_items = list(dict.fromkeys(
+        text for item in raw_gap_items if len(text := str(item).strip()) >= 2
+    ))
+    gap_summary = "；".join(gap_items[:10]) or "本轮未发现需要用户补充的明确材料。"
+    attention_tone = {
+        "green": "green",
+        "orange": "amber",
+        "red": "red",
+        "gray": "gray",
+    }.get(str(evidence_attention.get("level") or ""), "amber")
+    attention_panel = ""
+    if evidence_attention:
+        attention_panel = f"""
+    <section class="summary-attention status-card status-{attention_tone}">
+      <h3>客服证据优先级</h3>
+      <p><b>{_h(evidence_attention.get("headline") or "请按证据优先级继续审核。")}</b></p>
+      <div class="attention-grid">
+        <article><h4>先看什么</h4>{_list_html(evidence_attention.get("customer_focus"), "本轮暂无额外关注项。")}</article>
+        <article><h4>需要对齐的分歧</h4>{_list_html(evidence_attention.get("disagreements"), "本轮未发现需要对齐的证据分歧。")}</article>
+        <article><h4>缺少的具体证据</h4>{_list_html(evidence_attention.get("missing_evidence"), "本轮未发现明确证据缺口。")}</article>
+      </div>
+    </section>"""
     advisory_panel = f"""
   <section class="panel advisory-panel decision-{_h(advisory_assessment.get('conclusion_code') or 'unknown')}">
     <div class="section-head"><h2>客服审核摘要</h2><p>按照 SOP 的审核倾向，先看建议，再决定是否展开技术细节。</p></div>
@@ -645,6 +687,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
       <article><small>流程</small><b>{_h(workflow_label)}</b></article>
     </div>
     <p class="muted">证据分数表示本轮证据充分程度，不是客观正确率。</p>
+    {attention_panel}
     <div class="summary-reason"><h3>为什么这样建议</h3><p>{_h(core_reason or advisory_assessment.get("reason") or conclusion)}</p></div>
     <div class="summary-gaps"><h3>需要补什么</h3><p>{_h(gap_summary)}</p></div>
     <div class="human-action status-{_h({'required': 'red', 'optional': 'amber', 'not_required': 'green'}.get(human_level, 'amber'))}">
@@ -663,11 +706,13 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         "evidence_does_not_support_claim": "NO",
         "evidence_inconclusive": "REVIEW",
     }.get(conclusion_code, _public_yes_no(parsed))
-    tone = "gray" if failed else {
-        "evidence_supports_claim": "green",
-        "evidence_does_not_support_claim": "red",
-        "evidence_inconclusive": "amber",
-    }.get(conclusion_code, "amber")
+    tone = "gray" if failed else (
+        attention_tone if evidence_attention else {
+            "evidence_supports_claim": "green",
+            "evidence_does_not_support_claim": "red",
+            "evidence_inconclusive": "amber",
+        }.get(conclusion_code, "amber")
+    )
     report_class = "minor-report" if is_minor_report else "product-report"
     verdict_text = "未完成" if failed else {
         "evidence_supports_claim": "支持",
@@ -1041,8 +1086,11 @@ p { line-height:1.75; }
 }
 .technical-details-body { margin-top:16px; }
 .technical-details-body > .panel { box-shadow:none; border-color:var(--line); }
-.summary-reason, .summary-gaps, .human-action { margin-top:12px; padding:14px; border-radius:8px; background:#f7faef; }
-.summary-reason h3, .summary-gaps h3, .human-action h3 { margin-top:0; }
+.summary-attention, .summary-reason, .summary-gaps, .human-action { margin-top:12px; padding:14px; border-radius:8px; background:#f7faef; }
+.summary-attention h3, .summary-reason h3, .summary-gaps h3, .human-action h3 { margin-top:0; }
+.attention-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+.attention-grid article { min-width:0; }
+.attention-grid h4 { margin:0 0 8px; }
 .summary-signals { margin-top:14px; }
 .metrics {
   display:grid;
@@ -1132,6 +1180,7 @@ p { line-height:1.75; }
 .status-green { border-left-color:#2eaf5d; background:#f2fbf5; }
 .status-amber { border-left-color:#f0a31a; background:#fffaf0; }
 .status-red { border-left-color:#df4b4b; background:#fff5f5; }
+.status-gray { border-left-color:#6b7280; background:#f4f5f6; }
 .evidence-link {
   display:inline-flex;
   margin:2px 4px 2px 0;

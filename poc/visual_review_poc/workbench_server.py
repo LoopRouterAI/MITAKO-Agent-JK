@@ -145,6 +145,7 @@ PRIVATE_REPORT_KEYS = {
     "user_prompt",
     "prompt",
     "status_code",
+    "error",
     "error_type",
     "path",
     "api_path",
@@ -170,7 +171,7 @@ app = FastAPI(
 )
 
 REVIEW_MODEL_PROFILES = {
-    "standard": {"label": "标准连续性复核", "sampling_mode": "dense", "default_max_frames": 1200},
+    "standard": {"label": "标准连续性复核", "sampling_mode": "adaptive", "default_max_frames": 24},
     "fast": {"label": "经济初筛", "sampling_mode": "adaptive", "default_max_frames": 12},
     "backup": {"label": "Strong 强化复核", "sampling_mode": "dense", "default_max_frames": 1800},
 }
@@ -355,20 +356,20 @@ def _group_batch_folder_uploads(files: List[UploadFile]) -> Dict[str, List[Uploa
     return groups
 
 
-def _clamp_float(value: float, low: float, high: float, fallback: float) -> float:
+def _clamp_float(value: Any, low: float, high: float, fallback: float) -> float:
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return fallback
     if not math.isfinite(parsed):
         return fallback
     return max(low, min(high, parsed))
 
 
-def _clamp_int(value: int, low: int, high: int, fallback: int) -> int:
+def _clamp_int(value: Any, low: int, high: int, fallback: int) -> int:
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return fallback
     return max(low, min(high, parsed))
 
@@ -479,7 +480,18 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
                 "evidence_image_indices": [True],
                 "coverage_complete": True,
                 "segment_count": True,
+                "payment_capability_risk": True,
             }],
+        },
+        "required_materials": [True],
+        "payment_capability_risk": {
+            "level": True,
+            "effect": True,
+            "evidence_image_indices": [True],
+            "low_age": True,
+            "process_evidence_status": True,
+            "requires_review": True,
+            "requires_more_material": True,
         },
         "authenticity_assessment": {
             "severity": True,
@@ -489,6 +501,7 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
             "evidence_image_indices": [True],
             "missing_exif_image_indices": [True],
             "unknown_exif_image_indices": [True],
+            "editor_metadata_image_indices": [True],
             "conclusion": True,
             "boundary": True,
         },
@@ -1006,8 +1019,8 @@ def _call_model_chunked_with_fallback(
         config = MODEL_CONFIGS[model_key]
         current = call_model_chunked(config, case, timeout=timeout, retries=retries)
         current_chunking = current.get("chunking") if isinstance(current.get("chunking"), dict) else {}
-        current_calls = int(current_chunking.get("total_model_calls") or 0)
-        current_unknown = int(current.get("unknown_cost_calls") or 0)
+        current_calls = _clamp_int(current_chunking.get("total_model_calls"), 0, 1_000_000, 0)
+        current_unknown = _clamp_int(current.get("unknown_cost_calls"), 0, 1_000_000, 0)
         channel_route_attempts.extend(
             item for item in current.get("_channel_route_attempts") or [] if isinstance(item, dict)
         )
@@ -1024,27 +1037,40 @@ def _call_model_chunked_with_fallback(
             chunking = dict(current_chunking)
             chunking["total_model_calls"] = current_calls + prior_model_calls
             result["chunking"] = chunking
-            result["unknown_cost_calls"] = int(result.get("unknown_cost_calls") or 0) + prior_unknown_calls
+            result["unknown_cost_calls"] = _clamp_int(
+                result.get("unknown_cost_calls"), 0, 1_000_000, 0
+            ) + prior_unknown_calls
             if prior_unknown_calls:
                 result["cost_status"] = "partial_unknown"
             result["model_latency_seconds_sum"] = round(
-                float(result.get("model_latency_seconds_sum") or 0) + prior_model_latency,
+                _clamp_float(result.get("model_latency_seconds_sum"), 0.0, 1_000_000.0, 0.0)
+                + prior_model_latency,
                 2,
             )
             result["latency_seconds"] = round(time.time() - wall_started, 2)
-            result["route_fallback_count"] = sum(1 for item in attempts[:-1] if item.get("status") != "skipped")
+            result["route_fallback_count"] = max(0, len(attempts) - 1)
             result["route_attempts"] = attempts
             result["_channel_route_attempts"] = channel_route_attempts
             return result
         last_result = current
         prior_model_calls += current_calls
         prior_unknown_calls += current_unknown
-        prior_model_latency += float(current.get("model_latency_seconds_sum") or current.get("latency_seconds") or 0)
-        retryable = is_retryable_failure(current)
-        attempts[-1]["decision"] = "fallback_retryable" if retryable and route_index < len(model_keys) else (
-            "exhausted" if retryable else "stop_non_retryable"
+        prior_model_latency += _clamp_float(
+            current.get("model_latency_seconds_sum") or current.get("latency_seconds"),
+            0.0,
+            1_000_000.0,
+            0.0,
         )
-        if not retryable:
+        retryable = is_retryable_failure(current)
+        provider_unavailable = current.get("status") == "skipped" or current.get("status_code") in {401, 403}
+        can_fallback = route_index < len(model_keys) and (retryable or provider_unavailable)
+        attempts[-1]["decision"] = (
+            "fallback_retryable" if can_fallback and retryable
+            else "fallback_provider_unavailable" if can_fallback
+            else "exhausted" if retryable
+            else "stop_non_retryable"
+        )
+        if not can_fallback:
             break
     result = dict(last_result)
     chunking = dict(result.get("chunking") or {})
@@ -1054,7 +1080,7 @@ def _call_model_chunked_with_fallback(
     result["cost_status"] = "unknown" if prior_unknown_calls else str(result.get("cost_status") or "not_incurred")
     result["model_latency_seconds_sum"] = round(prior_model_latency, 2)
     result["latency_seconds"] = round(time.time() - wall_started, 2)
-    result["route_fallback_count"] = max(0, sum(1 for item in attempts if item.get("status") != "skipped") - 1)
+    result["route_fallback_count"] = max(0, len(attempts) - 1)
     result["route_attempts"] = attempts
     result["_channel_route_attempts"] = channel_route_attempts
     return result
@@ -1201,8 +1227,7 @@ def _run_review(
         effective_fps = min(fps, 0.5)
         effective_max_frames = min(max_frames, int(profile["default_max_frames"]))
     elif review_model == "standard":
-        effective_fps = max(fps, 1.0)
-        effective_max_frames = max(max_frames, int(profile["default_max_frames"]))
+        effective_max_frames = min(max_frames, int(profile["default_max_frames"]))
     elif review_model == "backup":
         effective_fps = max(fps, 2.0)
         effective_max_frames = max(max_frames, int(profile["default_max_frames"]))
@@ -1435,13 +1460,17 @@ def _sample_scenarios() -> Dict[str, str]:
     return {str(key): str(value.get("scenario") or "video_unboxing") for key, value in samples.items() if isinstance(value, dict)}
 
 
-def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> Dict[str, Any]:
+def _run_sample_agent_review(
+    sample_id: str,
+    scenario: str,
+    model_key: str,
+    business_scenario: str = "",
+) -> Dict[str, Any]:
     sample_base = _sample_base()
     sample_dir = (sample_base / sample_id).resolve()
     if sample_base not in sample_dir.parents or not sample_dir.exists():
         raise HTTPException(status_code=404, detail="样本不存在")
-    if scenario not in {"video_unboxing", "product_damage", "minor_material"}:
-        raise HTTPException(status_code=400, detail="未知审核场景")
+    scenario, business_scenario = _normalize_review_scenario(scenario, business_scenario)
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
@@ -1456,8 +1485,18 @@ def _run_sample_agent_review(sample_id: str, scenario: str, model_key: str) -> D
     )
     run_dir = ROOT / "tmp" / "visual_review_workbench" / f"workbench_{sample_id}_{int(time.time())}"
     case = load_case_bundle(sample_dir, args, run_dir, scenario_override=scenario)
+    case = apply_frontdesk_context(
+        case,
+        scenario,
+        json.dumps({"business_scenario": business_scenario}, ensure_ascii=False),
+    )
     case["scenario"] = scenario
-    case["scenario_label"] = {"video_unboxing": "开箱/发错货审核", "product_damage": "商品有伤审核", "minor_material": "资料审核"}[scenario]
+    case["scenario_label"] = {
+        "product_damage": "商品有伤审核",
+        "wrong_item": "发错货审核",
+        "missing_item": "漏发货审核",
+        "minor_refund": "未成年人资料审核",
+    }.get(business_scenario, "开箱视频审核")
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
     result = _call_model_chunked_with_fallback(model_key, case, timeout=model_timeout, retries=model_retries)
@@ -1555,6 +1594,29 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
     }
 
 
+def _normalize_review_scenario(scenario: str, business_scenario: str = "") -> tuple[str, str]:
+    business_to_technical = {
+        "product_damage": "product_damage",
+        "wrong_item": "video_unboxing",
+        "missing_item": "video_unboxing",
+        "minor_refund": "minor_material",
+    }
+    normalized_business = business_scenario.strip()
+    if normalized_business:
+        expected_technical = business_to_technical.get(normalized_business)
+        if not expected_technical:
+            raise HTTPException(status_code=400, detail="未知业务审核场景")
+        supplied_technical = business_to_technical.get(scenario, scenario)
+        if supplied_technical != expected_technical:
+            raise HTTPException(status_code=422, detail="审核场景与业务场景不一致")
+        return expected_technical, normalized_business
+    if scenario in business_to_technical:
+        return business_to_technical[scenario], scenario
+    if scenario in {"video_unboxing", "minor_material"}:
+        return scenario, "minor_refund" if scenario == "minor_material" else ""
+    raise HTTPException(status_code=400, detail="未知审核场景")
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return INDEX_HTML.read_text(encoding="utf-8")
@@ -1562,6 +1624,16 @@ def index() -> str:
 
 @app.get("/video-unboxing", response_class=HTMLResponse)
 def video_unboxing_entry() -> str:
+    return INDEX_HTML.read_text(encoding="utf-8")
+
+
+@app.get("/wrong-item", response_class=HTMLResponse)
+def wrong_item_entry() -> str:
+    return INDEX_HTML.read_text(encoding="utf-8")
+
+
+@app.get("/missing-item", response_class=HTMLResponse)
+def missing_item_entry() -> str:
     return INDEX_HTML.read_text(encoding="utf-8")
 
 
@@ -1723,6 +1795,7 @@ def review_sample(payload: Dict[str, str]) -> JSONResponse:
         payload.get("sample_id", "sample_003"),
         payload.get("scenario", "product_damage"),
         payload.get("model_key", "auto"),
+        payload.get("business_scenario", ""),
     ))
 
 
@@ -1769,8 +1842,7 @@ def review_folder(
     probe_seconds: int = Form(12),
     files: List[UploadFile] = File(...),
 ) -> JSONResponse:
-    if scenario not in {"video_unboxing", "product_damage", "minor_material"}:
-        raise HTTPException(status_code=400, detail="未知审核场景")
+    scenario, business_scenario = _normalize_review_scenario(scenario, business_scenario)
     if sampling_mode not in {"adaptive", "dense"}:
         raise HTTPException(status_code=400, detail="未知抽帧策略")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
@@ -1826,6 +1898,7 @@ def review_folder(
 @app.post("/api/review-folders-batch")
 def review_folders_batch(
     scenario: str = Form("video_unboxing"),
+    business_scenario: str = Form(""),
     customer_claim: str = Form(""),
     product_master_data: str = Form(""),
     conversation_history: str = Form(""),
@@ -1839,8 +1912,7 @@ def review_folders_batch(
     probe_seconds: int = Form(12),
     files: List[UploadFile] = File(...),
 ) -> JSONResponse:
-    if scenario not in {"video_unboxing", "product_damage", "minor_material"}:
-        raise HTTPException(status_code=400, detail="未知审核场景")
+    scenario, business_scenario = _normalize_review_scenario(scenario, business_scenario)
     if sampling_mode not in {"adaptive", "dense"}:
         raise HTTPException(status_code=400, detail="未知抽帧策略")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
@@ -1849,6 +1921,7 @@ def review_folders_batch(
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
     groups = _group_batch_folder_uploads(files)
     evidence_context = {
+        "business_scenario": business_scenario,
         "customer_claim": customer_claim,
         "product_master_data": product_master_data,
         "conversation_history": conversation_history,
@@ -1930,8 +2003,7 @@ def review(
 ) -> JSONResponse:
     if source_type not in {"upload", "url"}:
         raise HTTPException(status_code=400, detail="未知素材来源")
-    if scenario not in {"video_unboxing", "product_damage", "minor_material"}:
-        raise HTTPException(status_code=400, detail="未知审核场景")
+    scenario, business_scenario = _normalize_review_scenario(scenario, business_scenario)
     if review_model not in REVIEW_MODEL_PROFILES:
         raise HTTPException(status_code=400, detail="未知审核档位")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
@@ -1969,7 +2041,7 @@ def review(
     if not damage_causality_policy and scenario == "product_damage":
         damage_causality_policy = json.dumps(
             {
-                "force_action_scan": review_model in {"standard", "backup"},
+                "force_action_scan": review_model == "backup",
                 "dedicated_chunk_frames": 20,
                 "context_frames": 6,
             },

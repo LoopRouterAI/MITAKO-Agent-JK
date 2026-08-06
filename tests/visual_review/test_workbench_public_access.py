@@ -29,9 +29,97 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
 
         self.assertIn('name="minor_refund_policy"', workbench)
         self.assertIn('"authoritative_verification":"disabled"', workbench)
+        self.assertIn('"independent_payment_min_age":10', workbench)
+        self.assertIn("申请时未满 10 周岁会加强核对支付密码来源和监护人发现消费过程", workbench)
+        self.assertIn("不仅凭年龄要求人工复核", workbench)
+        self.assertIn("开始审核未成年人资料", workbench)
+        self.assertNotIn("开始审核资料材料", workbench)
         self.assertIn("标准视觉初审（默认，不依赖外部接口）", workbench)
         self.assertNotIn("始终VIP客服终审", workbench)
         self.assertNotIn("最终结论必须由VIP客服复核确认", workbench)
+
+    def test_workbench_exposes_four_independent_business_scenarios(self) -> None:
+        workbench = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
+
+        for scenario in ("product_damage", "wrong_item", "missing_item", "minor_material"):
+            self.assertIn(f'data-scenario="{scenario}"', workbench)
+        self.assertIn("4 条业务入口", workbench)
+        self.assertNotIn("入口 01 / 开箱与发错货", workbench)
+        self.assertEqual(self.client.get("/wrong-item").status_code, 200)
+        self.assertEqual(self.client.get("/missing-item").status_code, 200)
+
+    def test_workbench_batch_api_preserves_wrong_and_missing_business_scenarios(self) -> None:
+        scenarios = {
+            "wrong_item": "video_unboxing",
+            "missing_item": "video_unboxing",
+            "minor_refund": "minor_material",
+        }
+        for business_scenario, technical_scenario in scenarios.items():
+            with self.subTest(business_scenario=business_scenario), patch.object(
+                workbench_server,
+                "_group_batch_folder_uploads",
+                return_value={"case-1": [object()]},
+            ), patch.object(
+                workbench_server,
+                "_save_folder_uploads",
+                return_value=(Path("case"), {"accepted_count": 1}),
+            ), patch.object(
+                workbench_server,
+                "_run_folder_agent_review",
+                return_value={"ok": True, "review": {"summary": {"review_status": "completed"}}},
+            ) as run_review:
+                response = self.client.post(
+                    "/api/review-folders-batch",
+                    data={
+                        "scenario": business_scenario,
+                    },
+                    files={"files": ("evidence.jpg", b"image", "image/jpeg")},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(run_review.call_args.args[1], technical_scenario)
+                self.assertEqual(run_review.call_args.args[3]["business_scenario"], business_scenario)
+
+    def test_review_scenario_normalization_rejects_conflicting_business_context(self) -> None:
+        self.assertEqual(
+            workbench_server._normalize_review_scenario("video_unboxing", "wrong_item"),
+            ("video_unboxing", "wrong_item"),
+        )
+        self.assertEqual(
+            workbench_server._normalize_review_scenario("video_unboxing", "missing_item"),
+            ("video_unboxing", "missing_item"),
+        )
+        self.assertEqual(
+            workbench_server._normalize_review_scenario("minor_material", "minor_refund"),
+            ("minor_material", "minor_refund"),
+        )
+
+        response = self.client.post(
+            "/api/review-folder",
+            data={"scenario": "product_damage", "business_scenario": "missing_item"},
+            files={"files": ("evidence.jpg", b"image", "image/jpeg")},
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_sample_api_preserves_business_scenario(self) -> None:
+        with patch.object(
+            workbench_server,
+            "_run_sample_agent_review",
+            return_value={"ok": True, "review": {"summary": {"review_status": "completed"}}},
+        ) as run_review:
+            response = self.client.post(
+                "/api/review-sample",
+                json={
+                    "sample_id": "sample_001",
+                    "scenario": "video_unboxing",
+                    "business_scenario": "wrong_item",
+                    "model_key": "auto",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(run_review.call_args.args[3], "wrong_item")
 
     def test_report_and_media_routes_require_path_bound_unexpired_signature(self) -> None:
         report_name = "signed-report.html"
@@ -211,7 +299,20 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                 "field_consistency": {
                     "status": "completed",
                     "verdict": "matched",
+                    "checks": [{
+                        "check_id": "identity_age",
+                        "status": "mismatched",
+                        "payment_capability_risk": "high",
+                    }],
                     "unknown": "不得公开",
+                },
+                "required_materials": ["请补充说明未成年人如何获得或得知支付密码。"],
+                "payment_capability_risk": {
+                    "level": "high",
+                    "effect": "需补充支付过程说明，不自动决定退款。",
+                    "evidence_image_indices": [1],
+                    "requires_review": False,
+                    "requires_more_material": True,
                 },
                 "authenticity_assessment": {
                     "severity": "warning",
@@ -277,6 +378,15 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertEqual(authenticity["risk_percent"], 25)
         self.assertEqual(authenticity["missing_exif_image_indices"], [4])
         self.assertNotIn("raw_ocr", authenticity)
+        assessment = public_parsed["minor_material_assessment"]
+        self.assertEqual(assessment["required_materials"], ["请补充说明未成年人如何获得或得知支付密码。"])
+        self.assertEqual(assessment["payment_capability_risk"]["level"], "high")
+        self.assertFalse(assessment["payment_capability_risk"]["requires_review"])
+        self.assertTrue(assessment["payment_capability_risk"]["requires_more_material"])
+        self.assertEqual(
+            assessment["field_consistency"]["checks"][0]["payment_capability_risk"],
+            "high",
+        )
         for forbidden in (
             "unknown_top_level",
             "unknown_nested",
@@ -290,6 +400,11 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             "model_limitations",
         ):
             self.assertNotIn(forbidden, serialized)
+
+    def test_health_does_not_expose_schema_placeholders(self) -> None:
+        health = self.client.get("/api/health").json()
+
+        self.assertNotIn("payment_capability_risk", health)
 
     def test_other_scenarios_use_strict_public_dto_and_redact_identifiers(self) -> None:
         parsed = {

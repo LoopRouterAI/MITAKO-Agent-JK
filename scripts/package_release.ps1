@@ -497,7 +497,7 @@ $deliveryEngineer = Join-Path $Stage "docs\delivery\engineer-onboarding.md"
 if (Test-Path $deliveryEngineer) { Remove-Item -LiteralPath $deliveryEngineer -Force }
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
-$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0805审核建议、盲测与完整功能说明.html"
+$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0806四场景与未成年人五类材料审核说明.html"
 if (-not (Test-Path -LiteralPath $CustomerHtmlSource -PathType Leaf)) {
     throw "Customer delivery HTML is missing: $CustomerHtmlSource"
 }
@@ -508,7 +508,12 @@ if (Test-Path (Join-Path $Root $customerDocsName)) {
     $obsoleteDoc1 = New-Utf16String @(0x0050,0x004F,0x0043,0x5BA1,0x67E5,0x0044,0x0065,0x006D,0x006F,0x4F7F,0x7528,0x4E0E,0x8FB9,0x754C,0x8BF4,0x660E,0x002D,0x0032,0x0030,0x0032,0x0036,0x002D,0x0030,0x0037,0x002D,0x0030,0x0033,0x002E,0x006D,0x0064)
     $obsoleteDoc2 = New-Utf16String @(0x4E09,0x7C7B,0x89C6,0x89C9,0x5BA1,0x6838,0x4F18,0x5148,0x8BF4,0x660E,0x002E,0x006D,0x0064)
     $obsoleteDoc3 = New-Utf16String @(0x77E5,0x8BC6,0x5E93,0x4E0E,0x89C6,0x89C9,0x8BC6,0x522B,0x6269,0x5C55,0x9700,0x6C42,0x002E,0x006D,0x0064)
-    $obsoleteCustomerDocs = @($obsoleteDoc1, $obsoleteDoc2, $obsoleteDoc3)
+    $obsoleteCustomerDocs = @(
+        $obsoleteDoc1,
+        $obsoleteDoc2,
+        $obsoleteDoc3,
+        "0805审核建议、盲测与完整功能说明.html"
+    )
     foreach ($name in $obsoleteCustomerDocs) {
         $obsoletePath = Join-Path (Join-Path $Stage $customerDocsName) $name
         if (Test-Path $obsoletePath) {
@@ -858,8 +863,9 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
+    "甲方沟通交付文档\0806四场景与未成年人五类材料审核说明.html",
     "docs\delivery\mitako-0805-blind-evidence-acceptance-20260805.html",
-    "甲方沟通交付文档\0805审核建议、盲测与完整功能说明.html",
     "docs\delivery\mitako-0803-review-advice-acceptance-20260803.html",
     "甲方沟通交付文档\0803完整功能测试与联调说明.html",
     "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",

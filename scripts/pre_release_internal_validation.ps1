@@ -71,7 +71,7 @@ try {
             try {
                 $dynamicReport = Get-Content -LiteralPath $dynamicReportPath -Raw -Encoding UTF8 | ConvertFrom-Json
                 $reuseDynamicReport = (
-                    $dynamicReport.ok -eq $true -and
+                    $dynamicReport.release_gate_ok -eq $true -and
                     [int]$dynamicReport.requested_count -eq 62 -and
                     [string]$dynamicReport.git_commit -eq $currentCommit
                 )

@@ -21,6 +21,11 @@ EVALUATION_LABEL_KEYS = {
     "manual_label",
     "reference_label",
     "final_label",
+    "final_decision",
+    "final_outcome",
+    "refund_result",
+    "resolution",
+    "approved",
     "gold_label",
     "人工结论",
     "人工标签",
@@ -28,6 +33,7 @@ EVALUATION_LABEL_KEYS = {
     "标准答案",
     "样本标签",
 }
+MODEL_EXCLUDED_KEYS = {"source_case", "source_record"}
 SENSITIVE_KEY_MARKERS = (
     "phone",
     "mobile",
@@ -66,6 +72,8 @@ def _is_sensitive_key(value: Any) -> bool:
 def assert_review_input_safe(value: Any) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
+            if str(key or "").strip().lower() in MODEL_EXCLUDED_KEYS:
+                continue
             if is_evaluation_key(key):
                 raise ValueError("evaluation_label_not_allowed")
             assert_review_input_safe(item)
@@ -80,7 +88,7 @@ def sanitize_review_input(value: Any) -> Any:
         return {
             key: "[敏感字段已遮盖]" if _is_sensitive_key(key) and item not in (None, "") else sanitize_review_input(item)
             for key, item in value.items()
-            if not is_evaluation_key(key)
+            if not is_evaluation_key(key) and str(key or "").strip().lower() not in MODEL_EXCLUDED_KEYS
         }
     if isinstance(value, list):
         return [sanitize_review_input(item) for item in value]

@@ -3,13 +3,47 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
+
+from fastapi.testclient import TestClient
 
 from poc.visual_review_poc import workbench_server
 
 
 class WorkbenchStrongProfileTest(unittest.TestCase):
+    def test_browser_default_continuity_policy_does_not_force_dense_scan(self) -> None:
+        html = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
+        selected = next(
+            line for line in html.splitlines()
+            if "continuity_policy" not in line and "selected" in line and "out_of_frame_warning_seconds" in line
+        )
+
+        self.assertNotIn('"force_dense_scan":true', selected)
+
+    def test_model_route_tolerates_invalid_nested_numeric_diagnostics(self) -> None:
+        succeeded = {
+            "status": "success",
+            "latency_seconds": "slow",
+            "model_latency_seconds_sum": "slow",
+            "unknown_cost_calls": "many",
+            "chunking": {"total_model_calls": "many"},
+            "parsed": {"predicted_label": "review"},
+        }
+        with patch.object(
+            workbench_server, "_configured_model_keys", return_value=["gemini35lite"]
+        ), patch.object(
+            workbench_server, "call_model_chunked", return_value=succeeded
+        ):
+            result = workbench_server._call_model_chunked_with_fallback(
+                "auto", {"case_id": "CASE-BAD-NUMBERS"}, timeout=180, retries=0
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["chunking"]["total_model_calls"], 0)
+        self.assertEqual(result["model_latency_seconds_sum"], 0.0)
+
     def test_auto_model_route_defaults_to_gemini_35_flash_lite(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             model_keys = workbench_server._configured_model_keys("auto")
@@ -152,6 +186,80 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
         self.assertEqual(result["route_fallback_count"], 0)
         self.assertEqual(result["route_attempts"][0]["decision"], "stop_non_retryable")
 
+    def test_auto_model_route_falls_back_when_primary_credentials_are_unavailable(self) -> None:
+        failed = {
+            "status": "failed",
+            "error_type": "hard",
+            "status_code": 401,
+            "latency_seconds": 1.0,
+            "model_latency_seconds_sum": 1.0,
+            "cost_status": "unknown",
+            "unknown_cost_calls": 1,
+            "chunking": {"total_model_calls": 1},
+        }
+        succeeded = {
+            "status": "success",
+            "latency_seconds": 2.0,
+            "model_latency_seconds_sum": 2.0,
+            "cost_status": "estimated",
+            "unknown_cost_calls": 0,
+            "chunking": {"total_model_calls": 1},
+            "parsed": {"predicted_label": "review"},
+        }
+        with patch.dict(
+            "os.environ",
+            {
+                "VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash",
+                "VISUAL_REVIEW_FALLBACK_MODELS": "qwen3.5-flash",
+            },
+            clear=False,
+        ), patch.object(
+            workbench_server,
+            "call_model_chunked",
+            side_effect=[failed, succeeded],
+        ) as model:
+            result = workbench_server._call_model_chunked_with_fallback(
+                "auto", {"case_id": "CASE-AUTH-FAILOVER"}, timeout=180, retries=0
+            )
+
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["route_fallback_count"], 1)
+        self.assertEqual(result["route_attempts"][0]["decision"], "fallback_provider_unavailable")
+
+    def test_auto_model_route_counts_skipped_primary_as_fallback(self) -> None:
+        skipped = {
+            "status": "skipped",
+            "error": "missing_api_key",
+            "cost_status": "not_incurred",
+            "chunking": {"total_model_calls": 0},
+        }
+        succeeded = {
+            "status": "success",
+            "cost_status": "estimated",
+            "chunking": {"total_model_calls": 1},
+            "parsed": {"predicted_label": "review"},
+        }
+        with patch.dict(
+            "os.environ",
+            {
+                "VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash",
+                "VISUAL_REVIEW_FALLBACK_MODELS": "qwen3.5-flash",
+            },
+            clear=False,
+        ), patch.object(
+            workbench_server,
+            "call_model_chunked",
+            side_effect=[skipped, succeeded],
+        ):
+            result = workbench_server._call_model_chunked_with_fallback(
+                "auto", {"case_id": "CASE-SKIPPED-FAILOVER"}, timeout=180, retries=0
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["route_fallback_count"], 1)
+        self.assertEqual(result["route_attempts"][0]["decision"], "fallback_provider_unavailable")
+
     def test_folder_review_uses_configured_model_timeout_and_retries(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             folder = Path(temp_dir)
@@ -255,7 +363,7 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
         self.assertEqual(result["sampling"]["sampled_frames"], 905)
         self.assertEqual(result["sampling"]["model_segments"], 38)
 
-    def test_standard_profile_enforces_full_timeline_one_fps(self) -> None:
+    def test_standard_profile_uses_bounded_adaptive_sampling(self) -> None:
         observed = {}
         with tempfile.TemporaryDirectory() as temp_dir:
             video = Path(temp_dir) / "evidence.mp4"
@@ -291,11 +399,31 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                 workbench_server._run_review(video, "product_damage", 0.2, 24, 24, 12, "standard", {})
 
         self.assertEqual(observed, {
-            "sampling_mode": "dense",
-            "fps": 1.0,
-            "max_frames": 1200,
+            "sampling_mode": "adaptive",
+            "fps": 0.2,
+            "max_frames": 24,
             "scenario_override": "product_damage",
         })
+
+    def test_standard_profile_does_not_force_damage_causality_scan_by_default(self) -> None:
+        observed = {}
+
+        def run_review(*args, **_kwargs):
+            observed.update(args[7])
+            return {"ok": True}
+
+        with patch.object(
+            workbench_server, "_save_upload", return_value=Path("evidence.mp4")
+        ), patch.object(workbench_server, "_run_review", side_effect=run_review):
+            response = TestClient(workbench_server.app).post(
+                "/api/review",
+                data={"scenario": "product_damage", "review_model": "standard"},
+                files={"file": ("evidence.mp4", b"video", "video/mp4")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        policy = json.loads(observed.get("damage_causality_policy") or "{}")
+        self.assertFalse(policy.get("force_action_scan", False))
 
 
 if __name__ == "__main__":

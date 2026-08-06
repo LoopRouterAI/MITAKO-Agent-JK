@@ -20,11 +20,23 @@ DOCUMENT_TYPES = (
 )
 
 CONSISTENCY_FIELDS = {
-    "identity_age": ["guardian_identity", "minor_identity", "age_eligibility"],
-    "guardian_relationship": ["guardian_identity", "minor_identity", "relationship_link"],
-    "commitment_signatures": ["guardian_signer", "minor_signer", "signature_presence"],
-    "order_payment": ["order_reference", "payer_identity", "amount", "transaction_scope"],
-    "mobile_realname": ["subscriber_identity", "account_mobile", "invoice_identity"],
+    "identity_age": [
+        "guardian_identity", "minor_identity", "age_eligibility",
+        "payment_password_access", "guardian_discovery_process",
+    ],
+    "guardian_relationship": [
+        "guardian_identity", "minor_identity", "relationship_link", "applicant_guardian_role",
+    ],
+    "commitment_signatures": [
+        "guardian_signer", "minor_signer", "signature_presence", "signature_method", "field_alignment",
+    ],
+    "order_payment": [
+        "order_reference", "payer_identity", "amount", "transaction_scope", "commitment_amount",
+    ],
+    "mobile_realname": [
+        "subscriber_identity", "account_mobile", "invoice_identity", "invoice_phone",
+        "number_status", "ownership_proof",
+    ],
 }
 
 CONSISTENCY_LABELS = {
@@ -60,6 +72,12 @@ SOP 版本：minor_refund_2_0
 3. 监护人与未成年人亲笔签字的退款申请承诺书。
 4. 购买订单证明、支付流水或支付账单。
 5. 账号绑定手机号实名归属证明。只有填写了本案用户信息、能看到实名主体和购物手机号或备注信息的运营商话费账单/电子发票，才属于有效证明。空白模板、示例图无效；只显示账号名和手机号的运营商 App 页面只能作为辅助线索，不能替代该证明。
+
+异常经验规则：
+- 身份证仅允许遮挡住址门牌号和身份证号后三位；密集水印或错误打码导致关键字段不可读时，应要求重新提交清晰材料，但不得仅凭水印认定造假。
+- 申请人与未成年人分处两本户口本时，必须由出生证明、同户直系关系页或盖章的合法监护证明闭合关系链；哥哥或姐姐不是法定监护人，不能直接代替父母或合法监护人申请。
+- 承诺书双方姓名必须亲笔签名，电脑录入姓名不能视为亲笔签名；金额与订单可退款范围一致且不得涂改，字段错位时应要求重新提交未涂改且字段对应正确的版本。
+- 运营商材料必须显示可与平台绑定号码比对的业务手机号；支付截图不能替代手机号实名归属证明。号码已注销时，应补充销户或原号码归属证明。
 
 护照识别边界：
 - 护照作为可识别证件，document_type 必须输出 passport，并输出签发国家/地区 issuing_country_or_region 与可读性 readability。
@@ -149,6 +167,7 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
     policy = context.get("minor_refund_policy") or {
         "review_mode": "standard",
         "authoritative_verification": "disabled",
+        "independent_payment_min_age": 10,
     }
     check = context.get("minor_consistency_check") or {}
     check_id = str(check.get("check_id") or "")
@@ -184,13 +203,14 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
    matched 表示所给图片中的该字段彼此一致；mismatched 表示存在明确冲突；uncertain 表示看不清或证据不足；not_assessed 只用于图片不包含该字段。
    matched 可用于至少两张图片中足够的可见字段片段一致，即使 SOP 允许的证件号中段已打码；但完全遮盖、手写难辨或缺字段必须输出 uncertain。
    mismatched 仅允许用于至少两张图片中的同一字段均完整清晰可见且明确不同；部分遮盖、打码、裁切或主副卡关系不明时不得输出 mismatched。
-2. 身份与年龄：比较监护人、未成年人主体及年龄是否满足未成年人申请条件；护照可作为视觉/OCR 一致性证据参与比较。
-3. 监护关系：比较身份证、护照与户口本或出生证明中的双方主体及关系链；护照签发国家/地区仅作可见字段初审。
-4. 承诺书：比较监护人与未成年人签署主体标注及双方签字是否存在；不得声称签名具有法律真实性。
-5. 订单与支付：比较订单引用、付款主体、金额和交易范围在所给凭证中是否一致；不得声称平台订单或支付记录真实。
-6. 手机号实名：比较运营商材料中的实名主体、账号绑定手机号和发票抬头/备注是否与其他材料一致；不得声称运营商实名状态真实有效。
+2. 身份与年龄：比较监护人、未成年人主体及年龄是否满足未成年人申请条件；护照可作为视觉/OCR 一致性证据参与比较。低于策略阈值时还要检查材料是否说明未成年人如何获得或得知支付密码，以及监护人如何、何时发现消费，分别写入 payment_password_access 与 guardian_discovery_process。
+3. 监护关系：比较身份证、护照与户口本或出生证明中的双方主体及关系链；护照签发国家/地区仅作可见字段初审。申请人是哥哥或姐姐时，applicant_guardian_role 不得判 matched，除非另有父母关系或合法监护证明。
+4. 承诺书：比较监护人与未成年人签署主体标注、双方签字是否存在、是否为亲笔签名以及字段是否对齐；电脑录入姓名不能视为亲笔签名，不得声称签名具有法律真实性。
+5. 订单与支付：比较订单引用、付款主体、金额和交易范围在所给凭证中是否一致，同时检查承诺书填写金额与订单可退款范围是否一致；不得声称平台订单或支付记录真实。
+6. 手机号实名：比较运营商材料中的实名主体、账号绑定手机号、发票抬头/备注和发票业务手机号是否一致；不得声称运营商实名状态真实有效。支付截图不能替代手机号实名归属证明；号码已注销时必须检查销户或原号码归属证明。
    主副卡并存、号码部分遮盖、发票备注不完整或无法建立主副卡关系时必须输出 uncertain，不得输出 mismatched。
 7. 同时检查明显裁切、拼接、涂改、遮挡或字段冲突风险。疑似编辑只能标风险，不能直接认定造假。tamper_risk=high 必须有明确局部异常，并只在 tamper_evidence_image_indices 中引用直接支持该异常的图片；压缩、扫描、截图、水印、缺少 EXIF 或一般清晰度问题不得单独判 high。
+8. 仅在 identity_age 检查中评估独立支付合理性：若清晰资料显示未成年人低于策略阈值 {policy.get('independent_payment_min_age', 10)} 岁，low_age 输出 true；达到阈值输出 false；年龄看不清输出 null。低龄且 payment_password_access、guardian_discovery_process 任一项不是 matched 时，payment_capability_risk 才输出 high；两项均 matched 时输出 none。它只是支付来源和监护过程的加强核验信号，不是法律结论，不得仅凭年龄给支持、拒绝或人工复核结论，也不得输出具体年龄。
 
 隐私与业务边界：
 - 模型可以在本次推理中读取字段用于比较，但不得输出任何字段原值、部分值、尾号、姓名、号码、金额、地址、OCR原文或哈希。
@@ -206,6 +226,8 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
   "coverage_ack": {{"expected_image_indices": [], "observed_image_indices": []}},
   "consistency_check": {{
     "check_id": "{check_id}",
+    "low_age": true|false|null,
+    "payment_capability_risk": "none|high|unknown",
     "field_results": {json.dumps(field_rows, ensure_ascii=False)},
     "tamper_risk": "low|medium|high|uncertain",
     "risk_reason_codes": ["no_obvious_risk|suspected_editing|unreadable_fields|incomplete_document|conflicting_fields|evidence_gap"],

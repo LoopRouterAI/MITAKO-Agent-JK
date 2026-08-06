@@ -8,6 +8,13 @@ from typing import Any, Dict, List
 PRICING_NOTE = "Gemini 3.5 Flash Lite 与 Gemini 3.5 Flash 按官方标准价估算；Gemini 3.1 Flash Lite 按用户成本表 0.25/1.50 USD 每百万 tokens 并按 7 元/USD 折算；Qwen3.5-Flash 与 Doubao Seed 2.0 Lite 按用户提供阶梯价依据输入 tokens 选择区间；本轮未使用音频输入。"
 
 
+def _positive_count(value: Any) -> int:
+    try:
+        return max(1, int(value or 1))
+    except (TypeError, ValueError, OverflowError):
+        return 1
+
+
 def summarize_cost_observability(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     unknown = 0
     estimated = 0
@@ -18,17 +25,17 @@ def summarize_cost_observability(items: List[Dict[str, Any]]) -> Dict[str, Any]:
             not_incurred += 1
             continue
         if explicit == "partial_unknown":
-            unknown += max(1, int(item.get("unknown_cost_calls") or 1))
-            estimated += max(1, int(item.get("estimated_cost_calls") or 1))
+            unknown += _positive_count(item.get("unknown_cost_calls"))
+            estimated += _positive_count(item.get("estimated_cost_calls"))
             continue
         if explicit == "unknown":
-            unknown += max(1, int(item.get("unknown_cost_calls") or 1))
+            unknown += _positive_count(item.get("unknown_cost_calls"))
             continue
         usage = item.get("usage") if isinstance(item.get("usage"), dict) else {}
         cost = item.get("cost") if isinstance(item.get("cost"), dict) else {}
         usage_reported = any(value not in (None, "") for value in usage.values())
         if explicit == "estimated" or usage_reported or "estimated_usd" in cost:
-            estimated += max(1, int(item.get("estimated_cost_calls") or 1))
+            estimated += _positive_count(item.get("estimated_cost_calls"))
         else:
             unknown += 1
     status = (

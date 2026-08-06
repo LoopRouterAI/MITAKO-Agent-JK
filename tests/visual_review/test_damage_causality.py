@@ -74,8 +74,10 @@ class DamageCausalityTest(unittest.TestCase):
                     {
                         "source_type": "supplemental_image",
                         "fact": "争议部位存在清晰可见的外观瑕疵。",
+                        "damage_visible": True,
                         "confidence": 0.9,
-                        "same_item_linkage": "与开箱视频中的同款商品一致",
+                        "same_item_linkage": "same_item",
+                        "temporal_linkage": "post_opening",
                     }
                 ],
             },
@@ -86,6 +88,28 @@ class DamageCausalityTest(unittest.TestCase):
         self.assertEqual(resolved["damage_presence"], "uncertain")
         self.assertEqual(resolved["supplemental_damage_presence"], "confirmed")
         self.assertEqual(result["predicted_label"], "review")
+
+    def test_linked_supplemental_image_without_visible_damage_is_not_confirmed(self):
+        result = apply_damage_causality_guard(
+            {
+                "predicted_label": "review",
+                "confidence": 0.72,
+                "damage_causality_assessment": assessment(damage_presence="uncertain"),
+                "adopted_evidence": [
+                    {
+                        "source_type": "supplemental_image",
+                        "fact": "争议部位未见清晰损伤。",
+                        "damage_visible": False,
+                        "confidence": 0.95,
+                        "same_item_linkage": "same_item",
+                        "temporal_linkage": "post_opening",
+                    }
+                ],
+            },
+            "product_damage",
+        )
+
+        self.assertNotIn("supplemental_damage_presence", result["damage_causality_assessment"])
 
     def test_uncertain_damage_keeps_evidence_score_for_later_sop_policy(self):
         result = apply_damage_causality_guard(
@@ -211,7 +235,7 @@ class DamageCausalityTest(unittest.TestCase):
                 "supplemental_images": [],
             }
         )
-        self.assertIn("ORDER-1", prompt)
+        self.assertNotIn("ORDER-1", prompt)
         self.assertNotIn("负样本", prompt)
         self.assertNotIn("人工拒绝", prompt)
 
@@ -401,6 +425,38 @@ class DamageCausalityTest(unittest.TestCase):
         self.assertEqual(combined["most_likely_origin"], "manufacturing_or_original_packaging")
         self.assertEqual(combined["origin_confidence"], 0.7)
         self.assertEqual(combined["causal_evidence_level"], "indirect")
+
+    def test_supplemental_only_damage_does_not_promote_indirect_origin(self):
+        rows = [
+            {
+                "damage_causality_assessment": assessment(
+                    damage_presence="uncertain",
+                    damage_timing="post_opening_only",
+                    most_likely_origin="customer_opening_or_handling",
+                    origin_confidence=0.8,
+                    causal_evidence_level="indirect",
+                ),
+            },
+            {
+                "adopted_evidence": [{
+                    "source_type": "supplementary_image",
+                    "image_index": 1,
+                    "fact": "同一商品的争议部位可见断裂。",
+                    "damage_visible": True,
+                    "confidence": 0.94,
+                    "same_item_linkage": "same_item",
+                    "temporal_linkage": "post_opening",
+                }],
+            },
+        ]
+
+        combined = aggregate_damage_causality(rows)
+
+        self.assertEqual(combined["damage_presence"], "confirmed")
+        self.assertEqual(combined["damage_timing"], "unknown")
+        self.assertEqual(combined["most_likely_origin"], "indeterminate")
+        self.assertEqual(combined["origin_confidence"], 0.0)
+        self.assertEqual(combined["causal_evidence_level"], "insufficient")
 
 
 if __name__ == "__main__":

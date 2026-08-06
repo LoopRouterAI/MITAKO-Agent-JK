@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from poc.visual_review_poc.model_catalog import summarize_cost_observability
+from poc.visual_review_poc.observability import sanitize_error_text
 
 
 
@@ -46,7 +47,7 @@ def run_adaptive_tasks(
                 try:
                     wave_results[index] = future.result()
                 except Exception as exc:
-                    wave_results[index] = {"status": "failed", "error": str(exc)[:500], "error_type": "hard"}
+                    wave_results[index] = {"status": "failed", "error": sanitize_error_text(exc, 500), "error_type": "hard"}
         normalized = [item or {"status": "failed", "error": "empty_chunk_result"} for item in wave_results]
         completed.extend(normalized)
         if any(_retryable_pressure(item) for item in normalized):

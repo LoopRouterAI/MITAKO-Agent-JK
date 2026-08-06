@@ -229,6 +229,64 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
             "request_more_material",
         )
 
+    def test_workbench_preserves_minor_required_materials_and_payment_risk_before_postprocess(self) -> None:
+        case = {
+            "case_id": "CASE-MINOR-RISK",
+            "scenario": "minor_material",
+            "scenario_label": "未成年人资料审核",
+            "customer_claim": "监护人申请未成年人退款",
+            "videos": [],
+            "frames": [],
+            "supplemental_images": [],
+            "structured_business_context": {
+                "business_scenario": "minor_refund",
+                "minor_refund_policy": {"authoritative_verification": "disabled"},
+            },
+        }
+        model_result = {
+            "status": "success",
+            "parsed": {
+                "predicted_label": "review",
+                "confidence": 0.82,
+                "overall_audit": {"conclusion": "低龄支付过程需要重点核验。"},
+                "minor_material_assessment": {
+                    "declared_image_count": 5,
+                    "accepted_image_count": 5,
+                    "processed_image_count": 5,
+                    "required_materials": ["请补充说明未成年人如何获得或得知支付密码。"],
+                    "payment_capability_risk": {
+                        "level": "high",
+                        "effect": "需补充支付过程说明，不自动决定退款。",
+                        "evidence_image_indices": [1],
+                        "low_age": True,
+                        "process_evidence_status": "missing",
+                        "requires_review": False,
+                        "requires_more_material": True,
+                    },
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            workbench_server, "score_result", return_value={}
+        ):
+            response = workbench_server._agent_report_response(
+                case,
+                Path(temp_dir),
+                model_result,
+                "minor-risk",
+                include_html_report=False,
+            )
+
+        advisory = response["advisory_assessment"]
+        self.assertEqual(advisory["human_review"]["level"], "not_required")
+        self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
+        self.assertEqual(advisory["evidence_attention"]["level"], "orange")
+        self.assertIn(
+            "请补充说明未成年人如何获得或得知支付密码。",
+            advisory["evidence_attention"]["missing_evidence"],
+        )
+
     def test_failed_review_is_not_reclassified_by_business_policy(self) -> None:
         metadata = ReviewCaseMetadata(
             client_case_id="CASE-SERVICE-FAILURE",

@@ -405,9 +405,6 @@ def _effective_review_policies(metadata: Dict[str, Any]) -> tuple[Dict[str, Any]
     continuity.setdefault("out_of_frame_warning_seconds", 3.0)
     preset = str((metadata.get("sampling_policy") or {}).get("preset") or "adaptive")
     scenario = str(metadata.get("scenario") or "")
-    if preset == "adaptive" and scenario == "product_damage":
-        continuity["force_dense_scan"] = True
-        causality["force_action_scan"] = True
     if preset in {"strong", "strict", "forensic"}:
         continuity["force_dense_scan"] = True
         if scenario == "product_damage":
@@ -563,7 +560,6 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         "conversation_history": json.dumps(metadata.get("conversation_history") or [], ensure_ascii=False),
         "customer_tone": str(metadata.get("customer_tone") or ""),
         "sop_context": json.dumps(metadata.get("sop_context") or {}, ensure_ascii=False),
-        "source_case": json.dumps(metadata.get("source_record") or {}, ensure_ascii=False),
         "asset_manifest": json.dumps(
             {
                 "assets": job.get("assets") or [],
@@ -1113,7 +1109,7 @@ def contract() -> Dict[str, Any]:
             "large_batch": "120GB 级生产批次应由对象存储直传、云转码/故事板服务和案件引用适配层承接；当前未伪装为已接入。",
         },
         "sampling_presets": {
-            "adaptive": "一般场景按时长和文件大小抽取 6-24 帧；商品有伤自动执行 1 fps 连续性与损伤成因质量底线。",
+            "adaptive": "按时长和文件大小抽取 6-24 帧并执行一次主审核；专项连续性与损伤成因检查仅由更强档位或显式策略启用。",
             "strong": "固定 2 fps，最多 1800 帧；用于离镜、动作前后和争议时点强化复核。",
             "strict": "固定 1 fps，最多 1200 帧，每 24 帧一个并行模型分段。",
             "forensic": "固定 2 fps，最多 1800 帧，每 24 帧一个并行模型分段。",

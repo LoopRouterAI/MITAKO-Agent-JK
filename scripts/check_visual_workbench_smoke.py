@@ -475,7 +475,7 @@ def test_retry_after_is_honored() -> None:
 
 def test_workbench_html() -> None:
     html = (ROOT / "poc" / "visual_review_poc" / "workbench.html").read_text(encoding="utf-8")
-    for scenario in ("video_unboxing", "product_damage", "minor_material"):
+    for scenario in ("product_damage", "wrong_item", "missing_item", "minor_material"):
         assert f'data-scenario="{scenario}"' in html
     assert "scenario=all" not in html
     assert "sampleEvalForm" in html
@@ -492,7 +492,7 @@ def test_workbench_html() -> None:
     assert "function configureBuiltInSampleControls()" in html
     assert "batchSampleBtn" in html
     assert "sample_004" in html
-    for path in ("/video-unboxing", "/product-damage", "/minor-material"):
+    for path in ("/product-damage", "/wrong-item", "/missing-item", "/minor-material"):
         assert path in html, path
     assert "人工结论样本评测" in html
     assert not FORBIDDEN_PUBLIC_TERMS.search(html)

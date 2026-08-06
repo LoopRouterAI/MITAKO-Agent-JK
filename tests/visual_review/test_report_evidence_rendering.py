@@ -315,6 +315,36 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         self.assertEqual(panel, "")
 
+    def test_minor_report_hides_product_damage_policy_placeholder_from_summary(self):
+        data = _report_data()
+        report = data["agent_report"]
+        report["scenario_label"] = "未成年人退款材料审核"
+        report["parsed"]["minor_material_assessment"] = {"decision": "negative"}
+        report["parsed"]["decision_policy_audit"] = {
+            "applied": False,
+            "reason": "未启用商品有伤规则分类建议。",
+        }
+        report["advisory_assessment"] = {
+            "assessment": {
+                "conclusion_code": "evidence_does_not_support_claim",
+                "conclusion": "申请人与监护关系字段存在明确冲突。",
+                "confidence": 0.84,
+            },
+            "sop_recommendation": {
+                "code": "not_support_claim",
+                "recommendation": "按照 SOP，当前证据倾向不支持用户诉求。",
+                "basis": "未启用商品有伤规则分类建议。",
+            },
+            "human_review": {"level": "required"},
+            "workflow_recommendation": "human_review",
+            "policy": {"business_action_allowed": False},
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("申请人与监护关系字段存在明确冲突", report_html)
+        self.assertNotIn("未启用商品有伤规则分类建议", report_html)
+
     def test_material_request_report_does_not_claim_vip_review(self):
         data = _report_data()
         data["agent_report"]["advisory_assessment"] = {
@@ -394,6 +424,61 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("业务动作由甲方系统执行，是否需要人工复核由单独的复核等级决定", report_html)
         self.assertIn("不要求逐单", report_html)
         self.assertNotIn("提交VIP客服复核", report_html)
+
+    def test_report_prioritizes_customer_evidence_attention(self):
+        data = _report_data()
+        data["agent_report"]["advisory_assessment"] = {
+            "assessment": {
+                "conclusion_code": "evidence_inconclusive",
+                "conclusion": "当前证据仍有一项关键分歧。",
+                "confidence": 0.72,
+                "confidence_level": "medium",
+                "calibration_status": "uncalibrated_evidence_score",
+            },
+            "human_review": {
+                "level": "required",
+                "reason_codes": ["evidence_conflict"],
+                "recommendation": "请授权人员核对原始证据。",
+            },
+            "workflow_recommendation": "human_review",
+            "signals": [],
+            "evidence_attention": {
+                "level": "red",
+                "headline": "关键证据存在冲突，先核对分歧再处理。",
+                "customer_focus": ["先看主视频损伤事实，再看开箱合规与动作前后链。"],
+                "disagreements": ["主视频与补充图片对损伤存在性的结论不同。"],
+                "missing_evidence": ["缺少同一商品同一部位的连续动作前后证据。"],
+            },
+            "policy": {"business_action_allowed": False},
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("客服证据优先级", report_html)
+        self.assertIn("先看什么", report_html)
+        self.assertIn("需要对齐的分歧", report_html)
+        self.assertIn("缺少的具体证据", report_html)
+        self.assertIn("关键证据存在冲突", report_html)
+        self.assertIn("同一商品同一部位", report_html)
+
+    def test_minor_payment_process_gap_uses_customer_facing_signal_label(self):
+        data = _report_data()
+        data["agent_report"]["advisory_assessment"] = {
+            "assessment": {"conclusion": "需补充支付过程说明。", "confidence": 0.72},
+            "human_review": {"level": "not_required", "reason_codes": ["material_resubmission_available"]},
+            "workflow_recommendation": "request_more_material",
+            "signals": [{
+                "code": "minor_payment_process_evidence_gap",
+                "severity": "warning",
+                "effect": "请补充支付密码来源和监护人发现消费过程。",
+            }],
+            "policy": {"business_action_allowed": False},
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("低龄支付过程待补", report_html)
+        self.assertNotIn("minor_payment_process_evidence_gap", report_html)
 
     def test_report_renders_evidence_boundaries_and_links_gallery_media(self):
         report_html = render_public_report(_report_data())

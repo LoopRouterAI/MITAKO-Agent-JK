@@ -190,14 +190,14 @@ def main() -> int:
     adaptive_channels = adaptive_plan.get("estimated_channel_calls") or {}
     _case(
         results,
-        "REVIEW-product-damage-adaptive-quality-floor",
+        "REVIEW-product-damage-adaptive-bounded-pass",
         code == 200
-        and adaptive_plan.get("sampling_mode") == "dense"
+        and adaptive_plan.get("sampling_mode") == "adaptive"
         and adaptive_plan.get("fps") == 1.0
-        and adaptive_plan.get("estimated_frames_per_video", 0) >= 453
-        and adaptive_channels.get("main_review", 0) > 0
-        and adaptive_channels.get("object_continuity", 0) > 0
-        and adaptive_channels.get("damage_causality", 0) > 0
+        and 0 < adaptive_plan.get("estimated_frames_per_video", 0) <= 24
+        and adaptive_channels.get("main_review") == 1
+        and adaptive_channels.get("object_continuity") == 0
+        and adaptive_channels.get("damage_causality") == 0
         and adaptive_plan.get("estimated_total_model_calls") == sum(adaptive_channels.values()),
         f"plan={adaptive_plan}",
         t0,

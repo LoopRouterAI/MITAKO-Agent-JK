@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 from poc.visual_review_poc.model_catalog import summarize_cost_observability
+from poc.visual_review_poc.observability import sanitize_error_text
 from review_service.schemas import ReviewMinorMaterialObservation
 
 
@@ -47,13 +48,26 @@ ALLOWED_EDITING_EVIDENCE_CODES = {
 PROCESS_TYPES = {"invoice_generation", "document_capture", "payment_record", "other", "uncertain"}
 PROCESS_QUALITY = {"clear", "partial", "unreadable"}
 CONSISTENCY_FIELDS = {
-    "identity_age": ("guardian_identity", "minor_identity", "age_eligibility"),
-    "guardian_relationship": ("guardian_identity", "minor_identity", "relationship_link"),
-    "commitment_signatures": ("guardian_signer", "minor_signer", "signature_presence"),
-    "order_payment": ("order_reference", "payer_identity", "amount", "transaction_scope"),
-    "mobile_realname": ("subscriber_identity", "account_mobile", "invoice_identity"),
+    "identity_age": (
+        "guardian_identity", "minor_identity", "age_eligibility",
+        "payment_password_access", "guardian_discovery_process",
+    ),
+    "guardian_relationship": (
+        "guardian_identity", "minor_identity", "relationship_link", "applicant_guardian_role",
+    ),
+    "commitment_signatures": (
+        "guardian_signer", "minor_signer", "signature_presence", "signature_method", "field_alignment",
+    ),
+    "order_payment": (
+        "order_reference", "payer_identity", "amount", "transaction_scope", "commitment_amount",
+    ),
+    "mobile_realname": (
+        "subscriber_identity", "account_mobile", "invoice_identity", "invoice_phone",
+        "number_status", "ownership_proof",
+    ),
 }
 CONSISTENCY_STATUS = {"matched", "mismatched", "uncertain", "not_assessed"}
+PAYMENT_CAPABILITY_RISKS = {"none", "high", "unknown"}
 FIELD_VISIBILITY = {"complete", "partial", "masked", "unreadable"}
 TAMPER_RISK = {"low", "medium", "high", "uncertain"}
 RISK_REASON_CODES = {
@@ -70,6 +84,87 @@ CONSISTENCY_MESSAGES = {
     "uncertain": "部分字段不可读、证据不足或存在可疑风险，无法完成视觉一致性确认。",
     "not_assessed": "本项尚未完成视觉字段一致性初审。",
 }
+CONSISTENCY_CHECK_LABELS = {
+    "identity_age": "身份与年龄材料",
+    "guardian_relationship": "监护关系材料",
+    "commitment_signatures": "退款承诺书",
+    "order_payment": "订单与支付材料",
+    "mobile_realname": "手机号实名归属材料",
+}
+CONSISTENCY_FIELD_LABELS = {
+    "guardian_identity": "监护人身份",
+    "minor_identity": "未成年人身份",
+    "age_eligibility": "未成年人年龄条件",
+    "payment_password_access": "支付密码获取方式",
+    "guardian_discovery_process": "监护人发现消费的过程",
+    "relationship_link": "监护关系",
+    "applicant_guardian_role": "申请人监护资格",
+    "guardian_signer": "监护人签字",
+    "minor_signer": "未成年人签字",
+    "signature_presence": "双方签字是否齐全",
+    "signature_method": "签字方式",
+    "field_alignment": "承诺书字段位置",
+    "order_reference": "订单编号",
+    "payer_identity": "付款人身份",
+    "amount": "订单金额",
+    "transaction_scope": "交易范围",
+    "commitment_amount": "承诺书金额",
+    "subscriber_identity": "实名主体",
+    "account_mobile": "手机号",
+    "invoice_identity": "发票实名主体",
+    "invoice_phone": "发票业务手机号",
+    "number_status": "手机号状态",
+    "ownership_proof": "手机号归属证明",
+}
+CONSISTENCY_FIELD_REQUIRED_MATERIALS = {
+    "payment_password_access": "请补充说明未成年人如何获得或得知支付密码。",
+    "guardian_discovery_process": "请补充说明监护人如何、何时发现消费。",
+    "relationship_link": "请补同一本户口本直接关系页、出生证明或法定监护证明。",
+    "applicant_guardian_role": "如申请人为兄弟姐妹等非法定监护人，不能直接代办；请补父母关系或合法监护证明。",
+    "signature_presence": "请重新提交包含双方亲笔签名的退款承诺书。",
+    "signature_method": "请重新提交包含双方亲笔签名的退款承诺书，电脑录入姓名不能替代签名。",
+    "field_alignment": "请重新提交字段填写位置正确且未涂改的退款承诺书。",
+    "commitment_amount": "请重新提交金额与订单可退款范围一致且未涂改的退款承诺书。",
+    "invoice_phone": "请补充显示平台绑定业务手机号的运营商发票或完整开票视频。",
+    "number_status": "请补充能够核验号码当前状态的运营商材料；如已注销，请补销户或原号码归属证明。",
+    "ownership_proof": "请补充手机号实名归属材料；如已注销，请补销户或原号码归属证明；支付截图不能替代手机号实名归属材料。",
+}
+
+
+def _required_materials(field_consistency: Dict[str, Any]) -> List[str]:
+    required: List[str] = []
+    low_age_fields = {"payment_password_access", "guardian_discovery_process"}
+    for check in field_consistency.get("checks") or []:
+        low_age_risk = check.get("low_age") is True or check.get("payment_capability_risk") == "high"
+        for field in check.get("field_results") or []:
+            field_name = str(field.get("field_name") or "")
+            instruction = CONSISTENCY_FIELD_REQUIRED_MATERIALS.get(field_name)
+            if (
+                field.get("status") in {"mismatched", "uncertain"}
+                and instruction
+                and (field_name not in low_age_fields or low_age_risk)
+                and instruction not in required
+            ):
+                required.append(instruction)
+    return required
+
+
+def _consistency_message(check_id: str, status: str, field_rows: List[Dict[str, Any]]) -> str:
+    if status != "mismatched":
+        return CONSISTENCY_MESSAGES[status]
+    mismatched = [item for item in field_rows if item.get("status") == "mismatched"]
+    fields = "、".join(
+        CONSISTENCY_FIELD_LABELS.get(str(item.get("field_name") or ""), str(item.get("field_name") or ""))
+        for item in mismatched
+    ) or "可见字段"
+    images = sorted({
+        int(index)
+        for item in mismatched
+        for index in item.get("evidence_image_indices") or []
+        if str(index).isdigit()
+    })
+    image_text = f"请回看图片 {'、'.join(str(index) for index in images)}。" if images else "请回看对应图片。"
+    return f"{CONSISTENCY_CHECK_LABELS.get(check_id, '所提供材料')}中以下可见字段互相对不上：{fields}。{image_text}"
 
 
 def _chunks(items: Sequence[Dict[str, Any]], size: int) -> List[List[Dict[str, Any]]]:
@@ -148,15 +243,20 @@ def _declared_image_count(case: Dict[str, Any]) -> int:
     return max(declared, len(case.get("supplemental_images") or []))
 
 
-def _minor_refund_policy(case: Dict[str, Any]) -> Dict[str, str]:
+def _minor_refund_policy(case: Dict[str, Any]) -> Dict[str, Any]:
     raw = (case.get("structured_business_context") or {}).get("minor_refund_policy") or {}
     review_mode = str(raw.get("review_mode") or "standard")
     authoritative = str(raw.get("authoritative_verification") or "disabled")
+    try:
+        min_age = max(0, min(int(raw.get("independent_payment_min_age", 10)), 18))
+    except (TypeError, ValueError):
+        min_age = 10
     return {
         "review_mode": review_mode if review_mode in {"standard", "strict"} else "standard",
         "authoritative_verification": (
             authoritative if authoritative in {"disabled", "advisory", "required"} else "disabled"
         ),
+        "independent_payment_min_age": min_age,
     }
 
 
@@ -172,6 +272,9 @@ def _authenticity_assessment(
     }
     missing_exif = sorted(index for index, item in image_by_index.items() if item.get("has_exif") is False)
     unknown_exif = sorted(index for index, item in image_by_index.items() if item.get("has_exif") is None)
+    editor_metadata = sorted(
+        index for index, item in image_by_index.items() if item.get("editor_metadata_present") is True
+    )
     suspected_editing = {
         int(item["image_index"])
         for item in observations
@@ -194,11 +297,16 @@ def _authenticity_assessment(
     confirmed_editing = specific_editing.intersection(corroborated_editing)
     suspected_editing.update(specific_editing)
     suspected_editing.update(corroborated_editing)
+    suspected_editing.update(editor_metadata)
     evidence_indices = sorted(suspected_editing)
     if confirmed_editing:
         severity = "critical"
         risk_score = min(0.94, 0.78 + 0.04 * len(evidence_indices))
         conclusion = "发现较强的疑似编辑或修改线索，请优先回看标红图片。"
+    elif editor_metadata and set(evidence_indices) == set(editor_metadata):
+        severity = "warning"
+        risk_score = 0.42
+        conclusion = "图片元数据显示曾由编辑软件处理；这不等同于内容造假，已标黄供人工抽检。"
     elif evidence_indices:
         severity = "warning"
         risk_score = 0.48
@@ -219,6 +327,7 @@ def _authenticity_assessment(
         "evidence_image_indices": evidence_indices,
         "missing_exif_image_indices": missing_exif,
         "unknown_exif_image_indices": unknown_exif,
+        "editor_metadata_image_indices": editor_metadata,
         "conclusion": conclusion,
         "boundary": "该分数是未校准的图片风险提示，不是图片真实或伪造的客观概率。",
     }
@@ -582,11 +691,19 @@ def _normalize_consistency_checks(
             field_name: [] for field_name in CONSISTENCY_FIELDS[check_id]
         }
         tamper_risks = []
+        payment_capability_risks = []
+        low_age_values: List[bool] = []
         risk_reason_codes = set()
         tamper_evidence_indices: set[int] = set()
         for result in check_results:
             parsed = result.get("parsed") or {}
             raw = parsed.get("consistency_check") or {}
+            payment_capability_risk = str(raw.get("payment_capability_risk") or "unknown")
+            payment_capability_risks.append(
+                payment_capability_risk if payment_capability_risk in PAYMENT_CAPABILITY_RISKS else "unknown"
+            )
+            if isinstance(raw.get("low_age"), bool):
+                low_age_values.append(raw["low_age"])
             expected_indices = {
                 int(value)
                 for value in (result.get("_expected_image_indices") or (parsed.get("coverage_ack") or {}).get("expected_image_indices") or [])
@@ -687,7 +804,7 @@ def _normalize_consistency_checks(
         normalized[check_id] = {
             "check_id": check_id,
             "status": status,
-            "message": CONSISTENCY_MESSAGES[status],
+            "message": _consistency_message(check_id, status, field_rows),
             "field_results": field_rows,
             "tamper_risk": tamper_risk,
             "risk_reason_codes": sorted(risk_reason_codes),
@@ -695,6 +812,16 @@ def _normalize_consistency_checks(
             "tamper_evidence_image_indices": sorted(tamper_evidence_indices),
             "coverage_complete": coverage_ok,
             "segment_count": len(check_results),
+            "low_age": (
+                low_age_values[0]
+                if low_age_values and len(set(low_age_values)) == 1
+                else None
+            ),
+            "payment_capability_risk": (
+                "high" if "high" in payment_capability_risks
+                else "none" if payment_capability_risks and set(payment_capability_risks) == {"none"}
+                else "unknown"
+            ),
         }
     checks = []
     for check_id in CONSISTENCY_FIELDS:
@@ -761,10 +888,8 @@ def aggregate_minor_material_results(
     )
     coverage_ratio = round(len(processed_indices) / max(declared_image_count, 1), 4)
     checklist = _checklist(observations, coverage_complete)
-    present_count = sum(1 for item in checklist if item["status"] == "present")
-    uncertain_count = sum(1 for item in checklist if item.get("quality_status") == "needs_manual_confirmation")
-    not_observed = [item for item in checklist if item["status"] == "not_observed_after_full_scan"]
     field_consistency = _normalize_consistency_checks(consistency_results, consistency_failures)
+    required_materials = _required_materials(field_consistency)
     consistency_by_id = {item["check_id"]: item for item in field_consistency["checks"]}
     consistency_status_labels = {
         "matched": "未发现明显矛盾",
@@ -787,33 +912,77 @@ def aggregate_minor_material_results(
             "uncertain": "visual_consistency_uncertain",
         }.get(check.get("status"), item["validation_status"])
 
+    relationship_check = consistency_by_id.get("guardian_relationship") or {}
+    relationship_link = next(
+        (
+            field for field in relationship_check.get("field_results") or []
+            if field.get("field_name") == "relationship_link"
+        ),
+        {},
+    )
+    if coverage_complete and relationship_link.get("status") in {"uncertain", "not_assessed"}:
+        relationship_item = next(item for item in checklist if item["requirement_id"] == "relationship")
+        relationship_item.update(
+            {
+                "status": "not_observed_after_full_scan",
+                "quality_status": "needs_manual_confirmation",
+                "validation_status": "visual_relationship_link_unresolved",
+                "rule_note": "现有材料未建立申请人与未成年人之间的直接亲子或监护关系，请补同一本户口本直接关系页、出生证明或法定监护证明。",
+            }
+        )
+
+    present_count = sum(1 for item in checklist if item["status"] == "present")
+    uncertain_count = sum(1 for item in checklist if item.get("quality_status") == "needs_manual_confirmation")
+    not_observed = [item for item in checklist if item["status"] == "not_observed_after_full_scan"]
+    identity_check = consistency_by_id.get("identity_age") or {}
+    payment_process_statuses = {
+        str(field.get("field_name") or ""): str(field.get("status") or "not_assessed")
+        for field in identity_check.get("field_results") or []
+        if str(field.get("field_name") or "") in {"payment_password_access", "guardian_discovery_process"}
+    }
+    payment_process_matched = (
+        len(payment_process_statuses) == 2
+        and all(status == "matched" for status in payment_process_statuses.values())
+    )
+    low_age = identity_check.get("low_age") if isinstance(identity_check.get("low_age"), bool) else None
+    model_payment_risk = str(identity_check.get("payment_capability_risk") or "unknown")
+    payment_process_gap = (
+        not payment_process_matched
+        and (low_age is True or model_payment_risk == "high")
+    )
+    payment_process_evidence_status = "matched" if payment_process_matched else "unresolved"
+    payment_capability_level = (
+        "high" if payment_process_gap
+        else "none" if low_age is False or payment_process_matched
+        else "unknown"
+    )
+    payment_capability_risk = {
+        "level": payment_capability_level,
+        "low_age": low_age,
+        "process_evidence_status": payment_process_evidence_status,
+        "requires_review": False,
+        "requires_more_material": payment_process_gap,
+        "effect": (
+            "申请时未满 10 周岁且支付密码来源或监护人发现消费过程尚未闭环；请补充对应说明。该信号不判断未成年人能否独立支付，也不自动决定退款、拒绝或人工复核。"
+            if payment_process_gap
+            else "低龄材料已完成支付来源和监护过程加强核验，不覆盖五类材料的事实结论。"
+        ),
+        "evidence_image_indices": identity_check.get("evidence_image_indices") or [],
+    }
+
     policy = _minor_refund_policy(case)
     authoritative_required = policy["authoritative_verification"] == "required"
     authenticity = _authenticity_assessment(case, observations, field_consistency)
     authenticity_blocked = bool(authenticity["blocks_visual_precheck"])
 
-    if (
-        coverage_complete
-        and present_count == len(checklist)
-        and field_consistency["verdict"] == "matched"
-        and not authenticity_blocked
-        and not authoritative_required
-    ):
-        predicted_label = "positive"
-        decision = "visual_precheck_passed"
-        system_yes_no = "YES"
-        confidence = 0.88
-        readiness = "ready_for_customer_policy"
-        visual_precheck_status = "passed"
-        conclusion = "五类必交材料已齐全，视觉字段未发现明显矛盾，可以按甲方现行流程继续审核。"
-    elif coverage_complete and present_count == len(checklist) and field_consistency["verdict"] == "mismatched":
+    if coverage_complete and field_consistency["verdict"] == "mismatched":
         predicted_label = "negative"
         decision = "visual_precheck_not_passed"
         system_yes_no = "NO"
         confidence = 0.84
         readiness = "visual_conflict_requires_review"
         visual_precheck_status = "failed"
-        conclusion = "材料虽然齐全，但可见字段存在明确冲突，当前资料不支持继续通过初审；请回看标红图片。"
+        conclusion = "可见字段存在明确冲突，当前资料不支持继续通过初审；请回看标红图片。"
     elif coverage_complete and present_count == len(checklist) and authenticity_blocked:
         predicted_label = "review"
         decision = "manual_review"
@@ -842,14 +1011,6 @@ def aggregate_minor_material_results(
         readiness = "needs_field_consistency_review"
         visual_precheck_status = "needs_review"
         conclusion = "五类材料已齐全，但字段仍不清楚或未完成比对；请回看标黄图片或受控重试，不能直接按本轮结果处理。"
-    elif coverage_complete and present_count == len(checklist):
-        predicted_label = "positive"
-        decision = "visual_precheck_passed_with_warnings"
-        system_yes_no = "YES"
-        confidence = 0.78
-        readiness = "ready_with_visual_warnings"
-        visual_precheck_status = "passed"
-        conclusion = "五类材料已齐全，未发现明确字段冲突或阻断性修改风险；可按甲方现行流程继续，标黄项仅供抽检。"
     elif not_observed:
         predicted_label = "review"
         decision = "request_more_material"
@@ -859,6 +1020,36 @@ def aggregate_minor_material_results(
         visual_precheck_status = "incomplete"
         missing_labels = "、".join(item["label"] for item in not_observed)
         conclusion = f"全量图片已处理，当前缺少可按 SOP 采信的{missing_labels}；请只补充这些材料。"
+    elif payment_process_gap:
+        predicted_label = "review"
+        decision = "request_more_material"
+        system_yes_no = "REVIEW"
+        confidence = 0.72
+        readiness = "needs_payment_process_evidence"
+        visual_precheck_status = "incomplete"
+        conclusion = "五类材料已齐全，但支付密码来源或监护人发现消费过程尚未闭环；请只补充对应过程说明。"
+    elif (
+        coverage_complete
+        and present_count == len(checklist)
+        and field_consistency["verdict"] == "matched"
+        and not authenticity_blocked
+        and not authoritative_required
+    ):
+        predicted_label = "positive"
+        decision = "visual_precheck_passed"
+        system_yes_no = "YES"
+        confidence = 0.88
+        readiness = "ready_for_customer_policy"
+        visual_precheck_status = "passed"
+        conclusion = "五类必交材料已齐全，视觉字段未发现明显矛盾，可以按甲方现行流程继续审核。"
+    elif coverage_complete and present_count == len(checklist):
+        predicted_label = "positive"
+        decision = "visual_precheck_passed_with_warnings"
+        system_yes_no = "YES"
+        confidence = 0.78
+        readiness = "ready_with_visual_warnings"
+        visual_precheck_status = "passed"
+        conclusion = "五类材料已齐全，未发现明确字段冲突或阻断性修改风险；可按甲方现行流程继续，标黄项仅供抽检。"
     else:
         predicted_label = "review"
         decision = "manual_review"
@@ -869,9 +1060,12 @@ def aggregate_minor_material_results(
         conclusion = "材料包未完成全量可靠识别或仍有角色/清晰度待确认，不能据此声称用户缺少材料。"
 
     material_gaps = [
-        f"请补充：{item['label']}。已识别的空白模板、示例图或辅助截图不能替代该必交材料。"
+        item["rule_note"]
+        if item["requirement_id"] == "relationship"
+        else f"请补充：{item['label']}。已识别的空白模板、示例图或辅助截图不能替代该必交材料。"
         for item in not_observed
     ]
+    material_gaps.extend(item for item in required_materials if item not in material_gaps)
     if not coverage_complete and not technical_processing_incomplete:
         material_gaps.insert(0, "本轮未完成全部图片的可靠识别，缺件结论已被门禁阻断。")
     if technical_processing_incomplete:
@@ -906,6 +1100,8 @@ def aggregate_minor_material_results(
         next_step = "请优先打开报告中标红的疑似编辑图片；确认原图无误后可重新送审。"
     elif authoritative_required:
         next_step = "当前工单显式启用了严格验真，请完成甲方配置的核验步骤；没有可用接口时请改回默认策略。"
+    elif payment_process_gap:
+        next_step = "请只补充未成年人如何获得或得知支付密码，以及监护人如何、何时发现消费的说明；无需仅因低龄先占用人工审核席位。"
     else:
         next_step = (
             "请用户只补充报告点名的材料；不要重复要求已经通过初审的资料。"
@@ -937,7 +1133,7 @@ def aggregate_minor_material_results(
         {
             "check_id": item.get("check_id"),
             "evidence_image_indices": item.get("evidence_image_indices") or [],
-            "message": "可见字段存在冲突，请回看对应图片。",
+            "message": item.get("message") or "可见字段存在冲突，请回看对应图片。",
         }
         for item in field_consistency.get("checks") or []
         if item.get("status") == "mismatched"
@@ -951,9 +1147,11 @@ def aggregate_minor_material_results(
             "confidence": authenticity["risk_score"],
         }
         for image_index in authenticity["evidence_image_indices"]
+        if authenticity["severity"] == "critical"
     ]
     assessment = {
         "sop_version": "minor_refund_2_0",
+        "conclusion": conclusion,
         "readiness": readiness,
         "visual_precheck_status": visual_precheck_status,
         "declared_image_count": declared_image_count,
@@ -971,7 +1169,9 @@ def aggregate_minor_material_results(
         "material_inventory": observations,
         "checklist": checklist,
         "field_consistency": field_consistency,
+        "required_materials": required_materials,
         "authenticity_assessment": authenticity,
+        "payment_capability_risk": payment_capability_risk,
         "policy": policy,
         "authoritative_verification": {
             "status": (
@@ -1120,7 +1320,7 @@ def run_minor_material_pipeline(
             except Exception as exc:
                 return {
                     "status": "failed",
-                    "error": str(exc)[:500],
+                    "error": sanitize_error_text(exc, 500),
                     "_model_calls": 1,
                 }
 
@@ -1170,7 +1370,7 @@ def run_minor_material_pipeline(
                 try:
                     completed.append(future.result())
                 except Exception as exc:
-                    completed.append((kind, index, [], {"status": "failed", "error": str(exc)[:500], "_model_calls": 1}))
+                    completed.append((kind, index, [], {"status": "failed", "error": sanitize_error_text(exc, 500), "_model_calls": 1}))
         for kind, index, indices, result in sorted(completed, key=lambda item: (item[0], item[1])):
             (image_metric_results if kind == "image" else video_metric_results).append(result)
             if result.get("status") != "success":
@@ -1227,12 +1427,12 @@ def run_minor_material_pipeline(
                 try:
                     result = future.result()
                 except Exception as exc:
-                    result = {"status": "failed", "error": str(exc)[:500], "_model_calls": 1}
+                    result = {"status": "failed", "error": sanitize_error_text(exc, 500), "_model_calls": 1}
                     consistency_metric_results.append(result)
                     consistency_failures.append({
                         "check_id": check_id,
                         "segment_index": job["segment_index"],
-                        "error": str(exc)[:500],
+                        "error": sanitize_error_text(exc, 500),
                     })
                     continue
                 consistency_metric_results.append(result)
@@ -1261,9 +1461,22 @@ def run_minor_material_pipeline(
     }
     cost = round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in billed_results), 6)
     cost_observability = summarize_cost_observability(billed_results)
+    failed_results = [item for item in billed_results if item.get("status") != "success"]
+    first_status_code = next((item.get("status_code") for item in failed_results if item.get("status_code")), None)
+    failure_types = {str(item.get("error_type") or "") for item in failed_results}
+    failure_types.discard("")
+    channel_route_attempts = [
+        dict(attempt)
+        for item in billed_results
+        for attempt in (item.get("_channel_route_attempts") or [])
+        if isinstance(attempt, dict)
+    ]
     return {
         "status": "success" if image_rows or not images else "failed",
         "error": "minor_material_all_image_batches_failed" if images and not image_rows else "",
+        "status_code": first_status_code,
+        "error_type": next(iter(failure_types)) if len(failure_types) == 1 else "",
+        "_channel_route_attempts": channel_route_attempts,
         "latency_seconds": round(time.time() - wall_started, 2),
         "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in billed_results), 2),
         "usage": usage,

@@ -318,7 +318,7 @@
 
     .entry-hub {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 14px;
       margin-top: 16px;
     }
@@ -339,6 +339,7 @@
 
     .entry-card:nth-child(2) { background: linear-gradient(135deg, #fff0c7, #fff 68%); }
     .entry-card:nth-child(3) { background: linear-gradient(135deg, #ffe5ef, #fff 68%); }
+    .entry-card:nth-child(4) { background: linear-gradient(135deg, #e6f3ff, #fff 68%); }
 
     .entry-card.active {
       border-color: rgba(16, 19, 31, .18);
@@ -348,6 +349,7 @@
 
     .entry-card:nth-child(2).active { box-shadow: 0 18px 44px rgba(255, 138, 31, .20), 0 0 0 3px rgba(255, 212, 61, .34); }
     .entry-card:nth-child(3).active { box-shadow: 0 18px 44px rgba(255, 117, 168, .18), 0 0 0 3px rgba(255, 117, 168, .24); }
+    .entry-card:nth-child(4).active { box-shadow: 0 18px 44px rgba(78, 156, 255, .18), 0 0 0 3px rgba(78, 156, 255, .24); }
 
     .entry-card small {
       width: max-content;
@@ -384,6 +386,7 @@
 
     .entry-card:nth-child(2) b { background: linear-gradient(90deg, var(--gold), var(--orange)); }
     .entry-card:nth-child(3) b { background: linear-gradient(90deg, #ffd5e5, var(--rose)); }
+    .entry-card:nth-child(4) b { background: linear-gradient(90deg, #d8edff, var(--blue)); }
 
     .panel {
       border: 1px solid rgba(16, 19, 31, .08);
@@ -895,7 +898,7 @@
 
     .scenario-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 12px;
       margin-bottom: 16px;
     }
@@ -1168,12 +1171,12 @@
     <section class="hero">
       <div class="hero-copy">
         <p class="eyebrow" data-i18n="eyebrow">虾淘客服视觉质检驾驶舱</p>
-        <h1 data-i18n="heroTitle">把开箱、有伤、资料审核变成<span class="accent">可复核证据链</span></h1>
+        <h1 data-i18n="heroTitle">把有伤、发错、漏发、资料审核变成<span class="accent">可复核证据链</span></h1>
         <p class="lead" data-i18n="heroLead">
           客服上传本地视频，或粘贴公开视频分享文本；系统先解析与取证，再按配置输出复核摘要。这里不替业务系统做自动裁决，只给客服负责人和VIP客服复核提供证据、风险和补件建议。
         </p>
         <div class="proof-pills" aria-label="核心能力">
-          <div class="proof-pill"><b>3 条入口</b><span>开箱、有伤、资料独立处理</span></div>
+          <div class="proof-pill"><b>4 条业务入口</b><span>有伤、发错、漏发、未成年人独立处理</span></div>
           <div class="proof-pill"><b>证据回链</b><span>帧图、补图、视频时间点可复核</span></div>
           <div class="proof-pill"><b>客服闭环</b><span>高置信抽检，低置信逐条复核</span></div>
         </div>
@@ -1182,8 +1185,8 @@
         <div class="review-map">
           <div class="review-screen">
             <div>
-              <strong>三条视觉审核业务队列</strong>
-              <span>开箱连续性、商品有伤证据、资料完整性分别进入对应队列，再输出可复核线索。</span>
+              <strong>四个业务场景，共用一套证据链</strong>
+              <span>发错与漏发共用开箱取证内核，但分别按订单对照和应发清单输出结论。</span>
             </div>
             <div class="scan-grid">
               <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
@@ -1198,21 +1201,27 @@
       </div>
     </section>
 
-    <nav class="entry-hub" aria-label="三大独立审核入口">
-      <button class="entry-card active" type="button" data-scenario="video_unboxing" aria-pressed="true">
-        <small>入口 01 / 开箱与发错货</small>
-        <strong>开箱视频审核</strong>
-        <span>面向“箱子是否离镜、视频是否剪辑、商品是否发错、规格是否不一致”的客服队列。</span>
-        <b>严格取证</b>
-      </button>
-      <button class="entry-card" type="button" data-scenario="product_damage" aria-pressed="false">
-        <small>入口 02 / 商品有伤</small>
+    <nav class="entry-hub" aria-label="四大独立审核入口">
+      <button class="entry-card active" type="button" data-scenario="product_damage" aria-pressed="true">
+        <small>入口 01 / 商品有伤</small>
         <strong>商品有伤审核</strong>
         <span>面向“划痕、压痕、破损、污损、照片可信度、是否需要补拍”的售后审核队列。</span>
         <b>样本可跑</b>
       </button>
+      <button class="entry-card" type="button" data-scenario="wrong_item" aria-pressed="false">
+        <small>入口 02 / 发错货</small>
+        <strong>发错货审核</strong>
+        <span>核对实收商品与订单 SKU、款式、规格、随机和特典规则，回链开箱证据。</span>
+        <b>订单对照</b>
+      </button>
+      <button class="entry-card" type="button" data-scenario="missing_item" aria-pressed="false">
+        <small>入口 03 / 漏发货</small>
+        <strong>漏发货审核</strong>
+        <span>核对应发与实收清单、赠品特典、分包物流和开箱视频，列出疑似缺件。</span>
+        <b>清单核对</b>
+      </button>
       <button class="entry-card" type="button" data-scenario="minor_material" aria-pressed="false">
-        <small>入口 03 / 未成年人资料</small>
+        <small>入口 04 / 未成年人资料</small>
         <strong>资料完整性审核</strong>
         <span>面向五类材料完整性、可见字段一致性和图片风险检查；默认不依赖外部在线验真。</span>
         <b>视觉初审</b>
@@ -1224,7 +1233,7 @@
         <div class="panel-head">
           <div>
             <h2 data-i18n="submitTitle">提交审核任务</h2>
-            <p data-i18n="submitSub">按岗位队列进入，不把三类任务混成一个入口；客服只需要处理自己当前负责的材料。</p>
+            <p data-i18n="submitSub">按四个业务队列进入；客服只需要处理自己当前负责的材料。</p>
           </div>
         </div>
         <div class="panel-body">
@@ -1237,7 +1246,8 @@
 
           <form id="reviewForm">
             <input type="hidden" name="source_type" id="sourceType" value="upload" />
-            <input type="hidden" name="scenario" id="scenarioInput" value="video_unboxing" />
+            <input type="hidden" name="scenario" id="scenarioInput" value="product_damage" />
+            <input type="hidden" name="business_scenario" id="businessScenarioInput" value="product_damage" />
 
             <div class="task-context" id="taskContext" aria-live="polite">
               <div class="task-context-head">
@@ -1340,11 +1350,11 @@
 
             <label for="reviewModel">审核策略</label>
             <select name="review_model" id="reviewModel">
-              <option value="standard">标准连续性复核（默认 · 1 FPS）</option>
+              <option value="standard">标准连续性复核（默认 · 自适应）</option>
               <option value="fast">经济初筛（不输出连续通过）</option>
               <option value="backup">Strong 强化复核（全时间轴 · 2 FPS）</option>
             </select>
-            <div class="hint">标准档按 1 FPS 核对主体连续性；Strong 档按 2 FPS 加密取证；经济档只做粗筛。</div>
+            <div class="hint">标准档自适应提取关键帧；Strong 档按 2 FPS 加密取证；经济档只做粗筛。</div>
 
             <details class="advanced-settings">
               <summary>高级取证设置</summary>
@@ -1369,9 +1379,9 @@
                   <div>
                     <label for="continuityPolicy">离镜补件提示阈值</label>
                     <select name="continuity_policy" id="continuityPolicy">
-                      <option value='{"out_of_frame_warning_seconds":1,"force_dense_scan":true,"scan_fps":2}'>1 秒（2 FPS）</option>
-                      <option value='{"out_of_frame_warning_seconds":3,"force_dense_scan":true,"scan_fps":0.67}' selected>3 秒（0.67 FPS）</option>
-                      <option value='{"out_of_frame_warning_seconds":4,"force_dense_scan":true,"scan_fps":0.5}'>4 秒（0.5 FPS）</option>
+                      <option value='{"out_of_frame_warning_seconds":1}'>1 秒</option>
+                      <option value='{"out_of_frame_warning_seconds":3}' selected>3 秒</option>
+                      <option value='{"out_of_frame_warning_seconds":4}'>4 秒</option>
                     </select>
                   </div>
                 </div>
@@ -1379,11 +1389,11 @@
                 <div id="minorRefundPolicyGroup" hidden>
                   <label for="minorRefundPolicy">未成年人资料审核方式</label>
                   <select name="minor_refund_policy" id="minorRefundPolicy">
-                    <option value='{"review_mode":"standard","authoritative_verification":"disabled"}' selected>标准视觉初审（默认，不依赖外部接口）</option>
-                    <option value='{"review_mode":"standard","authoritative_verification":"advisory"}'>视觉初审 + 在线验真提醒（不阻断）</option>
-                    <option value='{"review_mode":"strict","authoritative_verification":"required"}'>严格模式（必须完成甲方在线验真）</option>
+                    <option value='{"review_mode":"standard","authoritative_verification":"disabled","independent_payment_min_age":10}' selected>标准视觉初审（默认，不依赖外部接口）</option>
+                    <option value='{"review_mode":"standard","authoritative_verification":"advisory","independent_payment_min_age":10}'>视觉初审 + 在线验真提醒（不阻断）</option>
+                    <option value='{"review_mode":"strict","authoritative_verification":"required","independent_payment_min_age":10}'>严格模式（必须完成甲方在线验真）</option>
                   </select>
-                  <div class="hint">标准模式核对五类材料和图片中可见信息；只有甲方未来接入身份、运营商或订单验真能力后，才启用严格模式。</div>
+                  <div class="hint">标准模式核对五类材料和图片中可见信息；申请时未满 10 周岁会加强核对支付密码来源和监护人发现消费过程，缺口可直接补充，不仅凭年龄要求人工复核。只有甲方未来接入身份、运营商或订单验真能力后，才启用严格模式。</div>
                 </div>
 
                 <div class="row">
@@ -1397,7 +1407,7 @@
                   </div>
                 </div>
                 <div class="source-note">
-                  本工作台不会把整段大视频直接送入模型。标准档按 1 秒 1 帧覆盖全时间轴；Strong 档按 1 秒 2 帧取证，并将证据分成每组最多 24 帧并行复核。超大素材建议由对象存储和转码服务先做受控码率转码，再提交审核服务。
+                  本工作台不会把整段大视频直接送入模型。标准档自适应提取最多 24 个关键帧；Strong 档按 1 秒 2 帧取证，并将证据分成每组最多 24 帧并行复核。超大素材建议由对象存储和转码服务先做受控码率转码，再提交审核服务。
                 </div>
               </div>
             </details>
@@ -1444,21 +1454,26 @@
           <button class="console-toggle" id="consoleToggle" type="button">收起控制台</button>
         </div>
         <div class="panel-body">
-          <div class="scenario-grid" aria-label="三类重点场景">
+          <div class="scenario-grid" aria-label="四类重点场景">
             <div class="scenario-card">
               <span class="code">01</span>
-              <strong data-i18n="case1Title">开箱视频</strong>
-              <span data-i18n="case1Text">重点看箱体连续性、关键物品是否离镜、剪辑风险和补拍建议。</span>
+              <strong data-i18n="case1Title">商品有伤</strong>
+              <span data-i18n="case1Text">整理损伤可见证据、开箱合规性和 SOP 审核倾向。</span>
             </div>
             <div class="scenario-card">
               <span class="code">02</span>
-              <strong data-i18n="case2Title">商品有伤</strong>
-              <span data-i18n="case2Text">整理损伤可见证据、疑似破损位置、清晰度不足和复核理由。</span>
+              <strong data-i18n="case2Title">发错货</strong>
+              <span data-i18n="case2Text">对照订单 SKU、实收商品和随机/特典规则。</span>
             </div>
             <div class="scenario-card">
               <span class="code">03</span>
-              <strong data-i18n="case3Title">资料审核</strong>
-              <span data-i18n="case3Text">核对五类材料、可见字段与风险线索，输出交通灯式视觉初审。</span>
+              <strong data-i18n="case3Title">漏发货</strong>
+              <span data-i18n="case3Text">对照应发与实收清单、分包物流和开箱证据。</span>
+            </div>
+            <div class="scenario-card">
+              <span class="code">04</span>
+              <strong>未成年人资料</strong>
+              <span>核对五类材料、监护关系、字段一致性和风险线索。</span>
             </div>
           </div>
 
@@ -1508,6 +1523,7 @@
 	        const folderTab = document.getElementById('folderTab');
 	        const batchFolderTab = document.getElementById('batchFolderTab');
 	        const scenarioInput = document.getElementById('scenarioInput');
+        const businessScenarioInput = document.getElementById('businessScenarioInput');
         const entryCards = Array.from(document.querySelectorAll('.entry-card'));
         const form = document.getElementById('reviewForm');
         const submitBtn = document.getElementById('submitBtn');
@@ -1559,17 +1575,19 @@
         let timer = null;
 
         const taskProfiles = {
-          video_unboxing: {
-            badge: '当前队列 01',
-            title: '开箱视频审核',
-            desc: '用于判断开箱过程是否连续、箱体或关键物品是否离开镜头，以及是否需要补拍。',
+          wrong_item: {
+            badge: '当前队列 02',
+            title: '发错货审核',
+            desc: '核对实收商品是否与订单 SKU、款式、规格和随机/特典规则一致。',
+            analysisScenario: 'video_unboxing',
+            businessScenario: 'wrong_item',
             materials: ['一镜到底开箱视频', '外箱/面单/封条关键画面', '商品完整露出片段'],
             fps: '2',
             probe: '20',
             maxFrames: '12',
             apiFrames: '6',
-            submit: '开始审核开箱视频',
-            initialLog: '当前为开箱视频入口：请提交一镜到底开箱视频，严格取证会按 1 秒 2 帧抽取证据。',
+            submit: '开始审核发错货',
+            initialLog: '当前为发错货入口：请提交开箱视频，并提供订单 SKU、款式和随机/特典规则。',
             claim: '例：用户称收到的角色/款式/尺寸与订单不一致，要求核实是否发错。',
             product: '原始商品标题、角色、款式',
             sku: '订单规格、尺寸、数量、随机/盲抽规则',
@@ -1579,12 +1597,38 @@
             history: '粘贴用户此前对话、客服已要求补拍的内容、VIP客服备注。',
             sample: true,
             sampleId: 'sample_001',
-            sampleLabel: '运行 sample_001 开箱审核'
+            sampleLabel: '运行 sample_001 发错货审核'
+          },
+          missing_item: {
+            badge: '当前队列 03',
+            title: '漏发货审核',
+            desc: '核对应发清单、实收清单、赠品特典和分包物流，列出疑似漏发项。',
+            analysisScenario: 'video_unboxing',
+            businessScenario: 'missing_item',
+            materials: ['全部包裹开箱视频或平铺图', '订单应发清单', '包裹数、物流单号和分包规则'],
+            fps: '2',
+            probe: '20',
+            maxFrames: '12',
+            apiFrames: '6',
+            submit: '开始审核漏发货',
+            initialLog: '当前为漏发货入口：请提交全部包裹证据、订单应发清单和分包物流信息。',
+            claim: '例：用户称应收三件但只收到两件，要求核实漏发商品和数量。',
+            product: '订单商品、赠品和特典清单',
+            sku: '每个 SKU 应发数量、套装拆分和随机规则',
+            logistics: '包裹数、物流单号关联、是否分包或补发',
+            stage: '初次申诉 / 已补全部包裹证据 / 仓库核实中',
+            master: '粘贴应发清单、赠品/特典规则、分包和仓库出库记录。',
+            history: '粘贴用户展示清单、客服追问和仓库核实结论。',
+            sample: false,
+            sampleId: '',
+            sampleLabel: '当前队列暂无内置演示样本'
           },
           product_damage: {
-            badge: '当前队列 02',
+            badge: '当前队列 01',
             title: '商品有伤审核',
             desc: '用于整理破损、划痕、变形、碎裂等可见证据，并提示是否需要补拍局部特写。',
+            analysisScenario: 'product_damage',
+            businessScenario: 'product_damage',
             materials: ['商品整体画面', '损伤部位近景', '包装与物流外观辅助证据'],
             fps: '1',
             probe: '12',
@@ -1604,15 +1648,17 @@
             sampleLabel: '运行 sample_003 商品有伤'
           },
           minor_material: {
-            badge: '当前队列 03',
-            title: '资料审核',
+            badge: '当前队列 04',
+            title: '未成年人资料审核',
             desc: '用于核对五类材料完整性、可见字段一致性和图片风险；默认不依赖甲方尚未提供的在线验真接口。',
+            analysisScenario: 'minor_material',
+            businessScenario: 'minor_refund',
             materials: ['资料画面或录屏', '关系/订单证明材料', '已脱敏的关键页面'],
             fps: '1',
             probe: '10',
             maxFrames: '6',
             apiFrames: '4',
-            submit: '开始审核资料材料',
+            submit: '开始审核未成年人资料',
             initialLog: '当前为资料审核入口：系统会全量检查五类材料和可见字段，绿灯可继续、黄灯看存疑项、红灯优先复核。',
             claim: '例：监护人申请未成年人退款，提交身份证明、监护关系、承诺书和支付材料。',
             product: '退款涉及订单商品或订单集合',
@@ -1627,14 +1673,15 @@
           }
         };
         const scenarioPaths = {
-          video_unboxing: '/video-unboxing',
           product_damage: '/product-damage',
+          wrong_item: '/wrong-item',
+          missing_item: '/missing-item',
           minor_material: '/minor-material'
         };
 
         const reviewStrategyDefaults = {
           fast: { fps: '0.2', maxFrames: '12', apiFrames: '12' },
-          standard: { fps: '1', maxFrames: '1200', apiFrames: '24' },
+          standard: { fps: '1', maxFrames: '24', apiFrames: '24' },
           backup: { fps: '2', maxFrames: '1800', apiFrames: '24' }
         };
         reviewModel.addEventListener('change', () => {
@@ -1688,8 +1735,9 @@
         }
 
         function applyScenario(scenario, shouldWriteLog = true) {
-          const profile = taskProfiles[scenario] || taskProfiles.video_unboxing;
-          scenarioInput.value = scenario;
+          const profile = taskProfiles[scenario] || taskProfiles.product_damage;
+          scenarioInput.value = profile.analysisScenario;
+          businessScenarioInput.value = profile.businessScenario;
           entryCards.forEach((item) => {
             const active = item.dataset.scenario === scenario;
             item.classList.toggle('active', active);
@@ -1901,14 +1949,14 @@
         entryCards.forEach((card) => {
           card.addEventListener('click', (event) => {
             if (event.target.closest('a')) return;
-            const scenario = card.dataset.scenario || 'video_unboxing';
+            const scenario = card.dataset.scenario || 'product_damage';
             applyScenario(scenario);
             const next = new URL(scenarioPaths[scenario] || '/', window.location.href);
             window.history.replaceState({}, '', next);
           });
         });
         const initialScenario = pathScenarios[window.location.pathname] || new URLSearchParams(window.location.search).get('scenario') || scenarioInput.value;
-        applyScenario(taskProfiles[initialScenario] ? initialScenario : 'video_unboxing', false);
+        applyScenario(taskProfiles[initialScenario] ? initialScenario : 'product_damage', false);
 
         consoleToggle.addEventListener('click', () => {
           const collapsed = !consolePanel.classList.contains('collapsed');
@@ -2191,7 +2239,7 @@
 
         demoSampleBtn.addEventListener('click', async () => {
           const started = Date.now();
-          const profile = taskProfiles[scenarioInput.value] || taskProfiles.video_unboxing;
+          const profile = taskProfiles[businessScenarioInput.value === 'minor_refund' ? 'minor_material' : businessScenarioInput.value] || taskProfiles.product_damage;
           if (!profile.sampleId) {
             sampleEvalLog.textContent = '当前队列暂无甲方小量样本；可以用本地上传链路做样式和流程烟测，但不能作为业务效果验收。';
             return;
@@ -2207,7 +2255,7 @@
             const response = await fetch('/api/review-sample', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sample_id: profile.sampleId, scenario: scenarioInput.value })
+              body: JSON.stringify({ sample_id: profile.sampleId, scenario: profile.analysisScenario, business_scenario: profile.businessScenario })
             });
             const data = await response.json();
             writeLog(formatReviewSummary(data));

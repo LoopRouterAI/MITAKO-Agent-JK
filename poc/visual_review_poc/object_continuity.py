@@ -2,6 +2,7 @@
 """开箱视频主体连续性的结构化校验与分段聚合。"""
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List
 import re
 
@@ -13,9 +14,17 @@ CANONICAL_SUBJECTS = ("shipping_package", "product_package", "claimed_item")
 
 def _float(value: Any, default: float = 0.0) -> float:
     try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
         return default
+    return max(0.0, parsed) if math.isfinite(parsed) else default
+
+
+def _int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _enum(value: Any, allowed: set[str], fallback: str) -> str:
@@ -115,10 +124,7 @@ def _review_output(output: Dict[str, Any], reason: str) -> Dict[str, Any]:
     output["predicted_label"] = "review"
     output["system_yes_no"] = "REVIEW"
     output["decision"] = "manual_review"
-    try:
-        output["confidence"] = max(0.0, min(float(output.get("confidence") or 0.5), 1.0))
-    except (TypeError, ValueError):
-        output["confidence"] = 0.5
+    output["confidence"] = min(_float(output.get("confidence"), 0.5), 1.0)
     output["continuity_guard_reason"] = reason
     return output
 
@@ -200,25 +206,26 @@ def _visibility_rows(
     rows: Iterable[Dict[str, Any]],
     frames: Iterable[Dict[str, Any]],
 ) -> Dict[tuple[int, str], List[Dict[str, Any]]]:
-    frame_registry = {
-        (int(frame.get("video_index") or 0), int(frame.get("global_frame_index") or 0)): frame
-        for frame in frames
-        if frame.get("global_frame_index") is not None
-    }
-    global_registry = {
-        int(frame.get("global_frame_index") or 0): frame
-        for frame in frames
-        if frame.get("global_frame_index") is not None
-    }
+    frame_registry: Dict[tuple[int, int], Dict[str, Any]] = {}
+    global_registry: Dict[int, Dict[str, Any]] = {}
+    for frame in frames:
+        frame_index = _int(frame.get("global_frame_index"))
+        if frame_index is None:
+            continue
+        video_index = _int(frame.get("video_index")) or 0
+        frame_registry[(video_index, frame_index)] = frame
+        global_registry[frame_index] = frame
     timelines: Dict[tuple[int, str], List[Dict[str, Any]]] = {}
     for row in rows:
         for finding in row.get("frame_findings") or []:
             if not isinstance(finding, dict):
                 continue
-            video_index = int(finding.get("video_index") or 0)
-            frame_index = int(finding.get("global_frame_index") or finding.get("frame_index") or 0)
+            video_index = _int(finding.get("video_index")) or 0
+            frame_index = _int(finding.get("global_frame_index") or finding.get("frame_index"))
+            if frame_index is None:
+                continue
             registered = frame_registry.get((video_index, frame_index)) or global_registry.get(frame_index) or {}
-            video_index = int(registered.get("video_index") or video_index)
+            video_index = _int(registered.get("video_index")) or video_index
             timestamp = _seconds(registered.get("source_timestamp") or registered.get("timestamp"))
             if timestamp is None:
                 continue
@@ -244,7 +251,7 @@ def _visibility_rows(
                     }
                 )
     for (video_index, subject_id), values in timelines.items():
-        values.sort(key=lambda item: (item["timestamp"], int(item.get("global_frame_index") or 0)))
+        values.sort(key=lambda item: (item["timestamp"], item.get("global_frame_index") or 0))
         if subject_id != "claimed_item" or not any(item.get("identity_match") for item in values):
             continue
         matched_seen = False

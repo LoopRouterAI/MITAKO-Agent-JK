@@ -33,6 +33,79 @@ def review_result(
 
 
 class AdvisoryAssessmentTest(unittest.TestCase):
+    def test_four_scenarios_expose_customer_evidence_attention(self):
+        scenarios = (
+            (
+                "product_damage",
+                review_result(label="positive", confidence=0.91, parsed_extra={
+                    "damage_causality_assessment": {"damage_presence": "confirmed"},
+                }),
+                "green",
+                "主视频",
+            ),
+            (
+                "wrong_item",
+                review_result(label="review", confidence=0.72, parsed_extra={
+                    "material_gaps": ["缺少订单 SKU 与规格基准。"],
+                }),
+                "orange",
+                "订单 SKU",
+            ),
+            (
+                "missing_item",
+                review_result(label="review", confidence=0.71, parsed_extra={
+                    "material_gaps": ["缺少包裹与 SKU 的对应关系。"],
+                }),
+                "orange",
+                "应发清单",
+            ),
+            (
+                "minor_refund",
+                review_result(label="negative", confidence=0.86, parsed_extra={
+                    "evidence_conflicts": ["监护关系材料中的申请人角色与出生证明不一致。"],
+                    "minor_material_assessment": {"required_materials": ["补充合法监护关系证明。"]},
+                }),
+                "red",
+                "五类材料",
+            ),
+        )
+
+        for scenario, review, level, focus_text in scenarios:
+            with self.subTest(scenario=scenario):
+                result = attach_advisory_assessment(
+                    review,
+                    {"scenario": scenario},
+                    readiness={"full_review_ready": True, "missing_required": []},
+                )
+                attention = result["advisory_assessment"]["evidence_attention"]
+                self.assertEqual(attention["level"], level)
+                self.assertTrue(attention["headline"])
+                self.assertIn(focus_text, "；".join(attention["customer_focus"]))
+                self.assertIsInstance(attention["disagreements"], list)
+                self.assertIsInstance(attention["missing_evidence"], list)
+
+    def test_fragmented_material_gap_text_is_not_shown_as_user_request(self):
+        result = attach_advisory_assessment(
+            {
+                "summary": {"predicted_label": "review", "confidence": 0.74},
+                "agent_report": {
+                    "parsed": {
+                        "predicted_label": "review",
+                        "confidence": 0.74,
+                        "material_gaps": ["缺", "少", "视"],
+                    }
+                },
+            },
+            {"scenario": "product_damage"},
+        )
+
+        parsed = result["agent_report"]["parsed"]
+        self.assertEqual(parsed["material_gaps"], [])
+        self.assertFalse(any(
+            signal["code"] == "material_gap"
+            for signal in result["advisory_assessment"]["signals"]
+        ))
+
     def test_high_confidence_complete_evidence_does_not_require_human_review(self):
         result = attach_advisory_assessment(
             review_result(),
@@ -72,6 +145,31 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["sop_recommendation"]["code"], "comfort_compensation")
         self.assertFalse(advisory["policy"]["business_action_allowed"])
         ReviewAdvisoryAssessment.model_validate(advisory)
+
+    def test_minor_sop_basis_ignores_product_damage_policy_placeholder(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="negative",
+                confidence=0.84,
+                parsed_extra={
+                    "overall_audit": {"conclusion": "申请人与监护关系字段存在明确冲突。"},
+                    "minor_material_assessment": {"decision": "negative"},
+                    "decision_policy_audit": {
+                        "applied": False,
+                        "reason": "未启用商品有伤规则分类建议。",
+                    },
+                },
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertNotIn("商品有伤", advisory["sop_recommendation"]["basis"])
+        self.assertEqual(
+            advisory["sop_recommendation"]["basis"],
+            advisory["assessment"]["conclusion"],
+        )
 
     def test_legacy_advisory_without_sop_recommendation_remains_readable(self):
         advisory = attach_advisory_assessment(
@@ -183,6 +281,34 @@ class AdvisoryAssessmentTest(unittest.TestCase):
 
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "required")
+
+    def test_minor_nested_field_conflict_requires_human_review_after_public_projection(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="negative",
+                confidence=0.84,
+                parsed_extra={"minor_material_assessment": {
+                    "declared_image_count": 62,
+                    "accepted_image_count": 62,
+                    "processed_image_count": 62,
+                    "field_consistency": {
+                        "verdict": "mismatched",
+                        "checks": [{
+                            "check_id": "commitment_signatures",
+                            "status": "mismatched",
+                            "message": "退款承诺书中的监护人签字互相对不上。",
+                        }],
+                    },
+                }},
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["human_review"]["level"], "required")
+        self.assertIn("evidence_conflict", advisory["human_review"]["reason_codes"])
+        self.assertEqual(advisory["workflow_recommendation"], "human_review")
         self.assertEqual(advisory["workflow_recommendation"], "human_review")
         self.assertIn("evidence_conflict", advisory["human_review"]["reason_codes"])
 
@@ -325,6 +451,70 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "optional")
         self.assertIn("不要求每单转VIP客服复审", advisory["assessment"]["conclusion"])
+
+    def test_minor_low_age_payment_process_gap_requests_material_without_human_review(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="review",
+                confidence=0.82,
+                parsed_extra={"minor_material_assessment": {
+                    "declared_image_count": 20,
+                    "accepted_image_count": 20,
+                    "processed_image_count": 20,
+                    "required_materials": [
+                        "请补充说明未成年人如何获得或得知支付密码。",
+                        "请补充说明监护人如何、何时发现消费。",
+                    ],
+                    "payment_capability_risk": {
+                        "level": "high",
+                        "low_age": True,
+                        "process_evidence_status": "unresolved",
+                        "requires_review": False,
+                        "requires_more_material": True,
+                        "effect": "低龄支付过程说明尚未闭环",
+                        "evidence_image_indices": [3, 5],
+                    },
+                }},
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["human_review"]["level"], "not_required")
+        self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
+        self.assertEqual(advisory["human_review"]["reason_codes"], ["material_resubmission_available"])
+        self.assertFalse(result["agent_report"]["parsed"]["human_required"])
+        signal = next(item for item in advisory["signals"] if item["code"] == "minor_payment_process_evidence_gap")
+        self.assertEqual(signal["severity"], "warning")
+
+    def test_minor_low_age_with_verified_payment_process_is_optional_not_required(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="positive",
+                confidence=0.88,
+                parsed_extra={"minor_material_assessment": {
+                    "declared_image_count": 20,
+                    "accepted_image_count": 20,
+                    "processed_image_count": 20,
+                    "payment_capability_risk": {
+                        "level": "none",
+                        "low_age": True,
+                        "process_evidence_status": "matched",
+                        "requires_review": False,
+                        "effect": "低龄支付过程说明已核对",
+                        "evidence_image_indices": [3, 5],
+                    },
+                }},
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["human_review"]["level"], "optional")
+        self.assertIn("minor_low_age_process_verified", advisory["human_review"]["reason_codes"])
+        self.assertNotIn("minor_payment_capability_risk", advisory["human_review"]["reason_codes"])
 
     def test_minor_refund_policy_defaults_to_visual_review_without_external_verification(self):
         metadata = ReviewCaseMetadata.model_validate({

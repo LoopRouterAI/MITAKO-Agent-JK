@@ -618,6 +618,97 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(source_summary["supplemental_images"]["referenced_count"], 1)
         self.assertIn("不能单独推翻", source_summary["decision_boundary"])
 
+    def test_product_damage_reviews_every_supplemental_image_in_dedicated_pass(self):
+        case = dict(self.case)
+        case["supplemental_images"] = [
+            {"image_index": index, "file": f"damage-{index}.jpg"}
+            for index in range(1, 6)
+        ]
+        structured = dict(self.case["structured_business_context"])
+        structured["continuity_policy"] = {"force_dense_scan": False}
+        structured["damage_causality_policy"] = {"force_action_scan": False}
+        case["structured_business_context"] = structured
+        dedicated_batches = []
+
+        def supplemental_only_call(cfg, current_case, timeout, retries):
+            review_chunk = (current_case.get("structured_business_context") or {}).get("review_chunk") or {}
+            if review_chunk.get("pass_type") == "supplemental_evidence":
+                dedicated_batches.append([
+                    item["image_index"] for item in current_case.get("supplemental_images") or []
+                ])
+                result = self._fake_call(cfg, current_case, timeout, retries)
+                if current_case["supplemental_images"][0]["image_index"] == 1:
+                    result["parsed"]["adopted_evidence"] = []
+                else:
+                    for item in result["parsed"]["adopted_evidence"]:
+                        item.pop("image_index", None)
+                return result
+            main_case = dict(current_case)
+            main_case["supplemental_images"] = []
+            return self._fake_call(cfg, main_case, timeout, retries)
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=supplemental_only_call):
+            result = call_model_chunked({}, case, timeout=30, retries=0)
+
+        source_summary = result["parsed"]["damage_causality_assessment"]["evidence_source_summary"]
+        self.assertTrue(all(len(batch) == 1 for batch in dedicated_batches))
+        self.assertEqual(sorted(index for batch in dedicated_batches for index in batch), [1, 2, 3, 4, 5])
+        self.assertEqual(source_summary["supplemental_images"]["referenced_count"], 5)
+        self.assertEqual(source_summary["supplemental_images"]["processed_count"], 5)
+        self.assertEqual(source_summary["supplemental_images"]["unreferenced_image_indices"], [])
+        self.assertEqual(result["chunking"]["supplemental_evidence_pass"]["status"], "completed")
+
+    def test_linked_supplemental_damage_confirms_damage_without_inventing_cause(self):
+        case = dict(self.case)
+        case["supplemental_images"] = [{"image_index": 1, "file": "damage-closeup.jpg"}]
+        main = {
+            "parsed": {
+                "predicted_label": "review",
+                "confidence": 0.5,
+                "overall_audit": {"conclusion": "主视频未看清损伤"},
+                "damage_causality_assessment": {
+                    "damage_presence": "uncertain",
+                    "damage_timing": "unknown",
+                    "most_likely_origin": "indeterminate",
+                    "causal_evidence_level": "insufficient",
+                    "claim_support": "insufficient",
+                },
+            },
+            "usage": {},
+            "cost": {},
+        }
+        supplemental = {
+            "parsed": {
+                "adopted_evidence": [{
+                    "source_type": "supplementary_image",
+                    "image_index": 1,
+                    "asset_ref": "supplemental_image_1",
+                    "fact": "同一商品的耳羽已经断裂。",
+                    "why_it_matters": "直接证明损伤存在，但不证明损伤成因。",
+                    "damage_visible": True,
+                    "confidence": 0.94,
+                    "same_item_linkage": "high",
+                    "temporal_linkage": "post_opening",
+                }],
+            },
+            "usage": {},
+            "cost": {},
+        }
+
+        result = _aggregate_chunk_results(case, [main], supplemental_results=[supplemental])
+
+        assessment = result["parsed"]["damage_causality_assessment"]
+        source_summary = assessment["evidence_source_summary"]["supplemental_images"]
+        self.assertEqual(assessment["damage_presence"], "confirmed")
+        self.assertEqual(assessment["most_likely_origin"], "indeterminate")
+        self.assertEqual(assessment["causal_evidence_level"], "insufficient")
+        self.assertEqual(assessment["first_visible_evidence"]["image_index"], 1)
+        self.assertEqual(
+            assessment["evidence_source_summary"]["primary_video"]["damage_presence"],
+            "uncertain",
+        )
+        self.assertEqual(source_summary["linkage_status"], "verified")
+
     def test_partial_specialized_failure_only_degrades_its_evidence_dimension(self):
         case = dict(self.case)
         case["frames"] = [
@@ -656,6 +747,7 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(result["parsed"]["damage_evidence_tendency"], "does_not_support_claim")
         self.assertEqual(result["parsed"]["pass_integrity_status"], "partial_specialized")
         self.assertNotIn("specialized_pass_guard_reason", result["parsed"])
+        self.assertIn("补充图片专项", result["parsed"]["specialized_pass_warning"])
         self.assertIn("对应证据维度", result["parsed"]["specialized_pass_warning"])
         self.assertEqual(result["usage"]["total_tokens"], 50)
         self.assertEqual(result["cost"]["estimated_usd"], 0.007)

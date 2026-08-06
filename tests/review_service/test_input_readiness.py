@@ -384,7 +384,7 @@ class InputReadinessTest(unittest.TestCase):
                 }
             )
 
-    def test_product_damage_adaptive_has_one_fps_quality_floor(self):
+    def test_product_damage_adaptive_uses_bounded_single_pass_by_default(self):
         plan = sampling_plan(
             452.5,
             543_351_335,
@@ -394,10 +394,12 @@ class InputReadinessTest(unittest.TestCase):
             {"force_dense_scan": False},
             {"force_action_scan": False},
         )
-        self.assertEqual(plan["sampling_mode"], "dense")
+        self.assertEqual(plan["sampling_mode"], "adaptive")
         self.assertEqual(plan["fps"], 1.0)
-        self.assertGreater(plan["estimated_channel_calls"]["object_continuity"], 0)
-        self.assertGreater(plan["estimated_channel_calls"]["damage_causality"], 0)
+        self.assertLessEqual(plan["estimated_total_frames"], 24)
+        self.assertEqual(plan["estimated_channel_calls"]["object_continuity"], 0)
+        self.assertEqual(plan["estimated_channel_calls"]["damage_causality"], 0)
+        self.assertEqual(plan["estimated_total_model_calls"], 1)
 
     def test_sampling_plan_uses_three_second_default_out_of_frame_policy(self):
         plan = sampling_plan(
@@ -599,6 +601,58 @@ class InputReadinessTest(unittest.TestCase):
     def test_chinese_human_annotation_is_rejected_from_runtime_input(self):
         with self.assertRaisesRegex(ValueError, "evaluation_label_not_allowed"):
             ensure_label_isolation({"annotation": {"正/负样本": "负样本"}})
+
+    def test_source_record_preserves_audit_fields_without_treating_them_as_model_input(self):
+        source_record = {
+            "tag": "negative",
+            "status": "closed",
+            "admin_status": "rejected",
+            "final_decision": "negative",
+            "final_outcome": "refund_rejected",
+        }
+        metadata = ReviewCaseMetadata.model_validate({
+            "client_case_id": "CASE-SOURCE-AUDIT",
+            "scenario": "product_damage",
+            "source_record": source_record,
+        })
+
+        ensure_label_isolation(metadata.model_dump(mode="json"))
+        self.assertEqual(metadata.source_record, source_record)
+
+    def test_source_record_is_stored_but_never_forwarded_to_model(self):
+        metadata = ReviewCaseMetadata.model_validate({
+            "client_case_id": "CASE-SOURCE-STORAGE",
+            "scenario": "product_damage",
+            "source_record": {"case_reference": "REF-1"},
+        }).model_dump(mode="json")
+
+        fields = _review_fields({
+            "scenario": "product_damage",
+            "client_case_id": "CASE-SOURCE-STORAGE",
+            "metadata": metadata,
+            "assets": [],
+        })
+
+        self.assertNotIn("source_case", fields)
+
+    def test_customer_claim_and_conversation_have_total_size_limits(self):
+        with self.assertRaises(ValidationError):
+            ReviewCaseMetadata.model_validate({
+                "client_case_id": "CASE-CLAIM-LIMIT",
+                "scenario": "product_damage",
+                "customer_claim": "x" * 4001,
+            })
+        with self.assertRaisesRegex(ValidationError, "conversation_history_too_large"):
+            ReviewCaseMetadata.model_validate({
+                "client_case_id": "CASE-HISTORY-LIMIT",
+                "scenario": "product_damage",
+                "conversation_history": [
+                    {"role": "user", "text": "x" * 4000},
+                    {"role": "user", "text": "y" * 4000},
+                    {"role": "user", "text": "z" * 4000},
+                    {"role": "user", "text": "w"},
+                ],
+            })
 
     def test_customer_can_quote_previous_review_result_without_being_treated_as_gold_label(self):
         ensure_label_isolation({"customer_claim": "之前审核不通过，我要补充证据申请复核"})

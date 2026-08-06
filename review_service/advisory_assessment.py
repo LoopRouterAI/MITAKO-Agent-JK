@@ -6,6 +6,24 @@ from typing import Any, Dict, Iterable, List, Optional
 
 
 POLICY_REF = "MITAKO-ADVISORY-20260723@1"
+SCENARIO_CUSTOMER_FOCUS = {
+    "product_damage": [
+        "先看主视频是否连续展示争议商品、受损部位与开箱动作链，再用补充图片确认损伤是否清晰可见。",
+        "补充图片可确认损伤存在，但只有同一商品、同一部位且动作链连续时，才能讨论损伤成因。",
+    ],
+    "wrong_item": [
+        "先对齐订单 SKU、商品名称和规格基准，再核对实收商品的型号、颜色、尺寸或关键外观。",
+        "随机款、赠品或可替代规格必须按订单规则单独核验，不能仅凭外观不同判定错发。",
+    ],
+    "missing_item": [
+        "先对齐订单应发清单与开箱全过程中的实收清单，再核对包裹、SKU、数量和在途拆分信息。",
+        "画面未出现某件商品不等于确定少件；视频覆盖不全或应发基准缺失时应先补证。",
+    ],
+    "minor_refund": [
+        "先按五类材料核对身份、监护关系、退款承诺书、订单支付与手机号实名归属，再看跨材料字段是否一致。",
+        "年龄较低只触发支付来源和监护过程重点核验，不能仅凭年龄直接作出业务结论。",
+    ],
+}
 
 
 def _dict(value: Any) -> Dict[str, Any]:
@@ -54,11 +72,74 @@ def _conflicts(parsed: Dict[str, Any]) -> List[Any]:
     minor = _dict(parsed.get("minor_material_assessment"))
     consistency = _dict(minor.get("field_consistency"))
     found.extend(_items(consistency.get("conflicts")))
+    found.extend(
+        str(check.get("message") or check.get("check_id") or "未成年人资料可见字段存在冲突")
+        for check in _items(consistency.get("checks"))
+        if isinstance(check, dict) and check.get("status") == "mismatched"
+    )
     return found
 
 
 def _signal(code: str, severity: str, effect: str, **extra: Any) -> Dict[str, Any]:
     return {"code": code, "severity": severity, "effect": effect, **extra}
+
+
+def _material_gap_items(values: Any) -> List[str]:
+    return list(dict.fromkeys(
+        text
+        for item in _items(values)
+        if len(text := str(item).strip()) >= 2
+    ))
+
+
+def _public_messages(values: Any) -> List[str]:
+    messages: List[str] = []
+    for item in _items(values):
+        if isinstance(item, dict):
+            text = next((
+                str(item.get(key) or "").strip()
+                for key in ("message", "reason", "description", "effect")
+                if str(item.get(key) or "").strip()
+            ), "")
+        else:
+            text = str(item).strip()
+        if len(text) >= 2 and text not in messages:
+            messages.append(text)
+    return messages
+
+
+def _evidence_attention(
+    scenario: str,
+    human_level: str,
+    workflow: str,
+    signals: List[Dict[str, Any]],
+    conflicts: List[Any],
+    missing_evidence: List[str],
+    failed: bool,
+) -> Dict[str, Any]:
+    if failed or workflow == "system_retry":
+        level = "gray"
+    elif human_level == "required" or any(item.get("severity") == "critical" for item in signals):
+        level = "red"
+    elif workflow == "request_more_material" or human_level == "optional" or any(
+        item.get("severity") == "warning" for item in signals
+    ):
+        level = "orange"
+    else:
+        level = "green"
+    headline = {
+        "green": "关键证据已形成清晰结论",
+        "orange": "证据可继续审核，但需先处理标黄项",
+        "red": "存在关键冲突或必须复核项",
+        "gray": "技术处理未完成，暂不形成证据结论",
+    }[level]
+    return {
+        "level": level,
+        "headline": headline,
+        "customer_focus": SCENARIO_CUSTOMER_FOCUS.get(scenario, ["先核对支持结论的关键证据，再处理冲突和缺件。"]),
+        "disagreements": _public_messages(conflicts),
+        "missing_evidence": list(dict.fromkeys(missing_evidence)),
+    }
 
 
 def html_report_requested(metadata_or_job: Dict[str, Any]) -> bool:
@@ -74,7 +155,12 @@ def _sop_recommendation(
     conclusion: str,
 ) -> Dict[str, str]:
     audit = _dict(parsed.get("decision_policy_audit"))
-    basis = str(audit.get("reason") or conclusion or "本轮未形成可用依据。")
+    audit_reason = str(audit.get("reason") or "")
+    basis = str(
+        conclusion or "本轮未形成可用依据。"
+        if audit_reason.startswith("未启用商品有伤规则")
+        else audit_reason or conclusion or "本轮未形成可用依据。"
+    )
     if workflow == "system_retry":
         code = "system_retry"
         recommendation = "本轮先由系统重试，不要求用户重复提交材料。"
@@ -84,10 +170,7 @@ def _sop_recommendation(
     elif label == "positive":
         code = "support_claim"
         recommendation = "按照 SOP，当前证据倾向支持用户诉求。"
-    elif label == "negative" and (
-        audit.get("rule_id") == "PD-N-NONCOMPLIANT-OPENING-VIDEO"
-        and audit.get("supplemental_evidence_note")
-    ):
+    elif label == "negative" and audit.get("supplemental_evidence_note"):
         code = "comfort_compensation"
         recommendation = "按照 SOP，当前证据不支持用户诉求；补充证据可供最低档安慰性补偿参考。"
     elif label == "negative":
@@ -153,10 +236,9 @@ def attach_advisory_assessment(
         or processed_images < accepted_images
         or bool(minor.get("image_batch_failures"))
     )
-    material_gaps = [] if technical_processing_incomplete else [
-        str(item) for item in _items(parsed.get("material_gaps"))
-    ]
-    missing_material = list(dict.fromkeys(missing_required + material_gaps))
+    material_gaps = [] if technical_processing_incomplete else _material_gap_items(parsed.get("material_gaps"))
+    required_materials = [] if technical_processing_incomplete else _material_gap_items(minor.get("required_materials"))
+    missing_material = list(dict.fromkeys(_material_gap_items(missing_required) + material_gaps + required_materials))
     conflicts = _conflicts(parsed)
     authoritative = _dict(parsed.get("authoritative_verification")) or _dict(minor.get("authoritative_verification"))
     minor_policy = _dict(metadata.get("minor_refund_policy"))
@@ -168,6 +250,22 @@ def attach_advisory_assessment(
     }
     authenticity = _dict(parsed.get("authenticity_assessment")) or _dict(minor.get("authenticity_assessment"))
     authenticity_critical = str(authenticity.get("severity") or "").lower() == "critical"
+    payment_capability = _dict(minor.get("payment_capability_risk"))
+    payment_process_gap = (
+        payment_capability.get("requires_more_material") is True
+        or (
+            payment_capability.get("process_evidence_status") != "matched"
+            and (
+                payment_capability.get("low_age") is True
+                or payment_capability.get("level") == "high"
+            )
+        )
+    )
+    low_age_process_verified = (
+        payment_capability.get("low_age") is True
+        and payment_capability.get("process_evidence_status") == "matched"
+        and not payment_process_gap
+    )
     customer_risk = _dict(metadata.get("customer_risk_context"))
     customer_risk_level = str(customer_risk.get("risk_level") or "unknown").lower()
     diagnostics = _dict(output.get("diagnostics")) or _dict(agent_report.get("diagnostics"))
@@ -201,6 +299,8 @@ def attach_advisory_assessment(
             processed_count=processed_images,
         ))
     if out_of_frame_seconds >= policy["out_of_frame_resubmit_seconds"]:
+        if "连续开箱原视频（完整展示争议商品和所诉部位）" not in missing_material:
+            missing_material.append("连续开箱原视频（完整展示争议商品和所诉部位）")
         signals.append(_signal(
             "out_of_frame_over_threshold",
             "warning",
@@ -257,6 +357,20 @@ def attach_advisory_assessment(
             risk_percent=authenticity.get("risk_percent"),
             evidence_image_indices=_items(authenticity.get("evidence_image_indices"))[:20],
         ))
+    if payment_process_gap:
+        signals.append(_signal(
+            "minor_payment_process_evidence_gap",
+            "warning",
+            "低龄申请的支付密码来源或监护人发现消费过程尚未闭环；请补充对应说明。该信号不判断未成年人能否独立支付，也不自动决定退款、拒绝或人工复核。",
+            evidence_image_indices=_items(payment_capability.get("evidence_image_indices"))[:20],
+        ))
+    elif low_age_process_verified:
+        signals.append(_signal(
+            "minor_low_age_process_verified",
+            "warning",
+            "低龄材料已核对支付来源和监护发现过程；保留抽检提示，但不覆盖材料事实结论。",
+            evidence_image_indices=_items(payment_capability.get("evidence_image_indices"))[:20],
+        ))
     if customer_risk_level in {"medium", "high"}:
         signals.append(_signal(
             "customer_risk_context",
@@ -309,6 +423,8 @@ def attach_advisory_assessment(
             optional_reasons.append("non_blocking_risk_signal")
         if customer_risk_level in {"medium", "high"}:
             optional_reasons.append("customer_risk_sampling")
+        if low_age_process_verified:
+            optional_reasons.append("minor_low_age_process_verified")
 
     if technical_processing_incomplete:
         level = "not_required"
@@ -348,6 +464,17 @@ def attach_advisory_assessment(
         else:
             conclusion = f"{conclusion.rstrip('。')}；但连续性或材料仍有缺口，建议补充所列材料。"
 
+    parsed["material_gaps"] = missing_material
+    evidence_attention = _evidence_attention(
+        str(metadata.get("scenario") or ""),
+        level,
+        workflow,
+        signals,
+        conflicts,
+        missing_material,
+        failed,
+    )
+
     advisory = {
         "scenario": str(metadata.get("scenario") or ""),
         "assessment": {
@@ -371,6 +498,7 @@ def attach_advisory_assessment(
             "recommendation": recommendation,
         },
         "workflow_recommendation": workflow,
+        "evidence_attention": evidence_attention,
         "signals": signals,
         "policy": {
             "policy_ref": POLICY_REF,

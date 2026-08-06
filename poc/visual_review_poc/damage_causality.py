@@ -2,6 +2,7 @@
 """商品有伤场景的因果判定归一化与分段聚合。"""
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List
 
 
@@ -20,9 +21,17 @@ VALID_CLAIM_SUPPORT = {"supported", "not_supported", "insufficient"}
 
 def _float(value: Any, default: float = 0.0) -> float:
     try:
-        return max(0.0, min(float(value), 1.0))
-    except (TypeError, ValueError):
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
         return default
+    return max(0.0, min(parsed, 1.0)) if math.isfinite(parsed) else default
+
+
+def _frame_key(value: Dict[str, Any]) -> tuple[int, int] | None:
+    try:
+        return int(value.get("video_index") or 0), int(value["global_frame_index"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
 
 
 def _bool(value: Any) -> bool:
@@ -48,13 +57,54 @@ def _evidence_list(value: Any) -> List[Dict[str, Any]]:
     return [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+def normalize_supplemental_linkage(value: Any, *, temporal: bool = False) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not normalized or normalized in {"unknown", "unresolved", "uncertain", "not_assessed", "none", "null"}:
+        return None
+    if normalized in {"false", "no", "0", "not_linked", "mismatched"}:
+        return False
+    positives = {"true", "yes", "1", "verified", "matched", "linked", "high"}
+    if temporal:
+        positives.update({"pre_opening", "during_opening", "post_opening", "same_timeline"})
+    else:
+        positives.update({"same_item", "same_product", "identity_matched"})
+    return True if normalized in positives else None
+
+
+def linked_supplemental_damage_reference(evidence: Any) -> Dict[str, Any]:
+    for item in evidence if isinstance(evidence, list) else []:
+        if not isinstance(item, dict) or "image" not in str(item.get("source_type") or "").lower():
+            continue
+        if (
+            item.get("fact")
+            and item.get("damage_visible") is True
+            and _float(item.get("confidence")) >= 0.8
+            and normalize_supplemental_linkage(item.get("same_item_linkage")) is True
+            and normalize_supplemental_linkage(item.get("temporal_linkage"), temporal=True) is True
+        ):
+            return {
+                "source_type": "supplementary_image",
+                "image_index": item.get("image_index"),
+                "asset_ref": item.get("asset_ref"),
+                "fact": item.get("fact"),
+                "why_it_matters": item.get("why_it_matters"),
+                "confidence": _float(item.get("confidence")),
+                "same_item_linkage": True,
+                "temporal_linkage": True,
+                "damage_visible": True,
+            }
+    return {}
+
+
 def _same_chain(before: Dict[str, Any], action: Dict[str, Any], after: Dict[str, Any]) -> bool:
     identity_keys = ("video_index", "subject", "location", "chain_id")
     if any(not before.get(key) or before.get(key) != action.get(key) or before.get(key) != after.get(key) for key in identity_keys):
         return False
     try:
         indices = [int(item.get("global_frame_index")) for item in (before, action, after)]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     return indices[0] < indices[1] < indices[2] and all(item.get("timestamp") for item in (before, action, after))
 
@@ -62,11 +112,8 @@ def _same_chain(before: Dict[str, Any], action: Dict[str, Any], after: Dict[str,
 def _reference_allowed(reference: Dict[str, Any], valid_frames: set[tuple[int, int]] | None) -> bool:
     if valid_frames is None:
         return True
-    try:
-        key = (int(reference.get("video_index")), int(reference.get("global_frame_index")))
-    except (TypeError, ValueError):
-        return False
-    return key in valid_frames
+    key = _frame_key(reference)
+    return key is not None and key in valid_frames
 
 
 def _has_structured_action_chain(item: Dict[str, Any], valid_frames: set[tuple[int, int]] | None = None) -> bool:
@@ -83,10 +130,7 @@ def _has_preopening_reference(item: Dict[str, Any], valid_frames: set[tuple[int,
     reference = item.get("first_visible_evidence")
     if not isinstance(reference, dict):
         return False
-    try:
-        int(reference.get("video_index"))
-        int(reference.get("global_frame_index"))
-    except (TypeError, ValueError):
+    if _frame_key(reference) is None:
         return False
     return bool(reference.get("timestamp")) and _reference_allowed(reference, valid_frames)
 
@@ -102,10 +146,7 @@ def _replayable_damage_reference(
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
-        try:
-            int(candidate.get("video_index"))
-            int(candidate.get("global_frame_index"))
-        except (TypeError, ValueError):
+        if _frame_key(candidate) is None:
             continue
         if candidate.get("timestamp") and candidate.get("damage_visible") is True:
             return candidate
@@ -132,17 +173,7 @@ def _has_direct_chain(item: Dict[str, Any]) -> bool:
 
 
 def _has_linked_supplemental_damage(evidence: Any) -> bool:
-    for item in evidence if isinstance(evidence, list) else []:
-        if not isinstance(item, dict) or "image" not in str(item.get("source_type") or "").lower():
-            continue
-        linkage = item.get("same_item_linkage")
-        linkage_text = str(linkage or "").strip().lower()
-        linkage_unresolved = not linkage or any(
-            marker in linkage_text for marker in ("unresolved", "unknown", "不确定", "无法", "未建立")
-        )
-        if item.get("fact") and _float(item.get("confidence")) >= 0.8 and not linkage_unresolved:
-            return True
-    return False
+    return bool(linked_supplemental_damage_reference(evidence))
 
 
 def normalize_damage_causality(value: Any) -> Dict[str, Any]:
@@ -189,8 +220,10 @@ def apply_damage_causality_guard(
         return output
 
     assessment = normalize_damage_causality(output.get("damage_causality_assessment"))
-    if _has_linked_supplemental_damage(output.get("adopted_evidence")):
+    supplemental_reference = linked_supplemental_damage_reference(output.get("adopted_evidence"))
+    if supplemental_reference:
         assessment["supplemental_damage_presence"] = "confirmed"
+        assessment["supplemental_damage_reference"] = supplemental_reference
     output["damage_causality_assessment"] = assessment
     presence = assessment["damage_presence"]
     timing = assessment["damage_timing"]
@@ -199,9 +232,9 @@ def apply_damage_causality_guard(
     claim_support = assessment["claim_support"]
     origin_confidence = assessment["origin_confidence"]
     valid_frame_keys = None if valid_frames is None else {
-        (int(frame.get("video_index") or 0), int(frame.get("global_frame_index") or 0))
+        key
         for frame in valid_frames
-        if frame.get("global_frame_index") is not None
+        if (key := _frame_key(frame)) is not None
     }
 
     direct_customer_damage = (
@@ -270,7 +303,15 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
         for row, item in zip(source_rows, assessments)
         if (reference := _replayable_damage_reference(item, row.get("damage_observability")))
     ]
-    first_visible = replayable[0][1] if replayable else None
+    supplemental_references = [
+        reference
+        for row in source_rows
+        if (reference := linked_supplemental_damage_reference(row.get("adopted_evidence")))
+    ]
+    supplemental_only_damage = bool(supplemental_references) and not replayable
+    first_visible = replayable[0][1] if replayable else (
+        supplemental_references[0] if supplemental_references else None
+    )
     damage_locations = [
         item.get("damage_type_and_location")
         for item, _ in replayable
@@ -292,7 +333,9 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
 
     presence_values = {item["damage_presence"] for item in assessments}
     claim_support_values = {item["claim_support"] for item in assessments}
-    aggregate_presence = "confirmed" if "confirmed" in presence_values and first_visible else (
+    aggregate_presence = "confirmed" if (
+        ("confirmed" in presence_values and first_visible) or supplemental_references
+    ) else (
         "not_visible" if presence_values == {"not_visible"} else "uncertain"
     )
     aggregate_claim_support = best["claim_support"] if not conflicting else "insufficient"
@@ -303,15 +346,15 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
         {
             **best,
             "damage_presence": aggregate_presence,
-            "damage_timing": best.get("damage_timing") if not conflicting else "unknown",
+            "damage_timing": best.get("damage_timing") if not conflicting and not supplemental_only_damage else "unknown",
             "pre_opening_state_visible": best["pre_opening_state_visible"],
             "opening_action_visible": best["opening_action_visible"],
             "damage_change_observed": best["damage_change_observed"],
             "damage_type_and_location": "；".join(dict.fromkeys(map(str, damage_locations)))[:800],
             "first_visible_evidence": first_visible,
-            "most_likely_origin": origin,
-            "origin_confidence": best["origin_confidence"] if not conflicting else 0.0,
-            "causal_evidence_level": "insufficient" if conflicting else (
+            "most_likely_origin": "indeterminate" if supplemental_only_damage else origin,
+            "origin_confidence": best["origin_confidence"] if not conflicting and not supplemental_only_damage else 0.0,
+            "causal_evidence_level": "insufficient" if conflicting or supplemental_only_damage else (
                 best["causal_evidence_level"] if best in direct else (
                     "indirect" if best["causal_evidence_level"] in {"direct", "indirect"} else "insufficient"
                 )
@@ -320,6 +363,9 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
             "possible_origins": possible_origins,
             "alternative_explanations": list(dict.fromkeys(map(str, alternatives)))[:12],
             "cannot_conclude_reason": (
+                "补充图片只确认损伤存在；当前没有可回链的直接动作前后证据，不能判断损伤成因。"
+                if supplemental_only_damage
+                else
                 str(best.get("cannot_conclude_reason") or "")
                 if best in direct and not conflicting
                 else "；".join(dict.fromkeys(gaps))

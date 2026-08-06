@@ -19,6 +19,27 @@ REPORT = ROOT / "tests" / "reports" / "dynamic_material_capacity_http_latest.jso
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 
 
+def release_gate_result(checks: dict, assessment: dict) -> dict[str, bool]:
+    capacity_ok = all(
+        checks.get(key) is True
+        for key in ("all_assets_saved", "expanded_capacity", "all_images_accepted")
+    )
+    model_processing_ok = all(
+        checks.get(key) is True
+        for key in ("job_succeeded", "all_images_processed", "coverage_complete")
+    )
+    safe_external_failure = (
+        not model_processing_ok
+        and assessment.get("processing_status") == "technical_processing_incomplete"
+        and assessment.get("system_action") == "system_retry"
+    )
+    return {
+        "model_processing_ok": model_processing_ok,
+        "safe_external_failure": safe_external_failure,
+        "release_gate_ok": capacity_ok and (model_processing_ok or safe_external_failure),
+    }
+
+
 def git_commit() -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"],
@@ -148,8 +169,10 @@ def main() -> int:
         "all_images_processed": assessment.get("processed_image_count") == options.count,
         "coverage_complete": assessment.get("coverage_complete") is True,
     }
+    gate = release_gate_result(checks, assessment)
     report = {
         "ok": all(checks.values()),
+        **gate,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_commit(),
         "job_id": job_id,
@@ -175,7 +198,7 @@ def main() -> int:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0 if report["ok"] else 1
+    return 0 if report["release_gate_ok"] else 1
 
 
 if __name__ == "__main__":

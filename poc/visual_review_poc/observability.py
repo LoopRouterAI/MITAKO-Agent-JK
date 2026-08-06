@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict
 from urllib.parse import urlsplit
 
@@ -11,6 +12,20 @@ from poc.visual_review_poc.model_auth import endpoint_vendor_hint
 
 
 BLOCKED_FIELDS = {"headers", "authorization", "api_key", "key", "prompt", "payload", "media", "response"}
+_ERROR_SECRET_PATTERNS = (
+    re.compile(r"(?i)([?&](?:key|api_key|access_token)=)[^&\s]+"),
+    re.compile(r"(?i)(\b(?:api[_ -]?key|access[_ -]?token|authorization)\b\s*[:=]\s*)(?:bearer\s+)?[^\s,;}\]]+"),
+    re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{16,}\b"),
+    re.compile(r"\bsk-[0-9A-Za-z_-]{12,}\b"),
+)
+
+
+def sanitize_error_text(value: Any, limit: int = 1600) -> str:
+    text = str(value or "")[:max(limit * 2, 4096)]
+    for pattern in _ERROR_SECRET_PATTERNS:
+        text = pattern.sub(lambda match: f"{match.group(1)}[REDACTED]" if match.lastindex else "[REDACTED]", text)
+    return text[:limit]
 
 
 def visual_event_payload(event: str, *, endpoint: str = "", **fields: Any) -> Dict[str, Any]:

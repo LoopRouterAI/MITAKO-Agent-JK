@@ -111,10 +111,10 @@ UNIFIED_XIAO_JIAO_SYSTEM_PROMPT = """# 角色定义
 - 严禁说“没骗你”、“绝对没骗你”，这容易激发敌对情绪。若数次落空，必须真诚承认责任并致歉（如“非常抱歉多次给宝带来了不好的体验，让宝数次失望真的很过意不去”）。
 - 严禁说“还在地球呢”、“没跑丢哈”、“没有飞走”等戏谑、轻浮、敷衍的开玩笑回复。
 - 严禁使用“再耐心等等嘛”、“请耐心等待”等命令式或敷衍性被动词汇，应主动提供具体进展。
-- 严禁说“具体我也不清楚”、“不关我事/我不知道”。遇到政策盲区，必须表示已全力帮用户去各方核实，每日跟进，尽最大努力给用户交底。
+- 严禁说“具体我也不清楚”、“不关我事/我不知道”。遇到政策盲区，应如实说明需要进一步核实；只有业务上下文已记录核实动作或跟进计划时，才能声称相关动作已经执行。
 
 【必须体现的真诚专业语调】：
-- 谦逊诚实：勇于承担因海关新政清关导致的排期拉长责任，主动安抚用户焦虑。
+- 谦逊诚实：主动安抚用户焦虑；延误原因只能引用业务上下文中的已知事实，没有依据时不得归因或定责。
 - 实质安抚：涉及补偿、积分、优先发货、退款、补发时，只能说“可以帮您提交申请/由客服确认”，不能承诺已经发放、稍后到账或一定生效。
 - 核心词突出：对于出荷日期、物流进展等核心字眼，必须使用“#高亮词#”的轻量多媒体语法。日期只能来自业务上下文字段，不得拿示例日期当事实。
 - 回复精炼：单次回复正文字数必须严格控制在 100 字以内，字句简练，直奔主题。
@@ -281,6 +281,71 @@ def _current_user_text(state: AgentState) -> str:
         return raw
     messages = state.get("messages") or []
     return _strip_attachment_context(messages[-1].get("content", "") if messages else "")
+
+
+def _refund_amounts(text: str) -> List[float]:
+    action = r"(?:请退给我|退给我|退我|请退|退款|赔偿|补偿)"
+    action_matches = []
+    for match in re.finditer(action, text):
+        prefix = text[max(0, match.start() - 10):match.start()]
+        if (
+            re.search(r"(?:并非|不是|不需要|无需|不用|不要|不想|取消|不)\s*(?:要|申请)?\s*$", prefix)
+            and not prefix.endswith("不得不")
+        ):
+            continue
+        action_matches.append(match)
+    if not action_matches:
+        return []
+    candidates = []
+    for match in re.finditer(
+        r"[¥￥]?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+(?:\.[0-9]{1,2})?)\s*(?:元|块)",
+        text,
+    ):
+        candidates.append((match.start(), match.end(), float(match.group(1).replace(",", ""))))
+    digits = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+    for match in re.finditer(
+        r"([零〇一二两三四五六七八九十百千万]+)\s*(?:元|块)",
+        text,
+    ):
+        value = match.group(1)
+        total = current = 0
+        for char in value:
+            if char in digits:
+                current = digits[char]
+            elif units[char] == 10000:
+                total = (total + current) * 10000
+                current = 0
+            else:
+                total += (current or 1) * units[char]
+                current = 0
+        candidates.append((match.start(), match.end(), float(total + current)))
+
+    selected = {}
+    for match in action_matches:
+        sentence_start = max((text.rfind(mark, 0, match.start()) for mark in "。！？；;\n"), default=-1) + 1
+        sentence_ends = [text.find(mark, match.end()) for mark in "。！？；;\n"]
+        sentence_end = min((index for index in sentence_ends if index >= 0), default=len(text))
+        clause_start = max(text.rfind("，", sentence_start, match.start()), text.rfind(",", sentence_start, match.start())) + 1
+        clause_ends = [text.find(mark, match.end(), sentence_end) for mark in "，,"]
+        clause_end = min((index for index in clause_ends if index >= 0), default=sentence_end)
+        nearby = [item for item in candidates if clause_start <= item[0] and item[1] <= clause_end]
+        if not nearby:
+            nearby = [item for item in candidates if sentence_start <= item[0] and item[1] <= sentence_end]
+        if not nearby:
+            continue
+        nearest = min(
+            nearby,
+            key=lambda item: (
+                match.start() - item[1]
+                if item[1] <= match.start()
+                else item[0] - match.end()
+                if item[0] >= match.end()
+                else 0
+            ),
+        )
+        selected[(nearest[0], nearest[1])] = nearest[2]
+    return list(selected.values())
 
 
 def _recent_user_context(messages: List[Dict[str, str]], limit: int = 6) -> str:
@@ -462,7 +527,9 @@ def _build_lottery_detail_reply(state: AgentState) -> str:
 
 def _build_minor_refund_material_reply() -> str:
     return (
-        "未成年人退款需要先整理材料：监护人与未成年人身份证明、户口本或出生证明、订单/支付凭证、退款申请承诺说明。"
+        "未成年人退款需要先整理五类材料：监护人与未成年人身份证明；户口本相关页、出生证明或合法监护证明等监护关系证明；"
+        "金额与订单一致、无涂改且双方亲笔签名的退款承诺书；订单/支付凭证；绑定手机号实名归属证明。"
+        "运营商材料需显示可与平台账号比对的业务手机号，支付截图不能替代手机号归属材料。"
         "身份证号、住址等可先遮盖非必要部分，我会帮您整理后再由VIP客服终审。"
     )
 
@@ -787,7 +854,7 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
         transfer_reason = f"用户情绪评级达高风险 (Level {emotion_level})，触发转VIP客服安抚机制"
 
     # 5. 退款大额限额拦截 (如 Case 3 魈手办大额退款)
-    if "退款" in intent and any(k in last_user_msg for k in ["980", "九百八"]):
+    if "退款" in intent and any(amount > 100 for amount in _refund_amounts(last_user_msg)):
         should_transfer = True
         transfer_reason = "退款金额超过 AI 自主核销限额 (¥100)，转财务客服坐席"
 
@@ -1147,7 +1214,7 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
     if queue:
         await queue.put({"type": "node_start", "node": "generate_reply", "desc": "小蛟正在整理上下文并编写回复..."})
 
-    last_user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    last_user_msg = _current_user_text(state)
     intent = state["intent"]
     emotion_level = state["emotion_level"]
     order_data = state["order_data"]
@@ -1186,7 +1253,7 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
 - 本轮补偿/关怀建议: {json.dumps(compensation_given, ensure_ascii=False)}
 - 是否满足转VIP客服条件: {"是" if should_transfer else "否"}
 - 转VIP客服原因说明: {transfer_reason}
-- 用户本轮真实上传附件: {json.dumps(attachments, ensure_ascii=False)}
+- 用户已上传附件元数据: {json.dumps(attachments, ensure_ascii=False)}
 
 附件处理要求：
 - 如果用户已上传图片/视频，只能说“已收到材料/图片”，不要说没收到。
@@ -1198,9 +1265,17 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
     model_id = config.get("configurable", {}).get("model_id") or DEFAULT_MODEL_ID
     stream_reply = config.get("configurable", {}).get("stream_reply", False)
 
+    user_payload = (
+        "<untrusted_business_context>\n"
+        + context_str
+        + "\n</untrusted_business_context>\n"
+        + "<current_user_message>\n"
+        + last_user_msg
+        + "\n</current_user_message>"
+    )
     reply = await call_llm(
-        XIAO_JIAO_SYSTEM_PROMPT + "\n\n# 业务上下文环境\n" + context_str,
-        last_user_msg,
+        XIAO_JIAO_SYSTEM_PROMPT,
+        user_payload,
         history,
         queue,
         model_id=model_id,
@@ -1276,7 +1351,8 @@ async def safety_review_agent(state: AgentState, config: RunnableConfig) -> Dict
 
     liability_pattern = r"(平台的责任|我们的错|公司的问题|违法|违约)"
     if re.search(liability_pattern, reply):
-        safety_check_result = "review"
+        reply = "关于责任归属，需要结合订单事实和适用规则进一步核对；我会继续跟进，不在当前回复中直接定责。"
+        modified = True
 
     last_user_msg = _current_user_text(state)
     if re.search(r"(火星|月球|外太空)", last_user_msg) and re.search(r"(地球|火星|月球|外太空|乖乖|飞走|跑丢)", reply):
@@ -1284,6 +1360,45 @@ async def safety_review_agent(state: AgentState, config: RunnableConfig) -> Dict
         modified = True
 
     if _reply_conflicts_with_order_facts(reply, state):
+        reply = _build_grounded_service_reply(state)
+        modified = True
+
+    grounding_context = json.dumps(
+        {
+            "order": state.get("order_data") or {},
+            "logistics": state.get("logistics_data") or {},
+        },
+        ensure_ascii=False,
+    )
+    completed_action = re.search(
+        r"(?:已经|已).{0,16}?(核实|核查|确认|联系|咨询)|(?:核实|核查).{0,4}(?:过|完成)",
+        reply,
+    )
+    completed_sentence = ""
+    if completed_action:
+        completed_sentence = next(
+            (
+                sentence.strip()
+                for sentence in re.split(r"[，。；!?！？]", reply)
+                if completed_action.group(0) in sentence
+            ),
+            completed_action.group(0),
+        )
+    action_grounded = bool(
+        completed_sentence
+        and re.sub(r"\s+", "", completed_sentence) in re.sub(r"\s+", "", grounding_context)
+    )
+    cadence = re.search(
+        r"(?:每(?:日|天|周|小时)|每隔[^，。；]{1,8})[^，。；]{0,12}(?:跟进|同步|通知|更新)",
+        reply,
+    )
+    cadence_grounded = bool(cadence and cadence.group(0) in grounding_context)
+    ungrounded_progress = (
+        ("海关新政" in reply and "海关新政" not in grounding_context)
+        or (completed_action and not action_grounded)
+        or (cadence and not cadence_grounded)
+    )
+    if ungrounded_progress:
         reply = _build_grounded_service_reply(state)
         modified = True
 
@@ -1301,7 +1416,10 @@ async def safety_review_agent(state: AgentState, config: RunnableConfig) -> Dict
 
     if ("未成年人" in intent or ticket_type == "minor_refund") and any(k in last_user_msg for k in ["需要提交", "什么材料", "材料", "怎么申请"]):
         clean = sanitize_customer_reply(reply)
-        if not all(k in clean for k in ["身份证", "订单", "人工"]):
+        if not all(k in clean for k in [
+            "身份证明", "监护关系证明", "双方亲笔签名", "订单/支付凭证",
+            "绑定手机号实名归属证明", "业务手机号", "支付截图不能替代",
+        ]):
             reply = _build_minor_refund_material_reply()
             modified = True
 
@@ -1497,15 +1615,10 @@ def router_after_safety(state: AgentState):
     reply = state.get("reply_draft", "")
     has_transfer_action = "<action: transfer_to_human>" in reply
 
-    # 综合判断：若 check_transfer 拦截、安全审查判断为 review，或回复内容本身包含人工指令
-    if state.get("should_transfer") or state.get("safety_check_result") == "review" or has_transfer_action:
+    # 人工转接只服从前置确定性分流或显式动作；安全层负责改写公开回复。
+    if state.get("should_transfer") or has_transfer_action:
         return "review"
-
-    res = state["safety_check_result"]
-    if res == "pass":
-        return "pass"
-    else:
-        return "block"
+    return "pass"
 
 workflow.add_conditional_edges(
     "safety_review",

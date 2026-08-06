@@ -79,6 +79,7 @@ class ReviewMinorRefundPolicy(BaseModel):
 
     review_mode: Literal["standard", "strict"] = "standard"
     authoritative_verification: Literal["disabled", "advisory", "required"] = "disabled"
+    independent_payment_min_age: int = Field(default=10, ge=0, le=18)
 
 
 MinorDocumentType = Literal[
@@ -340,7 +341,7 @@ class ReviewCaseMetadata(BaseModel):
     ticket_id: str = ""
     user_id: str = ""
     order_no: str = ""
-    customer_claim: str = ""
+    customer_claim: str = Field(default="", max_length=4000)
     complaint_stage: str = ""
     customer_tone: str = ""
     order_items: List[Dict[str, Any]] = Field(default_factory=list)
@@ -375,6 +376,7 @@ class ReviewCaseMetadata(BaseModel):
         service_types = {"question", "request_more_material", "status_update"}
         final_keys = {"decision", "resolution", "refund_result", "final_outcome", "human_conclusion", "approved"}
         final_markers = ("人工最终", "最终决定", "同意退款", "已退款", "拒绝退款", "审核通过", "审核不通过")
+        total_text_length = 0
         for item in value:
             if not isinstance(item, dict):
                 raise ValueError("conversation_message_invalid")
@@ -387,6 +389,9 @@ class ReviewCaseMetadata(BaseModel):
             text = str(item.get("text") or item.get("content") or "")
             if len(text) > 4000 or any(marker in text for marker in final_markers):
                 raise ValueError("conversation_final_outcome_not_allowed")
+            total_text_length += len(text)
+        if total_text_length > 12000:
+            raise ValueError("conversation_history_too_large")
         return value
 
 
@@ -453,6 +458,14 @@ class ReviewAdvisoryPolicy(BaseModel):
     boundary: str
 
 
+class ReviewEvidenceAttention(BaseModel):
+    level: Literal["green", "orange", "red", "gray"]
+    headline: str
+    customer_focus: List[str] = Field(default_factory=list)
+    disagreements: List[str] = Field(default_factory=list)
+    missing_evidence: List[str] = Field(default_factory=list)
+
+
 class ReviewAdvisoryAssessment(BaseModel):
     scenario: str
     assessment: ReviewAssessmentDetails
@@ -464,6 +477,7 @@ class ReviewAdvisoryAssessment(BaseModel):
         "continue_by_customer_policy",
         "system_retry",
     ]
+    evidence_attention: Optional[ReviewEvidenceAttention] = None
     signals: List[ReviewAdvisorySignal] = Field(default_factory=list)
     policy: ReviewAdvisoryPolicy
 

@@ -105,7 +105,7 @@ def build_selection_prompt(case: Dict[str, Any]) -> str:
 - actual_received_item: 实际收到的商品/角色/SKU/规格/数量或破损事实。
 - audit_methods: 实际使用的审核方法数组。
 - frame_findings: 每帧一句客观观察，必须含 video_index、global_frame_index、timestamp、visible_facts、risk、subject_visibility。subject_visibility 必须逐帧列出 shipping_package、product_package、claimed_item 三个 canonical subject_id 及其 state(visible/partial/occluded/out_of_frame/not_yet_exposed/unknown)；不知道时写 unknown，不得省略。
-- adopted_evidence: 模型采信的关键证据数组，每项必须含 source_type、asset_ref、fact、why_it_matters、confidence，并按来源填写 video_index/global_frame_index、image_index 或 reference_index/reference_id；必须能回链到上方清单。仅补充图片证据填写 same_item_linkage 和 temporal_linkage；官方参考图的 source_type 必须是 official_product_reference，且不得表述为用户证据。
+- adopted_evidence: 模型采信的关键证据数组，每项必须含 source_type、asset_ref、fact、why_it_matters、confidence，并按来源填写 video_index/global_frame_index、image_index 或 reference_index/reference_id；必须能回链到上方清单。仅补充图片证据填写 same_item_linkage、temporal_linkage 和 damage_visible（必须是 true/false，文字描述不能替代）；官方参考图的 source_type 必须是 official_product_reference，且不得表述为用户证据。
 - supporting_evidence: 支持用户诉求的证据数组。
 - challenging_evidence: 反证或风险数组。
 - continuity_assessment: 多视频整体连续性、调包/剪辑风险。

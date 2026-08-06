@@ -6,6 +6,7 @@ import argparse
 import base64
 import json
 import logging
+import math
 import mimetypes
 import os
 import random
@@ -45,10 +46,12 @@ from poc.visual_review_poc.local_video_triage_demo import (
     parse_model_json,
     policy_decision,
     sample_video_frames,
+    _safe_confidence,
 )
 from poc.visual_review_poc.damage_causality import (
     aggregate_damage_causality,
     apply_damage_causality_guard,
+    normalize_supplemental_linkage,
 )
 from poc.visual_review_poc.object_continuity import (
     aggregate_object_continuity,
@@ -71,7 +74,7 @@ from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
 from poc.visual_review_poc.model_auth import gemini_channel_options
-from poc.visual_review_poc.observability import log_visual_event
+from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text
 
 ROOT = app_root()
 SAMPLE_ROOT = ROOT / "docs" / "三大审核场景的小量样本"
@@ -353,9 +356,9 @@ def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str,
                     outcome="success",
                 )
                 return {"ok": True, "status_code": response.status_code, "latency_seconds": latency, "data": response.json(), "attempt": attempt}
-            last = {"ok": False, "status_code": response.status_code, "latency_seconds": latency, "error": response.text[:1600], "error_type": classify_error(response.status_code, response.text), "attempt": attempt, "retry_after": response.headers.get("Retry-After")}
+            last = {"ok": False, "status_code": response.status_code, "latency_seconds": latency, "error": sanitize_error_text(response.text), "error_type": classify_error(response.status_code, response.text), "attempt": attempt, "retry_after": response.headers.get("Retry-After")}
         except Exception as exc:
-            last = {"ok": False, "status_code": None, "latency_seconds": round(time.time() - started, 2), "error": str(exc)[:1600], "error_type": classify_error(None, str(exc)), "attempt": attempt}
+            last = {"ok": False, "status_code": None, "latency_seconds": round(time.time() - started, 2), "error": sanitize_error_text(exc), "error_type": classify_error(None, str(exc)), "attempt": attempt}
         log_visual_event(
             LOGGER,
             "visual_model_http_attempt",
@@ -558,7 +561,7 @@ def _aggregate_damage_observability(rows: List[Dict[str, Any]]) -> Dict[str, Any
         "same_item_linkage": all(item.get("same_item_linkage") is True for item in values),
         "claimed_region_closeup": all(item.get("claimed_region_closeup") is True for item in values),
         "required_view_coverage": min(
-            max(0.0, min(float(item.get("required_view_coverage") or 0.0), 1.0)) for item in values
+            _safe_confidence(item.get("required_view_coverage")) for item in values
         ),
         "conflicting_evidence": conflicting,
         "missing_views": list(dict.fromkeys(
@@ -576,21 +579,16 @@ def _damage_key_evidence(
     valid_frame_keys: Optional[set[Tuple[int, int]]] = None,
     limit: int = 8,
 ) -> List[Dict[str, Any]]:
-    findings = [
-        dict(item)
-        for row in rows
-        for item in row.get("frame_findings") or []
-        if isinstance(item, dict)
-        and item.get("global_frame_index") is not None
-        and (
-            valid_frame_keys is None
-            or (int(item.get("video_index") or 0), int(item["global_frame_index"])) in valid_frame_keys
-        )
-    ]
-    by_key = {
-        (int(item.get("video_index") or 0), int(item["global_frame_index"])): item
-        for item in findings
-    }
+    findings: List[Dict[str, Any]] = []
+    for row in rows:
+        for item in row.get("frame_findings") or []:
+            if not isinstance(item, dict):
+                continue
+            key = _frame_key(item)
+            if key is None or (valid_frame_keys is not None and key not in valid_frame_keys):
+                continue
+            findings.append(dict(item))
+    by_key = {_frame_key(item): item for item in findings}
     ordered = [by_key[key] for key in sorted(by_key)]
     priority = [
         item for item in ordered
@@ -600,10 +598,7 @@ def _damage_key_evidence(
     if ordered:
         positions = {0, len(ordered) - 1, len(ordered) // 4, len(ordered) // 2, len(ordered) * 3 // 4}
         priority.extend(ordered[index] for index in sorted(positions))
-    selected = list({
-        (int(item.get("video_index") or 0), int(item["global_frame_index"])): item
-        for item in priority
-    }.values())[:limit]
+    selected = list({_frame_key(item): item for item in priority}.values())[:limit]
     return [
         {
             "source_type": "video_frame",
@@ -782,6 +777,28 @@ def _apply_global_timeline_summary(
     return output
 
 
+def _safe_number(value: Any, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(0.0, parsed) if math.isfinite(parsed) else default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _frame_key(item: Dict[str, Any]) -> tuple[int, int] | None:
+    try:
+        return int(item.get("video_index") or 0), int(item["global_frame_index"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
 def _aggregate_chunk_results(
     case: Dict[str, Any],
     results: List[Dict[str, Any]],
@@ -791,46 +808,56 @@ def _aggregate_chunk_results(
     causality_results: Optional[List[Dict[str, Any]]] = None,
     causality_failures: Optional[List[Dict[str, Any]]] = None,
     main_review_frame_count: Optional[int] = None,
+    supplemental_results: Optional[List[Dict[str, Any]]] = None,
+    supplemental_failures: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     def channel_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         representations = sorted({str(item.get("input_representation")) for item in items if item.get("input_representation")})
-        repair_calls = sum(int(item.get("repair_calls") or 0) for item in items)
+        repair_calls = sum(_safe_int(item.get("repair_calls")) for item in items)
         return {
             "model_calls": len(items) + repair_calls,
             "segment_calls": len(items),
             "repair_calls": repair_calls,
             "input_representations": representations,
-            "model_images": sum(int(item.get("model_image_count") or 0) for item in items),
-            "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in items), 2),
-            "input_tokens": sum(int((item.get("usage") or {}).get("input_tokens") or 0) for item in items),
-            "output_tokens": sum(int((item.get("usage") or {}).get("output_tokens") or 0) for item in items),
-            "total_tokens": sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in items),
-            "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in items), 6),
+            "model_images": sum(_safe_int(item.get("model_image_count")) for item in items),
+            "model_latency_seconds_sum": round(sum(_safe_number(item.get("latency_seconds")) for item in items), 2),
+            "input_tokens": sum(_safe_int((item.get("usage") or {}).get("input_tokens")) for item in items),
+            "output_tokens": sum(_safe_int((item.get("usage") or {}).get("output_tokens")) for item in items),
+            "total_tokens": sum(_safe_int((item.get("usage") or {}).get("total_tokens")) for item in items),
+            "estimated_usd": round(sum(_safe_number((item.get("cost") or {}).get("estimated_usd")) for item in items), 6),
             **_cost_observability(items),
         }
 
     parsed_rows = [item.get("parsed") or {} for item in results]
-    confidences = [float(item.get("confidence") or 0) for item in parsed_rows]
+    supplemental_rows = [item.get("parsed") or {} for item in (supplemental_results or [])]
+    confidences = [_safe_confidence(item.get("confidence")) for item in parsed_rows]
     best_index = max(range(len(parsed_rows)), key=lambda index: confidences[index])
     parsed = dict(parsed_rows[best_index])
     predicted = "review"
     confidence = round(sum(confidences) / max(len(confidences), 1), 4)
-    for key in ("frame_findings", "adopted_evidence", "supporting_evidence", "challenging_evidence", "issue_timestamps", "material_gaps", "skeptical_questions", "audit_methods"):
-        parsed[key] = [entry for item in parsed_rows for entry in (item.get(key) or [])][:120]
+    for key in ("frame_findings", "adopted_evidence", "supporting_evidence", "challenging_evidence", "supplemental_image_reviews", "issue_timestamps", "material_gaps", "skeptical_questions", "audit_methods"):
+        rows = (
+            parsed_rows + supplemental_rows
+            if key in {"adopted_evidence", "supporting_evidence", "challenging_evidence", "supplemental_image_reviews", "material_gaps"}
+            else parsed_rows
+        )
+        parsed[key] = [entry for item in rows for entry in (item.get(key) or [])][:120]
     business_scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or case.get("scenario") or "")
     causality_complete = bool(causality_results) and not causality_failures
     causality_rows = [item.get("parsed") or {} for item in (causality_results or [])]
     if business_scenario == "product_damage":
-        damage_rows = causality_rows or parsed_rows
+        primary_damage_rows = causality_rows or parsed_rows
+        primary_damage_assessment = aggregate_damage_causality(primary_damage_rows)
+        damage_rows = primary_damage_rows + supplemental_rows
         damage_assessment = aggregate_damage_causality(damage_rows)
         supplemental_evidence = [
             dict(entry)
-            for row in parsed_rows
-            for key in ("adopted_evidence", "supporting_evidence", "challenging_evidence")
+            for row in parsed_rows + supplemental_rows
+            for key in ("adopted_evidence", "supporting_evidence", "challenging_evidence", "supplemental_image_reviews")
             for entry in row.get(key) or []
             if isinstance(entry, dict)
             and str(entry.get("source_type") or "").lower() in {
-                "supplementary_image", "supplemental_image", "image",
+                "supplementary_image", "supplemental_image", "supplemental_image_review", "image",
             }
         ]
         referenced_indices = sorted({
@@ -838,20 +865,25 @@ def _aggregate_chunk_results(
             for item in supplemental_evidence
             if str(item.get("image_index") or "").isdigit()
         })
-        linkage_verified = any(
-            item.get("same_item_linkage") is True and item.get("temporal_linkage") is True
+        linkage_states = [
+            (
+                normalize_supplemental_linkage(item.get("same_item_linkage")),
+                normalize_supplemental_linkage(item.get("temporal_linkage"), temporal=True),
+            )
             for item in supplemental_evidence
-        )
+        ]
+        linkage_verified = any(same is True and temporal is True for same, temporal in linkage_states)
         provided_count = len(case.get("supplemental_images") or [])
         linkage_explicitly_rejected = (
             provided_count > 0
             and len(referenced_indices) == provided_count
             and bool(supplemental_evidence)
+            and bool(linkage_states)
             and all(
-            isinstance(item.get("same_item_linkage"), bool)
-            and isinstance(item.get("temporal_linkage"), bool)
-            and not (item.get("same_item_linkage") is True and item.get("temporal_linkage") is True)
-            for item in supplemental_evidence
+                same is not None
+                and temporal is not None
+                and not (same is True and temporal is True)
+                for same, temporal in linkage_states
             )
         )
         linkage_status = "verified" if linkage_verified else "not_linked" if linkage_explicitly_rejected else "unresolved"
@@ -867,17 +899,18 @@ def _aggregate_chunk_results(
                 "image_index": item.get("image_index"),
                 "fact": item.get("fact") or item.get("description") or "补充图片已被模型引用，但没有形成可公开的事实描述。",
                 "why_it_matters": item.get("why_it_matters") or "用于核对补充图片是否支持主诉，以及能否与主视频建立同物、同部位和过程关联。",
-                "same_item_linkage": item.get("same_item_linkage"),
-                "temporal_linkage": item.get("temporal_linkage"),
+                "same_item_linkage": normalize_supplemental_linkage(item.get("same_item_linkage")),
+                "temporal_linkage": normalize_supplemental_linkage(item.get("temporal_linkage"), temporal=True),
             })
         damage_assessment["evidence_source_summary"] = {
             "primary_video": {
                 "scope": "sampled_opening_video",
-                "damage_presence": damage_assessment.get("damage_presence"),
-                "claim_support": damage_assessment.get("claim_support"),
+                "damage_presence": primary_damage_assessment.get("damage_presence"),
+                "claim_support": primary_damage_assessment.get("claim_support"),
             },
             "supplemental_images": {
                 "provided_count": provided_count,
+                "processed_count": len(referenced_indices),
                 "referenced_count": len(referenced_indices),
                 "referenced_image_indices": referenced_indices,
                 "unreferenced_image_indices": [
@@ -889,9 +922,9 @@ def _aggregate_chunk_results(
             "decision_boundary": "补充特写图未建立同物、同部位和过程关联时，不能单独推翻主视频结论。",
         }
         valid_frame_keys = {
-            (int(item.get("video_index") or 0), int(item["global_frame_index"]))
+            key
             for item in case.get("frames") or []
-            if item.get("global_frame_index") is not None
+            if (key := _frame_key(item)) is not None
         }
         damage_assessment["key_evidence"] = _damage_key_evidence(damage_rows, valid_frame_keys)
         parsed["damage_causality_assessment"] = damage_assessment
@@ -961,19 +994,21 @@ def _aggregate_chunk_results(
     billed_results = (
         results
         + (main_failures or [])
+        + (supplemental_results or [])
+        + (supplemental_failures or [])
         + (continuity_results or [])
         + (causality_results or [])
         + (continuity_failures or [])
         + (causality_failures or [])
     )
     usage = {
-        key: sum(int((item.get("usage") or {}).get(key) or 0) for item in billed_results)
+        key: sum(_safe_int((item.get("usage") or {}).get(key)) for item in billed_results)
         for key in ("input_tokens", "output_tokens", "total_tokens")
     }
-    estimated_usd = round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in billed_results), 6)
+    estimated_usd = round(sum(_safe_number((item.get("cost") or {}).get("estimated_usd")) for item in billed_results), 6)
     cost_observability = _cost_observability(billed_results)
     total_model_calls = sum(
-        1 + int(item.get("repair_calls") or 0)
+        1 + _safe_int(item.get("repair_calls"))
         for item in billed_results
         if item.get("cost_status") != "not_incurred"
     )
@@ -989,6 +1024,7 @@ def _aggregate_chunk_results(
     specialized_incomplete = (
         (continuity_failures or [])
         + (causality_failures or [])
+        + (supplemental_failures or [])
         + continuity_coverage_gaps
         + causality_coverage_gaps
     )
@@ -997,7 +1033,7 @@ def _aggregate_chunk_results(
             "predicted_label": "review",
             "system_yes_no": "REVIEW",
             "decision": "manual_review",
-            "confidence": min(float(parsed.get("confidence") or 0.5), 0.69),
+            "confidence": min(_safe_confidence(parsed.get("confidence"), 0.5), 0.69),
             "business_action_allowed": False,
             "human_required": True,
             "specialized_pass_guard_reason": "主审核存在失败、模型输出缺口或结构不完整；已返回的有效证据予以保留，但不能使用不完整的主审核结果形成确定结论。",
@@ -1005,7 +1041,7 @@ def _aggregate_chunk_results(
         })
     elif specialized_incomplete:
         parsed["pass_integrity_status"] = "partial_specialized"
-        parsed["specialized_pass_warning"] = "连续性或损伤成因专项存在局部缺口；成功返回的证据继续有效，缺口只使对应证据维度保持未知。"
+        parsed["specialized_pass_warning"] = "连续性、损伤成因或补充图片专项存在局部缺口；成功返回的证据继续有效，缺口只使对应证据维度保持未知。"
     else:
         parsed["pass_integrity_status"] = "complete"
     parsed = _apply_global_timeline_summary(case, parsed, parsed_rows, conclusions)
@@ -1013,7 +1049,7 @@ def _aggregate_chunk_results(
     fulfillment_assessment = parsed.get("fulfillment_reconciliation") or {}
     continuity_assessment = parsed.get("object_continuity_assessment") or {}
     visibility_coverages = [
-        float(item.get("visibility_coverage") or 0)
+        _safe_number(item.get("visibility_coverage"))
         for item in continuity_assessment.get("tracked_subjects") or []
         if isinstance(item, dict)
     ]
@@ -1032,8 +1068,8 @@ def _aggregate_chunk_results(
     }
     return {
         "status": "success",
-        "latency_seconds": round(sum(float(item.get("latency_seconds") or 0) for item in billed_results), 2),
-        "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in billed_results), 2),
+        "latency_seconds": round(sum(_safe_number(item.get("latency_seconds")) for item in billed_results), 2),
+        "model_latency_seconds_sum": round(sum(_safe_number(item.get("latency_seconds")) for item in billed_results), 2),
         "usage": usage,
         "cost": {"estimated_usd": estimated_usd},
         **cost_observability,
@@ -1053,6 +1089,9 @@ def _aggregate_chunk_results(
             "total_model_calls": total_model_calls,
             "channels": {
                 "main_review": channel_summary(results + (main_failures or [])),
+                "supplemental_evidence": channel_summary(
+                    (supplemental_results or []) + (supplemental_failures or [])
+                ),
                 "object_continuity": channel_summary((continuity_results or []) + (continuity_failures or [])),
                 "damage_causality": channel_summary((causality_results or []) + (causality_failures or [])),
             },
@@ -1060,6 +1099,15 @@ def _aggregate_chunk_results(
                 "status": "degraded" if main_failures else "completed",
                 "successful_segment_count": len(results),
                 "failures": main_failures or [],
+            },
+            "supplemental_evidence_pass": {
+                "status": (
+                    "degraded" if supplemental_failures
+                    else "completed" if supplemental_results
+                    else "disabled"
+                ),
+                "segment_count": len(supplemental_results or []),
+                "failures": supplemental_failures or [],
             },
             "continuity_pass": {
                 "status": "degraded" if continuity_failures or continuity_coverage_gaps else ("completed" if continuity_complete else "disabled"),
@@ -1095,7 +1143,7 @@ def derive_claim_identity(results: List[Dict[str, Any]], case: Dict[str, Any]) -
     identity: Dict[str, Any] = {"customer_claim": str(case.get("customer_claim") or "").strip()}
     for result in sorted(
         results,
-        key=lambda item: float(parsed_dict(item).get("confidence") or 0),
+        key=lambda item: _safe_confidence(parsed_dict(item).get("confidence")),
         reverse=True,
     ):
         parsed = parsed_dict(result)
@@ -1167,7 +1215,9 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     def review_chunk(index: int, chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
         chunk_case = dict(case)
         chunk_case["frames"] = chunk
-        chunk_case["supplemental_images"] = (case.get("supplemental_images") or [])[:4]
+        chunk_case["supplemental_images"] = (
+            [] if scenario == "product_damage" else (case.get("supplemental_images") or [])[:4]
+        )
         chunk_case["official_reference_images"] = (
             case.get("official_reference_images") or []
         ) if index in reference_segment_indices else []
@@ -1212,7 +1262,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             1 for item in completed if item.get("cost_status") != "not_incurred"
         )
         usage = {
-            key: sum(int((item.get("usage") or {}).get(key) or 0) for item in completed)
+            key: sum(_safe_int((item.get("usage") or {}).get(key)) for item in completed)
             for key in ("input_tokens", "output_tokens", "total_tokens")
         }
         return {
@@ -1227,11 +1277,11 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             "chunk_failures": failures,
             "usage": usage,
             "cost": {
-                "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in completed), 6)
+                "estimated_usd": round(sum(_safe_number((item.get("cost") or {}).get("estimated_usd")) for item in completed), 6)
             },
             **_cost_observability(completed),
             "_channel_route_attempts": collect_channel_route_attempts(completed),
-            "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in completed), 2),
+            "model_latency_seconds_sum": round(sum(_safe_number(item.get("latency_seconds")) for item in completed), 2),
             "latency_seconds": round(time.time() - wall_started, 2),
             "chunking": {
                 "segment_count": len(chunks),
@@ -1242,10 +1292,88 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
                 "channels": {"main_review": {
                     "model_calls": incurred_calls,
                     "total_tokens": usage["total_tokens"],
-                    "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in completed), 6),
+                    "estimated_usd": round(sum(_safe_number((item.get("cost") or {}).get("estimated_usd")) for item in completed), 6),
                 }},
             },
         }
+
+    supplemental_results: List[Dict[str, Any]] = []
+    supplemental_failures: List[Dict[str, Any]] = []
+    supplemental_concurrency: Dict[str, Any] = {}
+    supplemental_images = case.get("supplemental_images") or []
+    if scenario == "product_damage" and supplemental_images:
+        supplemental_chunks = [[image] for image in supplemental_images]
+
+        def review_supplemental_chunk(index: int, images: List[Dict[str, Any]]) -> Dict[str, Any]:
+            chunk_case = dict(case)
+            chunk_case["frames"] = _representative_frames(frames, 6)
+            chunk_case["supplemental_images"] = images
+            chunk_case["official_reference_images"] = case.get("official_reference_images") or []
+            structured = dict(case.get("structured_business_context") or {})
+            structured["review_chunk"] = {
+                "pass_type": "supplemental_evidence",
+                "index": index + 1,
+                "total": len(supplemental_chunks),
+                "is_final_chunk": index + 1 == len(supplemental_chunks),
+                "instruction": (
+                    "本轮专门逐张审核补充图片。每张图片都必须在 adopted_evidence、"
+                    "supporting_evidence 或 challenging_evidence 中引用 image_index；"
+                    "分别填写 damage_visible 布尔值、同物关联和时序关联；文字描述不能替代"
+                    " damage_visible，不得因主视频证据不足而省略图片。"
+                ),
+            }
+            chunk_case["structured_business_context"] = structured
+            result = call_model(cfg, chunk_case, timeout, retries)
+            if result.get("status") != "success":
+                return result
+            image_index = images[0].get("image_index")
+            parsed = dict(result.get("parsed") or {})
+            image_finding_found = False
+            for key in ("adopted_evidence", "supporting_evidence", "challenging_evidence"):
+                anchored = []
+                for raw in parsed.get(key) or []:
+                    item = dict(raw) if isinstance(raw, dict) else raw
+                    if isinstance(item, dict) and "image" in str(item.get("source_type") or "").lower():
+                        image_finding_found = True
+                        item.setdefault("image_index", image_index)
+                        item.setdefault("asset_ref", f"supplemental_image_{image_index}")
+                    anchored.append(item)
+                parsed[key] = anchored
+            parsed["supplemental_image_reviews"] = [] if image_finding_found else [{
+                "source_type": "supplemental_image_review",
+                "image_index": image_index,
+                "asset_ref": f"supplemental_image_{image_index}",
+                "fact": "该补充图片已完成独立审核，本轮未形成可采信的损伤或反证描述。",
+                "why_it_matters": "用于区分已处理但无有效发现与系统尚未处理。",
+                "same_item_linkage": None,
+                "temporal_linkage": None,
+            }]
+            return {**result, "parsed": parsed}
+
+        supplemental_completed, supplemental_concurrency = run_adaptive_tasks(
+            list(enumerate(supplemental_chunks)),
+            workers=max(1, min(workers, len(supplemental_chunks))),
+            invoke=lambda item: review_supplemental_chunk(item[0], item[1]),
+        )
+        supplemental_results = [
+            item for item in supplemental_completed if item.get("status") == "success"
+        ]
+        supplemental_failures = [
+            {
+                "chunk_index": index + 1,
+                "status": item.get("status") or "failed",
+                "error": item.get("error") or item.get("status"),
+                "error_type": item.get("error_type") or "",
+                "status_code": item.get("status_code"),
+                "usage": item.get("usage") or {},
+                "cost": item.get("cost") or {},
+                "cost_status": item.get("cost_status") or "",
+                "latency_seconds": item.get("latency_seconds") or 0,
+                "_channel_route_attempts": item.get("_channel_route_attempts") or [],
+            }
+            for index, item in enumerate(supplemental_completed)
+            if item.get("status") != "success"
+        ]
     specialized_case = dict(case)
     specialized_structured = dict(case.get("structured_business_context") or {})
     claim_identity = derive_claim_identity(successful, case)
@@ -1293,6 +1421,8 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         causality_results,
         causality_failures,
         len(main_frames),
+        supplemental_results,
+        supplemental_failures,
     )
     chunking = aggregated.setdefault("chunking", {})
     chunking["concurrency"] = concurrency_audit
@@ -1300,6 +1430,8 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     chunking["official_reference_model_sends"] = (
         len(case.get("official_reference_images") or []) * len(reference_segment_indices)
     )
+    if supplemental_concurrency:
+        chunking["supplemental_evidence_pass"]["concurrency"] = supplemental_concurrency
     aggregated["latency_seconds"] = round(time.time() - wall_started, 2)
     return aggregated
 
@@ -1576,7 +1708,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             try:
                 result = future.result()
             except Exception as exc:
-                result = {"status": "failed", "error": str(exc)[:1600]}
+                result = {"status": "failed", "error": sanitize_error_text(exc)}
             results.append(
                 {
                     "case_id": case["case_id"],
