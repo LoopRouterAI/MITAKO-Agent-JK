@@ -30,7 +30,7 @@ from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.order_info_adapter import build_order_info_context
 from poc.visual_review_poc.model_auth import DEFAULT_GEMINI_MODEL, gemini_channel_options, resolve_gemini_model
 from poc.visual_review_poc.model_catalog import MODEL_CONFIGS
-from poc.visual_review_poc.gemini_response_schema import REVIEW_RESPONSE_SCHEMA
+from poc.visual_review_poc.review_response_schema import REVIEW_RESPONSE_SCHEMA
 from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text
 from review_input_safety import redact_review_personal_data
 

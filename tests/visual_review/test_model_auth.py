@@ -606,7 +606,7 @@ class ModelAuthTest(unittest.TestCase):
         self.assertEqual(result["_channel_route_attempts"][0]["decision"], "skipped_unsupported_file_uri")
 
     def test_gemini_schema_requires_meaningful_native_video_evidence(self):
-        from poc.visual_review_poc.gemini_response_schema import REVIEW_RESPONSE_SCHEMA
+        from poc.visual_review_poc.review_response_schema import REVIEW_RESPONSE_SCHEMA
 
         properties = REVIEW_RESPONSE_SCHEMA["properties"]
         continuity = properties["object_continuity_assessment"]

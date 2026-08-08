@@ -603,7 +603,7 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\local_video_triage_demo.py",
     "poc\visual_review_poc\model_selection_e2e.py",
     "poc\visual_review_poc\model_auth.py",
-    "poc\visual_review_poc\gemini_response_schema.py",
+    "poc\visual_review_poc\review_response_schema.py",
     "poc\visual_review_poc\media_deduplication.py",
     "poc\visual_review_poc\media_registry.py",
     "poc\visual_review_poc\native_video_proxy.py",

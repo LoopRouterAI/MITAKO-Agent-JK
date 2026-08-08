@@ -65,7 +65,7 @@ from poc.visual_review_poc.model_catalog import (
     PRICING_NOTE,
     summarize_cost_observability as _cost_observability,
 )
-from poc.visual_review_poc.gemini_response_schema import (
+from poc.visual_review_poc.review_response_schema import (
     FRAME_RESPONSE_SCHEMA,
     MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA,
     MINOR_MATERIAL_INVENTORY_RESPONSE_SCHEMA,
