@@ -450,6 +450,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             "MITAKO_AUTH_REQUIRED": "0",
             "MITAKO_PROTECTED_API_AUTH_REQUIRED": "0",
             "MITAKO_DEV_AUTH_BYPASS": "1",
+            "PYTHONIOENCODING": "utf-8",
         }
     )
     main_process: subprocess.Popen[Any] | None = None
@@ -565,9 +566,14 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             env=smoke_env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
-        _assert(smoke.returncode == 0, f"甲方包 API 冒烟失败：\n{smoke.stdout[-4000:]}\n{smoke.stderr[-2000:]}")
+        _assert(
+            smoke.returncode == 0,
+            f"甲方包 API 冒烟失败：\n{(smoke.stdout or '')[-4000:]}\n{(smoke.stderr or '')[-2000:]}",
+        )
         return {
             "main_port": main_port,
             "visual_port": visual_port,
