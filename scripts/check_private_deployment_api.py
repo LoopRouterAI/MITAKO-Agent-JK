@@ -155,19 +155,25 @@ def main() -> int:
     )
     sampling_plan = sampling.get("plan") or {}
     channel_calls = sampling_plan.get("estimated_channel_calls") or {}
+    unified_multitask = sampling_plan.get("unified_multitask") or {}
+    fallback_calls = unified_multitask.get("fallback_channel_calls") or {}
     _case(
         results,
         "REVIEW-sampling-plan",
         code == 200
         and sampling_plan.get("fps") == 1.0
         and sampling_plan.get("estimated_frames_per_video", 0) >= 453
-        and sampling_plan.get("main_review_frames") == 48
-        and sampling_plan.get("main_review_strategy") == "uniform_representative"
-        and sampling_plan.get("estimated_model_segments") == 2
-        and channel_calls.get("main_review") == 2
-        and channel_calls.get("object_continuity", 0) > 0
-        and channel_calls.get("damage_causality", 0) > 0
+        and sampling_plan.get("main_review_frames") == sampling_plan.get("estimated_total_frames")
+        and sampling_plan.get("main_review_strategy") == "unified_dense_multitask"
+        and sampling_plan.get("estimated_model_segments") == channel_calls.get("main_review")
+        and channel_calls.get("main_review", 0) > 0
+        and channel_calls.get("object_continuity") == 0
+        and channel_calls.get("damage_causality") == 0
         and sampling_plan.get("estimated_total_model_calls") == sum(channel_calls.values())
+        and unified_multitask.get("enabled") is True
+        and unified_multitask.get("primary_transport") == "gemini_native"
+        and fallback_calls.get("object_continuity", 0) > 0
+        and fallback_calls.get("damage_causality", 0) > 0
         and sampling_plan.get("transcode_recommended") is True,
         f"plan={sampling_plan}",
         t0,
