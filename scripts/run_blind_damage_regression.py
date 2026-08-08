@@ -6,10 +6,16 @@ import argparse
 import hashlib
 import json
 import mimetypes
+import os
 from contextlib import ExitStack
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
+
+
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env", override=False)
 
 
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".txt", ".json"}
@@ -28,6 +34,14 @@ def technical_scenario(scenario: str) -> str:
         return BUSINESS_TO_TECHNICAL[scenario]
     except KeyError as exc:
         raise ValueError("unsupported_business_scenario") from exc
+
+
+def internal_metrics_headers() -> dict[str, str]:
+    token = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
+    return {
+        "X-MITAKO-Internal-Metrics": "1",
+        "X-MITAKO-Internal-Token": token,
+    } if token else {}
 
 
 def blind_case_id(bundle: Path) -> str:
@@ -118,7 +132,12 @@ def run_case(
             timeout=httpx.Timeout(3600, connect=10, write=3600, read=3600),
             trust_env=False,
         ) as client:
-            response = client.post(base_url.rstrip("/") + "/api/review-folder", data=data, files=files)
+            response = client.post(
+                base_url.rstrip("/") + "/api/review-folder",
+                headers=internal_metrics_headers(),
+                data=data,
+                files=files,
+            )
         if response.is_error:
             raise RuntimeError(f"visual_workbench_http_{response.status_code}: {response.text[:2000]}")
         response.raise_for_status()
@@ -174,18 +193,22 @@ def main() -> int:
                     "processed_image_count": minor.get("processed_image_count"),
                     "checklist": minor.get("checklist"),
                     "field_consistency": minor.get("field_consistency"),
+                    "required_materials": minor.get("required_materials"),
                     "authenticity_assessment": minor.get("authenticity_assessment"),
                 }
                 if minor
                 else None,
+                "material_gaps": parsed.get("material_gaps"),
                 "damage_causality_assessment": parsed.get("damage_causality_assessment"),
                 "object_continuity_assessment": parsed.get("object_continuity_assessment"),
                 "continuity_guard_reason": parsed.get("continuity_guard_reason"),
                 "causality_guard_reason": parsed.get("causality_guard_reason"),
                 "pass_integrity_status": parsed.get("pass_integrity_status"),
                 "specialized_pass_guard_reason": parsed.get("specialized_pass_guard_reason"),
+                "video_audit_conclusion": parsed.get("video_audit_conclusion"),
                 "decision_policy_audit": parsed.get("decision_policy_audit")
                 or (payload.get("review") or {}).get("decision_policy_audit"),
+                "inference_estimate": ((payload.get("review") or {}).get("agent_report") or {}).get("inference_estimate"),
                 "report": (payload.get("review") or {}).get("report"),
                 "diagnostics": payload.get("diagnostics") or (payload.get("review") or {}).get("diagnostics"),
             }

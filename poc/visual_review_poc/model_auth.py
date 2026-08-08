@@ -88,11 +88,13 @@ def gemini_channel_options(model: str = "") -> List[Dict[str, Any]]:
 
     official_key = _first_env(("GEMINI_API_KEY", "GOOGLE_API_KEY"))
     if official_key:
+        configured_base = _first_env(("GEMINI_API_BASE_URL",)) or DEFAULT_GEMINI_BASE_URL
+        configured_hint = endpoint_vendor_hint(configured_base)
         candidates.append(
             (
-                "official",
+                "official" if configured_hint == "google" else configured_hint,
                 official_key,
-                _first_env(("GEMINI_API_BASE_URL",)) or DEFAULT_GEMINI_BASE_URL,
+                configured_base,
                 os.getenv("GEMINI_AUTH_MODE", "auto"),
             )
         )
@@ -130,7 +132,7 @@ def gemini_channel_options(model: str = "") -> List[Dict[str, Any]]:
     options: List[Dict[str, Any]] = []
     seen_endpoints = set()
     priorities = {"bananarouter": 0, "legacy": 0, "baidu": 1, "apiyi": 2, "official": 3}
-    candidates.sort(key=lambda item: priorities[item[0]])
+    candidates.sort(key=lambda item: priorities.get(item[0], 4))
     for channel, key, base, auth_mode in candidates:
         endpoint = gemini_generate_endpoint(base, resolved_model)
         normalized_endpoint = endpoint.casefold()
@@ -143,6 +145,7 @@ def gemini_channel_options(model: str = "") -> List[Dict[str, Any]]:
                 "model": resolved_model,
                 "endpoint": endpoint,
                 "headers": gemini_auth_headers(endpoint, key, auth_mode),
+                "supports_external_file_uri": channel == "baidu",
             }
         )
     return options

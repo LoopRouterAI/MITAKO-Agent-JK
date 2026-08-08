@@ -8,10 +8,24 @@ from unittest.mock import patch
 
 from poc.visual_review_poc.model_selection_e2e import call_model_chunked, gemini_payload, openai_messages
 from poc.visual_review_poc.local_video_triage_demo import build_system_prompt, enforce_boundary
-from poc.visual_review_poc.review_model_prompt import build_selection_prompt
+from poc.visual_review_poc.review_model_prompt import build_opening_start_prompt, build_selection_prompt
 
 
 class ModelRequestIsolationTest(unittest.TestCase):
+    def test_opening_start_prompt_only_judges_the_unopened_outer_package(self):
+        prompt = build_opening_start_prompt({
+            "frames": [
+                {"global_frame_index": 1, "video_index": 1, "timestamp": "00:00.00"},
+                {"global_frame_index": 2, "video_index": 1, "timestamp": "00:01.00"},
+            ],
+        })
+
+        self.assertIn("完整未拆封快递外包装", prompt)
+        self.assertIn("泡沫、气泡袋、商品内包装", prompt)
+        self.assertIn("面单可见不能替代封箱起始", prompt)
+        self.assertIn("只判断 sealed_start", prompt)
+        self.assertNotIn("伤情成因", prompt)
+
     def test_system_prompt_treats_customer_text_as_untrusted_evidence(self):
         prompt = build_system_prompt("product_damage")
 
@@ -80,6 +94,104 @@ class ModelRequestIsolationTest(unittest.TestCase):
         self.assertIn("播放加速本身不等于拼接剪辑或视频不合规", prompt)
         self.assertIn("一镜到底", prompt)
         self.assertIn("跳切、拼接、时间轴异常或关键过程缺失", prompt)
+
+    def test_prompt_requires_speed_impact_and_opening_compliance_facts(self):
+        prompt = build_selection_prompt({
+            "scenario_label": "商品有伤审核",
+            "customer_claim": "商品有伤",
+            "order_context": {},
+            "structured_business_context": {"business_scenario": "product_damage"},
+            "evidence_assets": [],
+            "videos": [],
+            "frames": [],
+            "supplemental_images": [],
+        })
+
+        for field in (
+            "speed_review_impact",
+            "critical_evidence_observable",
+            "affected_review_items",
+            "sealed_start",
+            "waybill_visible",
+            "issue_visible_in_continuous_opening",
+        ):
+            self.assertIn(field, prompt)
+        self.assertIn("1 FPS", prompt)
+        self.assertIn("2 FPS", prompt)
+        self.assertIn("加速本身只作为橙色风险信号", prompt)
+        self.assertIn("evidence_refs 使用扁平数组", prompt)
+        self.assertIn("完整未拆封快递外箱及封条", prompt)
+        self.assertIn("泡沫、气泡袋或商品内包装不算封箱起点", prompt)
+        self.assertIn("面单可见不能补足 sealed_start", prompt)
+
+    def test_prompt_cannot_invent_or_override_warehouse_final_state(self):
+        prompt = build_selection_prompt({
+            "scenario_label": "漏发货审核",
+            "customer_claim": "少收到一件商品",
+            "order_context": {},
+            "structured_business_context": {},
+            "evidence_assets": [],
+            "videos": [],
+            "frames": [],
+            "supplemental_images": [],
+        })
+
+        self.assertIn("warehouse_verification", prompt)
+        self.assertIn("不得自行生成、修改或覆盖", prompt)
+        self.assertIn("pending", prompt)
+        self.assertIn("历史待核实备注", prompt)
+
+    def test_prompt_requires_atomic_claim_and_attribution_facts(self):
+        prompt = build_selection_prompt({
+            "scenario_label": "商品有伤审核",
+            "customer_claim": "四件商品分别存在不同问题",
+            "order_context": {},
+            "structured_business_context": {
+                "claim_scope": {
+                    "active_claim_ids": ["CLM-1", "CLM-2"],
+                    "claims": [
+                        {"claim_id": "CLM-1", "subject_ref": "SKU-1", "issue_type": "product_damage"},
+                        {"claim_id": "CLM-2", "subject_ref": "SKU-2", "issue_type": "product_damage"},
+                    ],
+                }
+            },
+            "evidence_assets": [],
+            "videos": [],
+            "frames": [],
+            "supplemental_images": [],
+        })
+
+        for field in (
+            "claim_fact_assessment",
+            "atomic_claim_results",
+            "order_linkage",
+            "scene_match",
+            "assembly",
+            "reassembly_result",
+            "permanent_damage",
+        ):
+            self.assertIn(field, prompt)
+        self.assertIn("每个 active_claim_id", prompt)
+        self.assertIn("不能用一个总标签覆盖", prompt)
+
+    def test_native_video_ab_prompt_uses_video_timestamps_without_inventing_frame_indices(self):
+        prompt = build_selection_prompt({
+            "scenario_label": "商品有伤审核",
+            "customer_claim": "商品表面有划痕",
+            "order_context": {},
+            "structured_business_context": {
+                "business_scenario": "product_damage",
+                "native_video_review": {"enabled": True},
+            },
+            "evidence_assets": [],
+            "videos": [{"video_index": 1, "duration_seconds": 9.0}],
+            "frames": [],
+            "supplemental_images": [],
+        })
+
+        self.assertIn("原生视频时间戳", prompt)
+        self.assertIn("global_frame_index 写 null", prompt)
+        self.assertIn("不得伪造抽帧编号", prompt)
 
     def test_original_media_names_and_fields_never_enter_final_requests(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -29,13 +29,14 @@ CONSISTENCY_FIELDS = {
     ],
     "commitment_signatures": [
         "guardian_signer", "minor_signer", "signature_presence", "signature_method", "field_alignment",
+        "commitment_content", "refund_scope", "recipient_information", "signed_date",
     ],
     "order_payment": [
         "order_reference", "payer_identity", "amount", "transaction_scope", "commitment_amount",
     ],
     "mobile_realname": [
         "subscriber_identity", "account_mobile", "invoice_identity", "invoice_phone",
-        "number_status", "ownership_proof",
+        "number_status", "ownership_proof", "guardian_phone_holder",
     ],
 }
 
@@ -72,6 +73,7 @@ SOP 版本：minor_refund_2_0
 3. 监护人与未成年人亲笔签字的退款申请承诺书。
 4. 购买订单证明、支付流水或支付账单。
 5. 账号绑定手机号实名归属证明。只有填写了本案用户信息、能看到实名主体和购物手机号或备注信息的运营商话费账单/电子发票，才属于有效证明。空白模板、示例图无效；只显示账号名和手机号的运营商 App 页面只能作为辅助线索，不能替代该证明。
+学校盖章报名表只能作为身份或就读信息的辅助线索，不能单独替代身份证明或监护关系证明。
 
 异常经验规则：
 - 身份证仅允许遮挡住址门牌号和身份证号后三位；密集水印或错误打码导致关键字段不可读时，应要求重新提交清晰材料，但不得仅凭水印认定造假。
@@ -89,7 +91,9 @@ SOP 版本：minor_refund_2_0
 - 只判断本批图片实际可见的文档类型、角色、页/正反面和清晰度，不得根据文件顺序猜测。
 - 任一结构化字段缺失或不可读时统一输出 unknown，不得猜测，也不得写“用户未提交”“缺少其他批次材料”。
 - document_state 必须区分 filled、blank_template、example、unknown；模板和示例不得判为 filled。
+- 带有红色填写说明、占位文字、示例金额、教学箭头或样本水印的运营商发票属于 example，document_state 必须写 example、sop_eligibility 必须写 invalid；版式完整或字段清晰不能把样本变成用户实名材料。
 - sop_eligibility 必须区分 valid、supporting_only、invalid、unknown。材料类别识别正确不等于满足 SOP；运营商 App 账号页只能标 supporting_only。
+- 清晰可读且已填写的订单页、支付流水或支付账单可标 order_payment_proof；即使其权威归属仍需业务系统复核，也不得仅因此把订单支付材料判为缺失。支付截图只是不可以替代手机号实名归属证明。
 - suspected_editing 只允许在发现明确局部异常时使用，并同时填写 editing_evidence_codes。压缩、扫描、截图、水印、缺少 EXIF、轻微模糊或普通拍屏不能单独视为编辑证据。
 - 不得输出姓名、手机号、证件号、住址、订单号、付款账号、二维码内容或任何 OCR 原文。
 - 不执行退款、拒绝、通过等业务动作。
@@ -189,6 +193,7 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
         }
         for item in case.get("supplemental_images") or []
     ]
+    assessment_date = str((case.get("order_context") or {}).get("created_at") or "工单创建日期未提供")
     return f"""你正在执行未成年人退款资料的跨材料视觉字段一致性初审。
 
 检查项：{label}（{check_id}）
@@ -196,6 +201,7 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
 本次图片：{json.dumps(images, ensure_ascii=False)}
 预期图片编号：{json.dumps(check.get("expected_image_indices") or [], ensure_ascii=False)}
 本次审核策略：{json.dumps(policy, ensure_ascii=False)}
+年龄判断基准日期：{assessment_date}
 
 审核方法：
 1. 比较图片中可见字段是否彼此一致，逐项返回 matched、mismatched、uncertain 或 not_assessed。
@@ -205,12 +211,13 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
    mismatched 仅允许用于至少两张图片中的同一字段均完整清晰可见且明确不同；部分遮盖、打码、裁切或主副卡关系不明时不得输出 mismatched。
 2. 身份与年龄：比较监护人、未成年人主体及年龄是否满足未成年人申请条件；护照可作为视觉/OCR 一致性证据参与比较。低于策略阈值时还要检查材料是否说明未成年人如何获得或得知支付密码，以及监护人如何、何时发现消费，分别写入 payment_password_access 与 guardian_discovery_process。
 3. 监护关系：比较身份证、护照与户口本或出生证明中的双方主体及关系链；护照签发国家/地区仅作可见字段初审。申请人是哥哥或姐姐时，applicant_guardian_role 不得判 matched，除非另有父母关系或合法监护证明。
-4. 承诺书：比较监护人与未成年人签署主体标注、双方签字是否存在、是否为亲笔签名以及字段是否对齐；电脑录入姓名不能视为亲笔签名，不得声称签名具有法律真实性。
+4. 承诺书：比较监护人与未成年人签署主体标注、双方签字是否存在、是否为亲笔签名、字段是否对齐，并逐项检查 commitment_content、refund_scope、recipient_information、signed_date 是否完整；电脑录入姓名不能视为亲笔签名，不得声称签名具有法律真实性。
+   signature_presence 只有在监护人和未成年人两个签字位置都能看到实际手写笔迹时才可 matched；空白签字栏、打印或电脑录入的姓名必须为 mismatched，画面不清才为 uncertain。signature_method 同样只有明确可见手写笔迹才可 matched。
 5. 订单与支付：比较订单引用、付款主体、金额和交易范围在所给凭证中是否一致，同时检查承诺书填写金额与订单可退款范围是否一致；不得声称平台订单或支付记录真实。
-6. 手机号实名：比较运营商材料中的实名主体、账号绑定手机号、发票抬头/备注和发票业务手机号是否一致；不得声称运营商实名状态真实有效。支付截图不能替代手机号实名归属证明；号码已注销时必须检查销户或原号码归属证明。
+6. 手机号实名：比较运营商材料中的实名主体、账号绑定手机号、发票抬头/备注和发票业务手机号是否一致，并用 guardian_phone_holder 检查该号码是否属于本案申请监护人；号码属于未成年人不能满足本项当前 SOP。不得声称运营商实名状态真实有效。支付截图不能替代手机号实名归属证明；号码已注销时必须检查销户或原号码归属证明。
    主副卡并存、号码部分遮盖、发票备注不完整或无法建立主副卡关系时必须输出 uncertain，不得输出 mismatched。
 7. 同时检查明显裁切、拼接、涂改、遮挡或字段冲突风险。疑似编辑只能标风险，不能直接认定造假。tamper_risk=high 必须有明确局部异常，并只在 tamper_evidence_image_indices 中引用直接支持该异常的图片；压缩、扫描、截图、水印、缺少 EXIF 或一般清晰度问题不得单独判 high。
-8. 仅在 identity_age 检查中评估独立支付合理性：若清晰资料显示未成年人低于策略阈值 {policy.get('independent_payment_min_age', 10)} 岁，low_age 输出 true；达到阈值输出 false；年龄看不清输出 null。低龄且 payment_password_access、guardian_discovery_process 任一项不是 matched 时，payment_capability_risk 才输出 high；两项均 matched 时输出 none。它只是支付来源和监护过程的加强核验信号，不是法律结论，不得仅凭年龄给支持、拒绝或人工复核结论，也不得输出具体年龄。
+8. 仅在 identity_age 检查中评估独立支付合理性：以年龄判断基准日期计算，先输出 age_band。清晰资料显示低于策略阈值 {policy.get('independent_payment_min_age', 10)} 岁时输出 under_10，10 至 17 岁输出 10_to_17，已满 18 岁输出 18_or_over，看不清或主体不明输出 unknown；禁止把监护人的出生日期当作未成年人年龄。只有 age_band=under_10 时 low_age 才能为 true，age_band=10_to_17 或 18_or_over 时必须为 false，unknown 时必须为 null。低龄且 payment_password_access、guardian_discovery_process 任一项不是 matched 时，payment_capability_risk 才输出 high；两项均 matched 时输出 none。它只是支付来源和监护过程的加强核验信号，不是法律结论，不得仅凭年龄给支持、拒绝或人工复核结论，也不得输出具体年龄或出生日期。
 
 隐私与业务边界：
 - 模型可以在本次推理中读取字段用于比较，但不得输出任何字段原值、部分值、尾号、姓名、号码、金额、地址、OCR原文或哈希。
@@ -226,6 +233,7 @@ def build_minor_material_consistency_prompt(case: Dict[str, Any]) -> str:
   "coverage_ack": {{"expected_image_indices": [], "observed_image_indices": []}},
   "consistency_check": {{
     "check_id": "{check_id}",
+    "age_band": "under_10|10_to_17|18_or_over|unknown",
     "low_age": true|false|null,
     "payment_capability_risk": "none|high|unknown",
     "field_results": {json.dumps(field_rows, ensure_ascii=False)},

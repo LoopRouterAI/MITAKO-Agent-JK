@@ -253,6 +253,7 @@ class ReviewFulfillmentBaseline(BaseModel):
     selection_rules: List[Dict[str, Any]] = Field(default_factory=list)
     selection_rules_complete: bool = False
     standard_packing_list: List[Dict[str, Any]] = Field(default_factory=list)
+    warehouse_verification: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ReviewEvidenceCoverage(BaseModel):

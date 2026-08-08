@@ -30,6 +30,7 @@ from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.order_info_adapter import build_order_info_context
 from poc.visual_review_poc.model_auth import DEFAULT_GEMINI_MODEL, gemini_channel_options, resolve_gemini_model
 from poc.visual_review_poc.model_catalog import MODEL_CONFIGS
+from poc.visual_review_poc.gemini_response_schema import REVIEW_RESPONSE_SCHEMA
 from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text
 from review_input_safety import redact_review_personal_data
 
@@ -65,12 +66,15 @@ def parse_args() -> argparse.Namespace:
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
+    values = {}
     for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    for key, value in values.items():
+        os.environ.setdefault(key, value)
 
 
 def load_env() -> None:
@@ -502,8 +506,7 @@ def scenario_rules(scenario: str) -> str:
 - 用户应是“买了多件但实际少收到，且没有多收到其他错误商品”；若少了 A 却多了未购买的 C，应改按发错货审查。
 - 必须比对订单数量、拆单/分包状态、完整开箱过程、到手实物全家福、绿色自封袋和面单；订单已拆单时不能判为漏发。
 - 纸类、明信片、拍立得等可能多张叠放，必须先确认透明包装已完全拆开并重新清点。
-- 首选一镜到底且从未拆封开始的开箱视频；无视频时只能基于全家福、绿色自封袋和面单形成待人工核验的降级证据链。
-- _1 尾号等仓库异常二次处理单必须转人工答疑，不得自动判定或生成退款/补发动作。"""
+- 首选一镜到底且从未拆封开始的开箱视频；无视频时只能基于全家福、绿色自封袋和面单形成待人工核验的降级证据链。"""
     if scenario == "wrong_item":
         return """发错货专项规则：
 - 用户应是“原购买商品缺失，同时收到未购买的其他商品”；只有数量少而没有错误商品时应改按漏发货审查。
@@ -760,15 +763,19 @@ def build_payload(system_prompt: str, user_prompt: str, frames: List[Dict[str, A
     for frame in frames:
         path = Path(frame["path"])
         parts.append({"text": f"视频帧 {frame['frame_index']} / {frame['timestamp']} / {frame['file']}"})
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": encode_base64(path)}})
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": encode_base64(path)}})
     for image in images:
         path = Path(image["path"])
         parts.append({"text": f"补充图片 {image['image_index']} / {image['file']}"})
-        parts.append({"inline_data": {"mime_type": image["mime_type"], "data": encode_base64(path)}})
+        parts.append({"inlineData": {"mimeType": image["mime_type"], "data": encode_base64(path)}})
     return {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"parts": parts}],
-        "generationConfig": {"response_mime_type": "application/json", "maxOutputTokens": 8192},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": REVIEW_RESPONSE_SCHEMA,
+            "maxOutputTokens": 8192,
+        },
     }
 
 

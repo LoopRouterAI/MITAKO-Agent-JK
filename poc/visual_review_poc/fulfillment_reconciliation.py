@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Iterable, List, Tuple
 
+from review_service.warehouse_verification import trusted_warehouse_verification
+
 
 def _int(value: Any) -> int:
     try:
@@ -21,13 +23,32 @@ def _confidence(value: Any) -> float:
     return max(0.0, min(parsed, 1.0))
 
 
-def _item_key(item: Dict[str, Any]) -> str:
+def _item_spec(item: Dict[str, Any]) -> str:
+    return str(item.get("specification") or item.get("spec") or item.get("style") or "").strip().lower()
+
+
+def _item_base_key(item: Dict[str, Any]) -> str:
     for key in ("sku", "barcode", "packaging_identifier", "item_ref"):
         if item.get(key):
             return f"{key}:{str(item[key]).strip().lower()}"
     name = str(item.get("product_name") or item.get("name") or "").strip().lower()
-    spec = str(item.get("specification") or item.get("spec") or item.get("style") or "").strip().lower()
-    return f"name:{name}|spec:{spec}" if name else ""
+    return f"name:{name}" if name else ""
+
+
+def _item_key(item: Dict[str, Any]) -> str:
+    base = _item_base_key(item)
+    spec = _item_spec(item)
+    return f"{base}|spec:{spec}" if base and spec else base
+
+
+def _quantity(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed >= 0 else None
 
 
 def _frontdesk(case: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -51,6 +72,7 @@ def aggregate_fulfillment_reconciliation(
     baseline, coverage = _frontdesk(case)
     expected_by_key: Dict[str, Dict[str, Any]] = {}
     unkeyed_expected: List[Dict[str, Any]] = []
+    baseline_quantity_valid = True
     for source_item in baseline.get("expected_items") or []:
         if not isinstance(source_item, dict):
             continue
@@ -63,10 +85,20 @@ def aggregate_fulfillment_reconciliation(
             key,
             {**item, "expected_quantity": 0, "item_refs": []},
         )
-        current["expected_quantity"] += _int(item.get("expected_quantity") or item.get("quantity"))
+        raw_quantity = item.get("expected_quantity")
+        if raw_quantity in (None, ""):
+            raw_quantity = item.get("quantity")
+        quantity = _quantity(raw_quantity)
+        if quantity is None:
+            baseline_quantity_valid = False
+            quantity = 0
+        current["expected_quantity"] += quantity
         if item.get("item_ref"):
             current["item_refs"] = list(dict.fromkeys(current["item_refs"] + [str(item["item_ref"])]))
     expected = list(expected_by_key.values()) + unkeyed_expected
+    expected_keys_by_base: Dict[str, List[str]] = {}
+    for key, item in expected_by_key.items():
+        expected_keys_by_base.setdefault(_item_base_key(item), []).append(key)
     package_quantities: Dict[Tuple[str, str], Dict[str, Any]] = {}
     unconfirmed: List[Any] = []
     package_observations: Dict[str, Dict[str, Any]] = {}
@@ -79,10 +111,23 @@ def aggregate_fulfillment_reconciliation(
             if not key:
                 unconfirmed.append(item)
                 continue
+            candidate_keys = expected_keys_by_base.get(_item_base_key(item), [])
+            if key not in expected_by_key and candidate_keys and (
+                not _item_spec(item)
+                or any(not _item_spec(expected_by_key[candidate]) for candidate in candidate_keys)
+            ):
+                unconfirmed.append({**item, "reason": "specification_unconfirmed"})
+                continue
             package_ref = str(item.get("package_ref") or "unassigned")
             group = (package_ref, key)
             existing = package_quantities.get(group)
-            quantity = _int(item.get("observed_quantity") or item.get("quantity") or 1)
+            raw_quantity = item.get("observed_quantity")
+            if raw_quantity in (None, ""):
+                raw_quantity = item.get("quantity")
+            quantity = _quantity(1 if raw_quantity in (None, "") else raw_quantity)
+            if quantity is None:
+                unconfirmed.append({**item, "reason": "invalid_observed_quantity"})
+                continue
             if not existing or quantity > _int(existing.get("observed_quantity")):
                 package_quantities[group] = {**item, "observed_quantity": quantity, "package_ref": package_ref}
         unconfirmed.extend(row.get("unconfirmed_items") or [])
@@ -152,26 +197,54 @@ def aggregate_fulfillment_reconciliation(
         and coverage.get("all_items_displayed") is True
         and submitted_mapping_complete
     )
-    baseline_ready = bool(baseline.get("baseline_version") and expected and expected_packages)
+    baseline_ready = bool(
+        baseline.get("baseline_version") and expected and expected_packages and baseline_quantity_valid
+    )
     selection_rules_applicable = bool(baseline.get("selection_rules"))
     selection_rules_ready = not selection_rules_applicable or baseline.get("selection_rules_complete") is True
     benefit_rules_ready = scenario != "missing_item" or baseline.get("benefit_rules_complete") is True
-    evidence_sufficient = (
+    scenario_coverage_verified = coverage_verified or (
+        scenario == "wrong_item" and bool(observed_by_key)
+    )
+    visual_evidence_sufficient = (
         baseline_ready
         and input_complete
-        and coverage_verified
+        and scenario_coverage_verified
         and selection_rules_ready
         and benefit_rules_ready
         and not unconfirmed
         and not unknown_package_refs
     )
-    mismatch = bool(missing or unexpected)
-    verdict = "mismatched" if evidence_sufficient and mismatch else "matched" if evidence_sufficient else "indeterminate"
+    warehouse_verification = (
+        trusted_warehouse_verification(baseline) if scenario == "missing_item" else {}
+    )
+    evidence_sufficient = bool(warehouse_verification) or visual_evidence_sufficient
+    wrong_item_signal_in_missing_scene = bool(
+        scenario == "missing_item" and missing and unexpected and not warehouse_verification
+    )
+    mismatch = (
+        warehouse_verification.get("status") == "confirmed_missing"
+        if warehouse_verification
+        else bool(missing) if scenario == "missing_item" else bool(missing and unexpected)
+    )
+    verdict = (
+        "indeterminate"
+        if wrong_item_signal_in_missing_scene
+        else "mismatched" if evidence_sufficient and mismatch
+        else "matched" if evidence_sufficient
+        else "indeterminate"
+    )
     observation_confidence = max((_confidence(row.get("confidence")) for row in rows), default=0.0)
     boundary = (
-        "已完成版本化应发基准、全部包裹开箱和全部内容展示的视觉对账。"
-        if evidence_sufficient
-        else "应发基准、抽赏/赠品规则、包裹覆盖、全部内容展示或未确认项不完整，只能判为证据不足并人工复核。"
+        "甲方已提供可追溯的仓库终核，历史待核实备注不覆盖该终态。"
+        if warehouse_verification
+        else "同时存在应发商品缺少和未购商品多出的视觉线索，更符合错发场景；本轮不直接认定漏发。"
+        if wrong_item_signal_in_missing_scene
+        else "已完成版本化应发基准、实收商品身份、包裹映射与全家福证据链核对。"
+        if scenario == "wrong_item" and visual_evidence_sufficient and not coverage_verified
+        else "已完成版本化应发基准、全部包裹开箱和全部内容展示的视觉对账。"
+        if visual_evidence_sufficient
+        else "应发基准、抽赏/赠品规则、包裹覆盖、全部内容展示或未确认项不完整，应先补齐可获得的材料再复核。"
     )
     return {
         "baseline_version": baseline.get("baseline_version") or "",
@@ -189,10 +262,12 @@ def aggregate_fulfillment_reconciliation(
         "selection_rules_complete": selection_rules_ready,
         "benefit_rules_complete": benefit_rules_ready,
         "unknown_package_refs": unknown_package_refs,
+        "warehouse_verification": warehouse_verification,
+        "resolution_basis": "warehouse_verification" if warehouse_verification else "visual_reconciliation",
         "evidence_sufficiency": "sufficient" if evidence_sufficient else "insufficient",
         "verdict": verdict,
         "observation_confidence": observation_confidence,
-        "confidence": observation_confidence if evidence_sufficient else 0.0,
+        "confidence": 1.0 if warehouse_verification else observation_confidence if evidence_sufficient else 0.0,
         "decision_boundary": boundary,
         "scenario": scenario,
     }
@@ -209,9 +284,11 @@ def apply_fulfillment_guard(result: Dict[str, Any], scenario: str) -> Dict[str, 
     output["predicted_label"] = label
     output["system_yes_no"] = {"positive": "YES", "negative": "NO"}.get(label, "REVIEW")
     if label == "review":
-        output["decision"] = "manual_review"
+        output["decision"] = "request_more_material"
         output["confidence"] = min(_confidence(output.get("confidence")), 0.69)
-        output["fulfillment_guard_reason"] = reconciliation.get("decision_boundary") or "履约证据不足，需人工复核。"
+        output["fulfillment_guard_reason"] = reconciliation.get("decision_boundary") or "履约证据不足，应先补齐可获得的材料。"
+    elif reconciliation.get("resolution_basis") == "warehouse_verification":
+        output["fulfillment_guard_reason"] = reconciliation.get("decision_boundary") or "甲方仓库已提供可追溯终核。"
     else:
         output["fulfillment_guard_reason"] = "版本化应发基准与全部包裹视频展示已完成结构化对账。"
     return output

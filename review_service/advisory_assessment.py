@@ -6,6 +6,19 @@ from typing import Any, Dict, Iterable, List, Optional
 
 
 POLICY_REF = "MITAKO-ADVISORY-20260723@1"
+MATERIAL_GAP_LABELS = {
+    "order_item_baseline": "请补充可唯一识别的订单应发商品名称、规格或 SKU 基准。",
+    "all_expected_item_quantities": "请补充订单中每项商品的应发数量。",
+    "fulfillment_baseline.baseline_version": "请补充订单履约基准的版本或生成时间。",
+    "package_item_mapping": "请补充订单应发商品与包裹的对应关系。",
+    "submitted_package_mapping": "请补充本次提交的包裹与订单或物流单号的对应关系。",
+    "fulfillment_baseline.selection_rules_complete": "请补充随机款、赠品或替代规格等选款规则；如不适用，请明确声明不适用。",
+    "selection_rules_declaration": "请补充随机款、赠品或替代规格等选款规则；如不适用，请明确声明不适用。",
+    "benefit_rules_declaration": "请补充赠品、特典或组合商品的应发规则；如不适用，请明确声明不适用。",
+    "complete_evidence_coverage": "请补充覆盖全部已收包裹和全部实收商品的连续开箱视频或清晰全家福。",
+    "all_expected_packages_delivered": "请补充全部应发包裹已签收或已送达的物流记录。",
+    "customer_claim_or_claim_scope": "请明确本次申请所指的争议商品、部位和问题。",
+}
 SCENARIO_CUSTOMER_FOCUS = {
     "product_damage": [
         "先看主视频是否连续展示争议商品、受损部位与开箱动作链，再用补充图片确认损伤是否清晰可见。",
@@ -89,6 +102,13 @@ def _material_gap_items(values: Any) -> List[str]:
         text
         for item in _items(values)
         if len(text := str(item).strip()) >= 2
+    ))
+
+
+def _actionable_material_gap_items(values: Any) -> List[str]:
+    return list(dict.fromkeys(
+        MATERIAL_GAP_LABELS.get(item, item)
+        for item in _material_gap_items(values)
     ))
 
 
@@ -238,7 +258,11 @@ def attach_advisory_assessment(
     )
     material_gaps = [] if technical_processing_incomplete else _material_gap_items(parsed.get("material_gaps"))
     required_materials = [] if technical_processing_incomplete else _material_gap_items(minor.get("required_materials"))
-    missing_material = list(dict.fromkeys(_material_gap_items(missing_required) + material_gaps + required_materials))
+    missing_material = list(dict.fromkeys(
+        _actionable_material_gap_items(missing_required)
+        + _actionable_material_gap_items(material_gaps)
+        + _actionable_material_gap_items(required_materials)
+    ))
     conflicts = _conflicts(parsed)
     authoritative = _dict(parsed.get("authoritative_verification")) or _dict(minor.get("authoritative_verification"))
     minor_policy = _dict(metadata.get("minor_refund_policy"))
@@ -252,13 +276,10 @@ def attach_advisory_assessment(
     authenticity_critical = str(authenticity.get("severity") or "").lower() == "critical"
     payment_capability = _dict(minor.get("payment_capability_risk"))
     payment_process_gap = (
-        payment_capability.get("requires_more_material") is True
-        or (
-            payment_capability.get("process_evidence_status") != "matched"
-            and (
-                payment_capability.get("low_age") is True
-                or payment_capability.get("level") == "high"
-            )
+        payment_capability.get("low_age") is True
+        and (
+            payment_capability.get("requires_more_material") is True
+            or payment_capability.get("process_evidence_status") != "matched"
         )
     )
     low_age_process_verified = (
@@ -459,7 +480,9 @@ def attach_advisory_assessment(
         conclusion = "五类材料已齐全；部分可见字段建议抽检，但不要求每单转VIP客服复审。"
 
     if workflow == "request_more_material":
-        if conclusion_code == "evidence_inconclusive" or readiness_guard.get("applied") is True:
+        if minor.get("conclusion"):
+            conclusion = str(minor["conclusion"]).strip()
+        elif conclusion_code == "evidence_inconclusive" or readiness_guard.get("applied") is True:
             conclusion = "当前证据或业务基准不足，建议先补充所列材料，再形成明确事实判断。"
         else:
             conclusion = f"{conclusion.rstrip('。')}；但连续性或材料仍有缺口，建议补充所列材料。"

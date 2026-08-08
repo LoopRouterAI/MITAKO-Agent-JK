@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import json
 import logging
 import math
@@ -16,6 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from threading import BoundedSemaphore
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
@@ -45,6 +47,7 @@ from poc.visual_review_poc.local_video_triage_demo import (
     load_report_label,
     parse_model_json,
     policy_decision,
+    resize_frame,
     sample_video_frames,
     _safe_confidence,
 )
@@ -62,7 +65,15 @@ from poc.visual_review_poc.model_catalog import (
     PRICING_NOTE,
     summarize_cost_observability as _cost_observability,
 )
-from poc.visual_review_poc.review_model_prompt import build_selection_prompt
+from poc.visual_review_poc.gemini_response_schema import (
+    FRAME_RESPONSE_SCHEMA,
+    MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA,
+    MINOR_MATERIAL_INVENTORY_RESPONSE_SCHEMA,
+    MINOR_MATERIAL_VIDEO_RESPONSE_SCHEMA,
+    NATIVE_VIDEO_RESPONSE_SCHEMA,
+    OPENING_START_RESPONSE_SCHEMA,
+)
+from poc.visual_review_poc.review_model_prompt import build_opening_start_prompt, build_selection_prompt
 from poc.visual_review_poc.model_result_scoring import score_result
 from poc.visual_review_poc.fulfillment_reconciliation import (
     aggregate_fulfillment_reconciliation,
@@ -70,6 +81,8 @@ from poc.visual_review_poc.fulfillment_reconciliation import (
 )
 from poc.visual_review_poc.specialized_model_pass import run_adaptive_tasks, run_specialized_frame_pass
 from poc.visual_review_poc.minor_material_pipeline import run_minor_material_pipeline
+from poc.visual_review_poc.media_deduplication import deduplicate_media
+from poc.visual_review_poc.unified_model_pass import unified_dimension_gaps
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
@@ -81,6 +94,11 @@ SAMPLE_ROOT = ROOT / "docs" / "三大审核场景的小量样本"
 CNY_PER_USD = 7.0
 LOGGER = logging.getLogger("mitako.visual_review")
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+try:
+    PROVIDER_MAX_INFLIGHT = max(1, min(int(os.getenv("REVIEW_PROVIDER_MAX_INFLIGHT", "4") or 4), 32))
+except ValueError:
+    PROVIDER_MAX_INFLIGHT = 4
+_PROVIDER_REQUEST_GATE = BoundedSemaphore(PROVIDER_MAX_INFLIGHT)
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -154,25 +172,101 @@ def prepare_media(
     return prepared
 
 
+def extract_video_start_anchors(video: Path, run_dir: Path, frame_width: int) -> List[Dict[str, Any]]:
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        return []
+    run_dir.mkdir(parents=True, exist_ok=True)
+    frames = []
+    try:
+        for timestamp_seconds in (0.0, 1.0):
+            cap.set(cv2.CAP_PROP_POS_MSEC, timestamp_seconds * 1000)
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            frame = resize_frame(frame, frame_width)
+            path = run_dir / f"opening_anchor_{int(timestamp_seconds):02d}s.jpg"
+            encoded_ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 84])
+            if not encoded_ok:
+                continue
+            encoded.tofile(str(path))
+            frames.append({
+                "frame_index": len(frames) + 1,
+                "timestamp": format_time(timestamp_seconds),
+                "timestamp_seconds": timestamp_seconds,
+                "file": path.name,
+                "path": str(path),
+            })
+    finally:
+        cap.release()
+    return frames
+
+
+def discover_case_videos(sample_dir: Path) -> Tuple[List[Path], Dict[str, Any]]:
+    submitted_videos = sorted(
+        path
+        for path in sample_dir.iterdir()
+        if path.is_file()
+        and path.suffix.lower() in VIDEO_SUFFIXES
+        and not ignored_upload_reason(path.name)
+        and valid_media_file(path)
+    )
+    return deduplicate_media(submitted_videos)
+
+
 def load_case_bundle(
     sample_dir: Path,
     args: argparse.Namespace,
     run_dir: Path,
     scenario_override: str = "",
+    native_video: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    videos = sorted(
-        p
-        for p in sample_dir.iterdir()
-        if p.is_file()
-        and p.suffix.lower() in VIDEO_SUFFIXES
-        and not ignored_upload_reason(p.name)
-        and valid_media_file(p)
-    )
+    videos, video_deduplication = discover_case_videos(sample_dir)
     case = load_case(videos[0], args.supplemental_image_limit) if videos else load_case_from_folder(sample_dir, args.supplemental_image_limit)
     if scenario_override:
         case["scenario"] = scenario_override
     if not videos and not case.get("supplemental_images"):
         raise SystemExit(f"样本缺少可审核的视频或图片：{sample_dir}")
+    if native_video and len(videos) == 1:
+        source = dict(native_video)
+        if not source.get("file_uri"):
+            if not videos:
+                raise SystemExit(f"样本缺少可用于原生审核的视频：{sample_dir}")
+            source.setdefault("api_path", str(videos[0]))
+            source.setdefault("api_mime_type", mime_for(videos[0]))
+        source.setdefault("video_index", 1)
+        media_dir = run_dir / "api_media"
+        anchors = extract_video_start_anchors(videos[0], run_dir / "native_start_anchors", args.frame_width) if videos else []
+        for index, frame in enumerate(anchors, start=1):
+            frame["video_index"] = 1
+            frame["global_frame_index"] = index
+            frame["video_file"] = videos[0].name
+        case["frames"] = prepare_media(anchors, media_dir / "native_start_anchors")
+        case["videos"] = [{
+            "video_index": 1,
+            "file": videos[0].name if videos else "remote_video",
+            "source_bytes": videos[0].stat().st_size if videos else None,
+            "sampled_frames": len(case["frames"]),
+            "model_input": {"type": "native_video"},
+        }]
+        case["video_deduplication"] = video_deduplication
+        case["rejected_videos"] = []
+        case["model_frames_per_call"] = len(case["frames"])
+        case["sampling_mode"] = "native_video"
+        minor_material = case.get("scenario") in {"minor_material", "minor_refund"}
+        case["supplemental_images"] = prepare_media(
+            case["supplemental_images"],
+            media_dir / "images",
+            max_edge=1920 if minor_material else 1280,
+            quality=88 if minor_material else 82,
+        )
+        prepare_official_reference_images(case)
+        case["native_video"] = source
+        case.setdefault("structured_business_context", {})["native_video_review"] = {
+            "enabled": True,
+            "transport": "file_uri" if source.get("file_uri") else "inline_data",
+        }
+        return case
     frame_groups: List[List[Dict[str, Any]]] = []
     video_summaries = []
     rejected_videos: List[Dict[str, str]] = []
@@ -216,6 +310,7 @@ def load_case_bundle(
             group.append(copied)
         frame_groups.append(group)
     case["videos"] = video_summaries
+    case["video_deduplication"] = video_deduplication
     case["rejected_videos"] = rejected_videos
     if video_summaries:
         first_accepted = sample_dir / str(video_summaries[0]["file"])
@@ -243,22 +338,57 @@ def load_case_bundle(
 
 def gemini_payload(system_prompt: str, user_prompt: str, case: Dict[str, Any]) -> Dict[str, Any]:
     parts: List[Dict[str, Any]] = [{"text": user_prompt}]
+    native_video = case.get("native_video") or {}
+    if native_video:
+        video_index = native_video.get("video_index") or 1
+        parts.append({"text": f"原生视频 {video_index} / asset_ref=native_video_{video_index}"})
+        mime_type = native_video.get("api_mime_type") or "video/mp4"
+        if native_video.get("file_uri"):
+            parts.append({"fileData": {
+                "mimeType": mime_type,
+                "fileUri": str(native_video["file_uri"]),
+            }})
+        else:
+            path = Path(native_video["api_path"])
+            parts.append({"inlineData": {
+                "mimeType": mime_type,
+                "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+            }})
     for frame in case["frames"]:
         path = Path(frame["api_path"])
         parts.append({"text": f"视频{frame['video_index']} 帧{frame['global_frame_index']} / {frame['timestamp']} / asset_ref=video_{frame['video_index']}_frame_{frame['global_frame_index']}"})
-        parts.append({"inline_data": {"mime_type": frame["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
+        parts.append({"inlineData": {"mimeType": frame["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     for image in case["supplemental_images"]:
         path = Path(image["api_path"])
         parts.append({"text": f"补充图片 {image['image_index']} / asset_ref=supplemental_image_{image['image_index']}"})
-        parts.append({"inline_data": {"mime_type": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
+        parts.append({"inlineData": {"mimeType": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     for image in case.get("official_reference_images") or []:
         path = Path(image["api_path"])
         parts.append({"text": f"官方商品参考图 {image['reference_index']} / SKU={image.get('sku') or '未提供'} / asset_ref=official_product_reference_{image['reference_index']}。仅用于核对订单商品标准外观，不能作为用户开箱证据。"})
-        parts.append({"inline_data": {"mime_type": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
+        parts.append({"inlineData": {"mimeType": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
+    analysis_mode = str((case.get("structured_business_context") or {}).get("analysis_mode") or "")
+    response_schemas = {
+        "opening_start_only": OPENING_START_RESPONSE_SCHEMA,
+        "minor_material_inventory": MINOR_MATERIAL_INVENTORY_RESPONSE_SCHEMA,
+        "minor_material_process_video": MINOR_MATERIAL_VIDEO_RESPONSE_SCHEMA,
+        "minor_material_consistency": MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA,
+    }
+    default_schema = NATIVE_VIDEO_RESPONSE_SCHEMA if native_video else FRAME_RESPONSE_SCHEMA
+    response_schema = response_schemas.get(analysis_mode, default_schema)
+    max_output_tokens = {
+        "opening_start_only": 1024,
+        "minor_material_process_video": 2048,
+        "minor_material_inventory": 4096,
+        "minor_material_consistency": 4096,
+    }.get(analysis_mode, 8192)
     return {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"parts": parts}],
-        "generationConfig": {"response_mime_type": "application/json", "maxOutputTokens": 8192},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": response_schema,
+            "maxOutputTokens": max_output_tokens,
+        },
     }
 
 
@@ -336,12 +466,55 @@ def estimate_model_cost(cfg: Dict[str, Any], usage: Dict[str, Any]) -> Dict[str,
     }
 
 
-def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
+def post_with_retries(
+    endpoint: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout: int,
+    retries: int,
+    deadline_at: Optional[float] = None,
+) -> Dict[str, Any]:
     last: Dict[str, Any] = {}
     for attempt in range(1, retries + 2):
+        remaining = deadline_at - time.monotonic() if deadline_at is not None else None
+        if remaining is not None and remaining <= 0:
+            return {
+                "ok": False,
+                "status_code": None,
+                "latency_seconds": 0,
+                "error": "case_deadline_exceeded",
+                "error_type": "deadline",
+                "attempt": attempt - 1,
+            }
         started = time.time()
+        acquired = False
         try:
-            request_timeout = httpx.Timeout(float(timeout), connect=min(10.0, float(timeout)))
+            if remaining is None:
+                _PROVIDER_REQUEST_GATE.acquire()
+                acquired = True
+            else:
+                acquired = _PROVIDER_REQUEST_GATE.acquire(timeout=max(0.0, remaining))
+                if not acquired:
+                    return {
+                        "ok": False,
+                        "status_code": None,
+                        "latency_seconds": round(time.time() - started, 2),
+                        "error": "case_deadline_exceeded",
+                        "error_type": "deadline",
+                        "attempt": attempt - 1,
+                    }
+                remaining = deadline_at - time.monotonic()
+                if remaining <= 0:
+                    return {
+                        "ok": False,
+                        "status_code": None,
+                        "latency_seconds": round(time.time() - started, 2),
+                        "error": "case_deadline_exceeded",
+                        "error_type": "deadline",
+                        "attempt": attempt - 1,
+                    }
+            effective_timeout = min(float(timeout), max(0.1, remaining)) if remaining is not None else float(timeout)
+            request_timeout = httpx.Timeout(effective_timeout, connect=min(10.0, effective_timeout))
             with httpx.Client(timeout=request_timeout) as client:
                 response = client.post(endpoint, headers=headers, json=payload)
             latency = round(time.time() - started, 2)
@@ -359,6 +532,9 @@ def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str,
             last = {"ok": False, "status_code": response.status_code, "latency_seconds": latency, "error": sanitize_error_text(response.text), "error_type": classify_error(response.status_code, response.text), "attempt": attempt, "retry_after": response.headers.get("Retry-After")}
         except Exception as exc:
             last = {"ok": False, "status_code": None, "latency_seconds": round(time.time() - started, 2), "error": sanitize_error_text(exc), "error_type": classify_error(None, str(exc)), "attempt": attempt}
+        finally:
+            if acquired:
+                _PROVIDER_REQUEST_GATE.release()
         log_visual_event(
             LOGGER,
             "visual_model_http_attempt",
@@ -371,7 +547,14 @@ def post_with_retries(endpoint: str, headers: Dict[str, str], payload: Dict[str,
         )
         if last["error_type"] != "soft" or attempt > retries:
             return last
-        time.sleep(_retry_delay(last.get("retry_after"), attempt))
+        delay = _retry_delay(last.get("retry_after"), attempt)
+        if deadline_at is not None and deadline_at - time.monotonic() <= delay:
+            return {
+                **last,
+                "error": "case_deadline_exceeded",
+                "error_type": "deadline",
+            }
+        time.sleep(delay)
     return last
 
 
@@ -410,11 +593,21 @@ def compact_response(data: Dict[str, Any]) -> Dict[str, Any]:
     return output
 
 
-def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
+def call_model(
+    cfg: Dict[str, Any],
+    case: Dict[str, Any],
+    timeout: int,
+    retries: int,
+    deadline_at: Optional[float] = None,
+) -> Dict[str, Any]:
     business_scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or "")
     analysis_mode = str((case.get("structured_business_context") or {}).get("analysis_mode") or "")
-    system_prompt = build_system_prompt(business_scenario or case["scenario"])
-    user_prompt = build_selection_prompt(case)
+    if analysis_mode == "opening_start_only":
+        system_prompt = "你是开箱视频起始证据复核器。只依据提供的首帧锚点按固定口径判断，不推断画面外事实。"
+        user_prompt = build_opening_start_prompt(case)
+    else:
+        system_prompt = build_system_prompt(business_scenario or case["scenario"])
+        user_prompt = build_selection_prompt(case)
     failures: List[Dict[str, Any]] = []
     channel_attempts: List[Dict[str, Any]] = []
     if cfg["provider"] == "gemini_native":
@@ -423,8 +616,20 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
             return {"status": "skipped", "error": "missing_api_key", "cost_status": "not_incurred"}
         payload = gemini_payload(system_prompt, user_prompt, case)
         response: Dict[str, Any] = {}
+        external_file_uri = bool((case.get("native_video") or {}).get("file_uri"))
+        attempted_channel = False
         for option_index, option in enumerate(options):
-            response = post_with_retries(option["endpoint"], option["headers"], payload, timeout, retries)
+            if external_file_uri and option.get("supports_external_file_uri") is not True:
+                channel_attempts.append({
+                    "channel": option.get("channel") or "configured",
+                    "model": option.get("model") or cfg["model"],
+                    "decision": "skipped_unsupported_file_uri",
+                })
+                continue
+            attempted_channel = True
+            response = post_with_retries(
+                option["endpoint"], option["headers"], payload, timeout, retries, deadline_at
+            )
             if response.get("ok"):
                 channel_attempts.append({
                     "channel": option.get("channel") or "configured",
@@ -435,17 +640,28 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
                 break
             failures.append({key: response.get(key) for key in ("status_code", "latency_seconds", "error_type", "attempt")})
             retryable = is_retryable_failure(response)
+            has_compatible_fallback = any(
+                not external_file_uri or candidate.get("supports_external_file_uri") is True
+                for candidate in options[option_index + 1:]
+            )
             channel_attempts.append({
                 "channel": option.get("channel") or "configured",
                 "model": option.get("model") or cfg["model"],
                 "status_code": response.get("status_code"),
                 "error_type": response.get("error_type"),
-                "decision": "fallback_retryable" if retryable and option_index + 1 < len(options) else (
+                "decision": "fallback_retryable" if retryable and has_compatible_fallback else (
                     "exhausted" if retryable else "stop_non_retryable"
                 ),
             })
             if not retryable:
                 break
+        if not attempted_channel:
+            return {
+                "status": "skipped",
+                "error": "unsupported_external_file_uri_transport",
+                "_channel_route_attempts": channel_attempts,
+                "cost_status": "not_incurred",
+            }
         if not response.get("ok"):
             return {
                 "status": "failed",
@@ -467,7 +683,14 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
             "max_tokens": 4096,
             "response_format": {"type": "json_object"},
         }
-        response = post_with_retries(cfg["endpoint"], {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, payload, timeout, retries)
+        response = post_with_retries(
+            cfg["endpoint"],
+            {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            payload,
+            timeout,
+            retries,
+            deadline_at,
+        )
         if not response.get("ok"):
             return {"status": "failed", **response, "cost_status": "unknown"}
         text = extract_openai_text(response["data"])
@@ -479,7 +702,7 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
             "raw": raw_usage,
         }
     parsed_before_boundary = parse_model_json(text)
-    if analysis_mode in {"object_continuity_only", "damage_causality_only"}:
+    if analysis_mode in {"object_continuity_only", "damage_causality_only", "opening_start_only"}:
         parsed = parsed_before_boundary
     else:
         if (business_scenario or case["scenario"]) in {"wrong_item", "missing_item"}:
@@ -525,6 +748,134 @@ def call_model(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries:
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
     }
+
+
+def opening_start_verification_case(case: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "case_id": case.get("case_id") or "opening-start-verification",
+        "scenario": case.get("scenario") or "video_unboxing",
+        "scenario_label": case.get("scenario_label") or "开箱视频审核",
+        "customer_claim": "",
+        "order_context": {},
+        "videos": case.get("videos") or [],
+        "frames": [copy.deepcopy(frame) for frame in (case.get("frames") or [])[:2]],
+        "supplemental_images": [],
+        "official_reference_images": [],
+        "structured_business_context": {
+            "business_scenario": case.get("scenario") or "video_unboxing",
+            "analysis_mode": "opening_start_only",
+        },
+    }
+
+
+def call_opening_start_verification(
+    cfg: Dict[str, Any],
+    case: Dict[str, Any],
+    timeout: int,
+    retries: int,
+    deadline_at: Optional[float] = None,
+) -> Dict[str, Any]:
+    verification_case = opening_start_verification_case(case)
+    if not verification_case["frames"]:
+        return {"status": "skipped", "error": "missing_opening_start_anchors", "cost_status": "not_incurred"}
+    return call_model(
+        cfg,
+        verification_case,
+        timeout=timeout,
+        retries=retries,
+        deadline_at=deadline_at,
+    )
+
+
+def merge_opening_start_verification(
+    native_result: Dict[str, Any],
+    verification_result: Dict[str, Any],
+    anchors: Optional[List[Dict[str, Any]]] = None,
+    scenario: str = "",
+) -> Dict[str, Any]:
+    output = merge_model_billing(native_result, [verification_result])
+    verification = verification_result.get("parsed") if verification_result.get("status") == "success" else None
+    output["opening_start_verification"] = {
+        key: copy.deepcopy(verification_result.get(key))
+        for key in ("status", "latency_seconds", "usage", "cost", "cost_status", "_channel_route_attempts")
+        if verification_result.get(key) is not None
+    }
+    if not isinstance(verification, dict):
+        return output
+    expected_value = {"sealed": True, "unsealed": False, "indeterminate": None}.get(verification.get("result"))
+    if verification.get("sealed_start") is not expected_value or expected_value is None:
+        return output
+    registry = {
+        (int(frame.get("video_index") or 0), int(frame.get("global_frame_index") or 0), str(frame.get("timestamp") or ""))
+        for frame in anchors or []
+    }
+    refs = []
+    for ref in verification.get("evidence_refs") or []:
+        if not isinstance(ref, dict):
+            continue
+        try:
+            key = (int(ref.get("video_index") or 0), int(ref.get("global_frame_index") or 0), str(ref.get("timestamp") or ""))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not key[0] or not key[1] or not key[2] or (registry and key not in registry):
+            continue
+        refs.append({
+            "field": "sealed_start",
+            "video_index": key[0],
+            "global_frame_index": key[1],
+            "timestamp": key[2],
+        })
+    if not refs:
+        return output
+    for parsed_key in ("parsed_before_boundary", "parsed"):
+        parsed = output.get(parsed_key)
+        if not isinstance(parsed, dict):
+            continue
+        video_audit = parsed.setdefault("video_audit_conclusion", {})
+        opening = video_audit.setdefault("opening_video_compliance", {})
+        old_refs = opening.get("evidence_refs") or []
+        if isinstance(old_refs, dict):
+            old_refs = [
+                {**item, "field": field}
+                for field, items in old_refs.items()
+                for item in items or []
+                if isinstance(item, dict)
+            ]
+        opening["evidence_refs"] = [
+            item for item in old_refs
+            if isinstance(item, dict) and item.get("field") != "sealed_start"
+        ] + refs
+        opening["sealed_start"] = expected_value
+        opening["field_sources"] = {
+            **(opening.get("field_sources") or {}),
+            "sealed_start": "opening_start_verification",
+        }
+        opening["validated_fields"] = sorted(set(opening.get("validated_fields") or []) | {"sealed_start"})
+        opening["source"] = "hybrid_native_video_with_opening_start_verification"
+        opening["start_verification_reason"] = str(verification.get("reason") or "")
+        hard_values = [opening.get(field) for field in ("sealed_start", "waybill_visible", "single_take_continuity")]
+        opening["result"] = "noncompliant" if False in hard_values else "compliant" if all(value is True for value in hard_values) else "indeterminate"
+        if parsed_key == "parsed" and scenario == "product_damage" and expected_value is False:
+            confidence = _safe_confidence(parsed.get("confidence"), 0.9)
+            conclusion = "开箱起始专项复核确认视频并非从完整未拆封快递外包装开始，当前开箱材料不合规。"
+            parsed.update({
+                "predicted_label": "negative",
+                "system_yes_no": "NO",
+                "decision": "fail",
+                "confidence": confidence,
+                "business_action_allowed": False,
+                "human_required_for_business_action": True,
+                "opening_start_guard_reason": conclusion,
+                "overall_audit": {
+                    "conclusion": conclusion,
+                    "confidence": confidence,
+                    "core_reason": f"{conclusion} 这是开箱资料合规结论，不等于商品无损。",
+                    "business_follow_up_suggestion": "如需继续支持本次诉求，请补充符合开箱起始要求的证据；最终业务处理由甲方系统和授权人员决定。",
+                },
+            })
+    if scenario == "product_damage" and isinstance(output.get("parsed"), dict):
+        output["policy_decision"] = policy_decision(output["parsed"])
+    return output
 
 
 def _time_seconds(value: Any) -> Optional[float]:
@@ -648,14 +999,30 @@ def _apply_global_timeline_summary(
     """用全量帧注册表生成公开摘要，局部分段叙述只保留为内部审计。"""
     output = dict(parsed)
     frames = list(case.get("frames") or [])
+    frame_registry = {
+        _frame_key(item): str(item.get("timestamp") or "").strip()
+        for item in frames
+        if isinstance(item, dict) and _frame_key(item) is not None
+    }
+
+    def registered_reference(reference: Any) -> bool:
+        if not isinstance(reference, dict):
+            return False
+        key = _frame_key(reference)
+        return bool(
+            key in frame_registry
+            and str(reference.get("timestamp") or "").strip()
+            and str(reference.get("timestamp") or "").strip() == frame_registry[key]
+        )
+
     frame_times = [_time_seconds(item.get("timestamp")) for item in frames]
     valid_frame_times = [value for value in frame_times if value is not None]
     sampled_start = min(valid_frame_times) if valid_frame_times else None
     sampled_end = max(valid_frame_times) if valid_frame_times else None
     source_durations = [
-        float(item.get("duration_seconds"))
+        _safe_number(item.get("duration_seconds"))
         for item in case.get("videos") or []
-        if item.get("duration_seconds") not in (None, "")
+        if _safe_number(item.get("duration_seconds")) > 0
     ]
     source_duration = max(source_durations) if source_durations else None
     timeline_coverage_ratio = (
@@ -700,15 +1067,21 @@ def _apply_global_timeline_summary(
                     }
                 )
 
-    opening_values = sorted({
-        str((item.get("video_audit_conclusion") or {}).get("opening_integrity") or "").strip().lower()
+    video_audit_rows = [
+        value if isinstance(value, dict) else {}
         for item in parsed_rows
-        if str((item.get("video_audit_conclusion") or {}).get("opening_integrity") or "").strip()
+        if isinstance(item, dict)
+        for value in [item.get("video_audit_conclusion")]
+    ]
+    opening_values = sorted({
+        str(item.get("opening_integrity") or "").strip().lower()
+        for item in video_audit_rows
+        if str(item.get("opening_integrity") or "").strip()
     })
     playback_speed_values = sorted({
-        str((item.get("video_audit_conclusion") or {}).get("playback_speed") or "").strip().lower()
-        for item in parsed_rows
-        if str((item.get("video_audit_conclusion") or {}).get("playback_speed") or "").strip().lower()
+        str(item.get("playback_speed") or "").strip().lower()
+        for item in video_audit_rows
+        if str(item.get("playback_speed") or "").strip().lower()
         in {"normal", "accelerated", "unknown"}
     })
     playback_speed = (
@@ -716,13 +1089,138 @@ def _apply_global_timeline_summary(
         if "accelerated" in playback_speed_values
         else "normal" if playback_speed_values == ["normal"] else "unknown"
     )
+    requested_fps = []
+    for item in case.get("videos") or []:
+        try:
+            requested_fps.append(float(item.get("fps_requested")))
+        except (TypeError, ValueError):
+            continue
+    sampling_fps = max(requested_fps) if requested_fps else None
+    speed_rows = [item.get("speed_review_impact") or {} for item in video_audit_rows]
+    speed_rows = [item for item in speed_rows if isinstance(item, dict)]
+    speed_rank = {"none": 0, "uncertain": 1, "material": 2}
+    speed_status_values = [
+        str(item.get("status") or "").lower()
+        for item in speed_rows
+        if str(item.get("status") or "").lower() in speed_rank
+    ]
+    speed_status = max(
+        speed_status_values,
+        key=lambda value: speed_rank.get(value, 1),
+        default="none" if playback_speed == "normal" else "unknown",
+    )
+    affected_review_items = sorted({
+        str(value)
+        for item in speed_rows
+        for value in item.get("affected_review_items") or []
+        if str(value) in {
+            "sealed_start", "waybill", "opening_action",
+            "claimed_item_continuity", "issue_first_visible",
+        }
+    })
+    observable_values = [
+        item.get("critical_evidence_observable")
+        for item in speed_rows
+        if isinstance(item.get("critical_evidence_observable"), bool)
+    ]
+    critical_evidence_observable = (
+        False if speed_status in {"uncertain", "material"}
+        else all(observable_values) if observable_values else None
+    )
+    if playback_speed == "normal":
+        speed_status = "none"
+        affected_review_items = []
+        critical_evidence_observable = None
+    elif (
+        playback_speed == "accelerated"
+        and speed_status == "none"
+        and (critical_evidence_observable is False or affected_review_items)
+    ):
+        speed_status = "uncertain"
+        critical_evidence_observable = False
+    speed_evidence_refs = [
+        dict(reference)
+        for item in speed_rows
+        if str(item.get("status") or "").lower() == speed_status
+        for reference in item.get("evidence_refs") or []
+        if registered_reference(reference)
+    ]
+    opening_compliance_rows = [
+        item.get("opening_video_compliance") or {}
+        for item in video_audit_rows
+    ]
+    opening_compliance_rows = [item for item in opening_compliance_rows if isinstance(item, dict)]
+
+    def aggregate_opening_field(field_name: str) -> bool | None:
+        values = [item.get(field_name) for item in opening_compliance_rows]
+        if field_name == "sealed_start":
+            return values[0] if values and isinstance(values[0], bool) else None
+        if field_name in {"waybill_visible", "issue_visible_in_continuous_opening"}:
+            if True in values:
+                return True
+            return False if values and all(value is False for value in values) else None
+        if False in values:
+            return False
+        return True if values and all(value is True for value in values) else None
+
+    opening_field_names = (
+        "sealed_start", "waybill_visible", "single_take_continuity",
+        "issue_visible_in_continuous_opening",
+    )
+    aggregated_opening_values = {
+        field_name: aggregate_opening_field(field_name)
+        for field_name in opening_field_names
+    }
+    opening_evidence_refs = {
+        field_name: [
+            {key: value for key, value in reference.items() if key != "field"}
+            for item in opening_compliance_rows
+            if item.get(field_name) is aggregated_opening_values[field_name]
+            for reference in (
+                item.get("evidence_refs", {}).get(field_name, [])
+                if isinstance(item.get("evidence_refs"), dict)
+                else [
+                    candidate
+                    for candidate in item.get("evidence_refs") or []
+                    if isinstance(candidate, dict) and candidate.get("field") == field_name
+                ]
+            )
+            if registered_reference(reference)
+        ]
+        for field_name in opening_field_names
+    }
+
+    opening_video_compliance = dict(aggregated_opening_values)
+    opening_video_compliance["evidence_refs"] = opening_evidence_refs
+    opening_video_compliance["validated_fields"] = sorted(
+        field_name
+        for field_name in ("sealed_start", "waybill_visible", "single_take_continuity")
+        if sampling_boundary_status == "covered"
+        and opening_video_compliance[field_name] is False
+        and opening_evidence_refs[field_name]
+    )
+    opening_video_compliance["source"] = "global_timeline_aggregation"
+    opening_video_compliance["result"] = (
+        "noncompliant"
+        if False in (
+            opening_video_compliance["sealed_start"],
+            opening_video_compliance["waybill_visible"],
+            opening_video_compliance["single_take_continuity"],
+        )
+        else "compliant"
+        if all(
+            opening_video_compliance[field] is True
+            for field in ("sealed_start", "waybill_visible", "single_take_continuity")
+        )
+        else "indeterminate"
+    )
     opening_integrity, opening_integrity_source = _opening_integrity_from_continuity(
         list(output.get("continuity_frame_findings") or []),
         sampling_boundary_status,
     )
     risk_rank = {"low": 0, "medium": 1, "high": 2}
     swap_risk = max(
-        (str((item.get("video_audit_conclusion") or {}).get("swap_risk_level") or "low").lower() for item in parsed_rows),
+        (str(item.get("swap_risk_level") or "low").lower() for item in video_audit_rows),
         key=lambda value: risk_rank.get(value, 1),
         default="medium",
     )
@@ -735,7 +1233,7 @@ def _apply_global_timeline_summary(
         coverage_text += f"；争议商品首次曝光于 {first_exposed}"
     continuity_reason = coverage_text or "未获得可规范化的全局视频时间轴。"
     if continuity.get("continuity_verdict") == "long_absence":
-        continuity_reason += f"；检测到最长离镜 {float(continuity.get('longest_out_of_frame_seconds') or 0):.2f} 秒。"
+        continuity_reason += f"；检测到最长离镜 {_safe_number(continuity.get('longest_out_of_frame_seconds')):.2f} 秒。"
 
     label = str(output.get("predicted_label") or "review")
     label_text = {"positive": "当前证据支持本次诉求", "negative": "当前证据不支持本次诉求", "review": "当前证据仍需复核"}.get(label, "当前证据仍需复核")
@@ -749,6 +1247,15 @@ def _apply_global_timeline_summary(
         "segment_opening_claims": opening_values,
         "playback_speed": playback_speed,
         "segment_playback_speed_values": playback_speed_values,
+        "sampling_fps": sampling_fps,
+        "speed_review_impact": {
+            "status": speed_status,
+            "critical_evidence_observable": critical_evidence_observable,
+            "affected_review_items": affected_review_items,
+            "evidence_refs": speed_evidence_refs,
+            "source": "segment_consensus",
+        },
+        "opening_video_compliance": opening_video_compliance,
         "sampling_boundary_status": sampling_boundary_status,
         "technical_timeline_status": "requires_media_forensics",
         "evidence_continuity_status": continuity.get("continuity_verdict") or "indeterminate",
@@ -790,6 +1297,44 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return max(0, int(value))
     except (TypeError, ValueError, OverflowError):
         return default
+
+
+def merge_model_billing(
+    result: Dict[str, Any],
+    additions: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    rows = [copy.deepcopy(result), *(copy.deepcopy(item) for item in additions)]
+    output = rows[0]
+    output["usage"] = {
+        key: sum(_safe_int((item.get("usage") or {}).get(key)) for item in rows)
+        for key in ("input_tokens", "output_tokens", "total_tokens")
+    }
+    base_cost = dict(output.get("cost") or {})
+    base_cost["estimated_usd"] = round(
+        sum(_safe_number((item.get("cost") or {}).get("estimated_usd")) for item in rows),
+        6,
+    )
+    currencies = {
+        str((item.get("cost") or {}).get("currency") or "")
+        for item in rows
+        if (item.get("cost") or {}).get("currency")
+    }
+    if len(currencies) == 1:
+        base_cost["amount"] = round(
+            sum(_safe_number((item.get("cost") or {}).get("amount")) for item in rows),
+            6,
+        )
+    output["cost"] = base_cost
+    output.update(_cost_observability(rows))
+    output["model_latency_seconds_sum"] = round(
+        sum(
+            _safe_number(item.get("model_latency_seconds_sum") or item.get("latency_seconds"))
+            for item in rows
+        ),
+        2,
+    )
+    output["_channel_route_attempts"] = collect_channel_route_attempts(rows)
+    return output
 
 
 def _frame_key(item: Dict[str, Any]) -> tuple[int, int] | None:
@@ -1164,18 +1709,43 @@ def derive_claim_identity(results: List[Dict[str, Any]], case: Dict[str, Any]) -
     return {key: value for key, value in identity.items() if value not in (None, "", [], {})}
 
 
-def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, retries: int) -> Dict[str, Any]:
+def call_model_chunked(
+    cfg: Dict[str, Any],
+    case: Dict[str, Any],
+    timeout: int,
+    retries: int,
+    deadline_at: Optional[float] = None,
+) -> Dict[str, Any]:
     wall_started = time.time()
+
+    def invoke_model(current_case: Dict[str, Any]) -> Dict[str, Any]:
+        if deadline_at is None:
+            return call_model(cfg, current_case, timeout, retries)
+        return call_model(
+            cfg,
+            current_case,
+            timeout,
+            retries,
+            deadline_at=deadline_at,
+        )
+
     frames = case.get("frames") or []
     limit = max(1, min(int(case.get("model_frames_per_call") or 24), 24))
     scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or case.get("scenario") or "")
     policy = (case.get("structured_business_context") or {}).get("continuity_policy") or {}
     causality_policy = (case.get("structured_business_context") or {}).get("damage_causality_policy") or {}
+    unified_multitask = (
+        cfg.get("provider") == "gemini_native"
+        and cfg.get("unified_multitask", True) is not False
+        and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}
+        and policy.get("force_dense_scan") is True
+        and (scenario != "product_damage" or causality_policy.get("force_action_scan") is True)
+    )
     if scenario in {"minor_material", "minor_refund"}:
         workers = max(1, min(int(os.getenv("REVIEW_MINOR_WORKERS", "6") or 6), 8))
         output = run_minor_material_pipeline(
             case,
-            invoke=lambda batch_case: call_model(cfg, batch_case, timeout, retries),
+            invoke=invoke_model,
             workers=workers,
         )
         parsed = output.get("parsed") or {}
@@ -1183,7 +1753,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         output["policy_decision"] = policy_decision(parsed)
         return output
     if not frames:
-        result = call_model(cfg, case, timeout, retries)
+        result = invoke_model(case)
         result["chunking"] = {
             "segment_count": 1,
             "frames_per_segment": limit,
@@ -1198,6 +1768,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         scenario == "product_damage"
         and policy.get("force_dense_scan")
         and causality_policy.get("force_action_scan")
+        and not unified_multitask
     ):
         main_frame_limit = max(
             24,
@@ -1232,7 +1803,11 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             "official_reference_images_attached": len(chunk_case["official_reference_images"]),
         }
         chunk_case["structured_business_context"] = structured
-        return call_model(cfg, chunk_case, timeout, retries)
+        result = invoke_model(chunk_case)
+        result["_input_frame_indices"] = [frame.get("global_frame_index") for frame in chunk]
+        result["input_representation"] = "individual_frames"
+        result["model_image_count"] = len(chunk) + len(chunk_case["official_reference_images"])
+        return result
 
     completed, concurrency_audit = run_adaptive_tasks(
         list(enumerate(chunks)),
@@ -1256,6 +1831,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
         if item.get("status") != "success"
     ]
     successful = [item for item in completed if item.get("status") == "success"]
+    dimension_gaps = unified_dimension_gaps(successful, scenario) if unified_multitask else []
     if failures and not successful:
         all_skipped = all(item.get("status") == "skipped" for item in completed)
         incurred_calls = sum(
@@ -1302,13 +1878,22 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     supplemental_concurrency: Dict[str, Any] = {}
     supplemental_images = case.get("supplemental_images") or []
     if scenario == "product_damage" and supplemental_images:
-        supplemental_chunks = [[image] for image in supplemental_images]
+        supplemental_context_frames = _representative_frames(frames, 6)
+        supplemental_references = list(case.get("official_reference_images") or [])
+        supplemental_batch_size = min(
+            8,
+            max(1, 24 - len(supplemental_context_frames) - len(supplemental_references)),
+        )
+        supplemental_chunks = [
+            supplemental_images[index:index + supplemental_batch_size]
+            for index in range(0, len(supplemental_images), supplemental_batch_size)
+        ]
 
         def review_supplemental_chunk(index: int, images: List[Dict[str, Any]]) -> Dict[str, Any]:
             chunk_case = dict(case)
-            chunk_case["frames"] = _representative_frames(frames, 6)
+            chunk_case["frames"] = supplemental_context_frames
             chunk_case["supplemental_images"] = images
-            chunk_case["official_reference_images"] = case.get("official_reference_images") or []
+            chunk_case["official_reference_images"] = supplemental_references
             structured = dict(case.get("structured_business_context") or {})
             structured["review_chunk"] = {
                 "pass_type": "supplemental_evidence",
@@ -1323,31 +1908,47 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
                 ),
             }
             chunk_case["structured_business_context"] = structured
-            result = call_model(cfg, chunk_case, timeout, retries)
+            result = invoke_model(chunk_case)
+            result["input_representation"] = "supplemental_batch"
+            result["model_image_count"] = (
+                len(supplemental_context_frames) + len(images) + len(supplemental_references)
+            )
             if result.get("status") != "success":
                 return result
-            image_index = images[0].get("image_index")
+            expected_indices = {
+                int(image["image_index"])
+                for image in images
+                if str(image.get("image_index") or "").isdigit()
+            }
             parsed = dict(result.get("parsed") or {})
-            image_finding_found = False
+            found_indices = set()
             for key in ("adopted_evidence", "supporting_evidence", "challenging_evidence"):
                 anchored = []
                 for raw in parsed.get(key) or []:
                     item = dict(raw) if isinstance(raw, dict) else raw
                     if isinstance(item, dict) and "image" in str(item.get("source_type") or "").lower():
-                        image_finding_found = True
-                        item.setdefault("image_index", image_index)
-                        item.setdefault("asset_ref", f"supplemental_image_{image_index}")
+                        image_index = item.get("image_index")
+                        if not str(image_index or "").isdigit() and len(expected_indices) == 1:
+                            image_index = next(iter(expected_indices))
+                            item["image_index"] = image_index
+                        if str(image_index or "").isdigit() and int(image_index) in expected_indices:
+                            image_index = int(image_index)
+                            found_indices.add(image_index)
+                            item.setdefault("asset_ref", f"supplemental_image_{image_index}")
                     anchored.append(item)
                 parsed[key] = anchored
-            parsed["supplemental_image_reviews"] = [] if image_finding_found else [{
-                "source_type": "supplemental_image_review",
-                "image_index": image_index,
-                "asset_ref": f"supplemental_image_{image_index}",
-                "fact": "该补充图片已完成独立审核，本轮未形成可采信的损伤或反证描述。",
-                "why_it_matters": "用于区分已处理但无有效发现与系统尚未处理。",
-                "same_item_linkage": None,
-                "temporal_linkage": None,
-            }]
+            parsed["supplemental_image_reviews"] = [
+                {
+                    "source_type": "supplemental_image_review",
+                    "image_index": image_index,
+                    "asset_ref": f"supplemental_image_{image_index}",
+                    "fact": "该补充图片已完成独立审核，本轮未形成可采信的损伤或反证描述。",
+                    "why_it_matters": "用于区分已处理但无有效发现与系统尚未处理。",
+                    "same_item_linkage": None,
+                    "temporal_linkage": None,
+                }
+                for image_index in sorted(expected_indices - found_indices)
+            ]
             return {**result, "parsed": parsed}
 
         supplemental_completed, supplemental_concurrency = run_adaptive_tasks(
@@ -1382,7 +1983,11 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     specialized_case["structured_business_context"] = specialized_structured
     continuity_results: List[Dict[str, Any]] = []
     continuity_failures: List[Dict[str, Any]] = []
-    if policy.get("force_dense_scan") and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}:
+    if (
+        policy.get("force_dense_scan")
+        and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}
+        and (not unified_multitask or "object_continuity" in dimension_gaps)
+    ):
         configured_continuity_limit = max(
             12,
             min(int(os.getenv("REVIEW_CONTINUITY_FRAMES_PER_CALL", "24") or 24), 24),
@@ -1394,13 +1999,17 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             chunk_size=configured_continuity_limit,
             context_frame_count=3,
             workers=workers,
-            invoke=lambda pass_case: call_model(cfg, pass_case, timeout, retries),
+            invoke=invoke_model,
             repair_attempts=1,
             preserve_partial_coverage=True,
         )
     causality_results: List[Dict[str, Any]] = []
     causality_failures: List[Dict[str, Any]] = []
-    if scenario == "product_damage" and causality_policy.get("force_action_scan"):
+    if (
+        scenario == "product_damage"
+        and causality_policy.get("force_action_scan")
+        and (not unified_multitask or "damage_causality" in dimension_gaps)
+    ):
         causality_results, causality_failures = run_specialized_frame_pass(
             specialized_case,
             mode="damage_causality_only",
@@ -1408,7 +2017,7 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
             chunk_size=max(8, min(int(causality_policy.get("dedicated_chunk_frames") or 20), 24)),
             context_frame_count=max(2, min(int(causality_policy.get("context_frames") or 6), 8)),
             workers=workers,
-            invoke=lambda pass_case: call_model(cfg, pass_case, timeout, retries),
+            invoke=invoke_model,
             repair_attempts=1,
             preserve_partial_coverage=True,
         )
@@ -1430,6 +2039,15 @@ def call_model_chunked(cfg: Dict[str, Any], case: Dict[str, Any], timeout: int, 
     chunking["official_reference_model_sends"] = (
         len(case.get("official_reference_images") or []) * len(reference_segment_indices)
     )
+    chunking["unified_multitask"] = {
+        "enabled": unified_multitask,
+        "status": (
+            "completed" if unified_multitask and not dimension_gaps
+            else "dimension_fallback" if unified_multitask
+            else "disabled"
+        ),
+        "dimension_gaps": dimension_gaps,
+    }
     if supplemental_concurrency:
         chunking["supplemental_evidence_pass"]["concurrency"] = supplemental_concurrency
     aggregated["latency_seconds"] = round(time.time() - wall_started, 2)

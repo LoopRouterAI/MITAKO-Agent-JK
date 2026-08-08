@@ -13,6 +13,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from poc.visual_review_poc.minor_material_pipeline import (
+    _checklist,
     _consistency_image_jobs,
     _normalize_consistency_checks,
     aggregate_minor_material_results,
@@ -107,13 +108,14 @@ def _consistency_result(check_id: str, status: str = "matched") -> dict:
         ],
         "commitment_signatures": [
             "guardian_signer", "minor_signer", "signature_presence", "signature_method", "field_alignment",
+            "commitment_content", "refund_scope", "recipient_information", "signed_date",
         ],
         "order_payment": [
             "order_reference", "payer_identity", "amount", "transaction_scope", "commitment_amount",
         ],
         "mobile_realname": [
             "subscriber_identity", "account_mobile", "invoice_identity", "invoice_phone",
-            "number_status", "ownership_proof",
+            "number_status", "ownership_proof", "guardian_phone_holder",
         ],
     }[check_id]
     return {
@@ -122,6 +124,9 @@ def _consistency_result(check_id: str, status: str = "matched") -> dict:
             "coverage_ack": {"expected_image_indices": [1, 3], "observed_image_indices": [1, 3]},
             "consistency_check": {
                 "check_id": check_id,
+                "age_band": "10_to_17" if check_id == "identity_age" else "unknown",
+                "low_age": False if check_id == "identity_age" else None,
+                "payment_capability_risk": "none",
                 "field_results": [{
                     "field_name": field_name,
                     "status": status,
@@ -140,6 +145,15 @@ def _consistency_result(check_id: str, status: str = "matched") -> dict:
 
 
 class MinorMaterialPipelineTest(unittest.TestCase):
+    def test_payment_screenshot_remains_present_when_only_authoritative_use_is_limited(self) -> None:
+        payment = _observation(8)
+        payment["sop_eligibility"] = "supporting_only"
+
+        row = next(item for item in _checklist([payment], True) if item["requirement_id"] == "payment")
+
+        self.assertEqual(row["status"], "present")
+        self.assertEqual(row["quality_status"], "needs_manual_confirmation")
+
     def test_minor_sop_prompt_covers_field_level_business_rules(self) -> None:
         metadata = ReviewCaseMetadata.model_validate({
             "client_case_id": "MINOR-SOP-GUIDE",
@@ -168,6 +182,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             "金额与订单可退款范围一致",
             "支付截图不能替代手机号实名归属证明",
             "销户或原号码归属证明",
+            "红色填写说明",
+            "样本水印",
         ):
             self.assertIn(rule, inventory_prompt)
         for rule in (
@@ -176,6 +192,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             "guardian_discovery_process",
             "如何获得或得知支付密码",
             "监护人如何、何时发现消费",
+            "空白签字栏",
+            "打印或电脑录入的姓名",
         ):
             self.assertIn(rule, consistency_prompt)
 
@@ -306,6 +324,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             item for item in checks
             if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
         )
+        identity["parsed"]["consistency_check"]["low_age"] = True
+        identity["parsed"]["consistency_check"]["age_band"] = "under_10"
         identity["parsed"]["consistency_check"]["payment_capability_risk"] = "high"
         for field in identity["parsed"]["consistency_check"]["field_results"]:
             if field["field_name"] in {"payment_password_access", "guardian_discovery_process"}:
@@ -332,6 +352,40 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertIn("需补支付过程说明", panel)
         self.assertNotIn("低龄独立支付风险", panel)
 
+    def test_model_high_payment_risk_without_confirmed_low_age_does_not_request_material(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        for low_age in (False, None):
+            with self.subTest(low_age=low_age):
+                checks = [
+                    _consistency_result(check_id)
+                    for check_id in (
+                        "identity_age", "guardian_relationship", "commitment_signatures",
+                        "order_payment", "mobile_realname",
+                    )
+                ]
+                identity = next(
+                    item for item in checks
+                    if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
+                )
+                identity["parsed"]["consistency_check"]["low_age"] = low_age
+                identity["parsed"]["consistency_check"]["payment_capability_risk"] = "high"
+                for field in identity["parsed"]["consistency_check"]["field_results"]:
+                    if field["field_name"] in {"payment_password_access", "guardian_discovery_process"}:
+                        field["status"] = "uncertain"
+
+                parsed = aggregate_minor_material_results(
+                    case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+                )
+                assessment = parsed["minor_material_assessment"]
+                required = "；".join(assessment["required_materials"])
+
+                self.assertFalse(assessment["payment_capability_risk"]["requires_more_material"])
+                self.assertNotIn("支付密码", required)
+                self.assertNotIn("如何、何时发现消费", required)
+
     def test_explicit_field_conflict_precedes_low_age_payment_process_gap(self) -> None:
         case = _case(image_count=20, frame_count=0)
         rows = [(list(range(1, 21)), {
@@ -349,6 +403,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
         )
         identity["low_age"] = True
+        identity["age_band"] = "under_10"
         identity["payment_capability_risk"] = "high"
         for field in identity["field_results"]:
             if field["field_name"] in {"payment_password_access", "guardian_discovery_process"}:
@@ -386,6 +441,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
         )
         identity["low_age"] = True
+        identity["age_band"] = "under_10"
         identity["payment_capability_risk"] = "high"
 
         parsed = aggregate_minor_material_results(
@@ -398,6 +454,39 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertTrue(risk["low_age"])
         self.assertFalse(risk["requires_review"])
         self.assertEqual(risk["process_evidence_status"], "matched")
+
+    def test_age_band_conflict_blocks_low_age_material_request(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        identity = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
+        )
+        identity["age_band"] = "10_to_17"
+        identity["low_age"] = True
+        identity["payment_capability_risk"] = "high"
+        for field in identity["field_results"]:
+            if field["field_name"] in {"payment_password_access", "guardian_discovery_process"}:
+                field["status"] = "uncertain"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        risk = parsed["minor_material_assessment"]["payment_capability_risk"]
+        required = "；".join(parsed["minor_material_assessment"]["required_materials"])
+
+        self.assertIsNone(risk["low_age"])
+        self.assertFalse(risk["requires_more_material"])
+        self.assertNotIn("支付密码", required)
 
     def test_all_images_are_reviewed_in_batches_and_five_categories_are_present(self) -> None:
         case = _case()
@@ -595,6 +684,96 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(checklist["mobile_realname"]["status"], "not_observed_after_full_scan")
         self.assertTrue(any("绑定手机号实名归属证明" in item for item in parsed["material_gaps"]))
 
+    def test_minor_held_phone_invoice_does_not_pass_guardian_holder_check(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in ("identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname")
+        ]
+        mobile = next(
+            item for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "mobile_realname"
+        )
+        holder = next(
+            field for field in mobile["parsed"]["consistency_check"]["field_results"]
+            if field["field_name"] == "guardian_phone_holder"
+        )
+        holder["status"] = "mismatched"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        required = "；".join(parsed["minor_material_assessment"]["required_materials"])
+
+        self.assertEqual(parsed["predicted_label"], "negative")
+        self.assertIn("申请监护人", required)
+
+    def test_uncertain_guardian_phone_holder_requests_material_instead_of_passing(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in ("identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname")
+        ]
+        mobile = next(
+            item for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "mobile_realname"
+        )
+        holder = next(
+            field for field in mobile["parsed"]["consistency_check"]["field_results"]
+            if field["field_name"] == "guardian_phone_holder"
+        )
+        holder["status"] = "uncertain"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["minor_material_assessment"]["readiness"], "needs_guardian_phone_ownership")
+
+    def test_incomplete_commitment_note_requests_complete_document(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in ("identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname")
+        ]
+        commitment = next(
+            item for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "commitment_signatures"
+        )
+        for field in commitment["parsed"]["consistency_check"]["field_results"]:
+            if field["field_name"] in {"commitment_content", "refund_scope", "recipient_information", "signed_date"}:
+                field["status"] = "mismatched"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        required = "；".join(parsed["minor_material_assessment"]["required_materials"])
+
+        self.assertEqual(parsed["predicted_label"], "negative")
+        self.assertIn("完整承诺内容", required)
+        self.assertIn("签署日期", required)
+
+    def test_minor_prompt_limits_school_form_to_supporting_evidence(self) -> None:
+        case = _case(image_count=2, frame_count=0)
+
+        inventory_prompt = build_minor_material_inventory_prompt(case)
+        consistency_prompt = build_minor_material_consistency_prompt(case)
+
+        self.assertIn("学校盖章报名表", inventory_prompt)
+        self.assertIn("只能作为辅助线索", inventory_prompt)
+        self.assertIn("guardian_phone_holder", consistency_prompt)
+        self.assertIn("commitment_content", consistency_prompt)
+
     def test_repeated_generic_edit_warnings_do_not_become_critical(self) -> None:
         case = _case(image_count=20, frame_count=0)
         observations = [_observation(index) for index in range(1, 21)]
@@ -719,6 +898,103 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertTrue(all(item["status"] != "not_assessed" for item in assessment["field_consistency"]["checks"]))
         self.assertEqual(result["chunking"]["channels"]["minor_field_consistency"]["model_calls"], 5)
 
+    def test_missing_one_material_does_not_skip_other_consistency_checks(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        consistency_checks = []
+
+        def invoke(batch_case: dict) -> dict:
+            mode = batch_case["structured_business_context"]["analysis_mode"]
+            indices = [item["image_index"] for item in batch_case["supplemental_images"]]
+            if mode == "minor_material_inventory":
+                observations = [_observation(index) for index in indices]
+                for item in observations:
+                    if item["image_index"] == 16:
+                        item["document_state"] = "example"
+                        item["sop_eligibility"] = "invalid"
+                return {"status": "success", "parsed": {"material_observations": observations}}
+            check_id = batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+            consistency_checks.append(check_id)
+            result = _consistency_result(check_id)
+            if check_id == "commitment_signatures":
+                for field in result["parsed"]["consistency_check"]["field_results"]:
+                    if field["field_name"] == "signature_method":
+                        field["status"] = "uncertain"
+            return result
+
+        result = run_minor_material_pipeline(case, invoke=invoke, workers=4)
+
+        assessment = result["parsed"]["minor_material_assessment"]
+        checklist = assessment["checklist"]
+        mobile = next(item for item in checklist if item["requirement_id"] == "mobile_realname")
+        self.assertNotEqual(mobile["status"], "present")
+        self.assertIn("commitment_signatures", consistency_checks)
+        self.assertGreater(result["chunking"]["channels"]["minor_field_consistency"]["model_calls"], 0)
+        self.assertEqual(len(assessment["required_materials"]), 1)
+        self.assertIn("双方亲笔签名", assessment["required_materials"][0])
+        self.assertEqual(len(result["parsed"]["material_gaps"]), 2)
+        self.assertIn("号码已注销", result["parsed"]["material_gaps"][0])
+        self.assertIn("支付截图不能替代", result["parsed"]["material_gaps"][0])
+        self.assertIn("另有字段待补正", result["parsed"]["overall_audit"]["conclusion"])
+
+    def test_uncertain_field_without_evidence_does_not_request_material(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        order = next(
+            item for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "order_payment"
+        )
+        for field in order["parsed"]["consistency_check"]["field_results"]:
+            if field["field_name"] == "commitment_amount":
+                field["status"] = "uncertain"
+                field["visibility"] = "unreadable"
+                field["evidence_image_indices"] = []
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+
+        self.assertNotIn(
+            "金额与订单可退款范围一致",
+            "；".join(parsed["minor_material_assessment"]["required_materials"]),
+        )
+
+    def test_uncertain_noncritical_commitment_fields_do_not_expand_material_request(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        commitment = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "commitment_signatures"
+        )
+        for field in commitment["field_results"]:
+            if field["field_name"] in {"signature_method", "refund_scope", "recipient_information"}:
+                field["status"] = "uncertain"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        required = parsed["minor_material_assessment"]["required_materials"]
+
+        self.assertEqual(len(required), 1)
+        self.assertIn("双方亲笔签名", required[0])
+
     def test_material_completeness_without_field_consistency_cannot_pass(self) -> None:
         case = _case(image_count=20, frame_count=0)
         rows = [
@@ -823,7 +1099,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(parsed["predicted_label"], "positive")
         self.assertEqual(parsed["minor_material_assessment"]["visual_precheck_status"], "passed")
 
-    def test_consistency_jobs_cover_all_related_images_and_uncertain_segment_is_non_blocking(self) -> None:
+    def test_consistency_jobs_cover_all_related_images_and_uncertain_guardian_holder_blocks_pass(self) -> None:
         case = _case(image_count=20, frame_count=0)
         consistency_segments = []
 
@@ -880,7 +1156,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         self.assertTrue(set(range(9, 21)).issubset(set(mobile_check["evidence_image_indices"])))
         self.assertEqual(mobile_check["status"], "uncertain")
-        self.assertEqual(result["parsed"]["predicted_label"], "positive")
+        self.assertEqual(result["parsed"]["predicted_label"], "review")
 
     def test_partially_readable_related_image_is_covered_as_non_blocking_warning(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -920,7 +1196,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(assessment["visual_precheck_status"], "passed")
         self.assertFalse(result["parsed"]["human_required"])
 
-    def test_uncertain_visible_field_is_advisory_in_default_policy(self) -> None:
+    def test_uncertain_guardian_phone_holder_requires_material_in_default_policy(self) -> None:
         case = _case(image_count=20, frame_count=0)
         rows = [
             (list(range(start, min(start + 4, 21))), {
@@ -937,8 +1213,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
         )
 
-        self.assertEqual(parsed["predicted_label"], "positive")
-        self.assertEqual(parsed["decision"], "visual_precheck_passed_with_warnings")
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["decision"], "request_more_material")
         self.assertFalse(parsed["human_required"])
 
     def test_failed_consistency_call_is_included_in_usage_and_cost(self) -> None:
@@ -1038,6 +1314,14 @@ class MinorMaterialPipelineTest(unittest.TestCase):
 
         def invoke(batch_case: dict) -> dict:
             nonlocal attempts
+            mode = batch_case["structured_business_context"]["analysis_mode"]
+            if mode == "minor_material_consistency":
+                check_id = batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+                result = _consistency_result(check_id)
+                result["usage"] = {}
+                result["cost"] = {}
+                result["cost_status"] = "not_incurred"
+                return result
             attempts += 1
             indices = [item["image_index"] for item in batch_case["supplemental_images"]]
             observations = [] if attempts == 1 else [_observation(index) for index in indices]
@@ -1063,12 +1347,19 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(result["unknown_cost_calls"], 2)
         self.assertEqual(result["estimated_cost_calls"], 2)
 
-    def test_default_structural_retry_allows_two_repairs_before_system_retry(self) -> None:
+    def test_default_structural_retry_is_bounded_before_system_retry(self) -> None:
         case = _case(image_count=4, frame_count=0)
         attempts = 0
 
         def invoke(batch_case: dict) -> dict:
             nonlocal attempts
+            mode = batch_case["structured_business_context"]["analysis_mode"]
+            if mode == "minor_material_consistency":
+                check_id = batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+                result = _consistency_result(check_id)
+                result["usage"] = {}
+                result["cost"] = {}
+                return result
             attempts += 1
             indices = [item["image_index"] for item in batch_case["supplemental_images"]]
             return {
@@ -1084,9 +1375,10 @@ class MinorMaterialPipelineTest(unittest.TestCase):
 
         result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
 
-        self.assertEqual(attempts, 3)
-        self.assertTrue(result["parsed"]["minor_material_assessment"]["coverage_complete"])
-        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 3)
+        self.assertEqual(attempts, 6)
+        self.assertFalse(result["parsed"]["minor_material_assessment"]["coverage_complete"])
+        self.assertEqual(result["parsed"]["system_action"], "system_retry")
+        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 6)
 
     def test_persistent_batch_omission_falls_back_to_single_image_recovery(self) -> None:
         case = _case(image_count=4, frame_count=0)
@@ -1095,6 +1387,13 @@ class MinorMaterialPipelineTest(unittest.TestCase):
 
         def invoke(batch_case: dict) -> dict:
             nonlocal batch_attempts
+            mode = batch_case["structured_business_context"]["analysis_mode"]
+            if mode == "minor_material_consistency":
+                check_id = batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+                result = _consistency_result(check_id)
+                result["usage"] = {}
+                result["cost"] = {}
+                return result
             indices = [item["image_index"] for item in batch_case["supplemental_images"]]
             if len(indices) == 1:
                 single_attempts.extend(indices)
@@ -1111,12 +1410,12 @@ class MinorMaterialPipelineTest(unittest.TestCase):
 
         result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
 
-        self.assertEqual(batch_attempts, 3)
+        self.assertEqual(batch_attempts, 2)
         self.assertEqual(single_attempts, [1, 2, 3, 4])
         self.assertTrue(result["parsed"]["minor_material_assessment"]["coverage_complete"])
-        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 7)
+        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 6)
 
-    def test_single_image_recovery_reuses_bounded_schema_retries(self) -> None:
+    def test_single_image_recovery_runs_once_after_batch_repair(self) -> None:
         case = _case(image_count=1, frame_count=0)
         batch_attempts = 0
         recovery_attempts = 0
@@ -1132,7 +1431,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
                 recovery_attempts += 1
             else:
                 batch_attempts += 1
-            observations = [_observation(1)] if recovery and recovery_attempts == 2 else []
+            observations = [_observation(1)] if recovery else []
             return {
                 "status": "success",
                 "parsed": {"material_observations": observations},
@@ -1142,10 +1441,10 @@ class MinorMaterialPipelineTest(unittest.TestCase):
 
         result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
 
-        self.assertEqual(batch_attempts, 3)
-        self.assertEqual(recovery_attempts, 2)
+        self.assertEqual(batch_attempts, 2)
+        self.assertEqual(recovery_attempts, 1)
         self.assertTrue(result["parsed"]["minor_material_assessment"]["coverage_complete"])
-        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 5)
+        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 3)
 
     def test_recovery_exception_preserves_prior_usage_and_marks_processing_incomplete(self) -> None:
         case = _case(image_count=1, frame_count=0)
@@ -1153,6 +1452,13 @@ class MinorMaterialPipelineTest(unittest.TestCase):
 
         def invoke(batch_case: dict) -> dict:
             nonlocal attempts
+            mode = batch_case["structured_business_context"]["analysis_mode"]
+            if mode == "minor_material_consistency":
+                check_id = batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+                result = _consistency_result(check_id)
+                result["usage"] = {}
+                result["cost"] = {}
+                return result
             attempts += 1
             if attempts > 1:
                 raise RuntimeError("supplier timeout")
@@ -1166,11 +1472,45 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
 
         assessment = result["parsed"]["minor_material_assessment"]
-        self.assertEqual(attempts, 6)
+        self.assertEqual(attempts, 3)
         self.assertEqual(assessment["processing_status"], "technical_processing_incomplete")
         self.assertEqual(result["usage"]["total_tokens"], 15)
         self.assertEqual(result["cost"]["estimated_usd"], 0.001)
-        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 6)
+        self.assertEqual(result["chunking"]["channels"]["minor_material_inventory"]["model_calls"], 3)
+
+    def test_malformed_usage_cost_and_latency_do_not_abort_successful_semantic_result(self) -> None:
+        case = _case(image_count=1, frame_count=0)
+
+        def invoke(batch_case: dict) -> dict:
+            return {
+                "status": "success",
+                "parsed": {"material_observations": [_observation(1)]},
+                "usage": {"input_tokens": "many", "output_tokens": "unknown", "total_tokens": "n/a"},
+                "cost": {"estimated_usd": "unknown"},
+                "latency_seconds": "slow",
+            }
+
+        result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["usage"]["total_tokens"], 0)
+        self.assertEqual(result["cost"]["estimated_usd"], 0.0)
+        self.assertEqual(result["model_latency_seconds_sum"], 0.0)
+
+    def test_case_level_recovery_budget_bounds_persistent_omissions(self) -> None:
+        case = _case(image_count=200, frame_count=0)
+        attempts = 0
+
+        def invoke(batch_case: dict) -> dict:
+            nonlocal attempts
+            attempts += 1
+            return {"status": "success", "parsed": {"material_observations": []}}
+
+        result = run_minor_material_pipeline(case, invoke=invoke, workers=8)
+
+        self.assertLessEqual(attempts, 66)
+        self.assertEqual(result["parsed"]["processing_status"], "technical_processing_incomplete")
+        self.assertEqual(result["chunking"]["recovery_calls_used"], 16)
 
     def test_household_register_or_birth_certificate_satisfies_relationship_rule(self) -> None:
         case = _case(image_count=8, frame_count=0)

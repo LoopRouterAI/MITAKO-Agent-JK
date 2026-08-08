@@ -458,6 +458,28 @@ class DamageCausalityTest(unittest.TestCase):
         self.assertEqual(combined["origin_confidence"], 0.0)
         self.assertEqual(combined["causal_evidence_level"], "insufficient")
 
+    def test_special_product_risk_is_aggregated_conservatively_across_segments(self):
+        rows = [
+            {"damage_causality_assessment": assessment(
+                origin_confidence=0.2,
+                appearance_difference="visible",
+                business_defect_qualification="indeterminate",
+                special_product_rule="required_but_not_quantified",
+            )},
+            {"damage_causality_assessment": assessment(
+                origin_confidence=0.9,
+                appearance_difference="not_visible",
+                business_defect_qualification="confirmed",
+                special_product_rule="not_required",
+            )},
+        ]
+
+        combined = aggregate_damage_causality(rows)
+
+        self.assertEqual(combined["appearance_difference"], "visible")
+        self.assertEqual(combined["business_defect_qualification"], "indeterminate")
+        self.assertEqual(combined["special_product_rule"], "required_but_not_quantified")
+
 
 if __name__ == "__main__":
     unittest.main()

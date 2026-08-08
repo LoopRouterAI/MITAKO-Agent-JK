@@ -508,6 +508,27 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("本报告只说明送审证据支持什么结论", report_html)
         self.assertNotIn("反光可能影响细微划痕判断", report_html)
         self.assertIn("尚未使用独立留出集校准", report_html)
+
+    def test_report_identifies_traceable_warehouse_final_as_resolution_basis(self):
+        data = _report_data()
+        reconciliation = data["agent_report"]["parsed"]["fulfillment_reconciliation"]
+        reconciliation.update(
+            {
+                "resolution_basis": "warehouse_verification",
+                "warehouse_verification": {
+                    "status": "confirmed_not_missing",
+                    "source": "customer_warehouse",
+                    "verification_ref": "WH-CHECK-1",
+                },
+                "decision_boundary": "甲方已提供可追溯的仓库终核，历史待核实备注不覆盖该终态。",
+            }
+        )
+
+        report_html = render_public_report(data)
+
+        self.assertIn("仓库终核", report_html)
+        self.assertIn("确认未漏发", report_html)
+        self.assertIn("WH-CHECK-1", report_html)
         self.assertIn("这些分数不是正确率", report_html)
         self.assertIn("动作前争议部位被包装遮挡", report_html)
         self.assertIn("动作后压痕首次可见", report_html)
@@ -588,6 +609,57 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("采样边界估计", report_html)
         self.assertIn("3.0 至 6.0 秒", report_html)
         self.assertIn("采样分辨率 2.0 秒", report_html)
+
+    def test_report_explains_orange_speed_signal_and_two_fps_escalation(self):
+        data = _report_data()
+        video = data["agent_report"]["parsed"]["video_audit_conclusion"]
+        video.update({
+            "playback_speed": "accelerated",
+            "sampling_fps": 1.0,
+            "speed_review_impact": {
+                "status": "uncertain",
+                "critical_evidence_observable": False,
+                "affected_review_items": ["opening_action", "issue_first_visible"],
+            },
+        })
+        data["agent_report"]["parsed"]["decision_policy_audit"]["sampling_upgrade"] = {
+            "required": True,
+            "target_fps": 2.0,
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("橙色风险", report_html)
+        self.assertIn("当前 1 FPS 不足", report_html)
+        self.assertIn("2 FPS", report_html)
+        self.assertIn("拆封动作", report_html)
+        self.assertIn("伤情首次出现", report_html)
+
+    def test_report_does_not_claim_two_fps_completed_for_one_fps_material_signal(self):
+        data = _report_data()
+        data["agent_report"]["parsed"]["video_audit_conclusion"].update({
+            "playback_speed": "accelerated",
+            "sampling_fps": 1.0,
+            "speed_review_impact": {"status": "material", "affected_review_items": ["opening_action"]},
+        })
+
+        report_html = render_public_report(data)
+
+        self.assertIn("仍需 2 FPS", report_html)
+        self.assertNotIn("2 FPS 强化复核后仍无法判断", report_html)
+
+    def test_report_does_not_assume_observable_when_speed_impact_is_missing(self):
+        data = _report_data()
+        data["agent_report"]["parsed"]["video_audit_conclusion"].update({
+            "playback_speed": "accelerated",
+            "sampling_fps": 1.0,
+        })
+        data["agent_report"]["parsed"]["video_audit_conclusion"].pop("speed_review_impact", None)
+
+        report_html = render_public_report(data)
+
+        self.assertIn("尚未形成速度影响结论", report_html)
+        self.assertNotIn("关键证据仍可判断", report_html)
 
     def test_report_discloses_partial_specialized_coverage_without_overriding_verdict(self):
         data = _report_data()
@@ -673,6 +745,47 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("order_info_snapshot:abc123", report_html)
         self.assertIn("SKU-001", report_html)
         self.assertIn("不完整或待确认", report_html)
+
+    def test_report_renders_atomic_claims_and_video_deduplication(self):
+        data = _report_data()
+        data["agent_report"]["evidence_package"]["video_deduplication"] = {
+            "submitted_count": 2,
+            "unique_count": 1,
+            "duplicate_count": 1,
+        }
+        data["agent_report"]["parsed"]["claim_fact_assessment"] = {
+            "atomic_claim_results": [
+                {
+                    "claim_id": "CLM-1",
+                    "subject_ref": "SKU-1",
+                    "support_status": "supported",
+                    "reason": "划痕可见。",
+                },
+                {
+                    "claim_id": "CLM-2",
+                    "subject_ref": "SKU-2",
+                    "support_status": "not_supported",
+                    "reason": "复装后恢复正常。",
+                },
+            ],
+            "order_linkage": {"status": "verified", "reason": "包裹归属一致。"},
+            "scene_match": {"status": "matched", "reason": "属于商品有伤诉求。"},
+            "assembly": {
+                "state": "resolved_assembly_issue",
+                "reassembly_result": "successful",
+                "permanent_damage": "not_supported",
+                "reason": "复装成功。",
+            },
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("原子诉求逐项核验", report_html)
+        self.assertIn("CLM-1", report_html)
+        self.assertIn("SKU-2", report_html)
+        self.assertIn("复装后恢复正常", report_html)
+        self.assertIn("重复视频已跳过", report_html)
+        self.assertIn(">1<", report_html)
 
 
 if __name__ == "__main__":

@@ -381,9 +381,32 @@ class ModelResilienceTest(unittest.TestCase):
 
         self.assertEqual(len(completed), 7)
         self.assertEqual(audit["configured_workers"], 3)
-        self.assertEqual(audit["wave_workers"], [3, 1, 2, 1])
         self.assertEqual(audit["throttle_events"], 1)
         self.assertEqual(audit["recovery_events"], 2)
+
+    def test_adaptive_chunk_runner_refills_idle_worker_without_waiting_for_slowest_task(self) -> None:
+        import threading
+
+        from poc.visual_review_poc.specialized_model_pass import run_adaptive_tasks
+
+        third_started = threading.Event()
+
+        def invoke(value: int) -> dict:
+            if value == 0:
+                return {
+                    "status": "success" if third_started.wait(0.5) else "failed",
+                    "value": value,
+                }
+            if value == 2:
+                third_started.set()
+            return {"status": "success", "value": value}
+
+        completed, audit = run_adaptive_tasks(list(range(3)), workers=2, invoke=invoke)
+
+        self.assertEqual([item["value"] for item in completed], [0, 1, 2])
+        self.assertTrue(all(item["status"] == "success" for item in completed))
+        self.assertEqual(audit["scheduler"], "rolling_bounded")
+        self.assertEqual(audit["peak_inflight"], 2)
 
     def test_all_failed_chunks_keep_internal_channel_route_audit(self) -> None:
         from poc.visual_review_poc import model_selection_e2e as selection

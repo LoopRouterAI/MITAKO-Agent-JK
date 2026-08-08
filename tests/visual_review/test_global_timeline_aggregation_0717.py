@@ -77,6 +77,226 @@ class GlobalTimelineAggregation0717Test(unittest.TestCase):
             ["accelerated", "unknown"],
         )
 
+    def test_global_summary_aggregates_speed_impact_and_sampling_fps(self):
+        case = {
+            "frames": [{"timestamp": "00:00.00"}, {"timestamp": "00:04.00"}],
+            "videos": [{"duration_seconds": 4.0, "fps_requested": 1.0}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        rows = [
+            {"video_audit_conclusion": {
+                "playback_speed": "accelerated",
+                "speed_review_impact": {
+                    "status": "none",
+                    "critical_evidence_observable": True,
+                    "affected_review_items": [],
+                },
+            }},
+            {"video_audit_conclusion": {
+                "playback_speed": "accelerated",
+                "speed_review_impact": {
+                    "status": "uncertain",
+                    "critical_evidence_observable": False,
+                    "affected_review_items": ["opening_action", "issue_first_visible"],
+                },
+            }},
+        ]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, ["", ""])
+        speed = result["video_audit_conclusion"]["speed_review_impact"]
+
+        self.assertEqual(result["video_audit_conclusion"]["sampling_fps"], 1.0)
+        self.assertEqual(speed["status"], "uncertain")
+        self.assertFalse(speed["critical_evidence_observable"])
+        self.assertEqual(speed["affected_review_items"], ["issue_first_visible", "opening_action"])
+
+    def test_normal_playback_does_not_attribute_other_evidence_gaps_to_speed(self):
+        case = {
+            "frames": [{"timestamp": "00:00.00"}, {"timestamp": "00:04.00"}],
+            "videos": [{"duration_seconds": 4.0, "fps_requested": 1.0}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.5,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        rows = [{"video_audit_conclusion": {
+            "playback_speed": "normal",
+            "speed_review_impact": {
+                "status": "none",
+                "critical_evidence_observable": False,
+                "affected_review_items": ["opening_action"],
+            },
+        }}]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, [""])
+        speed = result["video_audit_conclusion"]["speed_review_impact"]
+
+        self.assertEqual(speed["status"], "none")
+        self.assertIsNone(speed["critical_evidence_observable"])
+        self.assertEqual(speed["affected_review_items"], [])
+
+    def test_accelerated_playback_with_contradictory_none_status_becomes_uncertain(self):
+        case = {
+            "frames": [{"timestamp": "00:00.00"}, {"timestamp": "00:04.00"}],
+            "videos": [{"duration_seconds": 4.0, "fps_requested": 1.0}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.5,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        rows = [{"video_audit_conclusion": {
+            "playback_speed": "accelerated",
+            "speed_review_impact": {
+                "status": "none",
+                "critical_evidence_observable": False,
+                "affected_review_items": ["opening_action"],
+            },
+        }}]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, [""])
+        speed = result["video_audit_conclusion"]["speed_review_impact"]
+
+        self.assertEqual(speed["status"], "uncertain")
+        self.assertFalse(speed["critical_evidence_observable"])
+
+    def test_malformed_fps_and_opening_evidence_do_not_abort_global_aggregation(self):
+        case = {
+            "frames": [{"timestamp": "00:00.00"}],
+            "videos": [{"duration_seconds": 1.0, "fps_requested": "invalid"}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        rows = [{
+            "video_audit_conclusion": {
+                "opening_video_compliance": {
+                    "sealed_start": False,
+                    "evidence_refs": ["invalid-shape"],
+                }
+            }
+        }]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, [""])
+        opening = result["video_audit_conclusion"]["opening_video_compliance"]
+
+        self.assertIsNone(result["video_audit_conclusion"]["sampling_fps"])
+        self.assertEqual(opening["validated_fields"], [])
+        self.assertEqual(opening["evidence_refs"]["sealed_start"], [])
+
+    def test_malformed_video_audit_shape_does_not_abort_global_aggregation(self):
+        case = {"frames": [{"timestamp": "00:00.00"}], "videos": [{"duration_seconds": 1.0}]}
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+
+        result = _apply_global_timeline_summary(
+            case,
+            parsed,
+            [{"video_audit_conclusion": ["invalid-shape"]}],
+            [""],
+        )
+
+        self.assertEqual(result["video_audit_conclusion"]["playback_speed"], "unknown")
+
+    def test_evidence_refs_must_resolve_to_the_case_frame_registry(self):
+        case = {
+            "frames": [
+                {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+                {"video_index": 1, "global_frame_index": 2, "timestamp": "00:04.00"},
+            ],
+            "videos": [{"duration_seconds": 4.0, "fps_requested": 2.0}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        fake_ref = {"video_index": 999, "global_frame_index": 999, "timestamp": "99:99.00"}
+        rows = [{"video_audit_conclusion": {
+            "playback_speed": "accelerated",
+            "speed_review_impact": {"status": "material", "evidence_refs": [fake_ref]},
+            "opening_video_compliance": {
+                "sealed_start": False,
+                "evidence_refs": {"sealed_start": [fake_ref]},
+            },
+        }}]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, [""])
+        audit = result["video_audit_conclusion"]
+
+        self.assertEqual(audit["speed_review_impact"]["evidence_refs"], [])
+        self.assertEqual(audit["opening_video_compliance"]["validated_fields"], [])
+
+    def test_flat_opening_evidence_refs_are_grouped_by_field(self):
+        real_ref = {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}
+        case = {
+            "frames": [real_ref, {"video_index": 1, "global_frame_index": 2, "timestamp": "00:04.00"}],
+            "videos": [{"duration_seconds": 4.0, "fps_requested": 1.0}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        rows = [{"video_audit_conclusion": {
+            "opening_video_compliance": {
+                "sealed_start": False,
+                "evidence_refs": [{**real_ref, "field": "sealed_start"}],
+            },
+        }}]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, [""])
+        opening = result["video_audit_conclusion"]["opening_video_compliance"]
+
+        self.assertEqual(opening["evidence_refs"]["sealed_start"], [real_ref])
+        self.assertEqual(opening["validated_fields"], ["sealed_start"])
+
+    def test_evidence_refs_cannot_be_borrowed_from_a_different_segment_status(self):
+        real_ref = {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}
+        case = {
+            "frames": [
+                real_ref,
+                {"video_index": 1, "global_frame_index": 2, "timestamp": "00:04.00"},
+            ],
+            "videos": [{"duration_seconds": 4.0, "fps_requested": 2.0}],
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.69,
+            "object_continuity_assessment": {"continuity_verdict": "indeterminate", "tracked_subjects": []},
+        }
+        rows = [
+            {"video_audit_conclusion": {
+                "speed_review_impact": {"status": "material", "evidence_refs": []},
+                "opening_video_compliance": {"sealed_start": False, "evidence_refs": {}},
+            }},
+            {"video_audit_conclusion": {
+                "speed_review_impact": {"status": "none", "evidence_refs": [real_ref]},
+                "opening_video_compliance": {
+                    "sealed_start": True,
+                    "evidence_refs": {"sealed_start": [real_ref]},
+                },
+            }},
+        ]
+
+        result = _apply_global_timeline_summary(case, parsed, rows, ["", ""])
+        audit = result["video_audit_conclusion"]
+
+        self.assertEqual(audit["speed_review_impact"]["status"], "material")
+        self.assertEqual(audit["speed_review_impact"]["evidence_refs"], [])
+        self.assertIs(audit["opening_video_compliance"]["sealed_start"], False)
+        self.assertEqual(audit["opening_video_compliance"]["validated_fields"], [])
+
     def test_segment_opening_claim_is_not_presented_as_deterministic_completeness(self):
         case = {
             "frames": [{"timestamp": "00:00.00"}, {"timestamp": "03:31.73"}],

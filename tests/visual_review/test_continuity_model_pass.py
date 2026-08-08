@@ -7,9 +7,10 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from poc.visual_review_poc.model_selection_e2e import _aggregate_chunk_results, call_model_chunked, gemini_payload, openai_messages, post_with_retries
+from poc.visual_review_poc.model_selection_e2e import _aggregate_chunk_results, call_model_chunked, gemini_payload, merge_opening_start_verification, openai_messages, post_with_retries
 from poc.visual_review_poc.review_model_prompt import build_selection_prompt
 from poc.visual_review_poc.specialized_model_pass import run_specialized_frame_pass
+from poc.visual_review_poc.unified_model_pass import native_dimension_gaps
 
 
 def _visibility(index: int, subject_id: str) -> str:
@@ -21,6 +22,178 @@ def _visibility(index: int, subject_id: str) -> str:
 
 
 class ContinuityModelPassTest(unittest.TestCase):
+    def test_native_dimension_check_rejects_empty_structured_shells(self):
+        parsed = {
+            "overall_audit": {},
+            "frame_findings": [],
+            "object_continuity_assessment": {},
+            "damage_causality_assessment": {},
+            "claim_fact_assessment": {},
+        }
+
+        self.assertEqual(
+            native_dimension_gaps(parsed, "product_damage"),
+            [
+                "claim_facts",
+                "damage_causality",
+                "frame_findings",
+                "object_continuity",
+                "opening_start_verification",
+                "opening_video_compliance",
+                "overall_audit",
+            ],
+        )
+
+    def test_native_dimension_check_accepts_timestamp_based_video_evidence(self):
+        parsed = {
+            "overall_audit": {"conclusion": "可见损伤"},
+            "frame_findings": [{"timestamp": "00:08.20", "visible_facts": "边角压痕"}],
+            "object_continuity_assessment": {
+                "continuity_verdict": "continuous",
+                "tracked_subjects": [{"subject_id": "claimed_item"}],
+            },
+            "video_audit_conclusion": {
+                "opening_video_compliance": {
+                    "sealed_start": True,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "evidence_refs": [{"field": "sealed_start", "video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}],
+                    "field_sources": {"sealed_start": "opening_start_verification"},
+                    "validated_fields": ["sealed_start"],
+                    "result": "compliant",
+                },
+            },
+            "damage_causality_assessment": {
+                "damage_presence": "confirmed",
+                "claim_support": "supported",
+            },
+            "claim_fact_assessment": {
+                "order_linkage": {"status": "verified"},
+                "scene_match": {"status": "matched"},
+                "assembly": {"state": "permanent_damage"},
+                "atomic_claim_results": [],
+            },
+        }
+
+        self.assertEqual(native_dimension_gaps(parsed, "product_damage"), [])
+
+    def test_native_dimension_check_requires_opening_video_compliance(self):
+        parsed = {
+            "overall_audit": {"conclusion": "可见损伤"},
+            "frame_findings": [{"timestamp": "00:08.20", "visible_facts": "边角压痕"}],
+            "object_continuity_assessment": {
+                "continuity_verdict": "continuous",
+                "tracked_subjects": [{"subject_id": "claimed_item"}],
+            },
+        }
+
+        self.assertIn("opening_video_compliance", native_dimension_gaps(parsed, "video_unboxing"))
+
+    def test_native_dimension_check_requires_start_verification_even_when_model_says_true(self):
+        parsed = {
+            "overall_audit": {"conclusion": "面单可见但未从封箱开始"},
+            "frame_findings": [{"timestamp": "00:00.00", "visible_facts": "首帧已是泡沫内包"}],
+            "object_continuity_assessment": {
+                "continuity_verdict": "continuous",
+                "tracked_subjects": [{"subject_id": "shipping_package"}],
+            },
+            "video_audit_conclusion": {
+                "opening_video_compliance": {
+                    "sealed_start": True,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "evidence_refs": {},
+                    "result": "noncompliant",
+                },
+            },
+        }
+
+        self.assertIn(
+            "opening_start_verification",
+            native_dimension_gaps(parsed, "video_unboxing"),
+        )
+
+    def test_verified_opening_start_failure_does_not_force_full_frame_fallback(self):
+        parsed = {
+            "overall_audit": {"conclusion": "可见损伤"},
+            "frame_findings": [{"timestamp": "00:08.20", "visible_facts": "边角压痕"}],
+            "object_continuity_assessment": {
+                "continuity_verdict": "continuous",
+                "tracked_subjects": [{"subject_id": "claimed_item"}],
+            },
+            "video_audit_conclusion": {
+                "opening_video_compliance": {
+                    "sealed_start": False,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "evidence_refs": [{"field": "sealed_start", "video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}],
+                    "field_sources": {"sealed_start": "opening_start_verification"},
+                    "validated_fields": ["sealed_start"],
+                    "result": "noncompliant",
+                },
+            },
+        }
+
+        gaps = native_dimension_gaps(parsed, "video_unboxing")
+        self.assertNotIn("opening_start_verification", gaps)
+        self.assertNotIn("opening_video_hard_failure_candidate", gaps)
+
+    def test_merge_opening_start_verification_overrides_only_sealed_start(self):
+        native = {
+            "status": "success",
+            "latency_seconds": 1.5,
+            "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+            "cost": {"amount": 0.01, "currency": "USD", "estimated_usd": 0.01},
+            "cost_status": "estimated",
+            "estimated_cost_calls": 1,
+            "_channel_route_attempts": [{"channel": "baidu", "decision": "selected"}],
+            "parsed": {
+                "video_audit_conclusion": {"opening_video_compliance": {
+                    "sealed_start": True,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "evidence_refs": [],
+                    "result": "compliant",
+                }},
+            },
+            "parsed_before_boundary": {},
+        }
+        verification = {
+            "status": "success",
+            "latency_seconds": 0.5,
+            "usage": {"input_tokens": 3, "output_tokens": 1, "total_tokens": 4},
+            "cost": {"amount": 0.002, "currency": "USD", "estimated_usd": 0.002},
+            "cost_status": "estimated",
+            "estimated_cost_calls": 1,
+            "_channel_route_attempts": [{"channel": "baidu", "decision": "selected"}],
+            "parsed": {
+                "result": "unsealed",
+                "sealed_start": False,
+                "evidence_refs": [{"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}],
+                "reason": "首帧已是气泡内包装。",
+            },
+        }
+
+        merged = merge_opening_start_verification(native, verification, scenario="product_damage")
+        opening = merged["parsed"]["video_audit_conclusion"]["opening_video_compliance"]
+        self.assertIs(opening["sealed_start"], False)
+        self.assertIs(opening["waybill_visible"], True)
+        self.assertEqual(opening["result"], "noncompliant")
+        self.assertEqual(opening["field_sources"]["sealed_start"], "opening_start_verification")
+        self.assertEqual(opening["validated_fields"], ["sealed_start"])
+        self.assertEqual(merged["parsed"]["predicted_label"], "negative")
+        self.assertNotEqual(merged["parsed_before_boundary"].get("predicted_label"), "negative")
+        self.assertIn("不等于商品无损", merged["parsed"]["overall_audit"]["core_reason"])
+        self.assertEqual(merged["usage"]["total_tokens"], 16)
+        self.assertEqual(merged["cost"]["estimated_usd"], 0.012)
+        self.assertEqual(merged["estimated_cost_calls"], 2)
+        self.assertEqual(merged["model_latency_seconds_sum"], 2.0)
+        self.assertEqual(len(merged["_channel_route_attempts"]), 2)
+
     def test_chunk_labels_are_not_promoted_without_structured_whole_case_evidence(self):
         case = {
             "case_id": "segment-label-isolation",
@@ -328,6 +501,197 @@ class ContinuityModelPassTest(unittest.TestCase):
             self.assertTrue(all(item["sku"] == "mddfrzszmxp013" for item in items))
             self.assertTrue(all("盛装舞步系列" in item["product_name"] for item in items))
 
+    def test_gemini_dense_product_damage_reuses_complete_unified_main_pass(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured["damage_causality_policy"] = {"force_action_scan": True}
+        case["structured_business_context"] = structured
+        observed_modes = []
+
+        def unified_call(cfg, current_case, timeout, retries):
+            mode = (current_case.get("structured_business_context") or {}).get("analysis_mode")
+            observed_modes.append(mode)
+            findings = [
+                {
+                    "global_frame_index": frame["global_frame_index"],
+                    "video_index": frame["video_index"],
+                    "timestamp": frame["timestamp"],
+                    "visible_facts": "逐帧统一审核事实",
+                    "subject_visibility": [
+                        {"subject_id": subject, "state": "visible"}
+                        for subject in ("shipping_package", "product_package", "claimed_item")
+                    ],
+                }
+                for frame in current_case["frames"]
+            ]
+            return {
+                "status": "success",
+                "parsed": {
+                    "predicted_label": "review",
+                    "confidence": 0.82,
+                    "overall_audit": {"conclusion": "统一审核完成"},
+                    "frame_findings": findings,
+                    "object_continuity_assessment": {"continuity_verdict": "continuous"},
+                    "damage_causality_assessment": {
+                        "damage_presence": "confirmed",
+                        "claim_support": "supported",
+                    },
+                },
+                "usage": {"total_tokens": 20},
+                "cost": {"estimated_usd": 0.001},
+                "cost_status": "estimated",
+                "latency_seconds": 0.1,
+            }
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=unified_call):
+            result = call_model_chunked({"provider": "gemini_native"}, case, timeout=30, retries=0)
+
+        self.assertEqual(observed_modes, [None])
+        self.assertEqual(result["chunking"]["total_model_calls"], 1)
+        self.assertEqual(result["chunking"]["unified_multitask"]["status"], "completed")
+        self.assertEqual(result["chunking"]["channels"]["object_continuity"]["model_calls"], 0)
+        self.assertEqual(result["chunking"]["channels"]["damage_causality"]["model_calls"], 0)
+
+    def test_gemini_dense_missing_item_reuses_complete_main_continuity(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured["business_scenario"] = "missing_item"
+        case["scenario"] = "video_unboxing"
+        case["structured_business_context"] = structured
+        observed_modes = []
+
+        def unified_call(cfg, current_case, timeout, retries):
+            observed_modes.append(
+                (current_case.get("structured_business_context") or {}).get("analysis_mode")
+            )
+            result = self._fake_call(cfg, current_case, timeout, retries)
+            result["parsed"]["frame_findings"] = [
+                {
+                    "global_frame_index": frame["global_frame_index"],
+                    "video_index": frame["video_index"],
+                    "timestamp": frame["timestamp"],
+                    "visible_facts": "逐帧统一审核事实",
+                    "subject_visibility": [
+                        {"subject_id": subject, "state": "visible"}
+                        for subject in ("shipping_package", "product_package", "claimed_item")
+                    ],
+                }
+                for frame in current_case["frames"]
+            ]
+            result["parsed"]["object_continuity_assessment"] = {
+                "continuity_verdict": "continuous"
+            }
+            return result
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=unified_call):
+            result = call_model_chunked(
+                {"provider": "gemini_native"}, case, timeout=30, retries=0
+            )
+
+        self.assertEqual(observed_modes, [None])
+        self.assertEqual(result["chunking"]["total_model_calls"], 1)
+        self.assertEqual(result["chunking"]["unified_multitask"]["status"], "completed")
+        self.assertEqual(result["chunking"]["channels"]["object_continuity"]["model_calls"], 0)
+
+    def test_gemini_dense_missing_item_reuses_sparse_anchored_continuity_summary(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured["business_scenario"] = "missing_item"
+        case["scenario"] = "video_unboxing"
+        case["structured_business_context"] = structured
+        observed_modes = []
+
+        def unified_call(cfg, current_case, timeout, retries):
+            observed_modes.append(
+                (current_case.get("structured_business_context") or {}).get("analysis_mode")
+            )
+            result = self._fake_call(cfg, current_case, timeout, retries)
+            frame = current_case["frames"][0]
+            result["parsed"]["frame_findings"] = [{
+                "global_frame_index": frame["global_frame_index"],
+                "video_index": frame["video_index"],
+                "timestamp": frame["timestamp"],
+                "visible_facts": "关键状态变化",
+                "subject_visibility": [
+                    {"subject_id": subject, "state": "visible"}
+                    for subject in ("shipping_package", "product_package", "claimed_item")
+                ],
+            }]
+            result["parsed"]["object_continuity_assessment"] = None
+            return result
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=unified_call):
+            result = call_model_chunked(
+                {"provider": "gemini_native"}, case, timeout=30, retries=0
+            )
+
+        self.assertEqual(observed_modes, [None])
+        self.assertEqual(result["chunking"]["total_model_calls"], 1)
+        self.assertEqual(result["chunking"]["unified_multitask"]["status"], "completed")
+        self.assertEqual(result["chunking"]["channels"]["object_continuity"]["model_calls"], 0)
+
+    def test_gemini_dense_product_damage_can_disable_unified_mode_for_ab_control(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured["damage_causality_policy"] = {"force_action_scan": True}
+        case["structured_business_context"] = structured
+        observed_modes = []
+
+        def recording_call(cfg, current_case, timeout, retries):
+            observed_modes.append(
+                (current_case.get("structured_business_context") or {}).get("analysis_mode")
+            )
+            return self._fake_call(cfg, current_case, timeout, retries)
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=recording_call):
+            result = call_model_chunked(
+                {"provider": "gemini_native", "unified_multitask": False},
+                case,
+                timeout=30,
+                retries=0,
+            )
+
+        self.assertIn("object_continuity_only", observed_modes)
+        self.assertIn("damage_causality_only", observed_modes)
+        self.assertFalse(result["chunking"]["unified_multitask"]["enabled"])
+
+    def test_unified_main_falls_back_only_for_missing_damage_dimension(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured["damage_causality_policy"] = {"force_action_scan": True}
+        case["structured_business_context"] = structured
+        observed_modes = []
+
+        def partial_unified_call(cfg, current_case, timeout, retries):
+            mode = (current_case.get("structured_business_context") or {}).get("analysis_mode")
+            observed_modes.append(mode)
+            if mode == "damage_causality_only":
+                return self._fake_call(cfg, current_case, timeout, retries)
+            result = self._fake_call(cfg, current_case, timeout, retries)
+            result["parsed"]["frame_findings"] = [
+                {
+                    "global_frame_index": frame["global_frame_index"],
+                    "video_index": frame["video_index"],
+                    "timestamp": frame["timestamp"],
+                    "visible_facts": "逐帧连续性事实",
+                    "subject_visibility": [
+                        {"subject_id": subject, "state": "visible"}
+                        for subject in ("shipping_package", "product_package", "claimed_item")
+                    ],
+                }
+                for frame in current_case["frames"]
+            ]
+            result["parsed"]["object_continuity_assessment"] = {"continuity_verdict": "continuous"}
+            result["parsed"]["damage_causality_assessment"] = {}
+            return result
+
+        with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=partial_unified_call):
+            result = call_model_chunked({"provider": "gemini_native"}, case, timeout=30, retries=0)
+
+        self.assertNotIn("object_continuity_only", observed_modes)
+        self.assertIn("damage_causality_only", observed_modes)
+        self.assertEqual(result["chunking"]["unified_multitask"]["dimension_gaps"], ["damage_causality"])
+
     def test_specialized_passes_do_not_guess_order_item_when_main_identity_is_missing(self):
         case = dict(self.case)
         case["customer_claim"] = "Nezha postcard has scratches"
@@ -618,11 +982,15 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(source_summary["supplemental_images"]["referenced_count"], 1)
         self.assertIn("不能单独推翻", source_summary["decision_boundary"])
 
-    def test_product_damage_reviews_every_supplemental_image_in_dedicated_pass(self):
+    def test_product_damage_batches_supplemental_images_without_losing_coverage(self):
         case = dict(self.case)
         case["supplemental_images"] = [
             {"image_index": index, "file": f"damage-{index}.jpg"}
             for index in range(1, 6)
+        ]
+        case["official_reference_images"] = [
+            {"reference_index": 1},
+            {"reference_index": 2},
         ]
         structured = dict(self.case["structured_business_context"])
         structured["continuity_policy"] = {"force_dense_scan": False}
@@ -651,12 +1019,16 @@ class ContinuityModelPassTest(unittest.TestCase):
             result = call_model_chunked({}, case, timeout=30, retries=0)
 
         source_summary = result["parsed"]["damage_causality_assessment"]["evidence_source_summary"]
-        self.assertTrue(all(len(batch) == 1 for batch in dedicated_batches))
-        self.assertEqual(sorted(index for batch in dedicated_batches for index in batch), [1, 2, 3, 4, 5])
+        self.assertEqual(dedicated_batches, [[1, 2, 3, 4, 5]])
         self.assertEqual(source_summary["supplemental_images"]["referenced_count"], 5)
         self.assertEqual(source_summary["supplemental_images"]["processed_count"], 5)
         self.assertEqual(source_summary["supplemental_images"]["unreferenced_image_indices"], [])
         self.assertEqual(result["chunking"]["supplemental_evidence_pass"]["status"], "completed")
+        expected_media = min(6, len(case["frames"])) + 5 + 2
+        self.assertEqual(
+            result["chunking"]["channels"]["supplemental_evidence"]["model_images"],
+            expected_media,
+        )
 
     def test_linked_supplemental_damage_confirms_damage_without_inventing_cause(self):
         case = dict(self.case)
@@ -1216,8 +1588,8 @@ class ContinuityModelPassTest(unittest.TestCase):
             openai = openai_messages("system", "user", case)
 
             gemini_parts = gemini["contents"][0]["parts"]
-            self.assertEqual(sum("inline_data" in item for item in gemini_parts), 1)
-            self.assertTrue(any((item.get("inline_data") or {}).get("mime_type") == "image/jpeg" for item in gemini_parts))
+            self.assertEqual(sum("inlineData" in item for item in gemini_parts), 1)
+            self.assertTrue(any((item.get("inlineData") or {}).get("mimeType") == "image/jpeg" for item in gemini_parts))
             openai_content = openai[1]["content"]
             self.assertEqual(sum(item.get("type") == "image_url" for item in openai_content), 1)
             self.assertFalse(any("时序拼图映射" in str(item.get("text") or "") for item in openai_content))

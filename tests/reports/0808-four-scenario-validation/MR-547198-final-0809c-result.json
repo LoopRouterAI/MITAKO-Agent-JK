@@ -1,0 +1,692 @@
+{
+  "label_isolation": "推理阶段不读取 annotation、reply 原文件、管理员消息或人工标签；只使用盲测包内清洗后的用户本人消息，本文件不计算命中率。",
+  "base_url": "http://127.0.0.1:7864",
+  "scenario": "minor_refund",
+  "fps": 1.0,
+  "out_of_frame_threshold_seconds": 2.0,
+  "results": [
+    {
+      "case_id": "CASE-05CFDFFAC265",
+      "ok": true,
+      "predicted_label": "review",
+      "confidence": 0.66,
+      "conclusion": "全量图片已处理，当前缺少可按 SOP 采信的绑定手机号实名归属证明；请只补充这些材料。 已提交材料另有字段待补正，详见材料缺口清单。",
+      "workflow_recommendation": "request_more_material",
+      "human_review": {
+        "level": "not_required",
+        "reason_codes": [
+          "material_resubmission_available"
+        ],
+        "recommendation": "当前可直接向用户补充收集材料，无需仅因材料缺口先占用人工审核席位。"
+      },
+      "minor_material_assessment": {
+        "readiness": "needs_specific_material",
+        "visual_precheck_status": "incomplete",
+        "declared_image_count": 20,
+        "accepted_image_count": 20,
+        "processed_image_count": 20,
+        "checklist": [
+          {
+            "requirement_id": "identity",
+            "label": "未成年人及监护人身份证明",
+            "status": "present",
+            "quality_status": "usable",
+            "evidence_refs": [
+              "supplemental_image_8",
+              "supplemental_image_9",
+              "supplemental_image_16",
+              "supplemental_image_17"
+            ],
+            "evidence_image_indices": [
+              8,
+              9,
+              16,
+              17
+            ],
+            "rule_note": "未成年人无身份证时可由户口本信息页或出生证明替代；角色和正反面仍需人工核对。",
+            "validation_status": "visual_consistency_uncertain"
+          },
+          {
+            "requirement_id": "relationship",
+            "label": "监护关系证明",
+            "status": "present",
+            "quality_status": "usable",
+            "evidence_refs": [
+              "supplemental_image_1",
+              "supplemental_image_7",
+              "supplemental_image_10",
+              "supplemental_image_15",
+              "supplemental_image_18"
+            ],
+            "evidence_image_indices": [
+              1,
+              7,
+              10,
+              15,
+              18
+            ],
+            "rule_note": "户口本相关页或出生证明二选一。",
+            "validation_status": "visual_consistency_uncertain"
+          },
+          {
+            "requirement_id": "commitment",
+            "label": "双方签字退款申请承诺书",
+            "status": "present",
+            "quality_status": "usable",
+            "evidence_refs": [
+              "supplemental_image_11",
+              "supplemental_image_12",
+              "supplemental_image_13",
+              "supplemental_image_14",
+              "supplemental_image_19"
+            ],
+            "evidence_image_indices": [
+              11,
+              12,
+              13,
+              14,
+              19
+            ],
+            "rule_note": "签字真实性由人工终审确认。",
+            "validation_status": "visual_consistency_uncertain"
+          },
+          {
+            "requirement_id": "payment",
+            "label": "订单或支付凭证",
+            "status": "present",
+            "quality_status": "usable",
+            "evidence_refs": [
+              "supplemental_image_3",
+              "supplemental_image_6",
+              "supplemental_image_20"
+            ],
+            "evidence_image_indices": [
+              3,
+              6,
+              20
+            ],
+            "rule_note": "金额、订单范围和付款主体由业务系统复核。",
+            "validation_status": "visual_consistency_uncertain"
+          },
+          {
+            "requirement_id": "mobile_realname",
+            "label": "绑定手机号实名归属证明",
+            "status": "not_observed_after_full_scan",
+            "quality_status": "needs_manual_confirmation",
+            "evidence_refs": [
+              "supplemental_image_2",
+              "supplemental_image_4",
+              "supplemental_image_5"
+            ],
+            "evidence_image_indices": [
+              2,
+              4,
+              5
+            ],
+            "rule_note": "仅填写了本案实名主体和购物手机号/备注信息的运营商账单或电子发票有效；空白模板、示例图和普通账号页不能替代。",
+            "validation_status": "visual_consistency_uncertain"
+          }
+        ],
+        "field_consistency": {
+          "schema_version": "minor_consistency_v1",
+          "status": "completed",
+          "verdict": "uncertain",
+          "message": "部分字段不可读、证据不足或存在可疑风险，无法完成视觉一致性确认。",
+          "checks": [
+            {
+              "check_id": "identity_age",
+              "status": "uncertain",
+              "message": "部分字段不可读、证据不足或存在可疑风险，无法完成视觉一致性确认。",
+              "field_results": [
+                {
+                  "field_name": "guardian_identity",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    8,
+                    9,
+                    15,
+                    16,
+                    18
+                  ]
+                },
+                {
+                  "field_name": "minor_identity",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    15,
+                    18
+                  ]
+                },
+                {
+                  "field_name": "age_eligibility",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    15,
+                    18
+                  ]
+                },
+                {
+                  "field_name": "payment_password_access",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": []
+                },
+                {
+                  "field_name": "guardian_discovery_process",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": []
+                }
+              ],
+              "tamper_risk": "low",
+              "risk_reason_codes": [
+                "no_obvious_risk"
+              ],
+              "evidence_image_indices": [
+                1,
+                7,
+                8,
+                9,
+                10,
+                15,
+                16,
+                18
+              ],
+              "coverage_complete": true,
+              "segment_count": 1,
+              "payment_capability_risk": "none"
+            },
+            {
+              "check_id": "guardian_relationship",
+              "status": "uncertain",
+              "message": "部分字段不可读、证据不足或存在可疑风险，无法完成视觉一致性确认。",
+              "field_results": [
+                {
+                  "field_name": "guardian_identity",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    8,
+                    9,
+                    16
+                  ]
+                },
+                {
+                  "field_name": "minor_identity",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    1,
+                    7,
+                    15,
+                    18
+                  ]
+                },
+                {
+                  "field_name": "relationship_link",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    1,
+                    7,
+                    15,
+                    18
+                  ]
+                },
+                {
+                  "field_name": "applicant_guardian_role",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    9,
+                    16,
+                    18
+                  ]
+                }
+              ],
+              "tamper_risk": "low",
+              "risk_reason_codes": [
+                "no_obvious_risk"
+              ],
+              "evidence_image_indices": [
+                1,
+                7,
+                8,
+                9,
+                10,
+                15,
+                16,
+                18
+              ],
+              "coverage_complete": true,
+              "segment_count": 1,
+              "payment_capability_risk": "none"
+            },
+            {
+              "check_id": "commitment_signatures",
+              "status": "uncertain",
+              "message": "部分字段不可读、证据不足或存在可疑风险，无法完成视觉一致性确认。",
+              "field_results": [
+                {
+                  "field_name": "guardian_signer",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    11,
+                    19
+                  ]
+                },
+                {
+                  "field_name": "minor_signer",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    11,
+                    19
+                  ]
+                },
+                {
+                  "field_name": "signature_presence",
+                  "status": "uncertain",
+                  "visibility": "partial",
+                  "evidence_image_indices": [
+                    11,
+                    19
+                  ]
+                },
+                {
+                  "field_name": "signature_method",
+                  "status": "uncertain",
+                  "visibility": "partial",
+                  "evidence_image_indices": [
+                    11,
+                    19
+                  ]
+                },
+                {
+                  "field_name": "field_alignment",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    11,
+                    14,
+                    19
+                  ]
+                },
+                {
+                  "field_name": "commitment_content",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    11,
+                    12,
+                    13,
+                    14,
+                    19
+                  ]
+                },
+                {
+                  "field_name": "refund_scope",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": [
+                    14,
+                    19
+                  ]
+                },
+                {
+                  "field_name": "recipient_information",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": [
+                    14,
+                    19
+                  ]
+                },
+                {
+                  "field_name": "signed_date",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    11,
+                    19
+                  ]
+                }
+              ],
+              "tamper_risk": "low",
+              "risk_reason_codes": [
+                "no_obvious_risk"
+              ],
+              "evidence_image_indices": [
+                1,
+                7,
+                8,
+                9,
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                18,
+                19
+              ],
+              "coverage_complete": true,
+              "segment_count": 2,
+              "payment_capability_risk": "none"
+            },
+            {
+              "check_id": "order_payment",
+              "status": "uncertain",
+              "message": "部分字段不可读、证据不足或存在可疑风险，无法完成视觉一致性确认。",
+              "field_results": [
+                {
+                  "field_name": "order_reference",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    6
+                  ]
+                },
+                {
+                  "field_name": "payer_identity",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    3,
+                    20
+                  ]
+                },
+                {
+                  "field_name": "amount",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    3,
+                    6,
+                    20
+                  ]
+                },
+                {
+                  "field_name": "transaction_scope",
+                  "status": "matched",
+                  "visibility": "complete",
+                  "evidence_image_indices": [
+                    6
+                  ]
+                },
+                {
+                  "field_name": "commitment_amount",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": []
+                }
+              ],
+              "tamper_risk": "low",
+              "risk_reason_codes": [
+                "no_obvious_risk"
+              ],
+              "evidence_image_indices": [
+                3,
+                6,
+                9,
+                16,
+                20
+              ],
+              "coverage_complete": true,
+              "segment_count": 1,
+              "payment_capability_risk": "none"
+            },
+            {
+              "check_id": "mobile_realname",
+              "status": "uncertain",
+              "message": "部分字段不可读、证据不足或存在可疑风险，无法完成视觉一致性确认。",
+              "field_results": [
+                {
+                  "field_name": "subscriber_identity",
+                  "status": "uncertain",
+                  "visibility": "partial",
+                  "evidence_image_indices": [
+                    9,
+                    16
+                  ]
+                },
+                {
+                  "field_name": "account_mobile",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": []
+                },
+                {
+                  "field_name": "invoice_identity",
+                  "status": "uncertain",
+                  "visibility": "partial",
+                  "evidence_image_indices": [
+                    2,
+                    4,
+                    5
+                  ]
+                },
+                {
+                  "field_name": "invoice_phone",
+                  "status": "uncertain",
+                  "visibility": "partial",
+                  "evidence_image_indices": [
+                    2,
+                    4,
+                    5
+                  ]
+                },
+                {
+                  "field_name": "number_status",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": []
+                },
+                {
+                  "field_name": "ownership_proof",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": []
+                },
+                {
+                  "field_name": "guardian_phone_holder",
+                  "status": "uncertain",
+                  "visibility": "unreadable",
+                  "evidence_image_indices": [
+                    6
+                  ]
+                }
+              ],
+              "tamper_risk": "low",
+              "risk_reason_codes": [
+                "evidence_gap",
+                "unreadable_fields"
+              ],
+              "evidence_image_indices": [
+                2,
+                3,
+                4,
+                5,
+                6,
+                9,
+                16,
+                20
+              ],
+              "coverage_complete": true,
+              "segment_count": 1,
+              "payment_capability_risk": "none"
+            }
+          ]
+        },
+        "required_materials": [
+          "请重新提交包含双方亲笔签名的退款承诺书；电脑录入姓名不能替代签名。"
+        ],
+        "authenticity_assessment": {
+          "severity": "warning",
+          "risk_score": 0.25,
+          "risk_percent": 25,
+          "blocks_visual_precheck": false,
+          "evidence_image_indices": [],
+          "missing_exif_image_indices": [
+            2,
+            4,
+            5,
+            16,
+            17,
+            18,
+            19,
+            20
+          ],
+          "unknown_exif_image_indices": [],
+          "editor_metadata_image_indices": [],
+          "conclusion": "部分图片没有可用拍摄信息；压缩、转发或格式转换都可能造成该情况，本身不能证明图片造假。",
+          "boundary": "该分数是未校准的图片风险提示，不是图片真实或伪造的客观概率。"
+        }
+      },
+      "material_gaps": [
+        "请补充申请监护人的运营商绑定手机号实名归属证明，需显示平台绑定业务手机号；如号码已注销，请补销户或原号码归属证明；支付截图不能替代手机号实名归属材料。",
+        "请重新提交包含双方亲笔签名的退款承诺书；电脑录入姓名不能替代签名。"
+      ],
+      "damage_causality_assessment": null,
+      "object_continuity_assessment": null,
+      "continuity_guard_reason": null,
+      "causality_guard_reason": null,
+      "pass_integrity_status": null,
+      "specialized_pass_guard_reason": null,
+      "video_audit_conclusion": null,
+      "decision_policy_audit": null,
+      "inference_estimate": {
+        "input_tokens": 124489,
+        "output_tokens": 7481,
+        "total_tokens": 131970,
+        "estimated_usd": 0.056049,
+        "cost_status": "estimated",
+        "unknown_cost_calls": 0,
+        "route_fallback_count": 0,
+        "route_attempts": [
+          {
+            "route_index": 1,
+            "status": "success",
+            "status_code": null,
+            "error_type": "",
+            "model_calls": 12,
+            "decision": "selected"
+          }
+        ],
+        "channel_route_attempts": [
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          }
+        ],
+        "total_frames": 12,
+        "main_review_frames": 0,
+        "total_model_calls": 12,
+        "segment_count": 12,
+        "concurrency": {},
+        "channels": {
+          "minor_material_inventory": {
+            "model_calls": 5,
+            "repair_calls": 0,
+            "total_tokens": 40760,
+            "estimated_usd": 0.019057
+          },
+          "minor_process_video": {
+            "model_calls": 1,
+            "repair_calls": 0,
+            "total_tokens": 16334,
+            "estimated_usd": 0.007182
+          },
+          "minor_field_consistency": {
+            "model_calls": 6,
+            "repair_calls": 0,
+            "total_tokens": 74876,
+            "estimated_usd": 0.02981
+          }
+        },
+        "native_video": {},
+        "degraded_passes": {},
+        "boundary": "估算值用于容量与成本比较，不等同于供应商最终账单。"
+      },
+      "report": {
+        "requested": true,
+        "status": "ready",
+        "html_url": "/reports/agent_single_1786207688_3.html?expires=1786208588&sig=81bccfb70fade1dd4a37c614c7927fb705283c1ee6cceb3f7b81304312ca8d81"
+      },
+      "diagnostics": null
+    }
+  ]
+}

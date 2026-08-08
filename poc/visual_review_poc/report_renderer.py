@@ -11,6 +11,7 @@ from poc.visual_review_poc.report_assessment_sections import (
     render_confidence_components_panel,
     render_damage_causality_panel,
     render_fulfillment_reconciliation_panel,
+    render_claim_fact_panel,
     render_minor_material_panel,
     render_object_continuity_panel,
 )
@@ -523,6 +524,50 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         "accelerated": "疑似加速",
         "unknown": "无法判断",
     }.get(str(video.get("playback_speed") or "unknown"), "无法判断")
+    speed_impact = video.get("speed_review_impact") or {}
+    speed_status = str(speed_impact.get("status") or "unknown")
+    sampling_fps = video.get("sampling_fps")
+    try:
+        sampling_fps_value = float(sampling_fps)
+        sampling_fps_text = f"{sampling_fps_value:g} FPS"
+    except (TypeError, ValueError):
+        sampling_fps_value = 0.0
+        sampling_fps_text = "当前抽帧密度"
+    affected_labels = {
+        "sealed_start": "封箱起始",
+        "waybill": "面单可见性",
+        "opening_action": "拆封动作",
+        "claimed_item_continuity": "争议商品连续性",
+        "issue_first_visible": "伤情首次出现",
+    }
+    affected_text = "、".join(
+        affected_labels.get(str(item), str(item))
+        for item in speed_impact.get("affected_review_items") or []
+    ) or "关键审核节点"
+    if video.get("playback_speed") != "accelerated":
+        speed_impact_html = ""
+    elif speed_status == "uncertain":
+        speed_impact_html = (
+            f"<p><b>橙色风险：</b>疑似加速，当前 {_h(sampling_fps_text)} 不足以判断"
+            f"{_h(affected_text)}；建议受控提升到 2 FPS 强化复核，加速本身不作为判负依据。</p>"
+        )
+    elif speed_status == "material" and sampling_fps_value >= 2.0:
+        speed_impact_html = (
+            f"<p><b>实质影响：</b>2 FPS 强化复核后仍无法判断{_h(affected_text)}，"
+            "当前开箱材料不足以形成可靠结论。</p>"
+        )
+    elif speed_status == "material":
+        speed_impact_html = (
+            f"<p><b>橙色风险：</b>当前仅完成 {_h(sampling_fps_text)} 审核，"
+            f"{_h(affected_text)}仍需 2 FPS 强化复核，不能提前写成实质不合规。</p>"
+        )
+    elif speed_status == "none" and speed_impact.get("critical_evidence_observable") is True:
+        speed_impact_html = (
+            f"<p><b>橙色风险：</b>疑似加速，但当前 {_h(sampling_fps_text)} 下"
+            "关键证据仍可判断，不因加速本身阻断结论。</p>"
+        )
+    else:
+        speed_impact_html = "<p><b>橙色风险：</b>疑似加速，但尚未形成速度影响结论，不能据此判负。</p>"
     advisory = report.get("advisory_assessment") or data.get("advisory_assessment") or {}
     advisory_assessment = advisory.get("assessment") or {}
     sop_recommendation = advisory.get("sop_recommendation") or {}
@@ -574,6 +619,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     quality = report.get("quality") or {}
     media_gallery = report.get("media_gallery") or {}
     evidence_package = report.get("evidence_package") or {}
+    video_deduplication = evidence_package.get("video_deduplication") or {}
     official_reference_status = evidence_package.get("official_reference_status") or {}
     order_baseline = evidence_package.get("order_baseline") or {}
     order_rows = "".join(
@@ -650,6 +696,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         parsed.get("object_continuity_assessment"), media_gallery, _evidence_items, _h
     )
     fulfillment_panel = render_fulfillment_reconciliation_panel(parsed.get("fulfillment_reconciliation"), _h)
+    claim_fact_panel = render_claim_fact_panel(parsed.get("claim_fact_assessment"), _h)
     minor_material_panel = render_minor_material_panel(parsed.get("minor_material_assessment"), _h)
     confidence_components_panel = render_confidence_components_panel(parsed.get("confidence_components"), _h)
     decision_policy_panel = _decision_policy_panel(parsed.get("decision_policy_audit") or data.get("decision_policy_audit"))
@@ -833,6 +880,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	    <div class="metric video-only"><small>查看画面</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
 	    <div class="metric"><small>补充图片</small><b>{_h(evidence_package.get("supplemental_images_sent") or "-")}</b></div>
 	    <div class="metric product-only"><small>官方参考图</small><b>{_h(evidence_package.get("official_reference_images_sent") or "-")}</b></div>
+	    <div class="metric video-only"><small>重复视频已跳过</small><b>{_h(video_deduplication.get("duplicate_count") or 0)}</b></div>
 	    {internal_metrics_html}
 		    <div class="metric"><small>报告用途</small><b>客服审核建议</b></div>
 		  </section>
@@ -865,6 +913,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     </div>
     <p><b>口径说明：</b>视频时间轴完整不等于争议商品全程连续可见；抽帧覆盖、媒体技术取证、开箱过程和商品连续性是四个独立维度。</p>
     <p><b>画面节奏判断：{_h(visual_playback_speed)}</b>。这是模型对画面节奏的观察，不是精确倍速测量。</p>
+    {speed_impact_html}
     <p><b>播放速度技术取证：</b></p><ul class="boundary-list">{playback_speed_evidence}</ul>
     <p><b>连续性：</b>{_h(video.get("continuity_reason") or video.get("reason") or "本轮没有输出明确连续性理由。")}</p>
     <p><b>剪辑/调包风险：</b>{_h(video.get("edit_or_cut_risk") or "-")} / {_h(video.get("swap_risk_level") or "-")}</p>
@@ -885,6 +934,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     {damage_causality_panel}
   {object_continuity_panel}
   {fulfillment_panel}
+  {claim_fact_panel}
 
   <section class="panel product-only">
     <div class="section-head"><h2>系统订单基线</h2><p>这里展示服务实际送审的受信任订单字段，不依赖模型复述。</p></div>

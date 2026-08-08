@@ -1,11 +1,34 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 
 class ModelAuthTest(unittest.TestCase):
+    def test_dotenv_uses_last_value_in_file_without_overriding_process_env(self):
+        from poc.visual_review_poc.local_video_triage_demo import load_env_file
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(
+                "GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com\n"
+                "GEMINI_API_BASE_URL=https://vod.bj.baidubce.com/v3/chat/gc\n",
+                encoding="utf-8",
+            )
+            with patch.dict("os.environ", {}, clear=True):
+                load_env_file(env_file)
+                self.assertEqual(
+                    os.environ["GEMINI_API_BASE_URL"],
+                    "https://vod.bj.baidubce.com/v3/chat/gc",
+                )
+            with patch.dict("os.environ", {"GEMINI_API_BASE_URL": "https://runtime.example"}, clear=True):
+                load_env_file(env_file)
+                self.assertEqual(os.environ["GEMINI_API_BASE_URL"], "https://runtime.example")
+
     def test_baidu_endpoint_uses_bearer_and_full_url_is_not_duplicated(self):
         from poc.visual_review_poc.model_auth import gemini_auth_headers, gemini_generate_endpoint
 
@@ -54,6 +77,22 @@ class ModelAuthTest(unittest.TestCase):
         self.assertNotIn("x-goog-api-key", channel["headers"])
         self.assertEqual(option["headers"]["Authorization"], "Bearer gateway-secret")
         self.assertTrue(option["endpoint"].endswith("/v1beta/models/gemini-3.5-flash:generateContent"))
+
+    def test_gemini_named_credentials_are_labeled_by_baidu_endpoint(self):
+        from poc.visual_review_poc.model_auth import gemini_channel_options
+
+        with patch.dict(
+            "os.environ",
+            {
+                "GEMINI_API_KEY": "baidu-secret",
+                "GEMINI_API_BASE_URL": "https://vod.bj.baidubce.com/v3/chat/gc",
+            },
+            clear=True,
+        ):
+            options = gemini_channel_options("gemini-3.5-flash-lite")
+
+        self.assertEqual([item["channel"] for item in options], ["baidu"])
+        self.assertEqual(options[0]["headers"]["Authorization"], "Bearer baidu-secret")
 
     def test_channels_follow_runtime_priority_and_bananarouter_uses_bearer(self):
         from poc.visual_review_poc.local_video_triage_demo import gemini_channels
@@ -354,6 +393,248 @@ class ModelAuthTest(unittest.TestCase):
 
         self.assertNotIn("temperature", local_payload["generationConfig"])
         self.assertNotIn("temperature", selection_payload["generationConfig"])
+
+    def test_gemini_native_payloads_use_rest_casing_and_structured_output(self):
+        from poc.visual_review_poc.local_video_triage_demo import build_payload
+        from poc.visual_review_poc.model_selection_e2e import gemini_payload
+
+        payloads = [
+            build_payload("system", "user", [], []),
+            gemini_payload(
+                "system",
+                "user",
+                {"frames": [], "supplemental_images": [], "official_reference_images": []},
+            ),
+        ]
+
+        for payload in payloads:
+            config = payload["generationConfig"]
+            self.assertEqual(config["responseMimeType"], "application/json")
+            self.assertEqual(config["responseSchema"]["type"], "object")
+            self.assertIn("frame_findings", config["responseSchema"]["required"])
+            self.assertIn("systemInstruction", payload)
+            serialized = str(payload)
+            self.assertNotIn("response_mime_type", serialized)
+            self.assertNotIn("system_instruction", serialized)
+
+    def test_gemini_frame_payload_uses_baidu_compatible_compact_schema(self):
+        from poc.visual_review_poc.model_selection_e2e import gemini_payload
+
+        payload = gemini_payload(
+            "system",
+            "user",
+            {"frames": [], "supplemental_images": [], "official_reference_images": []},
+        )
+
+        schema = payload["generationConfig"]["responseSchema"]
+        self.assertIn("frame_findings", schema["required"])
+        frame_required = set(schema["properties"]["frame_findings"]["items"]["required"])
+        self.assertTrue({"video_index", "global_frame_index"}.issubset(frame_required))
+        for duplicate_field in (
+            "supporting_evidence",
+            "challenging_evidence",
+            "audit_methods",
+            "visual_evidence_verdict",
+            "confidence_reason",
+            "model_limitations",
+        ):
+            self.assertNotIn(duplicate_field, schema["properties"])
+
+    def test_gemini_payload_can_attach_one_native_video_for_internal_ab(self):
+        from poc.visual_review_poc.model_selection_e2e import gemini_payload
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video = Path(temp_dir) / "evidence.mp4"
+            video.write_bytes(b"video-bytes")
+            payload = gemini_payload(
+                "system",
+                "user",
+                {
+                    "frames": [],
+                    "supplemental_images": [],
+                    "official_reference_images": [],
+                    "native_video": {
+                        "video_index": 1,
+                        "api_path": str(video),
+                        "api_mime_type": "video/mp4",
+                    },
+                },
+            )
+
+        parts = payload["contents"][0]["parts"]
+        video_parts = [item["inlineData"] for item in parts if "inlineData" in item]
+        self.assertEqual(len(video_parts), 1)
+        self.assertEqual(video_parts[0]["mimeType"], "video/mp4")
+        self.assertIn("native_video_1", str(parts))
+        native_schema = payload["generationConfig"]["responseSchema"]
+        self.assertIn(
+            "opening_video_compliance",
+            native_schema["properties"]["video_audit_conclusion"]["properties"],
+        )
+        for duplicate_field in (
+            "supporting_evidence",
+            "challenging_evidence",
+            "audit_methods",
+            "visual_evidence_verdict",
+            "confidence_reason",
+            "model_limitations",
+        ):
+            self.assertNotIn(duplicate_field, native_schema["properties"])
+
+    def test_opening_start_verification_uses_small_dedicated_schema(self):
+        from poc.visual_review_poc.model_selection_e2e import gemini_payload
+
+        payload = gemini_payload(
+            "system",
+            "user",
+            {
+                "frames": [],
+                "supplemental_images": [],
+                "official_reference_images": [],
+                "structured_business_context": {"analysis_mode": "opening_start_only"},
+            },
+        )
+
+        schema = payload["generationConfig"]["responseSchema"]
+        self.assertEqual(set(schema["required"]), {"result", "sealed_start", "evidence_refs", "reason"})
+        self.assertNotIn("frame_findings", schema["properties"])
+        self.assertEqual(payload["generationConfig"]["maxOutputTokens"], 1024)
+
+    def test_minor_material_modes_use_dedicated_compact_schemas(self):
+        from poc.visual_review_poc.model_selection_e2e import gemini_payload
+
+        expected_fields = {
+            "minor_material_inventory": {"coverage_ack", "material_observations"},
+            "minor_material_process_video": {"process_observations", "process_summary"},
+            "minor_material_consistency": {"coverage_ack", "consistency_check"},
+        }
+        for analysis_mode, fields in expected_fields.items():
+            with self.subTest(analysis_mode=analysis_mode):
+                payload = gemini_payload(
+                    "system",
+                    "user",
+                    {
+                        "frames": [],
+                        "supplemental_images": [],
+                        "official_reference_images": [],
+                        "structured_business_context": {"analysis_mode": analysis_mode},
+                    },
+                )
+                schema = payload["generationConfig"]["responseSchema"]
+                self.assertTrue(fields.issubset(schema["properties"]))
+                self.assertNotIn("frame_findings", schema["properties"])
+                self.assertLessEqual(payload["generationConfig"]["maxOutputTokens"], 4096)
+
+    def test_gemini_payload_can_reference_baidu_public_video_url(self):
+        from poc.visual_review_poc.model_selection_e2e import gemini_payload
+
+        payload = gemini_payload(
+            "system",
+            "user",
+            {
+                "frames": [],
+                "supplemental_images": [],
+                "official_reference_images": [],
+                "native_video": {
+                    "video_index": 1,
+                    "file_uri": "https://media.example.com/evidence.mp4?signature=short-lived",
+                    "api_mime_type": "video/mp4",
+                },
+            },
+        )
+
+        parts = payload["contents"][0]["parts"]
+        self.assertEqual(
+            [item["fileData"] for item in parts if "fileData" in item],
+            [{
+                "mimeType": "video/mp4",
+                "fileUri": "https://media.example.com/evidence.mp4?signature=short-lived",
+            }],
+        )
+        self.assertFalse(any("inlineData" in item for item in parts))
+
+    def test_external_native_video_url_skips_channels_without_declared_capability(self):
+        from poc.visual_review_poc import model_selection_e2e as selection
+
+        cfg = dict(selection.MODEL_CONFIGS["gemini35lite"])
+        case = {
+            "case_id": "native-url-routing",
+            "scenario": "product_damage",
+            "structured_business_context": {},
+            "frames": [],
+            "supplemental_images": [],
+            "official_reference_images": [],
+            "native_video": {
+                "video_index": 1,
+                "file_uri": "https://media.example.com/evidence.mp4",
+                "api_mime_type": "video/mp4",
+            },
+        }
+        options = [
+            {
+                "channel": "bananarouter",
+                "endpoint": "https://banana.example/gemini",
+                "headers": {},
+                "supports_external_file_uri": False,
+            },
+            {
+                "channel": "baidu",
+                "endpoint": "https://vod.bj.baidubce.com/gemini",
+                "headers": {},
+                "supports_external_file_uri": True,
+            },
+        ]
+        response = {
+            "ok": True,
+            "status_code": 200,
+            "latency_seconds": 0.1,
+            "attempt": 1,
+            "data": {
+                "candidates": [{"content": {"parts": [{"text": "{}"}]}}],
+                "usageMetadata": {},
+            },
+        }
+
+        with patch.object(selection, "gemini_request_options", return_value=options), patch.object(
+            selection, "post_with_retries", return_value=response
+        ) as post:
+            result = selection.call_model(cfg, case, timeout=30, retries=0)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_args.args[0], options[1]["endpoint"])
+        self.assertEqual(result["_channel_route_attempts"][0]["decision"], "skipped_unsupported_file_uri")
+
+    def test_gemini_schema_requires_meaningful_native_video_evidence(self):
+        from poc.visual_review_poc.gemini_response_schema import REVIEW_RESPONSE_SCHEMA
+
+        properties = REVIEW_RESPONSE_SCHEMA["properties"]
+        continuity = properties["object_continuity_assessment"]
+        damage = properties["damage_causality_assessment"]
+        finding = properties["frame_findings"]["items"]
+        video_audit = properties["video_audit_conclusion"]
+        opening = video_audit["properties"]["opening_video_compliance"]
+
+        self.assertIn("tracked_subjects", continuity["properties"])
+        self.assertIn("continuity_verdict", continuity["required"])
+        self.assertIn("damage_presence", damage["required"])
+        self.assertIn("claim_support", damage["required"])
+        self.assertIn("timestamp", finding["required"])
+        self.assertIn("subject_visibility", finding["required"])
+        self.assertIn("opening_video_compliance", video_audit["required"])
+        self.assertEqual(
+            set(opening["required"]),
+            {
+                "sealed_start",
+                "waybill_visible",
+                "single_take_continuity",
+                "issue_visible_in_continuous_opening",
+                "evidence_refs",
+                "result",
+            },
+        )
+        self.assertEqual(opening["properties"]["evidence_refs"]["type"], "array")
+        self.assertIn("field", opening["properties"]["evidence_refs"]["items"]["required"])
 
     def test_openai_compatible_payload_keeps_temperature(self):
         from poc.visual_review_poc import model_selection_e2e as selection

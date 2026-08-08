@@ -17,6 +17,9 @@ VALID_ORIGINS = {
 }
 VALID_EVIDENCE_LEVELS = {"direct", "indirect", "insufficient"}
 VALID_CLAIM_SUPPORT = {"supported", "not_supported", "insufficient"}
+VALID_APPEARANCE_DIFFERENCE = {"visible", "not_visible", "uncertain"}
+VALID_DEFECT_QUALIFICATION = {"confirmed", "not_qualified", "indeterminate"}
+VALID_SPECIAL_PRODUCT_RULE = {"not_required", "satisfied", "required_but_not_quantified"}
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -201,6 +204,15 @@ def normalize_damage_causality(value: Any) -> Dict[str, Any]:
         "origin_confidence": _float(source.get("origin_confidence")),
         "causal_evidence_level": _enum(source.get("causal_evidence_level"), VALID_EVIDENCE_LEVELS, "insufficient"),
         "claim_support": _enum(source.get("claim_support"), VALID_CLAIM_SUPPORT, "insufficient"),
+        "appearance_difference": _enum(
+            source.get("appearance_difference"), VALID_APPEARANCE_DIFFERENCE, "uncertain"
+        ),
+        "business_defect_qualification": _enum(
+            source.get("business_defect_qualification"), VALID_DEFECT_QUALIFICATION, "indeterminate"
+        ),
+        "special_product_rule": _enum(
+            source.get("special_product_rule"), VALID_SPECIAL_PRODUCT_RULE, "not_required"
+        ),
         "possible_origins": possible_origins,
         "alternative_explanations": _text_list(source.get("alternative_explanations")),
         "before_action_evidence": _evidence_list(source.get("before_action_evidence")),
@@ -341,6 +353,24 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
     aggregate_claim_support = best["claim_support"] if not conflicting else "insufficient"
     if claim_support_values == {"not_supported"}:
         aggregate_claim_support = "not_supported"
+    appearance_values = {item["appearance_difference"] for item in assessments}
+    qualification_values = {item["business_defect_qualification"] for item in assessments}
+    special_rule_values = {item["special_product_rule"] for item in assessments}
+    aggregate_appearance = (
+        "visible" if "visible" in appearance_values
+        else "not_visible" if appearance_values == {"not_visible"}
+        else "uncertain"
+    )
+    aggregate_qualification = (
+        next(iter(qualification_values)) if len(qualification_values) == 1 else "indeterminate"
+    )
+    aggregate_special_rule = (
+        "required_but_not_quantified"
+        if "required_but_not_quantified" in special_rule_values
+        else "satisfied" if special_rule_values == {"satisfied"}
+        else "not_required" if special_rule_values == {"not_required"}
+        else "required_but_not_quantified"
+    )
 
     return normalize_damage_causality(
         {
@@ -360,6 +390,9 @@ def aggregate_damage_causality(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]
                 )
             ),
             "claim_support": aggregate_claim_support,
+            "appearance_difference": aggregate_appearance,
+            "business_defect_qualification": aggregate_qualification,
+            "special_product_rule": aggregate_special_rule,
             "possible_origins": possible_origins,
             "alternative_explanations": list(dict.fromkeys(map(str, alternatives)))[:12],
             "cannot_conclude_reason": (

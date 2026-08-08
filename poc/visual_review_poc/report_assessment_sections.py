@@ -265,6 +265,18 @@ def render_fulfillment_reconciliation_panel(value: Any, escape: Callable[[Any], 
             rows.append(f"<li>{escape(name)}{quantity}{evidence_text}</li>")
         return "".join(rows) or f"<li>{escape(empty)}</li>"
 
+    warehouse = value.get("warehouse_verification") or {}
+    warehouse_status = {
+        "confirmed_missing": "确认漏发",
+        "confirmed_not_missing": "确认未漏发",
+    }.get(warehouse.get("status"), "未提供终核")
+    warehouse_cards = ""
+    if value.get("resolution_basis") == "warehouse_verification" and warehouse:
+        warehouse_cards = f"""
+      <article><small>判断依据</small><b>仓库终核</b></article>
+      <article><small>仓库结论</small><b>{escape(warehouse_status)}</b></article>
+      <article><small>核实编号</small><b>{escape(warehouse.get("verification_ref") or "未提供")}</b></article>"""
+
     return f"""
   <section class="panel fulfillment-panel">
     <div class="section-head"><h2>应发与视频展示清单对账</h2><p>订单基准、实际识别和未确认项分开表达；证据不完整不直接认定发错或漏发。</p></div>
@@ -274,6 +286,7 @@ def render_fulfillment_reconciliation_panel(value: Any, escape: Callable[[Any], 
       <article><small>物品是否全部展示</small><b>{escape("是" if value.get("all_items_displayed") else "否/未确认")}</b></article>
       <article><small>物品观察自评分</small><b>{escape(value.get("observation_confidence") if value.get("observation_confidence") is not None else "-")}</b></article>
       <article><small>对账置信度</small><b>{escape(value.get("confidence") if value.get("confidence") is not None else "-")}</b></article>
+      {warehouse_cards}
     </div>
     <div class="boundary-grid">
       <article class="boundary-card"><h3>应发清单</h3><ul class="boundary-list">{items("expected_items", "未提供应发清单。")}</ul></article>
@@ -283,6 +296,62 @@ def render_fulfillment_reconciliation_panel(value: Any, escape: Callable[[Any], 
     </div>
     <p><b>包裹覆盖：</b>{escape(value.get("package_coverage") or "未提供")}</p>
     <p><b>判断边界：</b>{escape(value.get("decision_boundary") or "最终业务处置仍需人工复核。")}</p>
+  </section>"""
+
+
+def render_claim_fact_panel(value: Any, escape: Callable[[Any], str]) -> str:
+    if not isinstance(value, dict):
+        return ""
+    status_labels = {
+        "supported": "支持",
+        "not_supported": "不支持",
+        "insufficient": "证据不足",
+        "verified": "已核验一致",
+        "failed": "核验冲突",
+        "matched": "场景匹配",
+        "mismatched": "场景不匹配",
+        "indeterminate": "尚不能确定",
+        "resolved_assembly_issue": "可复位装配问题",
+        "permanent_damage": "永久损伤",
+        "successful": "复装成功",
+        "not_tested": "未复装测试",
+    }
+    atomic_cards = []
+    for item in (value.get("atomic_claim_results") or [])[:20]:
+        if not isinstance(item, dict):
+            continue
+        atomic_cards.append(
+            '<article class="boundary-card">'
+            f'<h3>{escape(item.get("claim_id") or "未编号诉求")}</h3>'
+            f'<p><b>争议对象：</b>{escape(item.get("subject_ref") or "未绑定")}</p>'
+            f'<p><b>事实结论：</b>{escape(status_labels.get(item.get("support_status"), item.get("support_status") or "未给出"))}</p>'
+            f'<p>{escape(item.get("reason") or "本轮未给出单项理由。")}</p></article>'
+        )
+    summary_cards = []
+    for title, key, status_key in (
+        ("订单/包裹归属", "order_linkage", "status"),
+        ("诉求场景匹配", "scene_match", "status"),
+        ("装配与永久损伤", "assembly", "state"),
+    ):
+        item = value.get(key) or {}
+        if not isinstance(item, dict) or not item:
+            continue
+        status = item.get(status_key)
+        details = item.get("reason") or item.get("permanent_damage") or "本轮未给出补充说明。"
+        summary_cards.append(
+            '<article class="boundary-card">'
+            f'<h3>{escape(title)}</h3>'
+            f'<p><b>状态：</b>{escape(status_labels.get(status, status or "未给出"))}</p>'
+            f'<p>{escape(details)}</p></article>'
+        )
+    if not atomic_cards and not summary_cards:
+        return ""
+    return f"""
+  <section class="panel claim-fact-panel product-only">
+    <div class="section-head"><h2>原子诉求逐项核验</h2><p>每个诉求分别绑定商品对象和证据结论，整单标签不能覆盖单项差异。</p></div>
+    <div class="boundary-grid">{"".join(atomic_cards) or '<p class="muted">本轮没有形成可展示的原子诉求结果。</p>'}</div>
+    <h3>归属、场景与装配核验</h3>
+    <div class="boundary-grid">{"".join(summary_cards) or '<p class="muted">本轮没有额外核验结果。</p>'}</div>
   </section>"""
 
 

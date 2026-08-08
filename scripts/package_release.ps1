@@ -497,7 +497,7 @@ $deliveryEngineer = Join-Path $Stage "docs\delivery\engineer-onboarding.md"
 if (Test-Path $deliveryEngineer) { Remove-Item -LiteralPath $deliveryEngineer -Force }
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
-$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0806四场景与未成年人五类材料审核说明.html"
+$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0807黄金指南学习与审核能力更新说明.html"
 if (-not (Test-Path -LiteralPath $CustomerHtmlSource -PathType Leaf)) {
     throw "Customer delivery HTML is missing: $CustomerHtmlSource"
 }
@@ -603,7 +603,10 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\local_video_triage_demo.py",
     "poc\visual_review_poc\model_selection_e2e.py",
     "poc\visual_review_poc\model_auth.py",
+    "poc\visual_review_poc\gemini_response_schema.py",
+    "poc\visual_review_poc\media_deduplication.py",
     "poc\visual_review_poc\media_registry.py",
+    "poc\visual_review_poc\native_video_proxy.py",
     "poc\visual_review_poc\observability.py",
     "poc\visual_review_poc\minor_material_model_prompt.py",
     "poc\visual_review_poc\minor_material_pipeline.py",
@@ -621,7 +624,8 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\review_model_prompt.py",
     "poc\visual_review_poc\sample_evaluation.py",
     "poc\visual_review_poc\specialized_model_pass.py",
-    "poc\visual_review_poc\url_video_fetcher.py"
+    "poc\visual_review_poc\url_video_fetcher.py",
+    "poc\visual_review_poc\unified_model_pass.py"
 )
 
 foreach ($file in $RuntimeFiles) { Copy-RuntimeSource $file }
@@ -863,6 +867,8 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0807-guide-acceptance-20260807.html",
+    "甲方沟通交付文档\0807黄金指南学习与审核能力更新说明.html",
     "docs\delivery\mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
     "甲方沟通交付文档\0806四场景与未成年人五类材料审核说明.html",
     "docs\delivery\mitako-0805-blind-evidence-acceptance-20260805.html",

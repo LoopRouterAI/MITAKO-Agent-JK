@@ -1,0 +1,232 @@
+{
+  "label_isolation": "推理阶段不读取 annotation、reply 原文件、管理员消息或人工标签；只使用盲测包内清洗后的用户本人消息，本文件不计算命中率。",
+  "base_url": "http://127.0.0.1:7864",
+  "scenario": "wrong_item",
+  "fps": 1.0,
+  "out_of_frame_threshold_seconds": 2.0,
+  "results": [
+    {
+      "case_id": "CASE-393F7F77A639",
+      "ok": true,
+      "predicted_label": "review",
+      "confidence": 0.6,
+      "conclusion": "视频开箱流程展示了快递包裹和气泡膜外包装，但未完整拆解并特写展示最终到手实物的主体款式或特征，无法完全支撑发错货诉求。",
+      "workflow_recommendation": "request_more_material",
+      "human_review": {
+        "level": "not_required",
+        "reason_codes": [
+          "material_resubmission_available"
+        ],
+        "recommendation": "当前可直接向用户补充收集材料，无需仅因材料缺口先占用人工审核席位。"
+      },
+      "minor_material_assessment": null,
+      "material_gaps": [
+        "请补充订单应发商品与包裹的对应关系。",
+        "请补充本次提交的包裹与订单或物流单号的对应关系。",
+        "请补充随机款、赠品或替代规格等选款规则；如不适用，请明确声明不适用。"
+      ],
+      "damage_causality_assessment": null,
+      "object_continuity_assessment": {
+        "tracked_subjects": [
+          {
+            "subject_id": "shipping_package",
+            "description": "绿色快递防水袋",
+            "tracking_start": "00:00.00",
+            "tracking_end": "00:56.00",
+            "first_exposed_timestamp": "00:00.00",
+            "visibility_coverage": 1.0,
+            "out_of_frame_events": [],
+            "longest_out_of_frame_seconds": 0.0
+          },
+          {
+            "subject_id": "product_package",
+            "description": "气泡膜包裹的内包装",
+            "tracking_start": "00:56.00",
+            "tracking_end": "01:22.00",
+            "first_exposed_timestamp": "00:56.00",
+            "visibility_coverage": 0.9,
+            "out_of_frame_events": [],
+            "longest_out_of_frame_seconds": 0.0
+          },
+          {
+            "subject_id": "claimed_item",
+            "description": "争议商品（徽章）",
+            "tracking_start": "01:22.00",
+            "tracking_end": "01:22.00",
+            "first_exposed_timestamp": "01:22.00",
+            "visibility_coverage": 0.1,
+            "out_of_frame_events": [],
+            "longest_out_of_frame_seconds": 0.0
+          }
+        ],
+        "continuity_verdict": "continuous",
+        "longest_out_of_frame_seconds": 0.0,
+        "total_unobserved_seconds": 0.0,
+        "critical_events": [
+          {
+            "timestamp": "00:21.00",
+            "asset_ref": "native_video_1",
+            "fact": "快递面单特写清晰可见",
+            "global_frame_index": null,
+            "video_index": 1
+          },
+          {
+            "timestamp": "01:22.00",
+            "asset_ref": "native_video_1",
+            "fact": "气泡膜拆开，但未完全展现商品本体款式",
+            "global_frame_index": null,
+            "video_index": 1
+          }
+        ],
+        "longest_out_of_frame_lower_bound_seconds": null,
+        "longest_out_of_frame_upper_bound_seconds": null,
+        "out_of_frame_events": [],
+        "policy": {
+          "out_of_frame_warning_seconds": 2.0
+        }
+      },
+      "continuity_guard_reason": null,
+      "causality_guard_reason": null,
+      "pass_integrity_status": null,
+      "specialized_pass_guard_reason": null,
+      "video_audit_conclusion": {
+        "continuity_score": 0.85,
+        "continuity_reason": "视频从桌面快递袋静置状态开始拍摄，过程连续，无明显剪辑痕迹。",
+        "swap_risk_level": "low",
+        "edit_or_cut_risk": "无跳切或剪辑痕迹。",
+        "opening_integrity": "快递袋及气泡膜外包装保持连续拆解，但未完全展现商品本体。",
+        "playback_speed": "normal",
+        "sampling_fps": null,
+        "speed_review_impact": {
+          "status": "none",
+          "critical_evidence_observable": true,
+          "affected_review_items": [],
+          "evidence_refs": [],
+          "reason": "播放速度正常，不影响画面视检。"
+        },
+        "opening_video_compliance": {
+          "sealed_start": true,
+          "waybill_visible": true,
+          "single_take_continuity": true,
+          "issue_visible_in_continuous_opening": false,
+          "evidence_refs": [
+            {
+              "timestamp": "00:21.00",
+              "global_frame_index": null,
+              "video_index": 1
+            },
+            {
+              "timestamp": "01:22.00",
+              "global_frame_index": null,
+              "video_index": 1
+            },
+            {
+              "video_index": 1,
+              "global_frame_index": 1,
+              "timestamp": "00:00.00"
+            },
+            {
+              "video_index": 1,
+              "global_frame_index": 2,
+              "timestamp": "00:01.00"
+            }
+          ],
+          "result": "compliant",
+          "validated_fields": [
+            "sealed_start"
+          ],
+          "source": "hybrid_native_video_with_opening_start_verification"
+        }
+      },
+      "decision_policy_audit": {
+        "version": "2026-07-17.1",
+        "mode": "conservative_review",
+        "policy_ref": "",
+        "policy_source": "not_approved",
+        "requested_overrides_ignored": [],
+        "applied": false,
+        "rule_id": "",
+        "claim_scope": {
+          "claim_id": "",
+          "stage": "initial",
+          "issue_types": [],
+          "excluded_issue_types": [],
+          "active_claim_ids": [],
+          "split_status": "unresolved",
+          "ready": false
+        },
+        "evidence_gate": {
+          "video_present": true,
+          "continuity_verdict": "continuous",
+          "damage_presence": "uncertain",
+          "claim_support": "insufficient",
+          "damage_observability": "unknown",
+          "model_confidence": 0.6,
+          "media_forensics_status": "completed",
+          "media_forensics_risk_level": "low",
+          "supplemental_linkage_status": "not_provided"
+        },
+        "business_boundary": "该结果仅是审核分类建议，不自动执行拒绝、退款、补发、换货或最终定责。",
+        "reason": "未启用商品有伤规则分类建议。"
+      },
+      "inference_estimate": {
+        "input_tokens": 29992,
+        "output_tokens": 2523,
+        "total_tokens": 32515,
+        "estimated_usd": 0.015306,
+        "cost_status": "estimated",
+        "unknown_cost_calls": 0,
+        "route_fallback_count": 0,
+        "route_attempts": [],
+        "channel_route_attempts": [
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          }
+        ],
+        "total_frames": 0,
+        "main_review_frames": 0,
+        "total_model_calls": 2,
+        "segment_count": 1,
+        "concurrency": {},
+        "channels": {
+          "native_video": {
+            "model_calls": 1,
+            "repair_calls": 0,
+            "total_tokens": 0,
+            "estimated_usd": 0.0
+          },
+          "opening_start_verification": {
+            "model_calls": 1,
+            "repair_calls": 0,
+            "total_tokens": 0,
+            "estimated_usd": 0.0
+          }
+        },
+        "native_video": {
+          "status": "completed",
+          "technical_status": "success",
+          "status_code": 200,
+          "opening_start_verification_status": "success",
+          "transport": "inline_data"
+        },
+        "degraded_passes": {},
+        "boundary": "估算值用于容量与成本比较，不等同于供应商最终账单。"
+      },
+      "report": {
+        "requested": true,
+        "status": "ready",
+        "html_url": "/reports/agent_single_1786207616_2.html?expires=1786208516&sig=a5d07247ccf09f7766cfb7c00817ee8c0c7841f91733cd6523534c29f9e691de"
+      },
+      "diagnostics": null
+    }
+  ]
+}

@@ -166,6 +166,12 @@ Copy-Path "tests\reports\blind_0806_final_product_n1.json"
 Copy-Path "tests\reports\blind_0806_final_product_rn.json"
 Copy-Path "tests\reports\blind_0806_final_product_rp.json"
 Copy-Path "tests\reports\blind_0806_final_minor_m1.json"
+Copy-Path "tests\reports\review_0807_random_acceptance_latest.json"
+Copy-Path "tests\reports\review_0807_random_acceptance_latest.html"
+Copy-Path "tests\reports\0808-four-scenario-validation\PD-612691-final-0809-result.json"
+Copy-Path "tests\reports\0808-four-scenario-validation\WI-76139-final-0809-result.json"
+Copy-Path "tests\reports\0808-four-scenario-validation\MI-589330-final-0809-result.json"
+Copy-Path "tests\reports\0808-four-scenario-validation\MR-547198-final-0809c-result.json"
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
 Copy-LatestReport "auth_strict_*.html" "tests\reports\auth_strict_latest.html"
 Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_deployment_api_smoke_latest.json"
@@ -174,6 +180,14 @@ $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "docs\delivery\mitako-0807-guide-acceptance-20260807.html",
+    "甲方沟通交付文档\0807黄金指南学习与审核能力更新说明.html",
+    "我方内部开发文档\升级日志-2026-08-07-黄金指南与速度影响闭环.md",
+    "tests\reports\review_0807_random_acceptance_latest.json",
+    "tests\reports\0808-four-scenario-validation\PD-612691-final-0809-result.json",
+    "tests\reports\0808-four-scenario-validation\WI-76139-final-0809-result.json",
+    "tests\reports\0808-four-scenario-validation\MI-589330-final-0809-result.json",
+    "tests\reports\0808-four-scenario-validation\MR-547198-final-0809c-result.json",
     "docs\delivery\mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
     "甲方沟通交付文档\0806四场景与未成年人五类材料审核说明.html",
     "我方内部开发文档\升级日志-2026-08-06-四场景与五类材料闭环.md",

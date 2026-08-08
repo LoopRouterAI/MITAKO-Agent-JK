@@ -178,6 +178,16 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                     "api_path": str(sample_dir / "official.jpg"),
                 }],
                 "official_reference_status": {"status": "available", "available_count": 1},
+                "video_deduplication": {
+                    "submitted_count": 2,
+                    "unique_count": 1,
+                    "duplicate_count": 1,
+                    "duplicates": [{
+                        "kept": "customer-real-name.mp4",
+                        "ignored": "customer-copy.mp4",
+                        "sha256": "secret-hash",
+                    }],
+                },
                 "structured_business_context": {
                     "fulfillment_baseline": {
                         "baseline_version": "order_info_snapshot:test",
@@ -211,6 +221,9 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             baseline = response["agent_report"]["evidence_package"]["order_baseline"]
             self.assertEqual(baseline["expected_items"][0]["sku"], "SKU-001")
             self.assertEqual(baseline["tracking_ref"], "sha256:test")
+            dedupe = response["agent_report"]["evidence_package"]["video_deduplication"]
+            self.assertEqual(dedupe, {"submitted_count": 2, "unique_count": 1, "duplicate_count": 1})
+            self.assertNotIn("secret-hash", str(response["agent_report"]))
 
     def test_public_media_url_is_opaque_and_survives_registry_reload(self) -> None:
         workbench_server.RUNTIME_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
@@ -223,6 +236,18 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             self._assert_signed(url)
             self.assertTrue(urlsplit(url).path.startswith("/media-item/"))
             self.assertNotIn(media.name, url)
+            self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_registered_root_runtime_media_remains_available(self) -> None:
+        root_tmp = workbench_server.ROOT / "tmp"
+        root_tmp.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root_tmp) as temp_dir:
+            media = Path(temp_dir) / "report-evidence.jpg"
+            media.write_bytes(b"image")
+
+            url = workbench_server._media_url(media)
+
+            self._assert_signed(url)
             self.assertEqual(self.client.get(url).status_code, 200)
 
     def test_external_workbench_directory_media_remains_available(self) -> None:
@@ -240,13 +265,15 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.content, b"image")
 
-    def test_health_declares_inline_frame_transport_without_supplier_file_uri_dependency(self) -> None:
+    def test_health_declares_adaptive_native_video_and_frame_transport(self) -> None:
         payload = workbench_server.health()
         transport = payload["model_media_transport"]
 
-        self.assertEqual(transport["mode"], "inline_base64_images")
+        self.assertEqual(transport["mode"], "adaptive_native_video_or_inline_frames")
         self.assertIs(transport["supplier_file_uri_required"], False)
         self.assertIn("image/webp", transport["accepted_model_media_types"])
+        self.assertIn("video/mp4", transport["accepted_model_media_types"])
+        self.assertEqual(transport["native_video_max_unique_files"], 1)
 
     def test_technical_processing_incomplete_is_completed_transport_with_system_retry(self) -> None:
         self.assertTrue(workbench_server._structured_review_ok({
@@ -259,6 +286,83 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             "predicted_label": "review",
             "confidence": None,
         }))
+
+    def test_product_damage_public_projection_preserves_speed_and_opening_review_facts(self) -> None:
+        parsed = {
+            "damage_causality_assessment": {
+                "appearance_difference": "visible",
+                "business_defect_qualification": "indeterminate",
+                "special_product_rule": "required_but_not_quantified",
+            },
+            "video_audit_conclusion": {
+                "playback_speed": "accelerated",
+                "sampling_fps": 1.0,
+                "speed_review_impact": {
+                    "status": "uncertain",
+                    "critical_evidence_observable": False,
+                    "affected_review_items": ["opening_action"],
+                    "evidence_refs": [{
+                        "video_index": 1,
+                        "global_frame_index": 2,
+                        "timestamp": "00:01.00",
+                    }],
+                    "source": "segment_consensus",
+                },
+                "opening_video_compliance": {
+                    "sealed_start": True,
+                    "waybill_visible": False,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": None,
+                    "validated_fields": ["waybill_visible"],
+                    "result": "noncompliant",
+                },
+            },
+            "internal_prompt": "不得公开",
+        }
+
+        projected = workbench_server._public_parsed(parsed, "product_damage")
+        video = projected["video_audit_conclusion"]
+
+        self.assertEqual(video["sampling_fps"], 1.0)
+        self.assertEqual(video["speed_review_impact"]["status"], "uncertain")
+        self.assertEqual(video["opening_video_compliance"]["waybill_visible"], False)
+        self.assertEqual(video["opening_video_compliance"]["validated_fields"], ["waybill_visible"])
+        self.assertEqual(
+            projected["damage_causality_assessment"]["business_defect_qualification"],
+            "indeterminate",
+        )
+        self.assertNotIn("internal_prompt", projected)
+
+    def test_product_damage_public_projection_preserves_atomic_claim_facts(self) -> None:
+        projected = workbench_server._public_parsed({
+            "claim_fact_assessment": {
+                "atomic_claim_results": [{
+                    "claim_id": "CLM-1",
+                    "subject_ref": "SKU-1",
+                    "support_status": "supported",
+                    "evidence_refs": [{"video_index": 1, "global_frame_index": 8}],
+                    "reason": "争议部位可见。",
+                    "internal_chain": "不得公开",
+                }],
+                "order_linkage": {
+                    "status": "verified",
+                    "expected_package_fact": "极兔",
+                    "observed_package_fact": "极兔",
+                    "reason": "包裹一致。",
+                },
+                "scene_match": {"status": "matched", "claimed_scene": "product_damage"},
+                "assembly": {
+                    "state": "not_applicable",
+                    "reassembly_result": "not_tested",
+                    "permanent_damage": "insufficient",
+                },
+            },
+        }, "product_damage")
+
+        claim_facts = projected["claim_fact_assessment"]
+        self.assertEqual(claim_facts["atomic_claim_results"][0]["subject_ref"], "SKU-1")
+        self.assertEqual(claim_facts["order_linkage"]["status"], "verified")
+        self.assertNotIn("internal_chain", claim_facts["atomic_claim_results"][0])
 
     def test_minor_material_public_parsed_uses_strict_whitelist_and_redacts_identifiers(self) -> None:
         parsed = {
@@ -477,6 +581,14 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertNotIn("张三", serialized)
         self.assertNotIn("上海市浦东新区世纪大道100号", serialized)
         self.assertIn("[已脱敏]", serialized)
+
+    def test_redaction_preserves_opaque_media_url_that_resembles_identifier(self) -> None:
+        url = (
+            "/media-item/a988c0e7f6f72ff030325199142651e3"
+            "?expires=1786210503&sig=6c5a5cbba18afdb4fc3e07656b7a2b8560f6520dc79d362b4fd4173076d8a15f"
+        )
+
+        self.assertEqual(workbench_server._redact_minor_identifiers(url), url)
 
     def test_public_evidence_package_exposes_requested_and_effective_sampling_fps(self) -> None:
         payload = workbench_server._public_agent_report_payload(

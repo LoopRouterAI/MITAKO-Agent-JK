@@ -356,6 +356,29 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertNotIn("支持用户所述事实", advisory["assessment"]["conclusion"])
         self.assertEqual(result["agent_brief"]["conclusion"], advisory["assessment"]["conclusion"])
 
+    def test_readiness_codes_are_rendered_as_actionable_material_requests(self):
+        result = attach_advisory_assessment(
+            review_result(label="review", confidence=0.65),
+            {"scenario": "wrong_item"},
+            readiness={
+                "full_review_ready": False,
+                "missing_required": [
+                    "package_item_mapping",
+                    "submitted_package_mapping",
+                    "fulfillment_baseline.selection_rules_complete",
+                ],
+            },
+        )
+
+        self.assertEqual(
+            result["agent_report"]["parsed"]["material_gaps"],
+            [
+                "请补充订单应发商品与包裹的对应关系。",
+                "请补充本次提交的包裹与订单或物流单号的对应关系。",
+                "请补充随机款、赠品或替代规格等选款规则；如不适用，请明确声明不适用。",
+            ],
+        )
+
     def test_output_options_and_routing_thresholds_are_bounded(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
@@ -461,6 +484,7 @@ class AdvisoryAssessmentTest(unittest.TestCase):
                     "declared_image_count": 20,
                     "accepted_image_count": 20,
                     "processed_image_count": 20,
+                    "conclusion": "全量图片已处理，当前缺少支付来源与监护过程说明。",
                     "required_materials": [
                         "请补充说明未成年人如何获得或得知支付密码。",
                         "请补充说明监护人如何、何时发现消费。",
@@ -483,6 +507,10 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "not_required")
         self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
+        self.assertEqual(
+            advisory["assessment"]["conclusion"],
+            "全量图片已处理，当前缺少支付来源与监护过程说明。",
+        )
         self.assertEqual(advisory["human_review"]["reason_codes"], ["material_resubmission_available"])
         self.assertFalse(result["agent_report"]["parsed"]["human_required"])
         signal = next(item for item in advisory["signals"] if item["code"] == "minor_payment_process_evidence_gap")
@@ -515,6 +543,32 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["human_review"]["level"], "optional")
         self.assertIn("minor_low_age_process_verified", advisory["human_review"]["reason_codes"])
         self.assertNotIn("minor_payment_capability_risk", advisory["human_review"]["reason_codes"])
+
+    def test_minor_high_risk_without_confirmed_low_age_does_not_request_process_material(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="review",
+                confidence=0.82,
+                parsed_extra={"minor_material_assessment": {
+                    "declared_image_count": 20,
+                    "accepted_image_count": 20,
+                    "processed_image_count": 20,
+                    "payment_capability_risk": {
+                        "level": "high",
+                        "low_age": None,
+                        "process_evidence_status": "unresolved",
+                        "requires_review": False,
+                        "requires_more_material": False,
+                    },
+                }},
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
+        self.assertNotIn("minor_payment_process_evidence_gap", [item["code"] for item in advisory["signals"]])
 
     def test_minor_refund_policy_defaults_to_visual_review_without_external_verification(self):
         metadata = ReviewCaseMetadata.model_validate({

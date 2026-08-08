@@ -481,11 +481,12 @@ def sampling_plan(
         "continuity_policy": continuity_policy or {},
         "damage_causality_policy": damage_causality_policy or {},
     })
-    representative_main_enabled = (
+    unified_multitask_enabled = (
         scenario == "product_damage"
         and effective_continuity.get("force_dense_scan") is True
         and effective_causality.get("force_action_scan") is True
     )
+    representative_main_enabled = False
     main_review_frame_limit = max(
         24,
         min(int(os.getenv("REVIEW_PRODUCT_DAMAGE_MAIN_MAX_FRAMES", "48") or 48), 96),
@@ -494,15 +495,25 @@ def sampling_plan(
     segments = max(1, math.ceil(main_review_frames / frames_per_call))
     continuity_enabled = effective_continuity.get("force_dense_scan") is True and scenario in {
         "wrong_item", "missing_item", "product_damage"
-    }
+    } and not unified_multitask_enabled
     continuity_chunk_frames = max(
         12,
         min(int(os.getenv("REVIEW_CONTINUITY_FRAMES_PER_CALL", "24") or 24), 24),
     )
     continuity_segments = math.ceil(total_frames / continuity_chunk_frames) if continuity_enabled else 0
-    causality_enabled = scenario == "product_damage" and effective_causality.get("force_action_scan") is True
+    causality_enabled = (
+        scenario == "product_damage"
+        and effective_causality.get("force_action_scan") is True
+        and not unified_multitask_enabled
+    )
     causality_chunk_frames = max(8, min(int(effective_causality.get("dedicated_chunk_frames") or 20), 24))
     causality_segments = math.ceil(total_frames / causality_chunk_frames) if causality_enabled else 0
+    fallback_continuity_segments = (
+        math.ceil(total_frames / continuity_chunk_frames) if unified_multitask_enabled else 0
+    )
+    fallback_causality_segments = (
+        math.ceil(total_frames / causality_chunk_frames) if unified_multitask_enabled else 0
+    )
     estimated_total_calls = segments + continuity_segments + causality_segments
     worker_env = "REVIEW_MINOR_WORKERS" if scenario == "minor_refund" else "REVIEW_CHUNK_WORKERS"
     worker_default = "6" if scenario == "minor_refund" else "2"
@@ -515,7 +526,7 @@ def sampling_plan(
         "estimated_frames_per_video": frames_per_video,
         "estimated_total_frames": total_frames,
         "main_review_frames": main_review_frames,
-        "main_review_strategy": "uniform_representative" if representative_main_enabled else "all_sampled_frames",
+        "main_review_strategy": "unified_dense_multitask" if unified_multitask_enabled else "all_sampled_frames",
         "frames_per_model_call": frames_per_call,
         "continuity_frames_per_call": continuity_chunk_frames,
         "continuity_frames_per_call_by_transport": {
@@ -529,6 +540,15 @@ def sampling_plan(
             "damage_causality": causality_segments,
         },
         "estimated_total_model_calls": estimated_total_calls,
+        "unified_multitask": {
+            "enabled": unified_multitask_enabled,
+            "primary_transport": "gemini_native",
+            "fallback_policy": "仅补统一结果缺失的结构化维度",
+            "fallback_channel_calls": {
+                "object_continuity": fallback_continuity_segments,
+                "damage_causality": fallback_causality_segments,
+            },
+        },
         "effective_review_policies": {
             "continuity_policy": effective_continuity,
             "damage_causality_policy": effective_causality,
@@ -710,6 +730,15 @@ def _recommended_escalation(
         for item in signals
         if str(item.get("code") or "") not in reason_codes
     )
+    parsed = (
+        (review.get("agent_report") or {}).get("parsed")
+        if isinstance(review.get("agent_report"), dict)
+        else {}
+    ) or {}
+    video_audit = parsed.get("video_audit_conclusion") if isinstance(parsed, dict) else {}
+    video_audit = video_audit if isinstance(video_audit, dict) else {}
+    speed_impact = video_audit.get("speed_review_impact")
+    speed_impact = speed_impact if isinstance(speed_impact, dict) else {}
 
     actions: List[Dict[str, Any]] = []
     if workflow == "system_retry":
@@ -746,6 +775,27 @@ def _recommended_escalation(
                 "bounded": True,
                 "description": "仅在疑点可能通过更密抽帧获得新证据时建议强化，不因材料缺口重复烧模型。",
             })
+
+    speed_status = str(speed_impact.get("status") or "none").lower()
+    if (
+        video_audit.get("playback_speed") == "accelerated"
+        and speed_status in {"uncertain", "material"}
+        and current_fps < 2.0
+        and workflow != "request_more_material"
+    ):
+        sampling_action = next(
+            (item for item in actions if item.get("type") == "increase_sampling_strength"),
+            None,
+        )
+        if sampling_action is None:
+            sampling_action = {"type": "increase_sampling_strength"}
+            actions.append(sampling_action)
+        sampling_action.update({
+            "target_preset": "forensic",
+            "target_fps": 2.0,
+            "bounded": True,
+            "description": "疑似加速使关键节点在当前抽帧密度下无法判断，建议受控提升到 2 FPS 强化复核；不因加速本身判负。",
+        })
 
     return {
         "recommended": bool(actions),
@@ -1073,7 +1123,7 @@ def contract() -> Dict[str, Any]:
         "scenario_input_readiness": {
             "wrong_item": "需要可唯一确定应收商品的版本化订单基准、显式抽赏规则状态、包裹商品映射和已提交包裹归属；SKU 优先，但可唯一商品组合可替代。",
             "product_damage": "SKU/商品主数据为推荐增信字段，不是识别明显损伤或审核视频连续性的硬门槛。",
-            "missing_item": "需要完整应发清单、显式赠品/抽赏规则状态、包裹商品映射、证据覆盖和全部应发包裹已签收快照。",
+            "missing_item": "通常需要完整应发清单、规则状态、包裹映射、证据覆盖和签收快照；甲方提供可追溯仓库终核时，可直接采用该终态。",
             "opening_continuity": "独立于 SKU，按快递包装、商品包装和争议商品分别跟踪离镜时间线。",
         },
         "business_fields": [
@@ -1089,6 +1139,13 @@ def contract() -> Dict[str, Any]:
             "model_input": False,
             "automatic_rejection_allowed": False,
             "privacy": "只接收最小化聚合统计，不接收历史对话正文、手机号、证件号或其他身份明文。",
+        },
+        "warehouse_verification_policy": {
+            "field": "fulfillment_baseline.warehouse_verification",
+            "source": "customer_warehouse",
+            "terminal_statuses": ["confirmed_missing", "confirmed_not_missing"],
+            "required_fields": ["status", "source", "verification_ref"],
+            "trust_boundary": "仅甲方提供且可追溯的仓库终核可覆盖历史待核实备注；模型推断和 pending 状态均不得覆盖证据门禁。",
         },
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",

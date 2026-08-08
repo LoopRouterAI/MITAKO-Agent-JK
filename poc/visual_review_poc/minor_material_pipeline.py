@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 from poc.visual_review_poc.model_catalog import summarize_cost_observability
@@ -57,13 +59,14 @@ CONSISTENCY_FIELDS = {
     ),
     "commitment_signatures": (
         "guardian_signer", "minor_signer", "signature_presence", "signature_method", "field_alignment",
+        "commitment_content", "refund_scope", "recipient_information", "signed_date",
     ),
     "order_payment": (
         "order_reference", "payer_identity", "amount", "transaction_scope", "commitment_amount",
     ),
     "mobile_realname": (
         "subscriber_identity", "account_mobile", "invoice_identity", "invoice_phone",
-        "number_status", "ownership_proof",
+        "number_status", "ownership_proof", "guardian_phone_holder",
     ),
 }
 CONSISTENCY_STATUS = {"matched", "mismatched", "uncertain", "not_assessed"}
@@ -104,6 +107,10 @@ CONSISTENCY_FIELD_LABELS = {
     "signature_presence": "双方签字是否齐全",
     "signature_method": "签字方式",
     "field_alignment": "承诺书字段位置",
+    "commitment_content": "完整承诺内容",
+    "refund_scope": "退款范围",
+    "recipient_information": "收款信息",
+    "signed_date": "签署日期",
     "order_reference": "订单编号",
     "payer_identity": "付款人身份",
     "amount": "订单金额",
@@ -115,6 +122,7 @@ CONSISTENCY_FIELD_LABELS = {
     "invoice_phone": "发票业务手机号",
     "number_status": "手机号状态",
     "ownership_proof": "手机号归属证明",
+    "guardian_phone_holder": "申请监护人手机号归属",
 }
 CONSISTENCY_FIELD_REQUIRED_MATERIALS = {
     "payment_password_access": "请补充说明未成年人如何获得或得知支付密码。",
@@ -124,29 +132,76 @@ CONSISTENCY_FIELD_REQUIRED_MATERIALS = {
     "signature_presence": "请重新提交包含双方亲笔签名的退款承诺书。",
     "signature_method": "请重新提交包含双方亲笔签名的退款承诺书，电脑录入姓名不能替代签名。",
     "field_alignment": "请重新提交字段填写位置正确且未涂改的退款承诺书。",
+    "commitment_content": "请重新提交包含完整承诺内容的退款承诺书。",
+    "refund_scope": "请重新提交明确退款范围的完整退款承诺书。",
+    "recipient_information": "请重新提交收款信息完整的退款承诺书。",
+    "signed_date": "请重新提交填写签署日期的完整退款承诺书。",
     "commitment_amount": "请重新提交金额与订单可退款范围一致且未涂改的退款承诺书。",
     "invoice_phone": "请补充显示平台绑定业务手机号的运营商发票或完整开票视频。",
     "number_status": "请补充能够核验号码当前状态的运营商材料；如已注销，请补销户或原号码归属证明。",
     "ownership_proof": "请补充手机号实名归属材料；如已注销，请补销户或原号码归属证明；支付截图不能替代手机号实名归属材料。",
+    "guardian_phone_holder": "手机号实名归属主体必须是本案申请监护人；请补充申请监护人的号码归属材料。",
+}
+CONSISTENCY_FIELD_GROUPS = {
+    "relationship_link": "guardian_relationship",
+    "applicant_guardian_role": "guardian_relationship",
+    "signature_presence": "commitment_signatures",
+    "signature_method": "commitment_signatures",
+    "invoice_phone": "mobile_ownership",
+    "number_status": "mobile_ownership",
+    "ownership_proof": "mobile_ownership",
+    "guardian_phone_holder": "mobile_ownership",
+}
+CONSISTENCY_GROUP_REQUIRED_MATERIALS = {
+    "guardian_relationship": "如申请人为兄弟姐妹等非法定监护人，不能直接代办；请补同一本户口本直接关系页、出生证明、父母关系或合法监护证明。",
+    "commitment_signatures": "请重新提交包含双方亲笔签名的退款承诺书；电脑录入姓名不能替代签名。",
+    "mobile_ownership": "请补充申请监护人的运营商手机号实名归属材料，需显示平台绑定业务手机号并可核验号码当前状态；如号码已注销，请补销户或原号码归属证明；支付截图不能替代手机号实名归属材料。",
+}
+CONSISTENCY_REQUIREMENTS = {
+    "identity_age": "identity",
+    "guardian_relationship": "relationship",
+    "commitment_signatures": "commitment",
+    "order_payment": "payment",
+    "mobile_realname": "mobile_realname",
+}
+UNCERTAIN_ACTIONABLE_FIELDS = {
+    "signature_presence",
+    "signature_method",
+    "invoice_phone",
+    "number_status",
+    "ownership_proof",
+    "guardian_phone_holder",
 }
 
 
-def _required_materials(field_consistency: Dict[str, Any]) -> List[str]:
-    required: List[str] = []
+def _required_materials(
+    field_consistency: Dict[str, Any],
+    missing_requirement_ids: set[str] | None = None,
+) -> List[str]:
+    required: Dict[str, str] = {}
     low_age_fields = {"payment_password_access", "guardian_discovery_process"}
+    missing_requirement_ids = missing_requirement_ids or set()
     for check in field_consistency.get("checks") or []:
-        low_age_risk = check.get("low_age") is True or check.get("payment_capability_risk") == "high"
+        if CONSISTENCY_REQUIREMENTS.get(str(check.get("check_id") or "")) in missing_requirement_ids:
+            continue
+        low_age_risk = check.get("low_age") is True
         for field in check.get("field_results") or []:
             field_name = str(field.get("field_name") or "")
             instruction = CONSISTENCY_FIELD_REQUIRED_MATERIALS.get(field_name)
+            status = str(field.get("status") or "")
+            has_evidence = bool(field.get("evidence_image_indices"))
+            uncertain_actionable = status == "uncertain" and (
+                (field_name in low_age_fields and low_age_risk)
+                or (field_name in UNCERTAIN_ACTIONABLE_FIELDS and has_evidence)
+            )
             if (
-                field.get("status") in {"mismatched", "uncertain"}
+                (status == "mismatched" or uncertain_actionable)
                 and instruction
                 and (field_name not in low_age_fields or low_age_risk)
-                and instruction not in required
             ):
-                required.append(instruction)
-    return required
+                group = CONSISTENCY_FIELD_GROUPS.get(field_name, field_name)
+                required.setdefault(group, CONSISTENCY_GROUP_REQUIRED_MATERIALS.get(group, instruction))
+    return list(required.values())
 
 
 def _consistency_message(check_id: str, status: str, field_rows: List[Dict[str, Any]]) -> str:
@@ -171,14 +226,29 @@ def _chunks(items: Sequence[Dict[str, Any]], size: int) -> List[List[Dict[str, A
     return [list(items[index:index + size]) for index in range(0, len(items), size)]
 
 
+def _safe_metric_int(value: Any, default: int = 0) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _safe_metric_float(value: Any, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(0.0, parsed) if math.isfinite(parsed) else default
+
+
 def _metric_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
-        "model_calls": sum(int(item.get("_model_calls") or 1) for item in items),
-        "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in items), 2),
-        "input_tokens": sum(int((item.get("usage") or {}).get("input_tokens") or 0) for item in items),
-        "output_tokens": sum(int((item.get("usage") or {}).get("output_tokens") or 0) for item in items),
-        "total_tokens": sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in items),
-        "estimated_usd": round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in items), 6),
+        "model_calls": sum(_safe_metric_int(item.get("_model_calls"), 1) for item in items),
+        "model_latency_seconds_sum": round(sum(_safe_metric_float(item.get("latency_seconds")) for item in items), 2),
+        "input_tokens": sum(_safe_metric_int((item.get("usage") or {}).get("input_tokens")) for item in items),
+        "output_tokens": sum(_safe_metric_int((item.get("usage") or {}).get("output_tokens")) for item in items),
+        "total_tokens": sum(_safe_metric_int((item.get("usage") or {}).get("total_tokens")) for item in items),
+        "estimated_usd": round(sum(_safe_metric_float((item.get("cost") or {}).get("estimated_usd")) for item in items), 6),
     }
 
 
@@ -205,7 +275,7 @@ def _merge_semantic_attempts(first: Dict[str, Any], second: Dict[str, Any]) -> D
             except (TypeError, ValueError):
                 continue
     usage = {
-        key: sum(int((item.get("usage") or {}).get(key) or 0) for item in (first, second))
+        key: sum(_safe_metric_int((item.get("usage") or {}).get(key)) for item in (first, second))
         for key in ("input_tokens", "output_tokens", "total_tokens")
     }
     cost_observability = summarize_cost_observability([first, second])
@@ -220,12 +290,12 @@ def _merge_semantic_attempts(first: Dict[str, Any], second: Dict[str, Any]) -> D
         "usage": usage,
         "cost": {
             "estimated_usd": round(
-                sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in (first, second)),
+                sum(_safe_metric_float((item.get("cost") or {}).get("estimated_usd")) for item in (first, second)),
                 6,
             )
         },
-        "latency_seconds": round(sum(float(item.get("latency_seconds") or 0) for item in (first, second)), 2),
-        "_model_calls": int(first.get("_model_calls") or 1) + int(second.get("_model_calls") or 1),
+        "latency_seconds": round(sum(_safe_metric_float(item.get("latency_seconds")) for item in (first, second)), 2),
+        "_model_calls": _safe_metric_int(first.get("_model_calls"), 1) + _safe_metric_int(second.get("_model_calls"), 1),
     }
 
 
@@ -446,6 +516,12 @@ def _sop_usable(observation: Dict[str, Any]) -> bool:
 
 def _sop_present(observation: Dict[str, Any]) -> bool:
     document_types = set(observation.get("document_types") or [])
+    if "order_payment_proof" in document_types:
+        return (
+            observation.get("readability") in {"clear", "partial"}
+            and observation.get("document_state") not in {"blank_template", "example"}
+            and observation.get("sop_eligibility") != "invalid"
+        )
     strict_mobile = bool(document_types.intersection({"mobile_realname_proof", "carrier_invoice"}))
     if strict_mobile:
         return (
@@ -693,6 +769,7 @@ def _normalize_consistency_checks(
         tamper_risks = []
         payment_capability_risks = []
         low_age_values: List[bool] = []
+        age_band_values: List[str] = []
         risk_reason_codes = set()
         tamper_evidence_indices: set[int] = set()
         for result in check_results:
@@ -704,6 +781,9 @@ def _normalize_consistency_checks(
             )
             if isinstance(raw.get("low_age"), bool):
                 low_age_values.append(raw["low_age"])
+            age_band = str(raw.get("age_band") or "unknown")
+            if age_band in {"under_10", "10_to_17", "18_or_over", "unknown"}:
+                age_band_values.append(age_band)
             expected_indices = {
                 int(value)
                 for value in (result.get("_expected_image_indices") or (parsed.get("coverage_ack") or {}).get("expected_image_indices") or [])
@@ -801,6 +881,21 @@ def _normalize_consistency_checks(
             status = "matched"
         else:
             status = "uncertain"
+        age_band = (
+            age_band_values[0]
+            if age_band_values and len(set(age_band_values)) == 1
+            else "unknown"
+        )
+        raw_low_age = (
+            low_age_values[0]
+            if low_age_values and len(set(low_age_values)) == 1
+            else None
+        )
+        low_age = (
+            True if age_band == "under_10" and raw_low_age is True
+            else False if age_band in {"10_to_17", "18_or_over"} and raw_low_age is False
+            else None
+        )
         normalized[check_id] = {
             "check_id": check_id,
             "status": status,
@@ -812,14 +907,11 @@ def _normalize_consistency_checks(
             "tamper_evidence_image_indices": sorted(tamper_evidence_indices),
             "coverage_complete": coverage_ok,
             "segment_count": len(check_results),
-            "low_age": (
-                low_age_values[0]
-                if low_age_values and len(set(low_age_values)) == 1
-                else None
-            ),
+            "age_band": age_band,
+            "low_age": low_age,
             "payment_capability_risk": (
-                "high" if "high" in payment_capability_risks
-                else "none" if payment_capability_risks and set(payment_capability_risks) == {"none"}
+                "high" if low_age is True and "high" in payment_capability_risks
+                else "none" if low_age is False or payment_capability_risks and set(payment_capability_risks) == {"none"}
                 else "unknown"
             ),
         }
@@ -889,7 +981,12 @@ def aggregate_minor_material_results(
     coverage_ratio = round(len(processed_indices) / max(declared_image_count, 1), 4)
     checklist = _checklist(observations, coverage_complete)
     field_consistency = _normalize_consistency_checks(consistency_results, consistency_failures)
-    required_materials = _required_materials(field_consistency)
+    missing_requirement_ids = {
+        item["requirement_id"]
+        for item in checklist
+        if item["status"] == "not_observed_after_full_scan"
+    }
+    required_materials = _required_materials(field_consistency, missing_requirement_ids)
     consistency_by_id = {item["check_id"]: item for item in field_consistency["checks"]}
     consistency_status_labels = {
         "matched": "未发现明显矛盾",
@@ -945,10 +1042,9 @@ def aggregate_minor_material_results(
         and all(status == "matched" for status in payment_process_statuses.values())
     )
     low_age = identity_check.get("low_age") if isinstance(identity_check.get("low_age"), bool) else None
-    model_payment_risk = str(identity_check.get("payment_capability_risk") or "unknown")
     payment_process_gap = (
         not payment_process_matched
-        and (low_age is True or model_payment_risk == "high")
+        and low_age is True
     )
     payment_process_evidence_status = "matched" if payment_process_matched else "unresolved"
     payment_capability_level = (
@@ -974,6 +1070,16 @@ def aggregate_minor_material_results(
     authoritative_required = policy["authoritative_verification"] == "required"
     authenticity = _authenticity_assessment(case, observations, field_consistency)
     authenticity_blocked = bool(authenticity["blocks_visual_precheck"])
+    commitment_completeness_gap = any(
+        field.get("field_name") in {"commitment_content", "refund_scope", "recipient_information", "signed_date"}
+        and field.get("status") in {"uncertain", "not_assessed"}
+        for field in (consistency_by_id.get("commitment_signatures") or {}).get("field_results") or []
+    )
+    guardian_phone_holder_gap = any(
+        field.get("field_name") == "guardian_phone_holder"
+        and field.get("status") in {"uncertain", "not_assessed"}
+        for field in (consistency_by_id.get("mobile_realname") or {}).get("field_results") or []
+    )
 
     if coverage_complete and field_consistency["verdict"] == "mismatched":
         predicted_label = "negative"
@@ -983,6 +1089,22 @@ def aggregate_minor_material_results(
         readiness = "visual_conflict_requires_review"
         visual_precheck_status = "failed"
         conclusion = "可见字段存在明确冲突，当前资料不支持继续通过初审；请回看标红图片。"
+    elif coverage_complete and present_count == len(checklist) and commitment_completeness_gap:
+        predicted_label = "review"
+        decision = "request_more_material"
+        system_yes_no = "REVIEW"
+        confidence = 0.72
+        readiness = "needs_complete_commitment"
+        visual_precheck_status = "incomplete"
+        conclusion = "退款承诺书的承诺内容、退款范围、收款信息或签署日期尚未完整确认；请补交字段完整的承诺书。"
+    elif coverage_complete and present_count == len(checklist) and guardian_phone_holder_gap:
+        predicted_label = "review"
+        decision = "request_more_material"
+        system_yes_no = "REVIEW"
+        confidence = 0.72
+        readiness = "needs_guardian_phone_ownership"
+        visual_precheck_status = "incomplete"
+        conclusion = "手机号实名材料尚未确认号码属于本案申请监护人；请补充申请监护人的号码归属材料。"
     elif coverage_complete and present_count == len(checklist) and authenticity_blocked:
         predicted_label = "review"
         decision = "manual_review"
@@ -1020,6 +1142,8 @@ def aggregate_minor_material_results(
         visual_precheck_status = "incomplete"
         missing_labels = "、".join(item["label"] for item in not_observed)
         conclusion = f"全量图片已处理，当前缺少可按 SOP 采信的{missing_labels}；请只补充这些材料。"
+        if required_materials:
+            conclusion += " 已提交材料另有字段待补正，详见材料缺口清单。"
     elif payment_process_gap:
         predicted_label = "review"
         decision = "request_more_material"
@@ -1062,7 +1186,11 @@ def aggregate_minor_material_results(
     material_gaps = [
         item["rule_note"]
         if item["requirement_id"] == "relationship"
-        else f"请补充：{item['label']}。已识别的空白模板、示例图或辅助截图不能替代该必交材料。"
+        else (
+            "请补充申请监护人的运营商绑定手机号实名归属证明，需显示平台绑定业务手机号；如号码已注销，请补销户或原号码归属证明；支付截图不能替代手机号实名归属材料。"
+            if item["requirement_id"] == "mobile_realname"
+            else f"请补充：{item['label']}。已识别的空白模板、示例图或辅助截图不能替代该必交材料。"
+        )
         for item in not_observed
     ]
     material_gaps.extend(item for item in required_materials if item not in material_gaps)
@@ -1262,11 +1390,11 @@ def run_minor_material_pipeline(
     workers: int,
 ) -> Dict[str, Any]:
     wall_started = time.time()
-    effective_workers = max(1, min(int(workers or 1), 8))
+    effective_workers = max(1, min(_safe_metric_int(workers, 1), 8))
     images = list(case.get("supplemental_images") or [])
     frames = list(case.get("frames") or [])
-    image_batch_size = max(1, min(int(os.getenv("REVIEW_MINOR_IMAGE_BATCH_SIZE", "4") or 4), 6))
-    frame_batch_size = max(1, min(int(case.get("model_frames_per_call") or 24), 24))
+    image_batch_size = max(1, min(_safe_metric_int(os.getenv("REVIEW_MINOR_IMAGE_BATCH_SIZE", "4"), 4), 6))
+    frame_batch_size = max(1, min(_safe_metric_int(case.get("model_frames_per_call"), 24), 24))
     image_batches = _chunks(images, image_batch_size)
     frame_batches = _chunks(frames, frame_batch_size)
     jobs: List[Tuple[str, int, List[Dict[str, Any]]]] = [
@@ -1282,6 +1410,12 @@ def run_minor_material_pipeline(
     image_metric_results: List[Dict[str, Any]] = []
     video_metric_results: List[Dict[str, Any]] = []
     consistency_metric_results: List[Dict[str, Any]] = []
+    recovery_call_budget = max(
+        0,
+        min(_safe_metric_int(os.getenv("REVIEW_MINOR_RECOVERY_CALL_BUDGET", "16"), 16), 32),
+    )
+    recovery_calls_used = 0
+    recovery_lock = Lock()
 
     def review_job(kind: str, index: int, batch: List[Dict[str, Any]]) -> Tuple[str, int, List[int], Dict[str, Any]]:
         batch_case = dict(case)
@@ -1314,7 +1448,12 @@ def run_minor_material_pipeline(
         batch_case["structured_business_context"] = structured
         result = invoke(batch_case)
 
-        def invoke_repair(retry_case: Dict[str, Any]) -> Dict[str, Any]:
+        def invoke_repair(retry_case: Dict[str, Any]) -> Dict[str, Any] | None:
+            nonlocal recovery_calls_used
+            with recovery_lock:
+                if recovery_calls_used >= recovery_call_budget:
+                    return None
+                recovery_calls_used += 1
             try:
                 return invoke(retry_case)
             except Exception as exc:
@@ -1325,7 +1464,11 @@ def run_minor_material_pipeline(
                 }
 
         if kind == "image" and result.get("status") == "success":
-            schema_retries = max(0, min(int(os.getenv("REVIEW_MINOR_SCHEMA_RETRIES", "2") or 2), 2))
+            try:
+                schema_retries = int(os.getenv("REVIEW_MINOR_SCHEMA_RETRIES", "1") or 1)
+            except ValueError:
+                schema_retries = 1
+            schema_retries = max(0, min(schema_retries, 1))
             for retry_index in range(schema_retries):
                 missing = sorted(set(indices) - _result_observed_indices(result))
                 if not missing:
@@ -1339,11 +1482,14 @@ def run_minor_material_pipeline(
                     "instruction": "上次响应遗漏了图片编号；本次必须逐张返回全部 expected_image_indices，仍不得输出任何个人信息。",
                 }
                 retry_case["structured_business_context"] = retry_structured
-                result = _merge_semantic_attempts(result, invoke_repair(retry_case))
+                repair_result = invoke_repair(retry_case)
+                if repair_result is None:
+                    break
+                result = _merge_semantic_attempts(result, repair_result)
             missing = sorted(set(indices) - _result_observed_indices(result))
             images_by_index = {int(item["image_index"]): item for item in batch}
             for image_index in missing:
-                for recovery_index in range(schema_retries + 1):
+                for recovery_index in range(1):
                     retry_case = dict(batch_case)
                     retry_case["supplemental_images"] = [images_by_index[image_index]]
                     retry_structured = dict(structured)
@@ -1355,7 +1501,10 @@ def run_minor_material_pipeline(
                         "instruction": "批量响应持续遗漏该图片；本次只审核这一张，并必须返回该图片编号的受控分类结果。",
                     }
                     retry_case["structured_business_context"] = retry_structured
-                    result = _merge_semantic_attempts(result, invoke_repair(retry_case))
+                    repair_result = invoke_repair(retry_case)
+                    if repair_result is None:
+                        break
+                    result = _merge_semantic_attempts(result, repair_result)
                     if image_index in _result_observed_indices(result):
                         break
         result.setdefault("_model_calls", 1)
@@ -1383,9 +1532,7 @@ def run_minor_material_pipeline(
 
     preliminary = aggregate_minor_material_results(case, image_rows, image_failures, video_results, video_failures)
     preliminary_assessment = preliminary["minor_material_assessment"]
-    if preliminary_assessment["coverage_complete"] and all(
-        item["status"] == "present" for item in preliminary_assessment["checklist"]
-    ):
+    if preliminary_assessment["coverage_complete"]:
         consistency_jobs = _consistency_image_jobs(preliminary_assessment["material_inventory"], images)
 
         def review_consistency(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -1456,10 +1603,10 @@ def run_minor_material_pipeline(
     )
     billed_results = image_metric_results + video_metric_results + consistency_metric_results
     usage = {
-        key: sum(int((item.get("usage") or {}).get(key) or 0) for item in billed_results)
+        key: sum(_safe_metric_int((item.get("usage") or {}).get(key)) for item in billed_results)
         for key in ("input_tokens", "output_tokens", "total_tokens")
     }
-    cost = round(sum(float((item.get("cost") or {}).get("estimated_usd") or 0) for item in billed_results), 6)
+    cost = round(sum(_safe_metric_float((item.get("cost") or {}).get("estimated_usd")) for item in billed_results), 6)
     cost_observability = summarize_cost_observability(billed_results)
     failed_results = [item for item in billed_results if item.get("status") != "success"]
     first_status_code = next((item.get("status_code") for item in failed_results if item.get("status_code")), None)
@@ -1478,7 +1625,7 @@ def run_minor_material_pipeline(
         "error_type": next(iter(failure_types)) if len(failure_types) == 1 else "",
         "_channel_route_attempts": channel_route_attempts,
         "latency_seconds": round(time.time() - wall_started, 2),
-        "model_latency_seconds_sum": round(sum(float(item.get("latency_seconds") or 0) for item in billed_results), 2),
+        "model_latency_seconds_sum": round(sum(_safe_metric_float(item.get("latency_seconds")) for item in billed_results), 2),
         "usage": usage,
         "cost": {"estimated_usd": cost},
         **cost_observability,
@@ -1488,7 +1635,9 @@ def run_minor_material_pipeline(
             "segment_count": len(image_batches) + len(frame_batches) + len(consistency_jobs),
             "frames_per_segment": frame_batch_size,
             "total_frames": len(frames),
-            "total_model_calls": sum(int(item.get("_model_calls") or 1) for item in billed_results),
+            "total_model_calls": sum(_safe_metric_int(item.get("_model_calls"), 1) for item in billed_results),
+            "recovery_call_budget": recovery_call_budget,
+            "recovery_calls_used": recovery_calls_used,
             "channels": {
                 "minor_material_inventory": _metric_summary(image_metric_results),
                 "minor_process_video": _metric_summary(video_metric_results),

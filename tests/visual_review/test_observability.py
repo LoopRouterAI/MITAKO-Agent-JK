@@ -2,11 +2,29 @@
 from __future__ import annotations
 
 import json
+import time
 import unittest
 from unittest.mock import patch
 
 
 class VisualObservabilityTest(unittest.TestCase):
+    def test_expired_case_deadline_blocks_http_attempt(self):
+        from poc.visual_review_poc import model_selection_e2e
+
+        with patch.object(model_selection_e2e.httpx, "Client") as client:
+            result = model_selection_e2e.post_with_retries(
+                "https://example.com/v1/models/demo:generateContent",
+                {},
+                {},
+                timeout=180,
+                retries=2,
+                deadline_at=time.monotonic() - 1,
+            )
+
+        client.assert_not_called()
+        self.assertEqual(result["error_type"], "deadline")
+        self.assertEqual(result["attempt"], 0)
+
     def test_event_payload_exposes_endpoint_shape_without_credentials(self):
         from poc.visual_review_poc.observability import visual_event_payload
 
@@ -70,6 +88,59 @@ class VisualObservabilityTest(unittest.TestCase):
         self.assertEqual(events[0][1]["status_code"], 200)
         self.assertNotIn("headers", events[0][1])
         self.assertNotIn("payload", events[0][1])
+
+    def test_http_attempt_uses_and_releases_process_wide_provider_gate(self):
+        from poc.visual_review_poc import model_selection_e2e
+
+        class Gate:
+            acquired = 0
+            released = 0
+
+            def acquire(self, **kwargs):
+                self.acquired += 1
+                return True
+
+            def release(self):
+                self.released += 1
+
+        class Response:
+            status_code = 200
+            text = ""
+            headers = {}
+
+            @staticmethod
+            def json():
+                return {"ok": True}
+
+        class Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            @staticmethod
+            def post(*args, **kwargs):
+                return Response()
+
+        gate = Gate()
+        with patch.object(model_selection_e2e, "_PROVIDER_REQUEST_GATE", gate), patch.object(
+            model_selection_e2e.httpx, "Client", Client
+        ):
+            result = model_selection_e2e.post_with_retries(
+                "https://example.com/v1/models/demo:generateContent",
+                {},
+                {},
+                timeout=5,
+                retries=0,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(gate.acquired, 1)
+        self.assertEqual(gate.released, 1)
 
     def test_endpoint_path_is_not_logged_because_it_may_contain_credentials(self):
         from poc.visual_review_poc.observability import visual_event_payload

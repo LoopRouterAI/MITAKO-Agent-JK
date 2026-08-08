@@ -13,8 +13,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+from urllib.parse import unquote, urljoin, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -39,6 +40,16 @@ ALLOWED_HOST_SUFFIXES = (
 )
 DIRECT_VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".m4v", ".mkv")
 DIRECT_VIDEO_MAX_BYTES = 200 * 1024 * 1024
+DIRECT_REDIRECT_CODES = {301, 302, 303, 307, 308}
+DIRECT_REDIRECT_LIMIT = 5
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
+
+
+_DIRECT_URL_OPENER = build_opener(_NoRedirectHandler())
 
 URL_PATTERNS = [
     ("douyin", re.compile(r"https?://v\.douyin\.com/[\w-]+/?")),
@@ -119,6 +130,8 @@ def validate_public_video_url(url: str) -> Dict[str, Any]:
     platform_allowed = any(host == suffix or host.endswith(f".{suffix}") for suffix in ALLOWED_HOST_SUFFIXES)
     if not platform_allowed and not _is_direct_video_url(url):
         return {"ok": False, "status": "unsupported_platform", "error": "暂不支持该视频平台"}
+    if not platform_allowed and parsed.scheme != "https":
+        return {"ok": False, "status": "insecure_direct_url", "error": "公开视频直链仅支持 HTTPS"}
     strict_dns = os.getenv("VISUAL_URL_STRICT_DNS_GUARD", "1").strip().lower() in {"1", "true", "yes"}
     if strict_dns and not platform_allowed and _is_private_host(host):
         return {"ok": False, "status": "blocked_private_host", "error": "不支持内网或本机地址"}
@@ -177,12 +190,45 @@ def _direct_headers() -> Dict[str, str]:
     return {"User-Agent": "MITAKO-VisualReview/1.0"}
 
 
+def _validate_direct_request_target(url: str) -> None:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host:
+        raise ValueError("公开视频直链及其跳转目标必须使用 HTTPS")
+    if _is_private_host(host):
+        raise ValueError("公开视频直链不允许访问内网或本机地址")
+
+
+def _open_public_direct_url(url: str, *, method: str, timeout: int):
+    current_url = url
+    for _ in range(DIRECT_REDIRECT_LIMIT + 1):
+        _validate_direct_request_target(current_url)
+        request = Request(current_url, headers=_direct_headers(), method=method)
+        try:
+            response = _DIRECT_URL_OPENER.open(request, timeout=timeout)
+        except HTTPError as exc:
+            if exc.code not in DIRECT_REDIRECT_CODES:
+                raise
+            location = exc.headers.get("Location")
+            exc.close()
+            if not location:
+                raise ValueError("公开视频直链跳转缺少目标地址") from exc
+            current_url = urljoin(current_url, location)
+            continue
+        try:
+            _validate_direct_request_target(response.geturl())
+        except Exception:
+            response.close()
+            raise
+        return response
+    raise ValueError("公开视频直链跳转次数过多")
+
+
 def _fetch_direct_metadata(url: str) -> Dict[str, Any]:
     started = time.time()
     title = _direct_video_title(url)
     try:
-        req = Request(url, headers=_direct_headers(), method="HEAD")
-        with urlopen(req, timeout=20) as resp:
+        with _open_public_direct_url(url, method="HEAD", timeout=20) as resp:
             size = int(resp.headers.get("Content-Length") or 0)
             content_type = resp.headers.get("Content-Type") or ""
     except Exception:
@@ -217,8 +263,7 @@ def _download_direct_video_url(url: str) -> Dict[str, Any]:
     limit = _direct_video_max_bytes()
     total = 0
     try:
-        req = Request(url, headers=_direct_headers())
-        with urlopen(req, timeout=300) as resp, target.open("wb") as f:
+        with _open_public_direct_url(url, method="GET", timeout=300) as resp, target.open("wb") as f:
             expected = int(resp.headers.get("Content-Length") or 0)
             if expected > limit:
                 return {

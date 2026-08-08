@@ -6,6 +6,7 @@ from poc.visual_review_poc.fulfillment_reconciliation import (
     aggregate_fulfillment_reconciliation,
     apply_fulfillment_guard,
 )
+from poc.visual_review_poc.local_video_triage_demo import scenario_rules
 
 
 def case(expected_quantity: int = 2, packages=None, coverage=None):
@@ -56,6 +57,12 @@ def row(quantity: int, package_ref: str = "PKG-1", complete: bool = True):
 
 
 class FulfillmentReconciliationTest(unittest.TestCase):
+    def test_missing_item_prompt_does_not_use_ticket_suffix_as_review_gate(self):
+        prompt = scenario_rules("missing_item")
+
+        self.assertNotIn("_1 尾号", prompt)
+        self.assertNotIn("二次处理单必须转人工", prompt)
+
     def test_non_numeric_observation_confidence_degrades_to_zero(self):
         invalid = row(2)
         invalid["fulfillment_reconciliation"]["confidence"] = "high"
@@ -106,6 +113,68 @@ class FulfillmentReconciliationTest(unittest.TestCase):
         self.assertEqual(guarded["predicted_label"], "review")
         self.assertLessEqual(guarded["confidence"], 0.69)
 
+    def test_traceable_warehouse_confirmation_overrides_pending_visual_coverage(self):
+        current = case()
+        baseline = current["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]
+        baseline["warehouse_verification"] = {
+            "status": "confirmed_not_missing",
+            "source": "customer_warehouse",
+            "verification_ref": "WH-CHECK-1",
+        }
+
+        result = aggregate_fulfillment_reconciliation([row(1, complete=False)], current, "missing_item")
+        guarded = apply_fulfillment_guard({"confidence": 0.91, "fulfillment_reconciliation": result}, "missing_item")
+
+        self.assertEqual(result["verdict"], "matched")
+        self.assertEqual(result["evidence_sufficiency"], "sufficient")
+        self.assertEqual(result["resolution_basis"], "warehouse_verification")
+        self.assertEqual(result["warehouse_verification"]["status"], "confirmed_not_missing")
+        self.assertEqual(guarded["predicted_label"], "negative")
+        self.assertIn("仓库终核", guarded["fulfillment_guard_reason"])
+
+    def test_pending_warehouse_note_does_not_override_visual_evidence(self):
+        current = case()
+        baseline = current["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]
+        baseline["warehouse_verification"] = {
+            "status": "pending",
+            "source": "customer_warehouse",
+            "verification_ref": "WH-CHECK-2",
+        }
+
+        result = aggregate_fulfillment_reconciliation([row(1, complete=False)], current, "missing_item")
+
+        self.assertEqual(result["verdict"], "indeterminate")
+        self.assertNotEqual(result.get("resolution_basis"), "warehouse_verification")
+
+    def test_traceable_warehouse_missing_confirmation_is_positive(self):
+        current = case(expected_quantity=1)
+        baseline = current["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]
+        baseline["warehouse_verification"] = {
+            "status": "confirmed_missing",
+            "source": "customer_warehouse",
+            "verification_ref": "WH-CHECK-3",
+        }
+
+        result = aggregate_fulfillment_reconciliation([row(1)], current, "missing_item")
+        guarded = apply_fulfillment_guard({"confidence": 0.91, "fulfillment_reconciliation": result}, "missing_item")
+
+        self.assertEqual(result["verdict"], "mismatched")
+        self.assertEqual(guarded["predicted_label"], "positive")
+
+    def test_untraceable_warehouse_claim_is_not_authoritative(self):
+        current = case()
+        baseline = current["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]
+        baseline["warehouse_verification"] = {
+            "status": "confirmed_not_missing",
+            "source": "model_inference",
+            "verification_ref": "",
+        }
+
+        result = aggregate_fulfillment_reconciliation([row(1, complete=False)], current, "missing_item")
+
+        self.assertEqual(result["verdict"], "indeterminate")
+        self.assertEqual(result.get("warehouse_verification"), {})
+
     def test_quantities_sum_across_distinct_packages(self):
         packages = [
             {"package_ref": "PKG-1", "expected_item_refs": ["LINE-1"]},
@@ -145,6 +214,91 @@ class FulfillmentReconciliationTest(unittest.TestCase):
         result = aggregate_fulfillment_reconciliation([row(2)], current, "wrong_item")
         self.assertEqual(result["verdict"], "indeterminate")
         self.assertFalse(result["selection_rules_complete"])
+
+    def test_same_sku_with_different_specification_is_wrong_item(self):
+        current = case(expected_quantity=1)
+        expected = current["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]["expected_items"][0]
+        expected["specification"] = "L"
+        observed = row(1)
+        observed["fulfillment_reconciliation"]["observed_items"][0]["specification"] = "S"
+
+        result = aggregate_fulfillment_reconciliation([observed], current, "wrong_item")
+        guarded = apply_fulfillment_guard({"confidence": 0.88, "fulfillment_reconciliation": result}, "wrong_item")
+
+        self.assertEqual(result["verdict"], "mismatched")
+        self.assertEqual(guarded["predicted_label"], "positive")
+
+    def test_missing_observed_specification_keeps_wrong_item_indeterminate(self):
+        current = case(expected_quantity=1)
+        expected = current["structured_business_context"]["frontdesk_evidence_package"]["fulfillment_baseline"]["expected_items"][0]
+        expected["specification"] = "L"
+
+        result = aggregate_fulfillment_reconciliation([row(1)], current, "wrong_item")
+
+        self.assertEqual(result["verdict"], "indeterminate")
+        self.assertEqual(result["evidence_sufficiency"], "insufficient")
+
+    def test_non_numeric_observed_quantity_keeps_missing_item_indeterminate(self):
+        invalid = row(1)
+        invalid["fulfillment_reconciliation"]["observed_items"][0]["observed_quantity"] = "many"
+
+        result = aggregate_fulfillment_reconciliation([invalid], case(), "missing_item")
+
+        self.assertEqual(result["verdict"], "indeterminate")
+        self.assertEqual(result["evidence_sufficiency"], "insufficient")
+
+    def test_wrong_item_requires_missing_expected_and_unexpected_received(self):
+        result = aggregate_fulfillment_reconciliation([row(1)], case(expected_quantity=2), "wrong_item")
+        guarded = apply_fulfillment_guard({"confidence": 0.88, "fulfillment_reconciliation": result}, "wrong_item")
+
+        self.assertEqual(result["verdict"], "matched")
+        self.assertEqual(guarded["predicted_label"], "negative")
+
+    def test_missing_item_ignores_extra_item_when_expected_quantity_is_complete(self):
+        observed = row(2)
+        observed["fulfillment_reconciliation"]["observed_items"].append({
+            "sku": "SKU-X", "product_name": "额外赠品", "observed_quantity": 1, "package_ref": "PKG-1"
+        })
+
+        result = aggregate_fulfillment_reconciliation([observed], case(), "missing_item")
+        guarded = apply_fulfillment_guard({"confidence": 0.88, "fulfillment_reconciliation": result}, "missing_item")
+
+        self.assertEqual(result["verdict"], "matched")
+        self.assertEqual(guarded["predicted_label"], "negative")
+
+    def test_missing_expected_and_unexpected_received_does_not_confirm_missing_item(self):
+        observed = row(1)
+        observed["fulfillment_reconciliation"]["observed_items"].append({
+            "sku": "SKU-X", "product_name": "未购商品", "observed_quantity": 1, "package_ref": "PKG-1"
+        })
+
+        result = aggregate_fulfillment_reconciliation(
+            [observed], case(expected_quantity=2), "missing_item"
+        )
+        guarded = apply_fulfillment_guard(
+            {"confidence": 0.88, "fulfillment_reconciliation": result}, "missing_item"
+        )
+
+        self.assertEqual(result["verdict"], "indeterminate")
+        self.assertEqual(guarded["predicted_label"], "review")
+        self.assertIn("错发", result["decision_boundary"])
+
+    def test_wrong_item_can_use_complete_photo_chain_without_opening_video(self):
+        observed = row(0, complete=False)
+        observed["fulfillment_reconciliation"]["observed_items"] = [{
+            "sku": "SKU-X", "product_name": "未购商品", "observed_quantity": 1, "package_ref": "PKG-1"
+        }]
+
+        result = aggregate_fulfillment_reconciliation(
+            [observed], case(expected_quantity=1), "wrong_item"
+        )
+        guarded = apply_fulfillment_guard(
+            {"confidence": 0.88, "fulfillment_reconciliation": result}, "wrong_item"
+        )
+
+        self.assertEqual(result["verdict"], "mismatched")
+        self.assertEqual(result["evidence_sufficiency"], "sufficient")
+        self.assertEqual(guarded["predicted_label"], "positive")
 
 
 if __name__ == "__main__":

@@ -57,9 +57,11 @@ except ImportError:
     from url_video_fetcher import detect_platform, download_video_url, extract_video_url, fetch_metadata
 
 try:
-    from poc.visual_review_poc.model_selection_e2e import MODEL_CONFIGS, call_model_chunked, derive_claim_identity, is_retryable_failure, load_case_bundle, score_result
+    from poc.visual_review_poc.model_selection_e2e import MODEL_CONFIGS, call_model, call_model_chunked, call_opening_start_verification, derive_claim_identity, discover_case_videos, is_retryable_failure, load_case_bundle, merge_model_billing, merge_opening_start_verification, score_result
     from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
+    from poc.visual_review_poc.native_video_proxy import prepare_native_video_proxy
+    from poc.visual_review_poc.unified_model_pass import native_dimension_gaps
     from poc.visual_review_poc.report_renderer import (
         render_public_report as _render_public_report,
         safe_agent_conclusion as _safe_agent_conclusion,
@@ -67,9 +69,11 @@ try:
     )
     from poc.visual_review_poc.sample_evaluation import evaluate_sample_rows, read_sample_rows
 except ImportError:
-    from model_selection_e2e import MODEL_CONFIGS, call_model_chunked, derive_claim_identity, is_retryable_failure, load_case_bundle, score_result
+    from model_selection_e2e import MODEL_CONFIGS, call_model, call_model_chunked, call_opening_start_verification, derive_claim_identity, discover_case_videos, is_retryable_failure, load_case_bundle, merge_model_billing, merge_opening_start_verification, score_result
     from local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from official_reference_images import prepare_official_reference_images
+    from native_video_proxy import prepare_native_video_proxy
+    from unified_model_pass import native_dimension_gaps
     from report_renderer import (
         render_public_report as _render_public_report,
         safe_agent_conclusion as _safe_agent_conclusion,
@@ -109,8 +113,13 @@ try:
 except ValueError:
     REPORT_URL_TTL_SECONDS = 900
 MAX_UPLOAD_BYTES = int(os.getenv("VISUAL_MAX_UPLOAD_MB", "650") or 650) * 1024 * 1024
+NATIVE_INLINE_MEDIA_MAX_BYTES = 70 * 1024 * 1024
 MAX_FOLDER_BYTES = int(os.getenv("VISUAL_MAX_FOLDER_MB", "800") or 800) * 1024 * 1024
 MAX_FOLDER_FILES = max(1, int(os.getenv("VISUAL_MAX_FOLDER_FILES", "200") or 200))
+try:
+    UPLOAD_RETENTION_SECONDS = max(0, int(os.getenv("VISUAL_UPLOAD_RETENTION_HOURS", "72") or 72)) * 60 * 60
+except ValueError:
+    UPLOAD_RETENTION_SECONDS = 72 * 60 * 60
 EVALUATION_CONTEXT_FILENAMES = {"annotation.json", "reply.json", "manifest.json", "sample_labels.json"}
 SUPPLEMENTAL_IMAGE_SOFT_LIMIT = min(
     max(1, int(os.getenv("VISUAL_SUPPLEMENTAL_IMAGE_SOFT_LIMIT", "40") or 40)),
@@ -177,7 +186,25 @@ REVIEW_MODEL_PROFILES = {
 }
 
 
+def _cleanup_expired_uploads() -> None:
+    if UPLOAD_RETENTION_SECONDS <= 0 or not UPLOAD_DIR.is_dir():
+        return
+    cutoff = time.time() - UPLOAD_RETENTION_SECONDS
+    try:
+        candidates = list(UPLOAD_DIR.iterdir())
+    except OSError:
+        return
+    for path in candidates:
+        managed = path.name.startswith("folder_") or re.fullmatch(r"\d{8}_\d{6}_\d+", path.name)
+        try:
+            if managed and path.is_dir() and not path.is_symlink() and path.stat().st_mtime < cutoff:
+                shutil.rmtree(path)
+        except OSError:
+            continue
+
+
 def _save_upload(file: UploadFile) -> Path:
+    _cleanup_expired_uploads()
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     original_name = file.filename or "upload.mp4"
     if ignored_upload_reason(original_name):
@@ -237,6 +264,7 @@ def _save_folder_uploads(files: List[UploadFile]) -> tuple[Path, Dict[str, Any]]
             "received_count": len(accepted_candidates),
             "safe_limit": MAX_FOLDER_FILES,
         })
+    _cleanup_expired_uploads()
     target_dir = UPLOAD_DIR / f"folder_{time.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:12]}"
     target_dir.mkdir(parents=True, exist_ok=False)
     total = 0
@@ -577,6 +605,10 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "core_reason", "business_follow_up_suggestion", "visual_evidence_verdict", "visual_qc_conclusion",
     "verdict", "confidence_reason", "video_audit_conclusion", "continuity_score", "continuity_reason",
     "swap_risk_level", "edit_or_cut_risk", "opening_integrity", "opening_integrity_source", "sampling_boundary_status",
+    "playback_speed", "segment_playback_speed_values", "sampling_fps", "speed_review_impact",
+    "critical_evidence_observable", "affected_review_items", "evidence_refs", "opening_video_compliance",
+    "sealed_start", "waybill_visible", "single_take_continuity", "issue_visible_in_continuous_opening",
+    "validated_fields", "result", "source",
     "technical_timeline_status", "evidence_continuity_status", "object_continuity_assessment",
     "tracked_subjects", "subject_id", "description", "tracking_start", "tracking_end",
     "first_exposed_timestamp", "visibility_coverage", "out_of_frame_events", "start_timestamp",
@@ -600,11 +632,15 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "damage_causality_assessment", "damage_presence", "damage_type_and_location", "first_visible_evidence",
     "pre_opening_state_visible", "opening_action_visible", "damage_change_observed", "damage_timing",
     "possible_origins", "origin", "most_likely_origin", "origin_confidence", "causal_evidence_level",
+    "appearance_difference", "business_defect_qualification", "special_product_rule",
     "claim_support", "before_action_evidence", "action_evidence", "after_action_evidence", "subject",
     "location", "chain_id", "alternative_explanations", "cannot_conclude_reason", "damage_observability",
     "status", "claimed_region_closeup", "required_view_coverage", "conflicting_evidence", "missing_views",
     "evidence_source_summary", "primary_video", "scope", "supplemental_images", "provided_count",
     "referenced_count", "referenced_image_indices", "unreferenced_image_indices", "linkage_status", "evidence_findings",
+    "claim_fact_assessment", "atomic_claim_results", "claim_id", "subject_ref", "support_status",
+    "order_linkage", "expected_package_fact", "observed_package_fact", "scene_match", "claimed_scene",
+    "observed_scene", "assembly", "reassembly_result", "permanent_damage",
     "decision_boundary", "key_evidence", "fulfillment_reconciliation", "baseline_version", "expected_items",
     "observed_items", "suspected_missing_items", "unexpected_items", "unconfirmed_items",
     "package_observations", "package_coverage", "all_packages_uploaded", "all_items_displayed",
@@ -634,6 +670,9 @@ def _redact_minor_identifiers(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_minor_identifiers(item) for item in value]
     if isinstance(value, str):
+        path = urlsplit(value).path
+        if re.fullmatch(r"/media-item/[a-f0-9]{32}", path) or re.fullmatch(r"/reports/[a-zA-Z0-9._-]+\.html", path):
+            return value
         for pattern in _MINOR_IDENTIFIER_PATTERNS:
             value = pattern.sub("[已脱敏]", value)
         value = _LABELED_NAME_PATTERN.sub(r"\1[已脱敏]", value)
@@ -790,6 +829,10 @@ def _public_agent_report_payload(
         "official_reference_images_sent": len(case.get("official_reference_images") or []),
         "official_reference_status": case.get("official_reference_status") or {},
         "order_baseline": order_baseline,
+        "video_deduplication": {
+            key: int((case.get("video_deduplication") or {}).get(key) or 0)
+            for key in ("submitted_count", "unique_count", "duplicate_count")
+        },
     }
     parsed = _public_parsed(parsed, str(case.get("scenario") or ""))
     public_conclusion = _redact_minor_identifiers(public_conclusion)
@@ -857,6 +900,44 @@ def _media_url(path_value: Any) -> str:
     ).hexdigest()[:32]
     registry.register(media_id, rel)
     return _sign_public_url(f"/media-item/{media_id}")
+
+
+def _native_video_source(video: Path, proxy_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    mime_type = {
+        ".mov": "video/quicktime",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+    }.get(video.suffix.lower(), "video/mp4")
+    if video.stat().st_size <= NATIVE_INLINE_MEDIA_MAX_BYTES:
+        return {"video_index": 1, "api_path": str(video), "api_mime_type": mime_type}
+    proxy = prepare_native_video_proxy(video, proxy_dir, NATIVE_INLINE_MEDIA_MAX_BYTES) if proxy_dir else {}
+    if proxy.get("status") == "ready":
+        return {
+            "video_index": 1,
+            "api_path": str(proxy["path"]),
+            "api_mime_type": "video/mp4",
+            "proxy": proxy,
+        }
+    public_base = os.getenv("VISUAL_WORKBENCH_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    parsed_base = urlsplit(public_base)
+    if (
+        parsed_base.scheme != "https"
+        or not parsed_base.netloc
+        or parsed_base.username
+        or parsed_base.password
+        or parsed_base.query
+        or parsed_base.fragment
+        or parsed_base.path not in {"", "/"}
+    ):
+        return None
+    signed_path = _media_url(video)
+    if not signed_path.startswith("/media-item/"):
+        return None
+    return {
+        "video_index": 1,
+        "file_uri": f"{public_base}{signed_path}",
+        "api_mime_type": mime_type,
+    }
 
 
 def _media_gallery(case: Dict[str, Any], sample_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -999,11 +1080,20 @@ def _configured_model_keys(requested_model_key: str) -> List[str]:
     return keys or ["gemini35lite"]
 
 
+def _new_review_deadline() -> float:
+    try:
+        seconds = int(os.getenv("REVIEW_CASE_DEADLINE_SECONDS", "300") or 300)
+    except ValueError:
+        seconds = 300
+    return time.monotonic() + max(60, min(seconds, 900))
+
+
 def _call_model_chunked_with_fallback(
     requested_model_key: str,
     case: Dict[str, Any],
     timeout: int,
     retries: int,
+    deadline_at: Optional[float] = None,
 ) -> Dict[str, Any]:
     model_keys = _configured_model_keys(requested_model_key)
     if not model_keys:
@@ -1017,7 +1107,13 @@ def _call_model_chunked_with_fallback(
     last_result: Dict[str, Any] = {"status": "skipped", "error": "no_available_review_model"}
     for route_index, model_key in enumerate(model_keys, start=1):
         config = MODEL_CONFIGS[model_key]
-        current = call_model_chunked(config, case, timeout=timeout, retries=retries)
+        current = call_model_chunked(
+            config,
+            case,
+            timeout=timeout,
+            retries=retries,
+            deadline_at=deadline_at,
+        )
         current_chunking = current.get("chunking") if isinstance(current.get("chunking"), dict) else {}
         current_calls = _clamp_int(current_chunking.get("total_model_calls"), 0, 1_000_000, 0)
         current_unknown = _clamp_int(current.get("unknown_cost_calls"), 0, 1_000_000, 0)
@@ -1092,6 +1188,7 @@ def _internal_inference_estimate(result: Dict[str, Any]) -> Dict[str, Any]:
     cost = result.get("cost") if isinstance(result.get("cost"), dict) else {}
     chunking = result.get("chunking") if isinstance(result.get("chunking"), dict) else {}
     channels = chunking.get("channels") if isinstance(chunking.get("channels"), dict) else {}
+    native_video = chunking.get("native_video") if isinstance(chunking.get("native_video"), dict) else {}
     degraded_passes: Dict[str, Any] = {}
     for output_name, source_name in (
         ("main_review", "main_review_pass"),
@@ -1162,6 +1259,22 @@ def _internal_inference_estimate(result: Dict[str, Any]) -> Dict[str, Any]:
             for key, value in channels.items()
             if isinstance(value, dict)
         },
+        "native_video": {
+            key: native_video.get(key)
+            for key in (
+                "status",
+                "technical_status",
+                "status_code",
+                "error_type",
+                "dimension_gaps",
+                "opening_start_verification_status",
+                "transport",
+                "proxy_status",
+                "proxy_bytes",
+                "proxy_elapsed_seconds",
+            )
+            if native_video.get(key) not in (None, "", [], {})
+        },
         "degraded_passes": degraded_passes,
         "boundary": "估算值用于容量与成本比较，不等同于供应商最终账单。",
     }
@@ -1218,7 +1331,12 @@ def _run_review(
     review_model: str,
     evidence_context: Optional[Dict[str, Any]] = None,
     include_html_report: bool = True,
+    include_internal_metrics: bool = False,
+    defer_postprocess: bool = False,
+    requested_model_key: str = "auto",
+    sampling_mode_override: str = "",
 ) -> Dict[str, Any]:
+    deadline_at = _new_review_deadline()
     profile = REVIEW_MODEL_PROFILES.get(review_model) or REVIEW_MODEL_PROFILES["standard"]
     load_visual_env()
     effective_fps = fps
@@ -1231,9 +1349,14 @@ def _run_review(
     elif review_model == "backup":
         effective_fps = max(fps, 2.0)
         effective_max_frames = max(max_frames, int(profile["default_max_frames"]))
+    effective_sampling_mode = profile["sampling_mode"]
+    if sampling_mode_override in {"adaptive", "dense"}:
+        effective_fps = fps
+        effective_max_frames = max_frames
+        effective_sampling_mode = sampling_mode_override
     args = SimpleNamespace(
         fps=effective_fps,
-        sampling_mode=profile["sampling_mode"],
+        sampling_mode=effective_sampling_mode,
         max_frames_per_video=effective_max_frames,
         api_frame_limit=api_frame_limit,
         probe_seconds=float(probe_seconds),
@@ -1241,38 +1364,153 @@ def _run_review(
         supplemental_image_limit=MAX_SUPPLEMENTAL_IMAGES,
     )
     run_dir = ROOT / "tmp" / "visual_review_workbench" / f"single_{video.parent.name}_{time.time_ns()}"
-    try:
-        case = load_case_bundle(video.parent, args, run_dir, scenario_override=scenario)
-    except SystemExit as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
-    case.setdefault("structured_business_context", {})["continuity_claim_identity"] = derive_claim_identity([], case)
-    prepare_official_reference_images(case)
+
+    def prepared_case(native_video: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        try:
+            native_options = {"native_video": native_video} if native_video else {}
+            current = load_case_bundle(
+                video.parent,
+                args,
+                run_dir,
+                scenario_override=scenario,
+                **native_options,
+            )
+        except SystemExit as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        current = apply_frontdesk_context(
+            current,
+            scenario,
+            json.dumps(evidence_context or {}, ensure_ascii=False),
+        )
+        current.setdefault("structured_business_context", {})["continuity_claim_identity"] = derive_claim_identity([], current)
+        prepare_official_reference_images(current)
+        return current
+
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
-    result = _call_model_chunked_with_fallback(
-        "auto",
-        case,
-        timeout=model_timeout,
-        retries=model_retries,
-    )
+    model_keys = _configured_model_keys(requested_model_key)
+    primary_config = MODEL_CONFIGS[model_keys[0]] if model_keys else {}
+    case_videos, _ = discover_case_videos(video.parent)
+    native_source = None
+    if (
+        review_model != "backup"
+        and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}
+        and primary_config.get("provider") == "gemini_native"
+        and len(case_videos) == 1
+        and case_videos[0].resolve() == video.resolve()
+    ):
+        native_source = _native_video_source(video, run_dir / "native_video_proxy")
+    case = prepared_case(native_source)
+    native_result: Dict[str, Any] = {}
+    native_gaps: List[str] = []
+    if native_source:
+        native_result = call_model(
+            primary_config,
+            case,
+            timeout=model_timeout,
+            retries=model_retries,
+            deadline_at=deadline_at,
+        )
+        native_gaps = native_dimension_gaps(native_result.get("parsed") or {}, scenario)
+        if (
+            native_result.get("status") == "success"
+            and set(native_gaps).issubset({"opening_start_verification", "opening_video_hard_failure_candidate"})
+        ):
+            opening_verification = call_opening_start_verification(
+                primary_config,
+                case,
+                timeout=model_timeout,
+                retries=model_retries,
+                deadline_at=deadline_at,
+            )
+            native_result = merge_opening_start_verification(
+                native_result,
+                opening_verification,
+                case.get("frames") or [],
+                scenario=scenario,
+            )
+            native_gaps = native_dimension_gaps(native_result.get("parsed") or {}, scenario)
+    if native_source and native_result.get("status") == "success" and not native_gaps:
+        proxy = native_source.get("proxy") if isinstance(native_source.get("proxy"), dict) else {}
+        result = dict(native_result)
+        result["chunking"] = {
+            "total_model_calls": 2,
+            "main_review_frames": 0,
+            "channels": {
+                "native_video": {"model_calls": 1, "model_images": 1 + len(case.get("frames") or [])},
+                "opening_start_verification": {"model_calls": 1, "model_images": len(case.get("frames") or [])},
+            },
+            "native_video": {
+                "status": "completed",
+                "technical_status": native_result.get("status"),
+                "status_code": native_result.get("status_code"),
+                "dimension_gaps": [],
+                "opening_start_verification_status": (
+                    (native_result.get("opening_start_verification") or {}).get("status") or "not_run"
+                ),
+                "transport": "file_uri" if native_source.get("file_uri") else "inline_data",
+                "proxy_status": proxy.get("status"),
+                "proxy_bytes": proxy.get("proxy_bytes"),
+                "proxy_elapsed_seconds": proxy.get("elapsed_seconds"),
+            },
+        }
+        result["model_latency_seconds_sum"] = round(
+            float(result.get("latency_seconds") or 0)
+            + float((result.get("opening_start_verification") or {}).get("latency_seconds") or 0),
+            2,
+        )
+    else:
+        if native_source:
+            proxy = native_source.get("proxy") if isinstance(native_source.get("proxy"), dict) else {}
+            case = prepared_case()
+        result = _call_model_chunked_with_fallback(
+            requested_model_key,
+            case,
+            timeout=model_timeout,
+            retries=model_retries,
+            deadline_at=deadline_at,
+        )
+        if native_source:
+            result = merge_model_billing(result, [native_result])
+            chunking = dict(result.get("chunking") or {})
+            native_incurred = 0 if native_result.get("status") == "skipped" else 1
+            opening_status = (native_result.get("opening_start_verification") or {}).get("status")
+            opening_incurred = 1 if opening_status and opening_status != "skipped" else 0
+            chunking["total_model_calls"] = int(chunking.get("total_model_calls") or 0) + native_incurred + opening_incurred
+            chunking["native_video"] = {
+                "status": "fallback_to_frames",
+                "dimension_gaps": native_gaps,
+                "technical_status": native_result.get("status"),
+                "status_code": native_result.get("status_code"),
+                "error_type": native_result.get("error_type"),
+                "opening_start_verification_status": opening_status or "not_run",
+                "transport": "file_uri" if native_source.get("file_uri") else "inline_data",
+                "proxy_status": proxy.get("status"),
+                "proxy_bytes": proxy.get("proxy_bytes"),
+                "proxy_elapsed_seconds": proxy.get("elapsed_seconds"),
+            }
+            result["chunking"] = chunking
     review = _agent_report_response(
         case,
         video.parent,
         result,
         "agent_single",
         profile["label"],
+        include_internal_metrics=include_internal_metrics,
         include_html_report=include_html_report,
+        defer_postprocess=defer_postprocess,
     )
     review["sampling"] = {
         "profile": review_model,
         "label": profile["label"],
-        "sampling_mode": profile["sampling_mode"],
+        "sampling_mode": effective_sampling_mode,
         "fps": effective_fps,
         "sampled_frames": len(case.get("frames") or []),
         "model_segments": ((review.get("agent_report") or {}).get("inference_estimate") or {}).get("segment_count"),
         "frames_per_segment": api_frame_limit,
     }
+    if native_source and not native_gaps and native_result.get("status") == "success":
+        review["sampling"]["sampling_mode"] = "native_video"
     return {"ok": (review.get("summary") or {}).get("review_status") == "completed", **review}
 
 
@@ -1499,7 +1737,13 @@ def _run_sample_agent_review(
     }.get(business_scenario, "开箱视频审核")
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
-    result = _call_model_chunked_with_fallback(model_key, case, timeout=model_timeout, retries=model_retries)
+    result = _call_model_chunked_with_fallback(
+        model_key,
+        case,
+        timeout=model_timeout,
+        retries=model_retries,
+        deadline_at=_new_review_deadline(),
+    )
     review = _agent_report_response(case, sample_dir, result, f"agent_{sample_id}")
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
@@ -1552,6 +1796,24 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
 def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False, include_html_report: bool = True, defer_postprocess: bool = False) -> Dict[str, Any]:
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
+    videos, _ = discover_case_videos(folder_dir)
+    if videos:
+        review = _run_review(
+            videos[0],
+            scenario,
+            fps,
+            max_frames,
+            api_frame_limit,
+            probe_seconds,
+            "standard",
+            evidence_context,
+            include_html_report=include_html_report,
+            include_internal_metrics=include_internal_metrics,
+            defer_postprocess=defer_postprocess,
+            requested_model_key=model_key,
+            sampling_mode_override=sampling_mode,
+        )
+        return {"ok": review.get("ok") is True, "source_status": "folder_ready", "review": review}
     load_visual_env()
     args = SimpleNamespace(
         fps=fps,
@@ -1577,6 +1839,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         case,
         timeout=model_timeout,
         retries=model_retries,
+        deadline_at=_new_review_deadline(),
     )
     review = _agent_report_response(
         case,
@@ -1680,10 +1943,11 @@ def health() -> Dict[str, Any]:
         "persistent_report_signing_required": REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET,
         "runtime_media_storage": runtime_storage,
         "model_media_transport": {
-            "mode": "inline_base64_images",
+            "mode": "adaptive_native_video_or_inline_frames",
             "supplier_file_uri_required": False,
-            "accepted_model_media_types": ["image/jpeg", "image/webp"],
-            "strategy": "服务端本地抽帧、压缩和分段并发；原视频不直接发送给多模态供应商",
+            "accepted_model_media_types": ["video/mp4", "video/quicktime", "video/webm", "image/jpeg", "image/webp"],
+            "native_video_max_unique_files": 1,
+            "strategy": "单个有效去重视频优先原生视频审核并用开场锚点复核；多视频或原生结果不完整时保留完整抽帧审核",
         },
         "official_product_references": {
             "mode": "per_review_on_demand",
@@ -1762,7 +2026,7 @@ def opaque_media_asset(media_id: str, expires: str = "", sig: str = "") -> FileR
         path = (base / rel).resolve()
     except OSError as exc:
         raise HTTPException(status_code=404, detail="素材不存在") from exc
-    allowed_roots = [WORKBENCH_DIR.resolve(), SAMPLE_MATERIAL_DIR, RUNTIME_MEDIA_DIR]
+    allowed_roots = [ROOT.resolve(), WORKBENCH_DIR.resolve(), SAMPLE_MATERIAL_DIR, RUNTIME_MEDIA_DIR]
     if not any(path == base or base in path.parents for base in allowed_roots):
         raise HTTPException(status_code=404, detail="素材不存在")
     if not path.is_file() or path.suffix.lower() not in ALLOWED_MEDIA_SUFFIXES:

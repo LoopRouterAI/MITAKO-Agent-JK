@@ -142,3 +142,48 @@ powershell -ExecutionPolicy Bypass -File scripts/package_internal_release.ps1
 ```
 
 预期：全量测试、构建、发布门禁和双 ZIP 独立解压冷启动全部通过，产物仅位于 `dist/`。
+
+### Task 6: 最新终审与新增黄金指南共享规则
+
+**Files:**
+- Modify: `poc/visual_review_poc/fulfillment_reconciliation.py`
+- Modify: `poc/visual_review_poc/model_selection_e2e.py`
+- Modify: `poc/visual_review_poc/review_model_prompt.py`
+- Modify: `review_service/decision_policy.py`
+- Modify: corresponding tests under `tests/visual_review/` and `tests/review_service/`
+
+- [ ] **Step 1: 冻结终审来源和失败回归**
+
+覆盖 100 条黄金标分批来源、仓库终审覆盖过程备注、错包裹保留视觉事实但阻断订单归因、多子诉求逐项聚合、重复视频去重、包装来源错场景和可复位装配状态。
+
+- [ ] **Step 2: 最小实现共享字段和优先级**
+
+复用 `claim_scope`、`fulfillment_baseline`、媒体摘要和现有损伤事实；不新增案例编号、商品关键词或目录规则。
+
+- [ ] **Step 3: 运行定向回归和真实中立 Case**
+
+先验证无标签输入，再加载黄金字段比较；失败时只修共享根因。
+
+### Task 7: 百度云统一推理与原生视频 A/B
+
+**Files:**
+- Modify: `poc/visual_review_poc/model_auth.py`
+- Modify: `poc/visual_review_poc/model_selection_e2e.py`
+- Create or modify the smallest dedicated structured-schema helper under `poc/visual_review_poc/`
+- Modify: corresponding transport and resilience tests
+
+- [ ] **Step 1: 修正实际通道识别并锁定契约**
+
+百度基础地址使用 Bearer 认证并标记百度内部路由；保留当前 `GEMINI_MODEL`。
+
+- [ ] **Step 2: 合并重复视觉任务**
+
+每个 12-16 帧分段一次输出主事实、连续性、成因、速度和开箱节点；服务端验证全量帧引用，缺哪一维只回退哪一维。补图分批且官方参考图每批只发送一次。
+
+- [ ] **Step 3: 增加原生视频实验路径**
+
+受控 `inlineData` 或批准 HTTPS `fileData`；超预算或精确覆盖不足时回退统一抽帧，不依赖第三方 Files API。
+
+- [ ] **Step 4: 真实 A/B**
+
+同一模型、通道、证据和标签隔离条件下比较旧分阶段、统一抽帧和原生视频；记录结构化成功、事实差异、请求、Token、墙钟与报告质量。

@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context
 from review_service.input_readiness import assess_input_readiness
 from review_service.schemas import ReviewCaseMetadata
-from review_service.service import _public_media_urls, contract, sampling_plan
+from review_service.service import _public_media_urls, _recommended_escalation, contract, sampling_plan
 from review_service.service import ensure_label_isolation
 from review_service.service import _apply_input_readiness_guard
 from review_service.service import _review_fields
@@ -30,6 +30,14 @@ class InputReadinessTest(unittest.TestCase):
         self.assertIn("sampling_policy", contract()["business_fields"])
         self.assertIn("customer_risk_context", contract()["business_fields"])
         self.assertEqual(contract()["customer_risk_context_policy"]["model_input"], False)
+        warehouse = contract()["warehouse_verification_policy"]
+        self.assertEqual(warehouse["source"], "customer_warehouse")
+        self.assertEqual(
+            set(warehouse["terminal_statuses"]),
+            {"confirmed_missing", "confirmed_not_missing"},
+        )
+        self.assertIn("可追溯", warehouse["trust_boundary"])
+        self.assertIn("仓库终核", contract()["scenario_input_readiness"]["missing_item"])
 
     def test_public_report_refreshes_signed_workbench_media_urls(self):
         with patch.dict("os.environ", {
@@ -52,6 +60,28 @@ class InputReadinessTest(unittest.TestCase):
         self.assertNotIn("order_item_baseline", result["missing_required"])
         self.assertIn("fulfillment_baseline.baseline_version", result["missing_required"])
         self.assertIn("package_item_mapping", result["missing_required"])
+
+    def test_missing_item_with_traceable_warehouse_final_is_ready_without_video_coverage(self):
+        result = assess_input_readiness(
+            {
+                "scenario": "missing_item",
+                "fulfillment_baseline": {
+                    "baseline_version": "ORDER-1@V1",
+                    "expected_items": [
+                        {"item_ref": "LINE-1", "sku": "SKU-1", "expected_quantity": 1}
+                    ],
+                    "warehouse_verification": {
+                        "status": "confirmed_not_missing",
+                        "source": "customer_warehouse",
+                        "verification_ref": "WH-CHECK-1",
+                    },
+                },
+            }
+        )
+
+        self.assertTrue(result["full_review_ready"])
+        self.assertTrue(result["capabilities"]["missing_item_decision"])
+        self.assertEqual(result["missing_required"], [])
 
     def test_wrong_item_is_ready_with_package_and_submitted_tracking_linkage(self):
         result = assess_input_readiness(
@@ -438,6 +468,32 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(one_fps["fps"], 1.0)
         self.assertEqual(two_fps["fps"], 2.0)
 
+    def test_uncertain_speed_impact_recommends_bounded_two_fps_review(self):
+        escalation = _recommended_escalation(
+            {
+                "scenario": "product_damage",
+                "metadata": {"scenario": "product_damage", "sampling_policy": {"preset": "strict"}},
+            },
+            {
+                "agent_report": {"parsed": {"video_audit_conclusion": {
+                    "playback_speed": "accelerated",
+                    "sampling_fps": 1.0,
+                    "speed_review_impact": {"status": "uncertain"},
+                }}},
+                "advisory_assessment": {
+                    "workflow_recommendation": "human_review",
+                    "human_review": {"level": "required", "reason_codes": []},
+                    "signals": [],
+                },
+            },
+            {},
+        )
+
+        action = next(item for item in escalation["actions"] if item["type"] == "increase_sampling_strength")
+        self.assertEqual(action["target_preset"], "forensic")
+        self.assertEqual(action["target_fps"], 2.0)
+        self.assertIn("疑似加速", action["description"])
+
     def test_sampling_plan_counts_all_enabled_review_channels(self):
         with patch.dict("os.environ", {"REVIEW_PRODUCT_DAMAGE_MAIN_MAX_FRAMES": "48"}, clear=False):
             plan = sampling_plan(
@@ -451,11 +507,13 @@ class InputReadinessTest(unittest.TestCase):
             )
         channels = plan["estimated_channel_calls"]
         self.assertEqual(plan["estimated_total_frames"], 454)
-        self.assertEqual(plan["main_review_frames"], 48)
-        self.assertEqual(channels["main_review"], 2)
-        self.assertGreater(channels["object_continuity"], 0)
-        self.assertGreater(channels["damage_causality"], 0)
+        self.assertEqual(plan["main_review_frames"], 454)
+        self.assertEqual(channels["main_review"], 19)
+        self.assertEqual(channels["object_continuity"], 0)
+        self.assertEqual(channels["damage_causality"], 0)
         self.assertEqual(plan["estimated_total_model_calls"], sum(channels.values()))
+        self.assertTrue(plan["unified_multitask"]["enabled"])
+        self.assertGreater(plan["unified_multitask"]["fallback_channel_calls"]["damage_causality"], 0)
 
     def test_sampling_plan_exposes_individual_frame_continuity_for_all_transports(self):
         with patch.dict("os.environ", {"REVIEW_CONTINUITY_FRAMES_PER_CALL": "48"}, clear=False):
@@ -475,7 +533,8 @@ class InputReadinessTest(unittest.TestCase):
             plan["continuity_frames_per_call_by_transport"],
             {"gemini_native_individual_frames": 24, "openai_compatible_individual_frames": 24},
         )
-        self.assertEqual(plan["estimated_channel_calls"]["object_continuity"], 4)
+        self.assertEqual(plan["estimated_channel_calls"]["object_continuity"], 0)
+        self.assertEqual(plan["unified_multitask"]["fallback_channel_calls"]["object_continuity"], 4)
 
     def test_strict_profile_automatically_enables_specialized_channels(self):
         plan = sampling_plan(
@@ -489,8 +548,9 @@ class InputReadinessTest(unittest.TestCase):
         )
         self.assertTrue(plan["effective_review_policies"]["continuity_policy"]["force_dense_scan"])
         self.assertTrue(plan["effective_review_policies"]["damage_causality_policy"]["force_action_scan"])
-        self.assertGreater(plan["estimated_channel_calls"]["object_continuity"], 0)
-        self.assertGreater(plan["estimated_channel_calls"]["damage_causality"], 0)
+        self.assertTrue(plan["unified_multitask"]["enabled"])
+        self.assertEqual(plan["estimated_channel_calls"]["object_continuity"], 0)
+        self.assertEqual(plan["estimated_channel_calls"]["damage_causality"], 0)
 
     def test_formal_job_propagates_fulfillment_and_causality_contract(self):
         metadata = ReviewCaseMetadata.model_validate(

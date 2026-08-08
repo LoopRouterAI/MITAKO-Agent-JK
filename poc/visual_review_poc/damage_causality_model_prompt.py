@@ -7,6 +7,10 @@ from typing import Any, Dict
 def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
     structured = case.get("structured_business_context") or {}
     frontdesk = structured.get("frontdesk_evidence_package") or {}
+    product_standard = {
+        "product_master_data": structured.get("product_master_data") or frontdesk.get("product_master_data") or {},
+        "sop_context": structured.get("sop_context") or frontdesk.get("sop_context") or {},
+    }
     targets = {int(value) for value in structured.get("causality_target_frame_indices") or []}
     frames = [
         {
@@ -24,6 +28,7 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
 争议商品身份锚点：{json.dumps(structured.get("continuity_claim_identity") or {}, ensure_ascii=False)}
 清洗后的用户消息：{json.dumps(frontdesk.get("conversation_history") or {}, ensure_ascii=False)}
 视频窗口与原视频时间映射：{json.dumps(frontdesk.get("asset_manifest") or {}, ensure_ascii=False)}
+商品主数据与版本化缺陷标准：{json.dumps(product_standard, ensure_ascii=False)}
 按发送顺序排列的帧：{json.dumps(frames, ensure_ascii=False)}
 
 审查纪律：
@@ -34,6 +39,7 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
 5. role=context_only 只提供前序上下文；frame_findings 只输出 role=target 的帧，逐帧且不得省略。
 6. 样本标签、人工答案和最终处置没有提供给你，不得猜测或迎合。
 7. 必须区分“视频文件/时间轴完整”“开箱过程完整”和“争议商品持续可观察”；三者不能互相替代。
+8. 异形、软体、手工或材质特性商品的外观差异不自动等于业务缺陷；必须分开记录可见外观差异和甲方商品标准是否足以认定缺陷，没有可执行标准时保持 indeterminate。
 
 严格输出 JSON 对象：
 {{
@@ -63,6 +69,9 @@ def build_damage_causality_prompt(case: Dict[str, Any]) -> str:
     "origin_confidence": 0.0,
     "causal_evidence_level": "direct/indirect/insufficient",
     "claim_support": "supported/not_supported/insufficient",
+    "appearance_difference": "visible/not_visible/uncertain",
+    "business_defect_qualification": "confirmed/not_qualified/indeterminate",
+    "special_product_rule": "not_required/satisfied/required_but_not_quantified",
     "before_action_evidence": [{{"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00", "subject": "对象", "location": "具体部位", "chain_id": "chain-1", "fact": "动作前状态"}}],
     "action_evidence": [{{"video_index": 1, "global_frame_index": 2, "timestamp": "00:01.00", "subject": "对象", "location": "具体部位", "chain_id": "chain-1", "fact": "作用动作"}}],
     "after_action_evidence": [{{"video_index": 1, "global_frame_index": 3, "timestamp": "00:02.00", "subject": "对象", "location": "具体部位", "chain_id": "chain-1", "fact": "动作后直接可见的损伤", "damage_visible": true}}],

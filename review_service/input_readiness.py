@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from .warehouse_verification import trusted_warehouse_verification
+
 
 IDENTIFIER_KEYS = {"sku", "sku_id", "item_id", "product_id", "barcode", "gtin", "packaging_code"}
 NAME_KEYS = {"name", "product_name", "item_name", "title"}
@@ -142,6 +144,8 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
     has_baseline = _has_order_baseline(metadata)
     has_product_master = bool(metadata.get("product_master_data"))
     fulfillment = _fulfillment_state(metadata)
+    baseline = metadata.get("fulfillment_baseline") or {}
+    warehouse_verification = trusted_warehouse_verification(baseline if isinstance(baseline, dict) else {})
 
     if not _nonempty(metadata.get("customer_claim")):
         missing_recommended.append("customer_claim")
@@ -165,24 +169,25 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
         alternatives.append("SKU/条码/包装编码任一唯一标识，或商品名+规格/款式/角色/数量的可唯一组合")
         warnings.append("缺少订单商品基准或包裹归属时仍可审核开箱连续性，但不能可靠判断是否发错货。")
     elif scenario == "missing_item":
-        if not has_baseline:
-            missing_required.append("order_item_baseline")
-        if not _has_quantity(metadata):
-            missing_required.append("all_expected_item_quantities")
-        if not fulfillment["baseline_versioned"]:
-            missing_required.append("fulfillment_baseline.baseline_version")
-        if not fulfillment["package_baseline_complete"]:
-            missing_required.append("package_item_mapping")
-        if not fulfillment["benefit_rules_complete"]:
-            missing_required.append("benefit_rules_declaration")
-        if not fulfillment["selection_rules_complete"]:
-            missing_required.append("selection_rules_declaration")
-        if not fulfillment["submitted_package_mapping_complete"]:
-            missing_required.append("submitted_package_mapping")
-        if not fulfillment["all_packages_uploaded"] or not fulfillment["all_items_displayed"]:
-            missing_required.append("complete_evidence_coverage")
-        if not fulfillment["all_expected_packages_delivered"]:
-            missing_required.append("all_expected_packages_delivered")
+        if not warehouse_verification:
+            if not has_baseline:
+                missing_required.append("order_item_baseline")
+            if not _has_quantity(metadata):
+                missing_required.append("all_expected_item_quantities")
+            if not fulfillment["baseline_versioned"]:
+                missing_required.append("fulfillment_baseline.baseline_version")
+            if not fulfillment["package_baseline_complete"]:
+                missing_required.append("package_item_mapping")
+            if not fulfillment["benefit_rules_complete"]:
+                missing_required.append("benefit_rules_declaration")
+            if not fulfillment["selection_rules_complete"]:
+                missing_required.append("selection_rules_declaration")
+            if not fulfillment["submitted_package_mapping_complete"]:
+                missing_required.append("submitted_package_mapping")
+            if not fulfillment["all_packages_uploaded"] or not fulfillment["all_items_displayed"]:
+                missing_required.append("complete_evidence_coverage")
+            if not fulfillment["all_expected_packages_delivered"]:
+                missing_required.append("all_expected_packages_delivered")
         if not has_product_master:
             missing_recommended.append("product_master_data_or_standard_packing_list")
         alternatives.append("SKU/条码/包装编码或可唯一商品组合 + 每项应发数量 + 版本化规则 + 包裹关联")
@@ -220,4 +225,5 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
         "capabilities": capabilities,
         "privacy_boundary": "审核不需要姓名、手机号、身份证号等用户隐私；订单侧数据按 SKU/商品基准/数量/规则最小化传递。",
         "fulfillment_readiness": fulfillment,
+        "warehouse_verification": warehouse_verification,
     }

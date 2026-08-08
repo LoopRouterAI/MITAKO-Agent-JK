@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from poc.visual_review_poc.model_catalog import summarize_cost_observability
@@ -28,41 +28,65 @@ def run_adaptive_tasks(
     workers: int,
     invoke: Callable[[Any], Dict[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """按供应商反馈缩放分段并发；不跨任务保存状态。"""
+    """按供应商反馈缩放滚动并发；完成一个任务后立即补位。"""
     configured = max(1, min(int(workers or 1), len(tasks) or 1))
     current = configured
-    completed: List[Dict[str, Any]] = []
+    completed: List[Optional[Dict[str, Any]]] = [None] * len(tasks)
     wave_workers: List[int] = []
     throttle_events = 0
     recovery_events = 0
-    offset = 0
-    while offset < len(tasks):
-        wave = tasks[offset:offset + current]
-        wave_workers.append(len(wave))
-        wave_results: List[Optional[Dict[str, Any]]] = [None] * len(wave)
-        with ThreadPoolExecutor(max_workers=len(wave)) as pool:
-            futures = {pool.submit(invoke, task): index for index, task in enumerate(wave)}
-            for future in as_completed(futures):
-                index = futures[future]
+    next_index = 0
+    peak_inflight = 0
+
+    with ThreadPoolExecutor(max_workers=configured) as pool:
+        inflight: Dict[Future[Dict[str, Any]], int] = {}
+
+        def fill_slots() -> None:
+            nonlocal next_index, peak_inflight
+            submitted = 0
+            while next_index < len(tasks) and len(inflight) < current:
+                inflight[pool.submit(invoke, tasks[next_index])] = next_index
+                next_index += 1
+                submitted += 1
+            if submitted:
+                wave_workers.append(submitted)
+                peak_inflight = max(peak_inflight, len(inflight))
+
+        fill_slots()
+        while inflight:
+            finished, _ = wait(inflight, return_when=FIRST_COMPLETED)
+            for future in sorted(finished, key=lambda item: inflight[item]):
+                index = inflight.pop(future)
                 try:
-                    wave_results[index] = future.result()
+                    result = future.result()
                 except Exception as exc:
-                    wave_results[index] = {"status": "failed", "error": sanitize_error_text(exc, 500), "error_type": "hard"}
-        normalized = [item or {"status": "failed", "error": "empty_chunk_result"} for item in wave_results]
-        completed.extend(normalized)
-        if any(_retryable_pressure(item) for item in normalized):
-            next_workers = max(1, current // 2)
-            throttle_events += int(next_workers < current)
-            current = next_workers
-        elif all(item.get("status") == "success" for item in normalized) and current < configured:
-            current += 1
-            recovery_events += 1
-        offset += len(wave)
-    return completed, {
+                    result = {
+                        "status": "failed",
+                        "error": sanitize_error_text(exc, 500),
+                        "error_type": "hard",
+                    }
+                normalized = result or {"status": "failed", "error": "empty_chunk_result"}
+                completed[index] = normalized
+                if _retryable_pressure(normalized):
+                    next_workers = max(1, current // 2)
+                    throttle_events += int(next_workers < current)
+                    current = next_workers
+                elif normalized.get("status") == "success" and current < configured:
+                    current += 1
+                    recovery_events += 1
+            fill_slots()
+
+    normalized_completed = [
+        item or {"status": "failed", "error": "empty_chunk_result"}
+        for item in completed
+    ]
+    return normalized_completed, {
         "configured_workers": configured,
         "wave_workers": wave_workers,
         "throttle_events": throttle_events,
         "recovery_events": recovery_events,
+        "scheduler": "rolling_bounded",
+        "peak_inflight": peak_inflight,
     }
 
 
@@ -154,7 +178,10 @@ def run_specialized_frame_pass(
     def invoke_prepared(pass_case: Dict[str, Any]) -> Dict[str, Any]:
         result = invoke(pass_case)
         result["input_representation"] = "individual_frames"
-        result["model_image_count"] = len(pass_case["frames"])
+        result["model_image_count"] = (
+            len(pass_case["frames"])
+            + len(pass_case.get("official_reference_images") or [])
+        )
         return result
 
     def merge_billing(primary: Dict[str, Any], repair: Dict[str, Any]) -> Dict[str, Any]:

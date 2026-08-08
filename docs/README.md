@@ -5,8 +5,8 @@
 | 文档 | 读者 |
 |---|---|
 | [../我方内部开发文档/MITAKO售后审核Agent业务认知基线-20260727.md](../我方内部开发文档/MITAKO售后审核Agent业务认知基线-20260727.md) | 当前业务规则、案例口径与下一轮开发接续人员 |
-| [../甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html](../甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html) | 双方负责人、客服、测试与研发 |
-| [delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html](./delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html) | 双方测试、研发与项目经理 |
+| [../甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html](../甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html) | 双方负责人、客服、测试与研发 |
+| [delivery/mitako-0807-guide-acceptance-20260807.html](./delivery/mitako-0807-guide-acceptance-20260807.html) | 双方测试、研发与项目经理 |
 | [../Codex接续开发交接说明.md](../Codex接续开发交接说明.md) | 迁移设备与 Codex 接续 |
 | [迭代维护笔记.md](./迭代维护笔记.md) | 下一轮 Codex 先读的踩坑与需求变化记录 |
 | [../README.md](../README.md) | 所有人 |

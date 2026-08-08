@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -17,8 +18,10 @@ import time
 import urllib.request
 import urllib.error
 import zipfile
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote, urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +98,33 @@ def _verify_hashes(root: Path, entries: list[dict[str, Any]]) -> None:
         _assert(_sha256(file_path) == expected, f"证据哈希不一致：{relative}")
 
 
+class _LocalLinkCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for key, value in attrs:
+            if key.lower() in {"href", "src"} and value:
+                self.links.append(value.strip())
+
+
+def _verify_local_html_links(root: Path) -> None:
+    root = root.resolve()
+    missing: list[str] = []
+    for html_path in root.rglob("*.html"):
+        parser = _LocalLinkCollector()
+        parser.feed(html_path.read_text(encoding="utf-8-sig", errors="ignore"))
+        for raw in parser.links:
+            split = urlsplit(raw)
+            if not split.path or split.scheme or split.netloc or split.path.startswith("/"):
+                continue
+            target = (html_path.parent / unquote(split.path)).resolve()
+            if root not in target.parents or not target.is_file():
+                missing.append(f"{html_path.relative_to(root).as_posix()} -> {raw}")
+    _assert(not missing, f"甲方包 HTML 存在离线断链：{missing[:20]}")
+
+
 def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[str, Any]:
     names = _zip_names(zip_path)
     required = {
@@ -117,6 +147,15 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "我方内部开发文档/升级日志-2026-07-16.md",
         "我方内部开发文档/升级日志-2026-07-15.md",
         "我方内部开发文档/升级日志-2026-08-06-四场景与五类材料闭环.md",
+        "我方内部开发文档/升级日志-2026-08-07-黄金指南与速度影响闭环.md",
+        "docs/delivery/mitako-0807-guide-acceptance-20260807.html",
+        "甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html",
+        "tests/reports/review_0807_random_acceptance_latest.json",
+        "tests/reports/review_0807_random_acceptance_latest.html",
+        "tests/reports/0808-four-scenario-validation/PD-612691-final-0809-result.json",
+        "tests/reports/0808-four-scenario-validation/WI-76139-final-0809-result.json",
+        "tests/reports/0808-four-scenario-validation/MI-589330-final-0809-result.json",
+        "tests/reports/0808-four-scenario-validation/MR-547198-final-0809c-result.json",
         "docs/delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
         "甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html",
         "tests/reports/blind_0806_final_product_p1.json",
@@ -200,6 +239,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/openapi.yaml",
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
+        "docs/delivery/mitako-0807-guide-acceptance-20260807.html",
+        "甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html",
         "docs/delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
         "甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html",
         "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
@@ -237,6 +278,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     )
     _assert(not blocked, f"甲方包包含内部或敏感文件：{blocked[:20]}")
     _verify_customer_text_boundary(root)
+    _verify_local_html_links(root)
 
     manifest = json.loads((root / "customer-package-manifest.json").read_text(encoding="utf-8-sig"))
     _assert(manifest.get("git_commit") == expected_commit, "甲方包提交号不是当前验收提交")
@@ -298,6 +340,12 @@ def _request_json(
     return json.loads(payload.decode("utf-8-sig")) if payload else {}
 
 
+def _request_text(url: str, expected_status: int = 200) -> str:
+    with urllib.request.urlopen(url, timeout=15) as response:
+        _assert(response.status == expected_status, f"HTTP 状态不符：{url}")
+        return response.read().decode("utf-8-sig")
+
+
 def _multipart_review_job(metadata: dict[str, Any]) -> tuple[bytes, str]:
     boundary = "----MITAKOReleaseContractBoundary"
     png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
@@ -329,6 +377,61 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
     log_dir.mkdir(exist_ok=True)
     main_log_path = log_dir / "main.log"
     visual_log_path = log_dir / "visual.log"
+    data_dir = customer_root / "data"
+    data_dir.mkdir(exist_ok=True)
+    signing_secret_path = data_dir / "report-signing-secret.txt"
+    if not signing_secret_path.exists():
+        signing_secret_path.write_text(secrets.token_hex(32), encoding="ascii")
+    signing_secret = signing_secret_path.read_text(encoding="ascii").strip()
+    _assert(len(signing_secret) >= 32, "持久化报告签名密钥生成失败")
+    report_name = "cold-start-signature.html"
+    report_path = f"/reports/{quote(report_name, safe='')}"
+    report_expiry = int(time.time()) + 600
+    report_signature = hmac.new(
+        signing_secret.encode("utf-8"),
+        f"{report_path}\n{report_expiry}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    signed_report_url = (
+        f"http://127.0.0.1:{visual_port}{report_path}"
+        f"?expires={report_expiry}&sig={report_signature}"
+    )
+    public_summary_dir = customer_root / "visual_review_workbench" / "reports" / "public_summaries"
+    public_summary_dir.mkdir(parents=True, exist_ok=True)
+    (public_summary_dir / "cold-start-signature.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "review_label": "冷启动签名验收",
+                "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "summary": {
+                    "cases": 1,
+                    "total_reviews": 1,
+                    "successful_reviews": 1,
+                    "predicted_label": "review",
+                    "confidence": 0.5,
+                    "needs_human_review": False,
+                    "review_status": "completed",
+                },
+                "conclusion": "冷启动签名验收报告。",
+                "agent_report": {
+                    "parsed": {
+                        "predicted_label": "review",
+                        "confidence": 0.5,
+                        "overall_audit": {"conclusion": "冷启动签名验收报告。"},
+                        "material_gaps": [],
+                    },
+                    "public_brief": {
+                        "conclusion": "冷启动签名验收报告。",
+                        "next_step": "无需业务操作。",
+                    },
+                },
+                "media_warnings": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     env = os.environ.copy()
     env.update(
         {
@@ -337,7 +440,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             "ALLOW_PORT_FALLBACK": "0",
             "VISUAL_WORKBENCH_PORT": str(visual_port),
             "VISUAL_WORKBENCH_PUBLIC_URL": f"http://127.0.0.1:{visual_port}",
-            "VISUAL_REPORT_SIGNING_SECRET": secrets.token_hex(32),
+            "VISUAL_REPORT_SIGNING_SECRET": signing_secret,
             "VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET": "1",
             "MITAKO_APP_ROOT": str(customer_root),
             "MITAKO_DATA_DIR": str(customer_root / ".runtime-data"),
@@ -364,6 +467,20 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
         visual_health = _wait_json(f"http://127.0.0.1:{visual_port}/api/health")
         _assert(visual_health.get("ok") is True, "甲方包视觉服务健康检查失败")
         _assert(visual_health.get("built_in_samples_available") is False, "甲方包不应宣称附带内部审核样本")
+        _assert("冷启动签名验收报告" in _request_text(signed_report_url), "首次启动无法访问签名报告")
+
+        _terminate(visual_process)
+        with visual_log_path.open("a", encoding="utf-8") as visual_log:
+            visual_process = subprocess.Popen(
+                [str(python), "-m", "poc.visual_review_poc.workbench_server"],
+                cwd=customer_root,
+                env=env,
+                stdout=visual_log,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        _wait_json(f"http://127.0.0.1:{visual_port}/api/health")
+        _assert("冷启动签名验收报告" in _request_text(signed_report_url), "服务重启后旧签名报告失效")
 
         with main_log_path.open("w", encoding="utf-8") as main_log:
             main_process = subprocess.Popen(
@@ -458,6 +575,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             "api_smoke": "14/14",
             "advisory_contract": "compiled runtime + metadata validation + JSON-only report 409",
             "visual_health": True,
+            "report_signature_survives_restart": True,
             "built_in_samples_available": False,
         }
     except Exception as exc:
