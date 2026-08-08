@@ -62,6 +62,8 @@ class FulfillmentReconciliationTest(unittest.TestCase):
 
         self.assertNotIn("_1 尾号", prompt)
         self.assertNotIn("二次处理单必须转人工", prompt)
+        self.assertIn("仓库终核", prompt)
+        self.assertIn("待核实备注本身不能下结论", prompt)
 
     def test_non_numeric_observation_confidence_degrades_to_zero(self):
         invalid = row(2)
