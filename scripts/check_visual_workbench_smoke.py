@@ -237,7 +237,7 @@ def test_workbench_api() -> None:
     image_path = next((ROOT / "docs" / "三大审核场景的小量样本" / "sample_003").glob("*.jpg"))
     original_call_model = workbench_server.call_model_chunked
 
-    def fake_success(cfg, case, timeout, retries):
+    def fake_success(cfg, case, timeout, retries, deadline_at=None):
         assert not case.get("videos"), case
         assert case.get("supplemental_images"), case
         return {
@@ -260,10 +260,10 @@ def test_workbench_api() -> None:
             },
         }
 
-    def fake_failed(cfg, case, timeout, retries):
+    def fake_failed(cfg, case, timeout, retries, deadline_at=None):
         return {"status": "failed", "status_code": 429, "error_type": "soft", "latency_seconds": 0.2}
 
-    def fake_unstructured(cfg, case, timeout, retries):
+    def fake_unstructured(cfg, case, timeout, retries, deadline_at=None):
         return {"status": "success", "latency_seconds": 0.1, "usage": {}, "cost": {}, "parsed": {"raw_text": "not json"}}
 
     try:
@@ -397,7 +397,7 @@ def test_model_transport_contract() -> None:
     original_key = os.environ.get("VISION_REVIEW_API_KEY")
     captured = {}
 
-    def fake_post(endpoint, headers, payload, timeout, retries):
+    def fake_post(endpoint, headers, payload, timeout, retries, deadline_at=None):
         captured["payload"] = payload
         return {
             "ok": True,
@@ -416,9 +416,9 @@ def test_model_transport_contract() -> None:
         result = model_selection.call_model(model_selection.MODEL_CONFIGS["gemini35"], case, timeout=1, retries=0)
         assert result["status"] == "success", result
         parts = captured["payload"]["contents"][0]["parts"]
-        inline_items = [item for item in parts if "inline_data" in item]
+        inline_items = [item for item in parts if "inlineData" in item]
         assert len(inline_items) == 1, parts
-        assert inline_items[0]["inline_data"]["mime_type"] == "image/jpeg", inline_items
+        assert inline_items[0]["inlineData"]["mimeType"] == "image/jpeg", inline_items
         assert not any("视频1 帧" in str(item.get("text") or "") for item in parts if isinstance(item, dict)), parts
     finally:
         model_selection.post_with_retries = original_post
