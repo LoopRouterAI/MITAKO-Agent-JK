@@ -35,11 +35,11 @@ def _base(case: Dict[str, Any], signals: Dict[str, Any], decision: str, issues: 
         "issues": issues,
         "evidence": signals.get("evidence", ""),
         "next_step": next_step,
-        "human_required": True,
+        "human_required": decision in {"manual_review", "suspect"},
         "evidence_ready": decision == "pass",
         "business_final_review_required": True,
         "mock_only": True,
-        "boundary": "本结果来自 POC fixture，只证明流程和字段契约；pass 仅表示证据链初筛通过，最终业务处置仍需人工复核。",
+        "boundary": "本结果来自 POC fixture，只证明流程和字段契约；最终业务动作由甲方规则执行，human_required 只表示证据是否必须人工复核。",
     }
 
 
@@ -91,7 +91,7 @@ def _review_product_damage(case: Dict[str, Any], signals: Dict[str, Any]) -> Dic
         signals,
         decision,
         issues,
-        "生成售后处理单，等待人工确认补发/换货" if decision == "pass" else "要求补拍或转VIP客服复核",
+        "证据初筛通过，可按甲方现行售后流程继续" if decision == "pass" else "要求补拍具体缺口或由授权人员复核",
     )
     result["damage_type"] = signals.get("damage_type", "")
     result["damage_area"] = signals.get("damage_area", "")
@@ -116,10 +116,10 @@ def _review_minor_material(case: Dict[str, Any], signals: Dict[str, Any]) -> Dic
 
     if issues:
         decision = "request_more_material" if not signals["tamper_suspected"] else "manual_review"
-        next_step = "按清单补齐材料后再进入人工复核"
+        next_step = "只补齐清单点名的材料；疑似篡改时由授权人员回看原图"
     else:
-        decision = "manual_review"
-        next_step = "资料较完整，但未成年人退款必须人工审批"
+        decision = "pass"
+        next_step = "资料初筛通过，可按甲方现行流程继续；本 Mock 不执行退款"
     result = _base(case, signals, decision, issues, next_step)
     result["redacted_ocr_text"] = signals.get("ocr_text", "")
     result["input_sensitive_info_masked"] = signals["sensitive_info_masked"]

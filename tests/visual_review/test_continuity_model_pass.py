@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
+from poc.visual_review_poc import model_selection_e2e
 from poc.visual_review_poc.model_selection_e2e import _aggregate_chunk_results, call_model_chunked, gemini_payload, merge_opening_start_verification, openai_messages, post_with_retries
 from poc.visual_review_poc.review_model_prompt import build_selection_prompt
 from poc.visual_review_poc.specialized_model_pass import run_specialized_frame_pass
@@ -194,6 +195,144 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(merged["model_latency_seconds_sum"], 2.0)
         self.assertEqual(len(merged["_channel_route_attempts"]), 2)
 
+    def test_opening_start_reference_uses_trusted_anchor_timestamp(self):
+        native = {
+            "status": "success",
+            "parsed": {"video_audit_conclusion": {"opening_video_compliance": {
+                "sealed_start": None,
+                "waybill_visible": True,
+                "single_take_continuity": True,
+                "issue_visible_in_continuous_opening": True,
+                "evidence_refs": [],
+                "result": "indeterminate",
+            }}},
+        }
+        verification = {
+            "status": "success",
+            "parsed": {
+                "result": "sealed",
+                "sealed_start": True,
+                "evidence_refs": [{"video_index": 1, "global_frame_index": 1, "timestamp": "0s"}],
+                "reason": "首帧显示完整未拆封快递外箱。",
+            },
+        }
+        anchors = [{"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}]
+
+        merged = merge_opening_start_verification(native, verification, anchors)
+
+        opening = merged["parsed"]["video_audit_conclusion"]["opening_video_compliance"]
+        self.assertIs(opening["sealed_start"], True)
+        self.assertEqual(opening["evidence_refs"][0]["timestamp"], "00:00.00")
+
+        verification["parsed"]["evidence_refs"][0]["global_frame_index"] = 99
+        rejected = merge_opening_start_verification(native, verification, anchors)
+        self.assertIs(
+            rejected["parsed"]["video_audit_conclusion"]["opening_video_compliance"]["sealed_start"],
+            None,
+        )
+
+    def test_product_damage_start_merge_keeps_issue_visibility_hard_failure(self):
+        native = {
+            "status": "success",
+            "parsed": {"video_audit_conclusion": {"opening_video_compliance": {
+                "sealed_start": True,
+                "waybill_visible": True,
+                "single_take_continuity": True,
+                "issue_visible_in_continuous_opening": False,
+                "evidence_refs": [],
+                "result": "noncompliant",
+            }}},
+        }
+        verification = {
+            "status": "success",
+            "parsed": {
+                "result": "sealed",
+                "sealed_start": True,
+                "evidence_refs": [{"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}],
+            },
+        }
+
+        merged = merge_opening_start_verification(native, verification, scenario="product_damage")
+
+        self.assertEqual(
+            merged["parsed"]["video_audit_conclusion"]["opening_video_compliance"]["result"],
+            "noncompliant",
+        )
+
+    def test_opening_compliance_verification_uses_dominant_video_and_valid_refs(self):
+        case = {
+            "case_id": "opening-compliance-verification",
+            "scenario": "product_damage",
+            "videos": [
+                {"video_index": 1, "duration_seconds": 2.0},
+                {"video_index": 9, "duration_seconds": 96.0},
+            ],
+            "frames": [
+                {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+                {"video_index": 9, "global_frame_index": 2, "timestamp": "00:00.00"},
+                {"video_index": 9, "global_frame_index": 3, "timestamp": "01:36.00"},
+            ],
+        }
+        verification_case = model_selection_e2e.opening_compliance_verification_case(case)
+        self.assertEqual(
+            {frame["video_index"] for frame in verification_case["frames"]},
+            {9},
+        )
+        base = {
+            "status": "success",
+            "parsed": {"video_audit_conclusion": {"opening_video_compliance": {
+                "sealed_start": False,
+                "waybill_visible": False,
+                "single_take_continuity": False,
+                "issue_visible_in_continuous_opening": False,
+                "evidence_refs": [],
+                "validated_fields": [],
+                "result": "noncompliant",
+            }}},
+        }
+        verification = {
+            "status": "success",
+            "parsed": {
+                "sealed_start": True,
+                "waybill_visible": False,
+                "single_take_continuity": True,
+                "issue_visible_in_continuous_opening": False,
+                "evidence_refs": [
+                    {
+                        "field": field,
+                        "video_index": 9,
+                        "global_frame_index": 2,
+                        "timestamp": "00:00.00",
+                    }
+                    for field in (
+                        "sealed_start", "waybill_visible", "single_take_continuity",
+                        "issue_visible_in_continuous_opening",
+                    )
+                ],
+                "result": "noncompliant",
+            },
+        }
+
+        merged = model_selection_e2e.merge_opening_compliance_verification(
+            base,
+            verification,
+            verification_case["frames"],
+            scenario="product_damage",
+        )
+        opening = merged["parsed"]["video_audit_conclusion"]["opening_video_compliance"]
+
+        self.assertIs(opening["sealed_start"], True)
+        self.assertIs(opening["waybill_visible"], False)
+        self.assertIs(opening["single_take_continuity"], True)
+        self.assertIs(opening["issue_visible_in_continuous_opening"], False)
+        self.assertEqual(opening["result"], "noncompliant")
+        self.assertEqual(opening["validated_fields"], [
+            "issue_visible_in_continuous_opening",
+            "sealed_start",
+            "single_take_continuity",
+            "waybill_visible",
+        ])
+
     def test_chunk_labels_are_not_promoted_without_structured_whole_case_evidence(self):
         case = {
             "case_id": "segment-label-isolation",
@@ -210,6 +349,101 @@ class ContinuityModelPassTest(unittest.TestCase):
         aggregated = _aggregate_chunk_results(case, results)
 
         self.assertEqual(aggregated["parsed"]["predicted_label"], "review")
+
+    def test_opening_compliance_uses_only_the_primary_continuous_opening_video(self):
+        case = {
+            "case_id": "opening-source-scope",
+            "scenario": "product_damage",
+            "frames": [
+                {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+                {"video_index": 9, "global_frame_index": 2, "timestamp": "00:00.00"},
+                {"video_index": 9, "global_frame_index": 3, "timestamp": "01:36.00"},
+            ],
+            "videos": [
+                {"video_index": 1, "duration_seconds": 2},
+                {"video_index": 9, "duration_seconds": 96},
+            ],
+            "structured_business_context": {"business_scenario": "product_damage"},
+        }
+        short_closeup = {
+            "parsed": {
+                "predicted_label": "review",
+                "confidence": 0.5,
+                "video_audit_conclusion": {"opening_video_compliance": {
+                    "sealed_start": None,
+                    "waybill_visible": None,
+                    "single_take_continuity": None,
+                    "issue_visible_in_continuous_opening": True,
+                    "evidence_refs": [{
+                        "field": "issue_visible_in_continuous_opening",
+                        "video_index": 1,
+                        "global_frame_index": 1,
+                        "timestamp": "00:00.00",
+                    }],
+                }},
+            },
+        }
+        primary_opening = {
+            "parsed": {
+                "predicted_label": "review",
+                "confidence": 0.6,
+                "video_audit_conclusion": {"opening_video_compliance": {
+                    "sealed_start": True,
+                    "waybill_visible": False,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "evidence_refs": [
+                        {
+                            "field": field,
+                            "video_index": 9,
+                            "global_frame_index": 2,
+                            "timestamp": "00:00.00",
+                        }
+                        for field in (
+                            "sealed_start", "waybill_visible", "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        )
+                    ],
+                }},
+                "damage_causality_assessment": {
+                    "damage_presence": "uncertain",
+                    "claim_support": "insufficient",
+                },
+            },
+        }
+        conflicting_primary = {
+            "parsed": {
+                "predicted_label": "review",
+                "confidence": 0.55,
+                "video_audit_conclusion": {"opening_video_compliance": {
+                    "waybill_visible": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "evidence_refs": [
+                        {
+                            "field": field,
+                            "video_index": 9,
+                            "global_frame_index": 2,
+                            "timestamp": "00:00.00",
+                        }
+                        for field in ("waybill_visible", "issue_visible_in_continuous_opening")
+                    ],
+                }},
+            },
+        }
+
+        aggregated = _aggregate_chunk_results(case, [short_closeup, primary_opening, conflicting_primary])
+        opening = aggregated["parsed"]["video_audit_conclusion"]["opening_video_compliance"]
+
+        self.assertIs(opening["sealed_start"], True)
+        self.assertIs(opening["waybill_visible"], False)
+        self.assertIs(opening["single_take_continuity"], True)
+        self.assertIs(opening["issue_visible_in_continuous_opening"], False)
+        self.assertEqual(opening["result"], "noncompliant")
+        self.assertEqual(
+            opening["validated_fields"],
+            ["waybill_visible"],
+        )
+        self.assertEqual(opening["evidence_refs"]["issue_visible_in_continuous_opening"], [])
 
     def test_provider_connect_timeout_is_bounded_separately_from_inference_timeout(self):
         client = MagicMock()
@@ -593,7 +827,7 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(result["chunking"]["unified_multitask"]["status"], "completed")
         self.assertEqual(result["chunking"]["channels"]["object_continuity"]["model_calls"], 0)
 
-    def test_gemini_dense_missing_item_reuses_sparse_anchored_continuity_summary(self):
+    def test_gemini_dense_missing_item_falls_back_when_main_continuity_is_sparse(self):
         case = dict(self.case)
         structured = dict(self.case["structured_business_context"])
         structured["business_scenario"] = "missing_item"
@@ -606,18 +840,19 @@ class ContinuityModelPassTest(unittest.TestCase):
                 (current_case.get("structured_business_context") or {}).get("analysis_mode")
             )
             result = self._fake_call(cfg, current_case, timeout, retries)
-            frame = current_case["frames"][0]
-            result["parsed"]["frame_findings"] = [{
-                "global_frame_index": frame["global_frame_index"],
-                "video_index": frame["video_index"],
-                "timestamp": frame["timestamp"],
-                "visible_facts": "关键状态变化",
-                "subject_visibility": [
-                    {"subject_id": subject, "state": "visible"}
-                    for subject in ("shipping_package", "product_package", "claimed_item")
-                ],
-            }]
-            result["parsed"]["object_continuity_assessment"] = None
+            if observed_modes[-1] is None:
+                frame = current_case["frames"][0]
+                result["parsed"]["frame_findings"] = [{
+                    "global_frame_index": frame["global_frame_index"],
+                    "video_index": frame["video_index"],
+                    "timestamp": frame["timestamp"],
+                    "visible_facts": "关键状态变化",
+                    "subject_visibility": [
+                        {"subject_id": subject, "state": "visible"}
+                        for subject in ("shipping_package", "product_package", "claimed_item")
+                    ],
+                }]
+                result["parsed"]["object_continuity_assessment"] = None
             return result
 
         with patch("poc.visual_review_poc.model_selection_e2e.call_model", side_effect=unified_call):
@@ -625,10 +860,10 @@ class ContinuityModelPassTest(unittest.TestCase):
                 {"provider": "gemini_native"}, case, timeout=30, retries=0
             )
 
-        self.assertEqual(observed_modes, [None])
-        self.assertEqual(result["chunking"]["total_model_calls"], 1)
-        self.assertEqual(result["chunking"]["unified_multitask"]["status"], "completed")
-        self.assertEqual(result["chunking"]["channels"]["object_continuity"]["model_calls"], 0)
+        self.assertEqual(observed_modes, [None, "object_continuity_only"])
+        self.assertEqual(result["chunking"]["total_model_calls"], 2)
+        self.assertEqual(result["chunking"]["unified_multitask"]["status"], "dimension_fallback")
+        self.assertEqual(result["chunking"]["channels"]["object_continuity"]["model_calls"], 1)
 
     def test_gemini_dense_product_damage_can_disable_unified_mode_for_ab_control(self):
         case = dict(self.case)
@@ -936,6 +1171,27 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertIn("temporal_linkage", prompt)
         self.assertIn("仅补充图片证据填写", prompt)
         self.assertIn("视频文件/时间轴完整", prompt)
+        self.assertIn("物流单号或关键关联字段清晰可读", prompt)
+        self.assertIn("后补短视频或照片中的伤点不能计入", prompt)
+
+    def test_unified_main_prompt_requires_every_target_frame_in_one_response(self):
+        case = dict(self.case)
+        structured = dict(self.case["structured_business_context"])
+        structured.update({
+            "unified_multitask": True,
+            "review_chunk": {"index": 1, "total": 1},
+        })
+        case["structured_business_context"] = structured
+        case["frames"] = self.frames[:3]
+
+        prompt = build_selection_prompt(case)
+
+        self.assertIn("统一多任务", prompt)
+        self.assertIn("本批全部 3 个目标帧", prompt)
+        self.assertIn("shipping_package、product_package、claimed_item", prompt)
+        self.assertIn("不得只返回关键帧", prompt)
+        self.assertIn("全部目标帧各一条精简状态", prompt)
+        self.assertNotIn("只记录对结论有贡献的关键状态帧", prompt)
 
     def test_damage_causality_pass_exposes_tendency_without_overriding_case_label(self):
         case = dict(self.case)

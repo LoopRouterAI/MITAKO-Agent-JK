@@ -104,6 +104,18 @@ def render_damage_causality_panel(
         if key_evidence
         else '<h3>关键帧审查链</h3><p class="muted">本轮没有形成可回链的关键帧；因此不能声称已逐步证明结论。</p>'
     )
+    source_breakdown_html = ""
+    if source_summary:
+        source_breakdown_html = f"""
+    <h3>主视频与补充证据分层</h3>
+    <div class="boundary-grid">
+      <article class="boundary-card"><h3>主视频</h3><p>范围：{escape(primary_video.get("scope") or "未说明")}</p><p>损伤存在性：{escape(_label(primary_video.get("damage_presence")))}</p><p>诉求支持度：{escape(_label(primary_video.get("claim_support")))}</p></article>
+      <article class="boundary-card"><h3>用户补充证据</h3><p>补充图片 {escape(supplemental.get("provided_count") or 0)} 张；报告引用 {escape(supplemental.get("referenced_count") or 0)} 张。</p><p>补充图损伤所见：{escape(_label(supplemental_presence))}</p><p>{escape(supplemental_status)}</p></article>
+    </div>
+    <p><b>证据权重边界：</b>{escape(source_summary.get("decision_boundary") or "补充图片与主视频必须分别说明证据作用。")}</p>
+    {supplemental_findings_html}
+    {key_evidence_html}
+"""
 
     def chain_cards(key: str, title: str, empty: str) -> str:
         items = []
@@ -133,14 +145,7 @@ def render_damage_causality_panel(
     </div>
     <p><b>损伤位置与类型：</b>{escape(assessment.get("damage_type_and_location") or "本轮未明确描述。")}</p>
     <p><b>过程锚点：</b>操作前状态 {escape("可见" if assessment.get("pre_opening_state_visible") else "不可见")}；拆封/操作动作 {escape("可见" if assessment.get("opening_action_visible") else "不可见")}；损伤变化 {escape("已观察到" if assessment.get("damage_change_observed") else "未形成直接观察")}</p>
-    <h3>主视频与补充证据分层</h3>
-    <div class="boundary-grid">
-      <article class="boundary-card"><h3>主视频</h3><p>范围：{escape(primary_video.get("scope") or "未完成主视频审查")}</p><p>损伤存在性：{escape(_label(primary_video.get("damage_presence")))}</p><p>诉求支持度：{escape(_label(primary_video.get("claim_support")))}</p></article>
-      <article class="boundary-card"><h3>用户补充证据</h3><p>补充图片 {escape(supplemental.get("provided_count") or 0)} 张；报告引用 {escape(supplemental.get("referenced_count") or 0)} 张。</p><p>补充图损伤所见：{escape(_label(supplemental_presence))}</p><p>{escape(supplemental_status)}</p></article>
-    </div>
-    <p><b>证据权重边界：</b>{escape(source_summary.get("decision_boundary") or "补充图片与主视频必须分别说明证据作用。")}</p>
-    {supplemental_findings_html}
-    {key_evidence_html}
+    {source_breakdown_html}
     {chain_cards("before_action_evidence", "动作前证据", "未形成同一对象同一部位的动作前证据。")}
     {chain_cards("action_evidence", "动作证据", "未形成可能致损动作的可回链证据。")}
     {chain_cards("after_action_evidence", "动作后证据", "未形成同一对象同一部位的动作后变化证据。")}
@@ -295,7 +300,7 @@ def render_fulfillment_reconciliation_panel(value: Any, escape: Callable[[Any], 
       <article class="boundary-card"><h3>未确认项</h3><ul class="boundary-list">{items("unconfirmed_items", "无额外未确认项。")}</ul></article>
     </div>
     <p><b>包裹覆盖：</b>{escape(value.get("package_coverage") or "未提供")}</p>
-    <p><b>判断边界：</b>{escape(value.get("decision_boundary") or "最终业务处置仍需人工复核。")}</p>
+    <p><b>判断边界：</b>{escape(value.get("decision_boundary") or "最终业务动作仍由甲方规则执行。")}</p>
   </section>"""
 
 
@@ -415,10 +420,10 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         return "status-amber"
     status_labels = {
         "present": "已识别到候选材料",
-        "needs_manual_confirmation": "已观察到，待人工确认",
+        "needs_manual_confirmation": "已观察到候选材料，按核对结果处理",
         "not_observed_after_full_scan": "全量扫描后尚未确认",
         "not_assessed": "尚未完成识别",
-        "needs_manual_consistency_check": "需人工核对主体与一致性",
+        "needs_manual_consistency_check": "可见主体与字段仍待核对",
         "needs_business_system_check": "需业务系统核对金额与订单",
         "confirmed_by_visual_category": "视觉类别已确认",
         "visual_consistency_matched": "视觉字段未发现明显矛盾",
@@ -549,8 +554,21 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         "clear": "status-green",
     }.get(str(authenticity.get("severity") or ""), "status-amber")
     payment_capability = value.get("payment_capability_risk") or {}
-    payment_tone = "status-amber" if payment_capability.get("requires_more_material") else "status-green" if payment_capability.get("process_evidence_status") == "matched" else "status-amber"
-    payment_label = "需补支付过程说明" if payment_capability.get("requires_more_material") else "支付过程说明已核对" if payment_capability.get("process_evidence_status") == "matched" else "支付过程信息待确认"
+    under_nine_review = payment_capability.get("requires_review") is True
+    show_payment_card = any((
+        payment_capability.get("low_age") is True,
+        payment_capability.get("under_nine") is True,
+        under_nine_review,
+        payment_capability.get("requires_more_material") is True,
+    ))
+    payment_tone = "status-red" if under_nine_review else "status-amber" if payment_capability.get("requires_more_material") else "status-green" if payment_capability.get("process_evidence_status") == "matched" else "status-amber"
+    payment_label = "未满 9 周岁，需人工关注支付能力" if under_nine_review else "需补支付过程说明" if payment_capability.get("requires_more_material") else "支付过程说明已核对" if payment_capability.get("process_evidence_status") == "matched" else "支付过程信息待确认"
+    payment_card = (
+        f'<article class="boundary-card status-card {payment_tone}"><h3>低龄支付过程核验</h3>'
+        f'<p><b>{escape(payment_label)}</b></p><p>{escape(payment_capability.get("effect") or "该信号只用于核对支付密码来源和监护人发现消费过程，不自动决定退款结果。")}</p>'
+        f'<p><b>点击回看：</b>{evidence_links(payment_capability.get("evidence_image_indices"))}</p></article>'
+        if show_payment_card else ""
+    )
     action_text = {
         "passed": "五类材料和可见字段均未发现明显问题，可按甲方现行一审流程继续。",
         "failed": "先打开标红图片确认冲突，再按 SOP 要求用户更正或补交对应材料。",
@@ -563,6 +581,9 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         "needs_review": "status-amber",
         "processing_incomplete": "status-amber",
     }.get(value.get("visual_precheck_status"), "status-amber")
+    if under_nine_review:
+        action_text = "年龄判断为高置信未满 9 周岁；保持材料事实结论，但须由授权人员重点核对独立支付能力、支付密码来源和监护发现过程。"
+        action_tone = "status-red"
     return f"""
   <section class="panel minor-material-panel">
     <div class="section-head"><h2>未成年人退款五类材料核对</h2><p>绿色可继续，黄色只看存疑项，红色优先复核；报告不展示姓名、号码或 OCR 原文。</p></div>
@@ -583,7 +604,7 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
     <div class="boundary-grid">{"".join(consistency_cards) or '<p class="muted">本轮未完成字段一致性初审。</p>'}</div>
     <div class="boundary-grid">
       <article class="boundary-card status-card {authenticity_tone}"><h3>图片真实性风险</h3><p><b>{escape(f'疑似修改风险 {authenticity["risk_percent"]}%' if authenticity.get("risk_percent") is not None else "本轮未形成可用风险分数")}</b></p><p>{escape(authenticity.get("conclusion") or "本轮没有可用的图片风险结果。")}</p><p><b>需优先回看：</b>{evidence_links(authenticity.get("evidence_image_indices"))}</p><p><b>编辑软件信息：</b>{evidence_links((authenticity.get("editor_metadata_image_indices") or [])[:20])}</p><p><b>缺少拍摄信息：</b>{evidence_links((authenticity.get("missing_exif_image_indices") or [])[:20])}</p><p>{escape(authenticity.get("boundary") or "缺少拍摄信息不等于图片造假。")}</p></article>
-      <article class="boundary-card status-card {payment_tone}"><h3>低龄支付过程核验</h3><p><b>{escape(payment_label)}</b></p><p>{escape(payment_capability.get("effect") or "该信号只用于核对支付密码来源和监护人发现消费过程，不自动决定退款结果。")}</p><p><b>点击回看：</b>{evidence_links(payment_capability.get("evidence_image_indices"))}</p></article>
+      {payment_card}
       <article class="boundary-card status-card {authoritative_tone}"><h3>外部在线验真</h3><p><b>{escape(authoritative_text)}</b></p><p>{escape(authoritative.get("boundary") or "视觉一致性不等于法定真实性，但未配置的接口不会阻断本轮初审。")}</p></article>
     </div>
     <h3>过程视频证据</h3><ul class="boundary-list">{"".join(process_items) or '<li>本轮没有形成可回链的过程视频证据。</li>'}</ul>

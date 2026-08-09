@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+from poc.visual_review_poc.object_continuity import subject_longest_out_of_frame
+
 
 DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-PD-ADVISORY@20260806.1"
 
@@ -136,6 +138,76 @@ def _opening_field_has_reference(opening: Dict[str, Any], field_name: str) -> bo
     )
 
 
+def _replace_opening_evidence(parsed: Dict[str, Any], opening: Dict[str, Any]) -> None:
+    """用主连续开箱链的结构化复核事实替换同帧冲突描述。"""
+    references = opening.get("evidence_refs") or []
+    if isinstance(references, dict):
+        references = [
+            {**item, "field": item.get("field") or field}
+            for field, items in references.items()
+            for item in (items or [])
+            if isinstance(item, dict)
+        ]
+    references = [item for item in references if isinstance(item, dict)]
+    verified_fields = set(opening.get("validated_fields") or [])
+    ref_keys = {
+        (item.get("video_index"), item.get("global_frame_index"))
+        for item in references
+        if item.get("video_index") is not None and item.get("global_frame_index") is not None
+    }
+    evidence = [
+        item for item in parsed.get("adopted_evidence") or []
+        if not isinstance(item, dict)
+        or (item.get("video_index"), item.get("global_frame_index")) not in ref_keys
+    ]
+    labels = {
+        "sealed_start": "封箱起始",
+        "waybill_visible": "面单可核验",
+        "single_take_continuity": "一镜到底连续拆封",
+        "issue_visible_in_continuous_opening": "伤点在连续开箱中清晰展示",
+    }
+    verified = []
+    for field, label in labels.items():
+        ref = next((item for item in references if item.get("field") in {None, field}), None)
+        timeline_absence = (
+            field == "issue_visible_in_continuous_opening"
+            and opening.get(field) is False
+            and opening.get("source") == "global_timeline_aggregation"
+            and opening.get("result") == "noncompliant"
+        )
+        if field not in verified_fields or not isinstance(opening.get(field), bool) or (not ref and not timeline_absence):
+            continue
+        ref = ref or {}
+        verified.append({
+            "source_type": "video_frame",
+            "video_index": ref.get("video_index"),
+            "global_frame_index": ref.get("global_frame_index"),
+            "timestamp": ref.get("timestamp"),
+            "fact": f"{label}：{'符合' if opening[field] else '不符合'}。",
+            "why_it_matters": "来自主连续开箱链的结构化复核；后补图片或短片不能覆盖该时态。",
+        })
+    if verified:
+        parsed["adopted_evidence"] = verified + evidence
+
+
+def _normalize_noncompliant_opening_damage(parsed: Dict[str, Any], opening: Dict[str, Any]) -> None:
+    """主开箱未展示伤点时，不让未关联补图冒充主视频支持结论。"""
+    if opening.get("issue_visible_in_continuous_opening") is not False:
+        return
+    damage = _dict(parsed.get("damage_causality_assessment"))
+    sources = _dict(damage.get("evidence_source_summary"))
+    primary = _dict(sources.get("primary_video"))
+    if primary.get("damage_presence") == "confirmed":
+        return
+    primary["claim_support"] = "insufficient"
+    sources["primary_video"] = primary
+    supplemental = _dict(sources.get("supplemental_images"))
+    if supplemental.get("linkage_status") != "verified":
+        damage["claim_support"] = "insufficient"
+    damage["evidence_source_summary"] = sources
+    parsed["damage_causality_assessment"] = damage
+
+
 def _claim_scope_ready(scope: Dict[str, Any], fallback_claim: str) -> bool:
     active = {str(value).strip() for value in scope.get("active_claim_ids") or [] if str(value).strip()}
     claims = {
@@ -176,15 +248,6 @@ def _visibility_coverage(continuity: Dict[str, Any]) -> Optional[float]:
     return min(values) if values else None
 
 
-def _claimed_item_longest_absence(continuity: Dict[str, Any]) -> Optional[float]:
-    values = [
-        _nonnegative_float(item.get("longest_out_of_frame_seconds"))
-        for item in continuity.get("tracked_subjects") or []
-        if isinstance(item, dict) and str(item.get("subject_id") or "") == "claimed_item"
-    ]
-    return max(values) if values else None
-
-
 def _apply_negative(review: Dict[str, Any], audit: Dict[str, Any], confidence: float) -> Dict[str, Any]:
     output = dict(review)
     agent_report = _dict(output.get("agent_report"))
@@ -198,6 +261,13 @@ def _apply_negative(review: Dict[str, Any], audit: Dict[str, Any], confidence: f
     core_reason = audit.get("reason") or "当前材料未满足甲方已批准的审核规则。"
     if audit.get("rule_id") == "PD-N-OPENING-VIDEO-REQUIRED":
         core_reason += " 这是开箱资料合规结论，不等于视觉证明商品无损。"
+    next_step = "按甲方 SOP 审核倾向继续处理，由授权人员决定具体业务动作。"
+    business_follow_up_reason = "当前材料未满足甲方已批准的审核规则；最终业务动作仍由甲方授权系统或人员决定。"
+    if audit.get("rule_id") == "PD-N-NONCOMPLIANT-OPENING-VIDEO":
+        opening = _dict(_dict(audit.get("evidence_gate")).get("opening_video_compliance"))
+        _replace_opening_evidence(parsed, opening)
+        _normalize_noncompliant_opening_damage(parsed, opening)
+        business_follow_up_reason = "主连续开箱材料不合规，补充图片或短片不能倒补开箱时态；最终业务动作仍由甲方授权系统或人员决定。"
     parsed.update(
         {
             "predicted_label": "negative",
@@ -207,12 +277,14 @@ def _apply_negative(review: Dict[str, Any], audit: Dict[str, Any], confidence: f
             "business_action_allowed": False,
             "human_required": False,
             "human_required_for_business_action": True,
+            "business_follow_up_reason": business_follow_up_reason,
+            "next_step": next_step,
             "decision_policy_audit": audit,
             "overall_audit": {
                 "conclusion": audit.get("reason") or "当前材料未满足甲方已批准的审核规则。",
                 "confidence": round(confidence, 4),
                 "core_reason": core_reason,
-                "business_follow_up_suggestion": "如需继续支持本次诉求，请补齐规则要求的证据后重新提交；最终业务处理由甲方系统和授权人员决定。",
+                "business_follow_up_suggestion": "按甲方 SOP 审核倾向继续处理；最终业务动作由甲方系统或授权人员决定。",
             },
         }
     )
@@ -232,7 +304,7 @@ def _apply_negative(review: Dict[str, Any], audit: Dict[str, Any], confidence: f
     brief.update(
         {
             "conclusion": audit.get("reason") or "当前材料未满足甲方已批准的审核规则。",
-            "next_step": "补齐规则要求的证据后重新提交，或由授权人员结合业务规则复核。",
+            "next_step": next_step,
             "confidence": round(confidence, 4),
         }
     )
@@ -251,6 +323,7 @@ def _apply_positive(review: Dict[str, Any], audit: Dict[str, Any], confidence: f
         "confidence": parsed.get("confidence"),
         "conclusion": previous_overall.get("conclusion") or "",
     }
+    next_step = "按甲方 SOP 继续处理，并由授权人员决定具体业务动作。"
     parsed.update(
         {
             "predicted_label": "positive",
@@ -260,6 +333,7 @@ def _apply_positive(review: Dict[str, Any], audit: Dict[str, Any], confidence: f
             "business_action_allowed": False,
             "human_required": False,
             "human_required_for_business_action": True,
+            "next_step": next_step,
             "decision_policy_audit": audit,
             "overall_audit": {
                 "conclusion": audit.get("reason") or "当前可见证据支持商品有伤诉求。",
@@ -285,7 +359,7 @@ def _apply_positive(review: Dict[str, Any], audit: Dict[str, Any], confidence: f
     brief.update(
         {
             "conclusion": audit.get("reason") or "当前可见证据支持商品有伤诉求。",
-            "next_step": "按甲方 SOP 继续处理，并由授权人员决定具体业务动作。",
+            "next_step": next_step,
             "confidence": round(confidence, 4),
         }
     )
@@ -303,6 +377,7 @@ def _apply_review(review: Dict[str, Any], audit: Dict[str, Any], confidence: flo
         "confidence": parsed.get("confidence"),
         "conclusion": _dict(parsed.get("overall_audit")).get("conclusion") or "",
     }
+    next_step = "按审核建议完成补充核验后再分类。"
     parsed.update({
         "predicted_label": "review",
         "system_yes_no": "REVIEW",
@@ -310,6 +385,8 @@ def _apply_review(review: Dict[str, Any], audit: Dict[str, Any], confidence: flo
         "confidence": round(confidence, 4),
         "business_action_allowed": False,
         "human_required": True,
+        "business_follow_up_reason": audit.get("reason") or "当前证据仍需强化复核。",
+        "next_step": next_step,
         "decision_policy_audit": audit,
         "overall_audit": {
             "conclusion": audit.get("reason") or "当前证据仍需强化复核。",
@@ -331,7 +408,7 @@ def _apply_review(review: Dict[str, Any], audit: Dict[str, Any], confidence: flo
     brief = _dict(output.get("agent_brief"))
     brief.update({
         "conclusion": audit.get("reason") or "当前证据仍需强化复核。",
-        "next_step": "按审核建议完成补充核验后再分类。",
+        "next_step": next_step,
         "confidence": round(confidence, 4),
     })
     output["agent_brief"] = brief
@@ -385,7 +462,7 @@ def apply_review_decision_policy(
     has_video = _has_video(job.get("assets") or [])
     scope_ready = _claim_scope_ready(scope, fallback_claim)
     coverage = _visibility_coverage(continuity)
-    claimed_item_longest_absence = _claimed_item_longest_absence(continuity)
+    claimed_item_longest_absence = subject_longest_out_of_frame(continuity, "claimed_item")
     model_confidence = _first_float(
         [parsed.get("confidence"), _dict(review.get("summary")).get("confidence")],
         0.0,
@@ -564,25 +641,65 @@ def apply_review_decision_policy(
     )
     missing_opening_fields = [
         field_name
-        for field_name in ("sealed_start", "waybill_visible", "single_take_continuity")
+        for field_name in (
+            "sealed_start", "waybill_visible", "single_take_continuity",
+            "issue_visible_in_continuous_opening",
+        )
         if opening_compliance.get(field_name) is False
     ]
     validated_opening_fields = set(opening_compliance.get("validated_fields") or [])
+    full_timeline_issue_absence_verified = (
+        missing_opening_fields == ["issue_visible_in_continuous_opening"]
+        and opening_compliance.get("result") == "noncompliant"
+        and opening_compliance.get("single_take_continuity") is True
+        and _opening_field_has_reference(opening_compliance, "single_take_continuity")
+    )
     global_opening_failure_verified = (
         video_audit.get("source") == "global_timeline_aggregation"
         and opening_compliance.get("source") == "global_timeline_aggregation"
         and video_audit.get("sampling_boundary_status") == "covered"
         and successful_evidence_pass
         and bool(missing_opening_fields)
-        and set(missing_opening_fields).issubset(validated_opening_fields)
+        and (
+            set(missing_opening_fields).issubset(validated_opening_fields)
+            or full_timeline_issue_absence_verified
+        )
     )
+    if global_opening_failure_verified and full_timeline_issue_absence_verified:
+        opening_compliance["validated_fields"] = sorted(
+            validated_opening_fields | {"issue_visible_in_continuous_opening"}
+        )
     opening_start_failure_verified = (
         missing_opening_fields == ["sealed_start"]
         and (opening_compliance.get("field_sources") or {}).get("sealed_start") == "opening_start_verification"
         and "sealed_start" in validated_opening_fields
         and _opening_field_has_reference(opening_compliance, "sealed_start")
     )
-    opening_hard_failure_verified = global_opening_failure_verified or opening_start_failure_verified
+    opening_compliance_failure_verified = (
+        opening_compliance.get("source") == "opening_compliance_verification"
+        and video_audit.get("sampling_boundary_status") == "covered"
+        and successful_evidence_pass
+        and bool(missing_opening_fields)
+        and set(missing_opening_fields).issubset(validated_opening_fields)
+        and all(
+            _opening_field_has_reference(opening_compliance, field_name)
+            for field_name in missing_opening_fields
+        )
+    )
+    opening_hard_failure_verified = (
+        global_opening_failure_verified
+        or opening_start_failure_verified
+        or opening_compliance_failure_verified
+    )
+    opening_field_labels = {
+        "sealed_start": "完整未拆封快递外包装起点",
+        "waybill_visible": "面单可核验",
+        "single_take_continuity": "一镜到底连续拆封",
+        "issue_visible_in_continuous_opening": "伤点在连续开箱中清晰展示",
+    }
+    missing_opening_text = "、".join(
+        opening_field_labels[field_name] for field_name in missing_opening_fields
+    )
     if (
         is_current_advisory
         and has_video
@@ -595,7 +712,7 @@ def apply_review_decision_policy(
             "reason": (
                 "按照商品有伤 SOP，可回链的开箱起始帧专项复核确认视频并非从完整未拆封快递外包装开始，当前开箱材料不合规。"
                 if opening_start_failure_verified
-                else "按照商品有伤 SOP，完整时间轴证据确认视频未满足封箱起始、面单可见或一镜到底连续拆封的开箱硬要求，当前开箱材料不合规。"
+                else f"按照商品有伤 SOP，完整时间轴证据确认视频未满足{missing_opening_text}的硬要求，当前开箱材料不合规。"
             ),
         })
         audit["evidence_gate"].update({
@@ -920,7 +1037,7 @@ def apply_review_decision_policy(
                     "补充照片可供最低档安慰性补偿参考，但不能推翻完整主视频未观察到所诉损伤的审核倾向。"
                 )
             return _apply_negative(output, audit, min(model_confidence, coverage or model_confidence))
-        audit["reason"] = "主视频尚未同时满足完整开箱、未见所诉损伤、诉求不受支持和聚合过程完整，保持人工复核。"
+        audit["reason"] = "主视频尚未同时满足完整开箱、未见所诉损伤、诉求不受支持和聚合过程完整；保留复核信号，不据此自动形成支持或不支持结论。"
         audit["recommendation_failed_conditions"] = [
             key for key, passed in recommendation_conditions.items() if not passed
         ]
@@ -945,4 +1062,12 @@ def apply_review_decision_policy(
                 "strict_recommendation": strict_recommendation,
             }
         )
+    if (
+        opening_compliance.get("result") == "noncompliant"
+        and output_parsed.get("predicted_label") == "review"
+    ):
+        _normalize_noncompliant_opening_damage(output_parsed, opening_compliance)
+        output_parsed["business_follow_up_reason"] = audit.get("reason") or "开箱合规项尚未闭环，保留复核信号。"
+        output_agent_report["parsed"] = output_parsed
+        output["agent_report"] = output_agent_report
     return output

@@ -30,7 +30,7 @@ from review_input_safety import assert_review_input_safe
 from review_media_safety import ignored_upload_reason, valid_media_magic
 
 from . import store
-from .media_forensics import inspect_job_media, resolve_ffprobe
+from .media_forensics import forensics_timeout_seconds, inspect_job_media, is_video_asset, resolve_ffprobe
 from .input_readiness import assess_input_readiness
 from .decision_policy import apply_review_decision_policy
 from .advisory_assessment import attach_advisory_assessment, html_report_requested
@@ -86,13 +86,17 @@ def ensure_label_isolation(value: Any) -> None:
     assert_review_input_safe(value)
 
 
-def _request_hash(metadata: ReviewCaseMetadata, uploads: Sequence[UploadFile]) -> str:
+def _request_hash(metadata: ReviewCaseMetadata, assets: Sequence[Dict[str, Any]]) -> str:
     basis = {
         "metadata": metadata.model_dump(mode="json"),
         "files": [
-            {"name": item.filename or "", "content_type": item.content_type or ""}
-            for item in uploads
-            if not ignored_upload_reason(item.filename or "")
+            {
+                "name": item.get("original_name") or "",
+                "content_type": item.get("mime_type") or "",
+                "size": int(item.get("size") or 0),
+                "sha256": item.get("sha256") or "",
+            }
+            for item in assets
         ],
     }
     raw = json.dumps(basis, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -212,15 +216,16 @@ async def create_job_from_uploads(
     store.init_db()
     ensure_label_isolation(metadata.model_dump(mode="json"))
     idempotency_key = (header_idempotency_key or metadata.idempotency_key).strip()
-    request_hash = _request_hash(metadata, uploads)
+    job_id = f"RJ-{uuid4().hex[:16].upper()}"
+    assets = await _save_uploads(job_id, metadata, uploads)
+    request_hash = _request_hash(metadata, assets)
     existing = store.get_by_idempotency(tenant_id, idempotency_key)
     if existing:
+        shutil.rmtree(upload_root() / job_id, ignore_errors=True)
         if store.request_hash(existing["job_id"]) != request_hash:
             raise ValueError("idempotency_key_conflict")
         return existing, False
 
-    job_id = f"RJ-{uuid4().hex[:16].upper()}"
-    assets = await _save_uploads(job_id, metadata, uploads)
     stored_metadata = metadata.model_dump(mode="json")
     stored_metadata["ingestion"] = _upload_ingestion_summary(uploads)
     try:
@@ -350,14 +355,88 @@ def _signed_job_media_urls(value: Any, tenant_id: str, job_id: str) -> Any:
     return value
 
 
+_PUBLIC_AGENT_REPORT_FIELDS = {
+    "case_id", "scenario", "scenario_label", "parsed", "quality", "runtime",
+    "public_brief", "evidence_package", "media_gallery",
+    "business_rule_version",
+}
+_PRIVATE_PUBLIC_FIELDS = {
+    "api_path", "debug", "debug_info", "diagnostics", "display_model", "error",
+    "error_type", "file", "internal", "internal_details", "internal_prompt",
+    "internal_url", "local_path", "model", "model_key", "model_name",
+    "original_name", "path", "prompt", "provider", "raw", "raw_response",
+    "raw_text", "source_record", "stored_name", "supplier_debug", "system_prompt",
+    "user_prompt",
+}
+_LOCAL_PATH_PATTERN = re.compile(
+    r"(?i)(?:file://|[a-z]:[\\/]|\\\\|/(?:home|users|tmp|var|opt|mnt|private|workspace)(?:/|$))"
+)
+
+
+def _sanitize_public_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _sanitize_public_value(item)
+            for key, item in value.items()
+            if str(key).lower() not in _PRIVATE_PUBLIC_FIELDS
+        }
+    if isinstance(value, list):
+        return [_sanitize_public_value(item) for item in value]
+    if isinstance(value, str) and _LOCAL_PATH_PATTERN.search(value):
+        return ""
+    return value
+
+
 def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
-    output = deepcopy(job)
-    inference = (
-        (((output.get("result") or {}).get("review") or {}).get("agent_report") or {}).get("inference_estimate")
-        or {}
-    )
-    if isinstance(inference, dict):
-        inference.pop("channel_route_attempts", None)
+    public_job_fields = {
+        "job_id", "client_case_id", "scenario", "status", "attempts",
+        "created_at", "started_at", "completed_at", "updated_at",
+    }
+    public_result_fields = {
+        "client_case_id", "scenario", "scenario_label", "source_status",
+        "media_forensics", "input_readiness", "boundary", "review",
+        "recommended_escalation",
+    }
+    public_review_fields = {
+        "review_label", "summary", "frame_strategy", "media_warnings",
+        "agent_brief", "agent_report", "media_forensics", "advisory_assessment",
+        "report", "sampling",
+    }
+    output = {
+        key: deepcopy(job[key])
+        for key in public_job_fields
+        if key in job
+    }
+    output["assets"] = [
+        {
+            key: deepcopy(asset[key])
+            for key in ("asset_id", "mime_type", "size", "fields")
+            if key in asset
+        }
+        for asset in job.get("assets") or []
+        if isinstance(asset, dict)
+    ]
+    raw_result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    output["result"] = {
+        key: deepcopy(raw_result[key])
+        for key in public_result_fields
+        if key in raw_result
+    }
+    raw_review = output["result"].get("review")
+    if isinstance(raw_review, dict):
+        output["result"]["review"] = {
+            key: deepcopy(raw_review[key])
+            for key in public_review_fields
+            if key in raw_review
+        }
+        raw_agent_report = output["result"]["review"].get("agent_report")
+        if isinstance(raw_agent_report, dict):
+            output["result"]["review"]["agent_report"] = {
+                key: deepcopy(raw_agent_report[key])
+                for key in _PUBLIC_AGENT_REPORT_FIELDS
+                if key in raw_agent_report
+            }
+    output["result"] = _sanitize_public_value(output["result"])
     output["result"] = _job_media_urls(output.get("result") or {}, str(output.get("job_id") or ""))
     return output
 
@@ -564,6 +643,7 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
     metadata = job.get("metadata") or {}
     continuity_policy, damage_causality_policy = _effective_review_policies(metadata)
     return {
+        "rule_tenant_id": str(job.get("tenant_id") or ""),
         "scenario": SCENARIO_MAP[job["scenario"]],
         "business_scenario": job["scenario"],
         "ticket_id": str(metadata.get("ticket_id") or job["client_case_id"]),
@@ -618,13 +698,37 @@ def _validate_workbench_health(
         raise ValueError("visual_workbench_contract_mismatch")
 
 
-def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
-    job_dir = upload_root() / job["job_id"]
+def _workbench_request_policy() -> tuple[int, int]:
     timeout_seconds = max(30, int(os.getenv("REVIEW_JOB_TIMEOUT_SECONDS", "1800") or 1800))
     retries = max(0, min(int(os.getenv("REVIEW_WORKBENCH_RETRIES", "2") or 2), 4))
+    return timeout_seconds, retries
+
+
+def _workbench_lease_seconds(job: Dict[str, Any]) -> int:
+    timeout_seconds, retries = _workbench_request_policy()
+    backoff_seconds = sum(min(2 ** attempt, 4) for attempt in range(retries))
+    video_count = sum(
+        1
+        for asset in job.get("assets") or []
+        if is_video_asset(asset)
+    )
+    return (
+        video_count * forensics_timeout_seconds()
+        + timeout_seconds * (retries + 1)
+        + backoff_seconds
+        + 60
+    )
+
+
+def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
+    job_dir = upload_root() / job["job_id"]
+    timeout_seconds, retries = _workbench_request_policy()
     retryable = {429, 502, 503, 504}
     attempts: List[Dict[str, Any]] = []
     payload: Any = None
+    internal_token = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
+    if not internal_token:
+        raise ValueError("visual_internal_token_required")
     soft_limit, safe_limit = _review_asset_limits()
     with httpx.Client(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
         health = client.get(f"{_workbench_url()}/api/health")
@@ -652,7 +756,7 @@ def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
                     headers={
                         "X-Request-ID": f"{job['job_id']}-workbench-{attempt}",
                         "X-MITAKO-Internal-Metrics": "1",
-                        "X-MITAKO-Internal-Token": os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip(),
+                        "X-MITAKO-Internal-Token": internal_token,
                     },
                     data=_review_fields(job),
                     files=files,
@@ -905,14 +1009,18 @@ def _sync_final_advisory_brief(review: Dict[str, Any]) -> Dict[str, Any]:
     if next_step:
         public_brief["next_step"] = next_step
     agent_report["public_brief"] = public_brief
+    parsed = dict(agent_report.get("parsed") or {})
+    if next_step:
+        parsed["next_step"] = next_step
+    agent_report["parsed"] = parsed
     output["agent_report"] = agent_report
     return output
 
 
 def run_job(job_id: str) -> Dict[str, Any]:
-    lease_seconds = max(30, int(os.getenv("REVIEW_JOB_TIMEOUT_SECONDS", "1800") or 1800)) + 60
-    if not store.claim_job(job_id, lease_seconds):
-        return store.get_job(job_id) or {}
+    queued_job = store.get_job(job_id) or {}
+    if not store.claim_job(job_id, _workbench_lease_seconds(queued_job)):
+        return queued_job or store.get_job(job_id) or {}
     job = store.get_job(job_id) or {}
     forensics = _media_forensics(job)
     readiness = assess_input_readiness(job.get("metadata") or {})

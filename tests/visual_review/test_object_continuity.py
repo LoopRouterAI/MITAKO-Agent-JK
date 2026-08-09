@@ -36,6 +36,38 @@ def continuity(verdict="continuous", duration=0.0):
 
 
 class ObjectContinuityTest(unittest.TestCase):
+    def test_product_damage_ignores_shipping_package_absence_after_claimed_item_exposure(self):
+        result = apply_object_continuity_guard(
+            {
+                "predicted_label": "positive",
+                "confidence": 0.91,
+                "damage_causality_assessment": {"damage_presence": "confirmed"},
+                "object_continuity_assessment": {
+                    "continuity_verdict": "long_absence",
+                    "longest_out_of_frame_seconds": 31.8,
+                    "tracked_subjects": [
+                        {
+                            "subject_id": "shipping_package",
+                            "out_of_frame_events": [{"duration_seconds": 31.8}],
+                        },
+                        {
+                            "subject_id": "claimed_item",
+                            "visibility_coverage": 1.0,
+                            "out_of_frame_events": [],
+                        },
+                    ],
+                },
+            },
+            "product_damage",
+            True,
+            {"out_of_frame_warning_seconds": 3.0},
+        )
+
+        self.assertEqual(result["predicted_label"], "positive")
+        self.assertEqual(result["continuity_recommendation"], "continue")
+        self.assertEqual(result["object_continuity_assessment"]["relevant_subject_id"], "claimed_item")
+        self.assertEqual(result["object_continuity_assessment"]["relevant_longest_out_of_frame_seconds"], 0.0)
+
     def test_missing_subject_timeline_cannot_claim_continuity(self):
         result = apply_object_continuity_guard(
             {"predicted_label": "positive", "confidence": 0.95},

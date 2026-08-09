@@ -257,6 +257,30 @@ def _report_data():
 
 
 class ReportEvidenceRenderingTest(unittest.TestCase):
+    def test_video_continuity_uses_object_tracking_when_video_summary_omits_it(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed["video_audit_conclusion"].pop("evidence_continuity_status", None)
+        parsed["object_continuity_assessment"]["continuity_verdict"] = "continuous"
+
+        report_html = render_public_report(data)
+
+        self.assertIn("商品证据连续性</small><b>连续</b>", report_html)
+        self.assertNotIn("商品证据连续性</small><b>未知</b>", report_html)
+
+    def test_image_only_report_omits_video_metrics_and_video_proof(self):
+        data = _report_data()
+        report = data["agent_report"]
+        report["evidence_package"]["videos"] = []
+        report["evidence_package"]["frames_sent"] = 0
+        report["media_gallery"]["frames"] = []
+
+        report_html = render_public_report(data)
+
+        self.assertNotIn("商品连续性分数", report_html)
+        self.assertNotIn("视频审核论证", report_html)
+        self.assertNotIn("视频查看密度", report_html)
+
     def test_public_agent_report_preserves_timeline_coverage_metadata(self):
         report = _public_agent_report_payload(
             case={
@@ -548,6 +572,16 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertNotIn("MITAKO-PD-20260720@2", report_html)
         self.assertIn("争议商品离镜时间超过策略阈值", report_html)
         self.assertIn("补充证据关联尚未解决", report_html)
+
+    def test_report_hides_source_breakdown_when_the_model_did_not_return_one(self):
+        data = _report_data()
+        damage = data["agent_report"]["parsed"]["damage_causality_assessment"]
+        damage.pop("evidence_source_summary", None)
+
+        report_html = render_public_report(data)
+
+        self.assertNotIn("未完成主视频审查", report_html)
+        self.assertNotIn("补充图片 0 张", report_html)
         self.assertIn("ORDER-1@V1", report_html)
         self.assertIn("应发 2 / 已识别 1", report_html)
 
@@ -634,6 +668,37 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("2 FPS", report_html)
         self.assertIn("拆封动作", report_html)
         self.assertIn("伤情首次出现", report_html)
+
+    def test_report_lists_each_opening_video_requirement(self):
+        data = _report_data()
+        data["agent_report"]["parsed"]["video_audit_conclusion"]["opening_video_compliance"] = {
+            "sealed_start": True,
+            "waybill_visible": False,
+            "single_take_continuity": True,
+            "issue_visible_in_continuous_opening": False,
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("主开箱视频硬要求", report_html)
+        self.assertIn("封箱起始：</b>符合", report_html)
+        self.assertIn("面单可核验：</b>不符合", report_html)
+        self.assertIn("一镜到底连续拆封：</b>符合", report_html)
+        self.assertIn("伤点在连续开箱中清晰展示：</b>不符合", report_html)
+
+    def test_report_hides_opening_requirements_when_every_field_is_unknown(self):
+        data = _report_data()
+        data["agent_report"]["parsed"]["video_audit_conclusion"]["opening_video_compliance"] = {
+            "sealed_start": None,
+            "waybill_visible": None,
+            "single_take_continuity": None,
+            "issue_visible_in_continuous_opening": None,
+            "result": "indeterminate",
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertNotIn("主开箱视频硬要求", report_html)
 
     def test_report_does_not_claim_two_fps_completed_for_one_fps_material_signal(self):
         data = _report_data()

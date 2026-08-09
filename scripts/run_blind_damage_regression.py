@@ -44,6 +44,10 @@ def internal_metrics_headers() -> dict[str, str]:
     } if token else {}
 
 
+def internal_metrics_fields() -> dict[str, str]:
+    return {"rule_tenant_id": "mitako"} if os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip() else {}
+
+
 def blind_case_id(bundle: Path) -> str:
     digest = hashlib.sha256(str(bundle.resolve()).encode("utf-8")).hexdigest()[:12].upper()
     return f"CASE-{digest}"
@@ -128,6 +132,7 @@ def run_case(
                 ensure_ascii=False,
             ),
         }
+        data.update(internal_metrics_fields())
         with httpx.Client(
             timeout=httpx.Timeout(3600, connect=10, write=3600, read=3600),
             trust_env=False,
@@ -194,6 +199,7 @@ def main() -> int:
                     "checklist": minor.get("checklist"),
                     "field_consistency": minor.get("field_consistency"),
                     "required_materials": minor.get("required_materials"),
+                    "payment_capability_risk": minor.get("payment_capability_risk"),
                     "authenticity_assessment": minor.get("authenticity_assessment"),
                 }
                 if minor

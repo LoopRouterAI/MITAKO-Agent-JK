@@ -104,7 +104,8 @@ def _consistency_result(check_id: str, status: str = "matched") -> dict:
             "payment_password_access", "guardian_discovery_process",
         ],
         "guardian_relationship": [
-            "guardian_identity", "minor_identity", "relationship_link", "applicant_guardian_role",
+            "guardian_identity", "minor_identity", "relationship_document_linkage",
+            "explicit_relationship_entry", "relationship_link", "applicant_guardian_role",
         ],
         "commitment_signatures": [
             "guardian_signer", "minor_signer", "signature_presence", "signature_method", "field_alignment",
@@ -124,9 +125,15 @@ def _consistency_result(check_id: str, status: str = "matched") -> dict:
             "coverage_ack": {"expected_image_indices": [1, 3], "observed_image_indices": [1, 3]},
             "consistency_check": {
                 "check_id": check_id,
+                "relationship_evidence_type": (
+                    "birth_certificate" if check_id == "guardian_relationship" else "not_applicable"
+                ),
                 "age_band": "10_to_17" if check_id == "identity_age" else "unknown",
                 "low_age": False if check_id == "identity_age" else None,
+                "under_nine": False if check_id == "identity_age" else None,
+                "age_confidence": "high" if check_id == "identity_age" else "unknown",
                 "payment_capability_risk": "none",
+                "relationship_document_groups": [],
                 "field_results": [{
                     "field_name": field_name,
                     "status": status,
@@ -194,6 +201,11 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             "监护人如何、何时发现消费",
             "空白签字栏",
             "打印或电脑录入的姓名",
+            "两本户口本",
+            "relationship_link 必须为 uncertain",
+            "每张关系材料按可见户号",
+            "relationship_document_linkage",
+            "explicit_relationship_entry",
         ):
             self.assertIn(rule, consistency_prompt)
 
@@ -293,9 +305,14 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             item for item in checks
             if item["parsed"]["consistency_check"]["check_id"] == "guardian_relationship"
         )
+        relationship["parsed"]["consistency_check"]["relationship_evidence_type"] = (
+            "separate_household_books_without_bridge"
+        )
         for field in relationship["parsed"]["consistency_check"]["field_results"]:
             if field["field_name"] == "relationship_link":
                 field["status"] = "uncertain"
+            elif field["field_name"] == "relationship_document_linkage":
+                field["status"] = "mismatched"
 
         parsed = aggregate_minor_material_results(
             case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
@@ -303,6 +320,10 @@ class MinorMaterialPipelineTest(unittest.TestCase):
 
         self.assertEqual(parsed["predicted_label"], "review")
         self.assertTrue(any("直接亲子或监护关系" in item for item in parsed["material_gaps"]))
+        self.assertTrue(any(
+            "直接亲子或监护关系" in item
+            for item in parsed["minor_material_assessment"]["required_materials"]
+        ))
         panel = render_minor_material_panel(
             parsed["minor_material_assessment"], lambda value: html.escape(str(value))
         )
@@ -310,6 +331,172 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertIn("未建立直接监护关系，需补关系证明", panel)
         self.assertIn("同一本户口本直接关系页、出生证明或法定监护证明", panel)
         self.assertNotIn("visual_relationship_link_unresolved", panel)
+
+    def test_separate_household_books_override_a_false_matched_relationship_link(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        relationship = next(
+            item for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "guardian_relationship"
+        )
+        relationship["parsed"]["consistency_check"]["relationship_evidence_type"] = (
+            "separate_household_books_without_bridge"
+        )
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        relationship_check = next(
+            item for item in parsed["minor_material_assessment"]["field_consistency"]["checks"]
+            if item["check_id"] == "guardian_relationship"
+        )
+        relationship_link = next(
+            item for item in relationship_check["field_results"]
+            if item["field_name"] == "relationship_link"
+        )
+
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(relationship_check["relationship_evidence_type"], "separate_household_books_without_bridge")
+        self.assertEqual(relationship_link["status"], "uncertain")
+        self.assertTrue(any("直接亲子或监护关系" in item for item in parsed["material_gaps"]))
+
+    def test_uncertain_relationship_evidence_cannot_keep_a_matched_relationship_link(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        relationship = next(
+            item for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "guardian_relationship"
+        )
+        relationship["parsed"]["consistency_check"]["relationship_evidence_type"] = "uncertain"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertTrue(any("直接亲子或监护关系" in item for item in parsed["material_gaps"]))
+
+    def test_same_household_claim_requires_document_and_explicit_relationship_link(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        relationship = next(
+            item for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "guardian_relationship"
+        )
+        relationship["parsed"]["consistency_check"]["relationship_evidence_type"] = "same_household_direct_link"
+        linkage = next(
+            item for item in relationship["parsed"]["consistency_check"]["field_results"]
+            if item["field_name"] == "relationship_document_linkage"
+        )
+        linkage["status"] = "mismatched"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        relationship_check = next(
+            item for item in parsed["minor_material_assessment"]["field_consistency"]["checks"]
+            if item["check_id"] == "guardian_relationship"
+        )
+
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(
+            relationship_check["relationship_evidence_type"],
+            "separate_household_books_without_bridge",
+        )
+        self.assertTrue(any("直接亲子或监护关系" in item for item in parsed["material_gaps"]))
+
+    def test_same_household_claim_requires_minor_and_guardian_pages_in_one_group(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        relationship = next(
+            item for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "guardian_relationship"
+        )
+        relationship["parsed"]["consistency_check"].update({
+            "relationship_evidence_type": "same_household_direct_link",
+            "relationship_document_groups": [
+                {
+                    "image_index": 1,
+                    "document_type": "household_register",
+                    "subject_role": "minor",
+                    "document_group": "group_1",
+                },
+                {
+                    "image_index": 3,
+                    "document_type": "household_register",
+                    "subject_role": "guardian",
+                    "document_group": "group_2",
+                },
+            ],
+        })
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        relationship_check = next(
+            item for item in parsed["minor_material_assessment"]["field_consistency"]["checks"]
+            if item["check_id"] == "guardian_relationship"
+        )
+
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(
+            relationship_check["relationship_evidence_type"],
+            "separate_household_books_without_bridge",
+        )
+        self.assertTrue(any("直接亲子或监护关系" in item for item in parsed["material_gaps"]))
+
+    def test_relationship_consistency_job_excludes_identity_cards(self) -> None:
+        observations = [
+            {"image_index": 1, "document_types": ["identity_card"], "subject_role": "guardian", "readability": "clear", "quality_issues": []},
+            {"image_index": 2, "document_types": ["identity_card"], "subject_role": "minor", "readability": "clear", "quality_issues": []},
+            {"image_index": 3, "document_types": ["household_register"], "subject_role": "minor", "readability": "clear", "quality_issues": []},
+            {"image_index": 4, "document_types": ["household_register"], "subject_role": "guardian", "readability": "clear", "quality_issues": []},
+        ]
+        images = [{"image_index": index} for index in range(1, 5)]
+
+        jobs = _consistency_image_jobs(observations, images)
+        relationship_job = next(item for item in jobs if item["check_id"] == "guardian_relationship")
+
+        self.assertEqual(
+            [item["image_index"] for item in relationship_job["selected"]],
+            [3, 4],
+        )
 
     def test_low_age_payment_process_gap_requests_material_without_forcing_human_review(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -385,6 +572,9 @@ class MinorMaterialPipelineTest(unittest.TestCase):
                 self.assertFalse(assessment["payment_capability_risk"]["requires_more_material"])
                 self.assertNotIn("支付密码", required)
                 self.assertNotIn("如何、何时发现消费", required)
+                panel = render_minor_material_panel(assessment, lambda value: html.escape(str(value)))
+                self.assertNotIn("低龄支付过程核验", panel)
+                self.assertNotIn("支付过程信息待确认", panel)
 
     def test_explicit_field_conflict_precedes_low_age_payment_process_gap(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -455,6 +645,77 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertFalse(risk["requires_review"])
         self.assertEqual(risk["process_evidence_status"], "matched")
 
+    def test_high_confidence_under_nine_requires_human_review_without_changing_fact_label(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        case["order_context"]["created_at"] = "2026-08-01"
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        identity = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
+        )
+        identity.update({
+            "age_band": "under_10",
+            "low_age": True,
+            "under_nine": True,
+            "age_confidence": "high",
+            "payment_capability_risk": "none",
+        })
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        risk = parsed["minor_material_assessment"]["payment_capability_risk"]
+
+        self.assertEqual(parsed["predicted_label"], "positive")
+        self.assertTrue(parsed["human_required"])
+        self.assertTrue(risk["under_nine"])
+        self.assertEqual(risk["age_confidence"], "high")
+        self.assertTrue(risk["requires_review"])
+        self.assertIn("未满 9 周岁", risk["effect"])
+
+    def test_under_nine_without_high_confidence_does_not_force_human_review(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        case["order_context"]["created_at"] = "2026-08-01"
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        identity = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
+        )
+        identity.update({
+            "age_band": "under_10",
+            "low_age": True,
+            "under_nine": True,
+            "age_confidence": "low",
+            "payment_capability_risk": "none",
+        })
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        risk = parsed["minor_material_assessment"]["payment_capability_risk"]
+
+        self.assertFalse(parsed["human_required"])
+        self.assertFalse(risk["requires_review"])
+        self.assertNotEqual(risk["age_confidence"], "high")
+
     def test_age_band_conflict_blocks_low_age_material_request(self) -> None:
         case = _case(image_count=20, frame_count=0)
         rows = [(list(range(1, 21)), {
@@ -492,6 +753,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         case = _case()
         reviewed_image_indices = []
         consistency_checks = []
+        consistency_contexts = {}
 
         def invoke(batch_case: dict) -> dict:
             mode = batch_case["structured_business_context"]["analysis_mode"]
@@ -520,6 +782,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             else:
                 check_id = batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
                 consistency_checks.append(check_id)
+                consistency_contexts[check_id] = batch_case["structured_business_context"]["minor_consistency_check"].get("material_context")
                 result = _consistency_result(check_id)
                 indices = [item["image_index"] for item in batch_case["supplemental_images"]]
                 result["parsed"]["coverage_ack"] = {
@@ -556,6 +819,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             set(consistency_checks),
             {"identity_age", "guardian_relationship", "commitment_signatures", "order_payment", "mobile_realname"},
         )
+        self.assertTrue(consistency_contexts["guardian_relationship"])
+        self.assertTrue(all("document_type" in item and "subject_role" in item for item in consistency_contexts["guardian_relationship"]))
         self.assertEqual(assessment["field_consistency"]["status"], "completed")
         self.assertEqual(len(assessment["field_consistency"]["checks"]), 5)
         self.assertEqual(assessment["authoritative_verification"]["status"], "not_configured_optional")
@@ -915,6 +1180,12 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             check_id = batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
             consistency_checks.append(check_id)
             result = _consistency_result(check_id)
+            result["parsed"]["coverage_ack"] = {
+                "expected_image_indices": indices,
+                "observed_image_indices": indices,
+            }
+            for field in result["parsed"]["consistency_check"]["field_results"]:
+                field["evidence_image_indices"] = indices[:2]
             if check_id == "commitment_signatures":
                 for field in result["parsed"]["consistency_check"]["field_results"]:
                     if field["field_name"] == "signature_method":
@@ -929,8 +1200,9 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertNotEqual(mobile["status"], "present")
         self.assertIn("commitment_signatures", consistency_checks)
         self.assertGreater(result["chunking"]["channels"]["minor_field_consistency"]["model_calls"], 0)
-        self.assertEqual(len(assessment["required_materials"]), 1)
-        self.assertIn("双方亲笔签名", assessment["required_materials"][0])
+        self.assertEqual(assessment["required_materials"], result["parsed"]["material_gaps"])
+        self.assertEqual(len(assessment["required_materials"]), 2)
+        self.assertTrue(any("双方亲笔签名" in item for item in assessment["required_materials"]))
         self.assertEqual(len(result["parsed"]["material_gaps"]), 2)
         self.assertIn("号码已注销", result["parsed"]["material_gaps"][0])
         self.assertIn("支付截图不能替代", result["parsed"]["material_gaps"][0])
@@ -1762,6 +2034,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         prompt = build_selection_prompt(case)
 
         self.assertIn("监护关系", prompt)
+        self.assertIn("relationship_evidence_type", prompt)
+        self.assertIn("separate_household_books_without_bridge", prompt)
         self.assertIn("比较图片中可见字段", prompt)
         self.assertIn("不得输出任何字段原值", prompt)
         self.assertIn("默认 disabled", prompt)

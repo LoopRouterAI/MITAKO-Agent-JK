@@ -55,7 +55,8 @@ CONSISTENCY_FIELDS = {
         "payment_password_access", "guardian_discovery_process",
     ),
     "guardian_relationship": (
-        "guardian_identity", "minor_identity", "relationship_link", "applicant_guardian_role",
+        "guardian_identity", "minor_identity", "relationship_document_linkage",
+        "explicit_relationship_entry", "relationship_link", "applicant_guardian_role",
     ),
     "commitment_signatures": (
         "guardian_signer", "minor_signer", "signature_presence", "signature_method", "field_alignment",
@@ -71,6 +72,15 @@ CONSISTENCY_FIELDS = {
 }
 CONSISTENCY_STATUS = {"matched", "mismatched", "uncertain", "not_assessed"}
 PAYMENT_CAPABILITY_RISKS = {"none", "high", "unknown"}
+AGE_CONFIDENCE = {"high", "low", "unknown"}
+RELATIONSHIP_EVIDENCE_TYPES = {
+    "same_household_direct_link",
+    "birth_certificate",
+    "legal_guardianship_proof",
+    "separate_household_books_without_bridge",
+    "uncertain",
+    "not_applicable",
+}
 FIELD_VISIBILITY = {"complete", "partial", "masked", "unreadable"}
 TAMPER_RISK = {"low", "medium", "high", "uncertain"}
 RISK_REASON_CODES = {
@@ -101,6 +111,8 @@ CONSISTENCY_FIELD_LABELS = {
     "payment_password_access": "支付密码获取方式",
     "guardian_discovery_process": "监护人发现消费的过程",
     "relationship_link": "监护关系",
+    "relationship_document_linkage": "关系材料主体链接",
+    "explicit_relationship_entry": "明确亲子或合法监护记载",
     "applicant_guardian_role": "申请人监护资格",
     "guardian_signer": "监护人签字",
     "minor_signer": "未成年人签字",
@@ -128,6 +140,8 @@ CONSISTENCY_FIELD_REQUIRED_MATERIALS = {
     "payment_password_access": "请补充说明未成年人如何获得或得知支付密码。",
     "guardian_discovery_process": "请补充说明监护人如何、何时发现消费。",
     "relationship_link": "请补同一本户口本直接关系页、出生证明或法定监护证明。",
+    "relationship_document_linkage": "请补同一本户口本直接关系页、出生证明或法定监护证明。",
+    "explicit_relationship_entry": "请补明确记载亲子或合法监护关系的证明。",
     "applicant_guardian_role": "如申请人为兄弟姐妹等非法定监护人，不能直接代办；请补父母关系或合法监护证明。",
     "signature_presence": "请重新提交包含双方亲笔签名的退款承诺书。",
     "signature_method": "请重新提交包含双方亲笔签名的退款承诺书，电脑录入姓名不能替代签名。",
@@ -144,6 +158,8 @@ CONSISTENCY_FIELD_REQUIRED_MATERIALS = {
 }
 CONSISTENCY_FIELD_GROUPS = {
     "relationship_link": "guardian_relationship",
+    "relationship_document_linkage": "guardian_relationship",
+    "explicit_relationship_entry": "guardian_relationship",
     "applicant_guardian_role": "guardian_relationship",
     "signature_presence": "commitment_signatures",
     "signature_method": "commitment_signatures",
@@ -165,6 +181,9 @@ CONSISTENCY_REQUIREMENTS = {
     "mobile_realname": "mobile_realname",
 }
 UNCERTAIN_ACTIONABLE_FIELDS = {
+    "relationship_link",
+    "relationship_document_linkage",
+    "explicit_relationship_entry",
     "signature_presence",
     "signature_method",
     "invoice_phone",
@@ -580,7 +599,7 @@ def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> L
             identity_usable,
             bool(identity),
             identity,
-            "未成年人无身份证时可由户口本信息页或出生证明替代；角色和正反面仍需人工核对。",
+            "未成年人无身份证时可由户口本信息页或出生证明替代；按清晰页面核对主体角色和证件正反面。",
             "needs_manual_consistency_check",
         ),
         (
@@ -600,7 +619,7 @@ def _checklist(observations: List[Dict[str, Any]], coverage_complete: bool) -> L
             any(_sop_usable(item) for item in commitment),
             bool(commitment),
             commitment,
-            "签字真实性由人工终审确认。",
+            "视觉初审只核对签名是否为亲笔书写及签署主体；法定真实性不由视觉模型单独认定。",
             "needs_manual_consistency_check",
         ),
         (
@@ -669,7 +688,7 @@ def _consistency_image_jobs(
     mobile = indices("mobile_realname_proof", "carrier_invoice")
     plans = {
         "identity_age": guardian + guardian_passport + minor + minor_passport + relationship,
-        "guardian_relationship": guardian + guardian_passport + minor + minor_passport + relationship,
+        "guardian_relationship": guardian_passport + minor_passport + relationship,
         "commitment_signatures": guardian + minor + relationship + commitment,
         "order_payment": guardian + payment,
         "mobile_realname": guardian + mobile + payment,
@@ -691,9 +710,7 @@ def _consistency_image_jobs(
             + (clear_relationship or relationship)[:1]
         ),
         "guardian_relationship": (
-            (clear_guardian or guardian)[:1]
-            + (clear_guardian_passport or guardian_passport)[:1]
-            + (clear_minor or minor)[:1]
+            (clear_guardian_passport or guardian_passport)[:1]
             + (clear_minor_passport or minor_passport)[:1]
             + (clear_relationship or relationship)[:1]
         ),
@@ -769,18 +786,34 @@ def _normalize_consistency_checks(
         tamper_risks = []
         payment_capability_risks = []
         low_age_values: List[bool] = []
+        under_nine_values: List[bool] = []
+        age_confidence_values: List[str] = []
         age_band_values: List[str] = []
+        relationship_evidence_values: List[str] = []
+        same_household_group_statuses: List[str] = []
         risk_reason_codes = set()
         tamper_evidence_indices: set[int] = set()
         for result in check_results:
             parsed = result.get("parsed") or {}
             raw = parsed.get("consistency_check") or {}
+            relationship_evidence_type = str(raw.get("relationship_evidence_type") or "uncertain")
+            relationship_evidence_values.append(
+                relationship_evidence_type
+                if relationship_evidence_type in RELATIONSHIP_EVIDENCE_TYPES
+                else "uncertain"
+            )
             payment_capability_risk = str(raw.get("payment_capability_risk") or "unknown")
             payment_capability_risks.append(
                 payment_capability_risk if payment_capability_risk in PAYMENT_CAPABILITY_RISKS else "unknown"
             )
             if isinstance(raw.get("low_age"), bool):
                 low_age_values.append(raw["low_age"])
+            if isinstance(raw.get("under_nine"), bool):
+                under_nine_values.append(raw["under_nine"])
+            age_confidence = str(raw.get("age_confidence") or "unknown")
+            age_confidence_values.append(
+                age_confidence if age_confidence in AGE_CONFIDENCE else "unknown"
+            )
             age_band = str(raw.get("age_band") or "unknown")
             if age_band in {"under_10", "10_to_17", "18_or_over", "unknown"}:
                 age_band_values.append(age_band)
@@ -794,6 +827,28 @@ def _normalize_consistency_checks(
                 for value in (parsed.get("coverage_ack") or {}).get("observed_image_indices") or []
                 if str(value).isdigit()
             }
+            if relationship_evidence_type == "same_household_direct_link":
+                role_groups: Dict[str, set[str]] = {"guardian": set(), "minor": set()}
+                for group in raw.get("relationship_document_groups") or []:
+                    if not isinstance(group, dict) or group.get("document_type") != "household_register":
+                        continue
+                    try:
+                        image_index = int(group.get("image_index"))
+                    except (TypeError, ValueError):
+                        continue
+                    role = str(group.get("subject_role") or "unknown")
+                    document_group = str(group.get("document_group") or "uncertain")
+                    if image_index not in expected_indices or role not in role_groups or document_group not in {
+                        "group_1", "group_2", "group_3", "group_4",
+                    }:
+                        continue
+                    role_groups[role].add(document_group)
+                if role_groups["guardian"] and role_groups["minor"]:
+                    same_household_group_statuses.append(
+                        "matched" if role_groups["guardian"] & role_groups["minor"] else "mismatched"
+                    )
+                else:
+                    same_household_group_statuses.append("uncertain")
             required_indices.update(
                 int(value) for value in (result.get("_required_image_indices") or expected_indices)
                 if str(value).isdigit()
@@ -864,6 +919,67 @@ def _normalize_consistency_checks(
                     image_index for item in candidates for image_index in item["evidence_image_indices"]
                 }),
             })
+        relationship_evidence_type = "not_applicable"
+        if check_id == "guardian_relationship":
+            bridge_types = {
+                value for value in relationship_evidence_values
+                if value in {
+                    "same_household_direct_link", "birth_certificate", "legal_guardianship_proof",
+                }
+            }
+            if len(bridge_types) == 1:
+                relationship_evidence_type = next(iter(bridge_types))
+            elif bridge_types:
+                relationship_evidence_type = "uncertain"
+            elif "separate_household_books_without_bridge" in relationship_evidence_values:
+                relationship_evidence_type = "separate_household_books_without_bridge"
+            else:
+                relationship_evidence_type = "uncertain"
+            fields_by_name = {item["field_name"]: item for item in field_rows}
+            valid_bridge = relationship_evidence_type in {
+                "same_household_direct_link", "birth_certificate", "legal_guardianship_proof",
+            }
+            bridge_fields_matched = all(
+                (fields_by_name.get(field_name) or {}).get("status") == "matched"
+                for field_name in ("relationship_document_linkage", "explicit_relationship_entry")
+            )
+            if valid_bridge and not bridge_fields_matched:
+                relationship_evidence_type = (
+                    "separate_household_books_without_bridge"
+                    if relationship_evidence_type == "same_household_direct_link"
+                    and (fields_by_name.get("relationship_document_linkage") or {}).get("status") == "mismatched"
+                    else "uncertain"
+                )
+                for field_name in (
+                    "relationship_document_linkage", "explicit_relationship_entry", "relationship_link",
+                ):
+                    if field_name in fields_by_name:
+                        fields_by_name[field_name]["status"] = "uncertain"
+            if relationship_evidence_type == "same_household_direct_link" and (
+                len(same_household_group_statuses) != len(check_results)
+                or set(same_household_group_statuses) != {"matched"}
+            ):
+                relationship_evidence_type = (
+                    "separate_household_books_without_bridge"
+                    if "mismatched" in same_household_group_statuses else "uncertain"
+                )
+                for field_name in ("relationship_document_linkage", "relationship_link"):
+                    if field_name in fields_by_name:
+                        fields_by_name[field_name]["status"] = "uncertain"
+            if relationship_evidence_type == "separate_household_books_without_bridge":
+                for field_name in (
+                    "relationship_document_linkage", "explicit_relationship_entry", "relationship_link",
+                ):
+                    if field_name in fields_by_name:
+                        fields_by_name[field_name]["status"] = "uncertain"
+                risk_reason_codes.discard("conflicting_fields")
+                risk_reason_codes.add("evidence_gap")
+            if relationship_evidence_type not in {
+                "same_household_direct_link", "birth_certificate", "legal_guardianship_proof",
+            }:
+                for field in field_rows:
+                    if field["field_name"] == "relationship_link":
+                        field["status"] = "uncertain"
         field_statuses = {item["status"] for item in field_rows}
         tamper_risk = next(
             (value for value in ("high", "medium", "uncertain", "low") if value in tamper_risks),
@@ -896,8 +1012,35 @@ def _normalize_consistency_checks(
             else False if age_band in {"10_to_17", "18_or_over"} and raw_low_age is False
             else None
         )
+        raw_under_nine = (
+            under_nine_values[0]
+            if under_nine_values and len(under_nine_values) == len(check_results)
+            and len(set(under_nine_values)) == 1
+            else None
+        )
+        under_nine = (
+            raw_under_nine
+            if age_band == "under_10" and raw_under_nine is not None
+            else False if age_band in {"10_to_17", "18_or_over"}
+            else None
+        )
+        age_identity_matched = all(
+            next(
+                (item.get("status") for item in field_rows if item.get("field_name") == field_name),
+                "not_assessed",
+            ) == "matched"
+            for field_name in ("minor_identity", "age_eligibility")
+        )
+        age_confidence = (
+            age_confidence_values[0]
+            if coverage_ok and age_identity_matched and age_confidence_values
+            and len(age_confidence_values) == len(check_results)
+            and len(set(age_confidence_values)) == 1
+            else "unknown"
+        )
         normalized[check_id] = {
             "check_id": check_id,
+            "relationship_evidence_type": relationship_evidence_type,
             "status": status,
             "message": _consistency_message(check_id, status, field_rows),
             "field_results": field_rows,
@@ -909,6 +1052,8 @@ def _normalize_consistency_checks(
             "segment_count": len(check_results),
             "age_band": age_band,
             "low_age": low_age,
+            "under_nine": under_nine,
+            "age_confidence": age_confidence,
             "payment_capability_risk": (
                 "high" if low_age is True and "high" in payment_capability_risks
                 else "none" if low_age is False or payment_capability_risks and set(payment_capability_risks) == {"none"}
@@ -919,6 +1064,7 @@ def _normalize_consistency_checks(
     for check_id in CONSISTENCY_FIELDS:
         checks.append(normalized.get(check_id, {
             "check_id": check_id,
+            "relationship_evidence_type": "uncertain" if check_id == "guardian_relationship" else "not_applicable",
             "status": "not_assessed",
             "message": CONSISTENCY_MESSAGES["not_assessed"],
             "field_results": [],
@@ -926,6 +1072,10 @@ def _normalize_consistency_checks(
             "risk_reason_codes": ["evidence_gap"] if check_id in failed_ids else [],
             "evidence_image_indices": [],
             "tamper_evidence_image_indices": [],
+            "age_band": "unknown",
+            "low_age": None,
+            "under_nine": None,
+            "age_confidence": "unknown",
         }))
     statuses = {item["status"] for item in checks}
     if statuses == {"matched"} and not failures:
@@ -981,12 +1131,6 @@ def aggregate_minor_material_results(
     coverage_ratio = round(len(processed_indices) / max(declared_image_count, 1), 4)
     checklist = _checklist(observations, coverage_complete)
     field_consistency = _normalize_consistency_checks(consistency_results, consistency_failures)
-    missing_requirement_ids = {
-        item["requirement_id"]
-        for item in checklist
-        if item["status"] == "not_observed_after_full_scan"
-    }
-    required_materials = _required_materials(field_consistency, missing_requirement_ids)
     consistency_by_id = {item["check_id"]: item for item in field_consistency["checks"]}
     consistency_status_labels = {
         "matched": "未发现明显矛盾",
@@ -1028,6 +1172,13 @@ def aggregate_minor_material_results(
             }
         )
 
+    missing_requirement_ids = {
+        item["requirement_id"]
+        for item in checklist
+        if item["status"] == "not_observed_after_full_scan"
+    }
+    required_materials = _required_materials(field_consistency, missing_requirement_ids)
+
     present_count = sum(1 for item in checklist if item["status"] == "present")
     uncertain_count = sum(1 for item in checklist if item.get("quality_status") == "needs_manual_confirmation")
     not_observed = [item for item in checklist if item["status"] == "not_observed_after_full_scan"]
@@ -1042,6 +1193,9 @@ def aggregate_minor_material_results(
         and all(status == "matched" for status in payment_process_statuses.values())
     )
     low_age = identity_check.get("low_age") if isinstance(identity_check.get("low_age"), bool) else None
+    under_nine = identity_check.get("under_nine") if isinstance(identity_check.get("under_nine"), bool) else None
+    age_confidence = str(identity_check.get("age_confidence") or "unknown")
+    under_nine_high_confidence = under_nine is True and age_confidence == "high"
     payment_process_gap = (
         not payment_process_matched
         and low_age is True
@@ -1055,11 +1209,15 @@ def aggregate_minor_material_results(
     payment_capability_risk = {
         "level": payment_capability_level,
         "low_age": low_age,
+        "under_nine": under_nine,
+        "age_confidence": age_confidence,
         "process_evidence_status": payment_process_evidence_status,
-        "requires_review": False,
+        "requires_review": under_nine_high_confidence,
         "requires_more_material": payment_process_gap,
         "effect": (
-            "申请时未满 10 周岁且支付密码来源或监护人发现消费过程尚未闭环；请补充对应说明。该信号不判断未成年人能否独立支付，也不自动决定退款、拒绝或人工复核。"
+            "申请时未满 9 周岁且年龄判断为高置信，请授权人员重点核对独立支付能力、支付密码来源及监护发现过程；年龄本身不决定退款或支持结论。"
+            if under_nine_high_confidence
+            else "申请时未满 10 周岁且支付密码来源或监护人发现消费过程尚未闭环；请补充对应说明。该信号不判断未成年人能否独立支付，也不自动决定退款、拒绝或人工复核。"
             if payment_process_gap
             else "低龄材料已完成支付来源和监护过程加强核验，不覆盖五类材料的事实结论。"
         ),
@@ -1211,6 +1369,7 @@ def aggregate_minor_material_results(
             or field_consistency["status"] in {"degraded", "not_completed"}
             or authenticity_blocked
             or authoritative_required
+            or under_nine_high_confidence
         )
     )
     business_follow_up_reason = (
@@ -1220,6 +1379,8 @@ def aggregate_minor_material_results(
     )
     if technical_processing_incomplete:
         next_step = "请受控重跑整案；全部资料处理完成后再生成审核建议，达到重试上限后再转授权人员。"
+    elif under_nine_high_confidence:
+        next_step = "申请时未满 9 周岁且年龄判断为高置信；请授权人员重点核对独立支付能力、支付密码来源和监护发现过程，年龄本身不改变材料事实结论。"
     elif predicted_label == "positive":
         next_step = "五类材料和可见字段均已通过初审，可按甲方现行一审流程继续；本服务不直接执行退款。"
     elif predicted_label == "negative":
@@ -1297,7 +1458,7 @@ def aggregate_minor_material_results(
         "material_inventory": observations,
         "checklist": checklist,
         "field_consistency": field_consistency,
-        "required_materials": required_materials,
+        "required_materials": material_gaps,
         "authenticity_assessment": authenticity,
         "payment_capability_risk": payment_capability_risk,
         "policy": policy,
@@ -1533,7 +1694,13 @@ def run_minor_material_pipeline(
     preliminary = aggregate_minor_material_results(case, image_rows, image_failures, video_results, video_failures)
     preliminary_assessment = preliminary["minor_material_assessment"]
     if preliminary_assessment["coverage_complete"]:
-        consistency_jobs = _consistency_image_jobs(preliminary_assessment["material_inventory"], images)
+        material_inventory = preliminary_assessment["material_inventory"]
+        inventory_by_index = {
+            int(item["image_index"]): item
+            for item in material_inventory
+            if str(item.get("image_index") or "").isdigit()
+        }
+        consistency_jobs = _consistency_image_jobs(material_inventory, images)
 
         def review_consistency(job: Dict[str, Any]) -> Dict[str, Any]:
             check_id = str(job["check_id"])
@@ -1547,6 +1714,14 @@ def run_minor_material_pipeline(
                 "segment_index": job["segment_index"],
                 "segment_total": job["segment_total"],
                 "expected_image_indices": expected_indices,
+                "material_context": [
+                    {
+                        key: inventory_by_index[image_index].get(key)
+                        for key in ("image_index", "document_type", "subject_role", "document_side", "readability")
+                    }
+                    for image_index in expected_indices
+                    if image_index in inventory_by_index
+                ],
                 "instruction": "只返回受控枚举、证据图片编号和风险码，不得返回任何字段原值。",
             }
             check_case["structured_business_context"] = structured

@@ -125,14 +125,42 @@ class FulfillmentReconciliationTest(unittest.TestCase):
         }
 
         result = aggregate_fulfillment_reconciliation([row(1, complete=False)], current, "missing_item")
-        guarded = apply_fulfillment_guard({"confidence": 0.91, "fulfillment_reconciliation": result}, "missing_item")
+        guarded = apply_fulfillment_guard({
+            "confidence": 0.2,
+            "confidence_reason": "缺少开箱视频，需要人工复核。",
+            "business_follow_up_reason": "缺少开箱视频，需要人工复核。",
+            "next_step": "转人工并要求补开箱视频。",
+            "claim_fact_assessment": {
+                "atomic_claim_results": [{
+                    "claim_id": "claim-missing-item",
+                    "subject_ref": "LINE-1",
+                    "support_status": "insufficient",
+                    "reason": "仅有静态图片，证据不足。",
+                    "evidence_refs": [{"asset_ref": "supplemental_image_1"}],
+                }],
+            },
+            "fulfillment_reconciliation": result,
+        }, "missing_item")
 
         self.assertEqual(result["verdict"], "matched")
         self.assertEqual(result["evidence_sufficiency"], "sufficient")
         self.assertEqual(result["resolution_basis"], "warehouse_verification")
         self.assertEqual(result["warehouse_verification"]["status"], "confirmed_not_missing")
+        self.assertIn("仓库终核", result["package_coverage"])
+        self.assertNotIn("0/1", result["package_coverage"])
         self.assertEqual(guarded["predicted_label"], "negative")
+        self.assertEqual(guarded["confidence"], 1.0)
         self.assertIn("仓库终核", guarded["fulfillment_guard_reason"])
+        self.assertIn("仓库终核", guarded["confidence_reason"])
+        self.assertIn("仓库终核", guarded["business_follow_up_reason"])
+        self.assertNotIn("补开箱视频", guarded["next_step"])
+        self.assertEqual(guarded["fulfillment_reconciliation"]["suspected_missing_items"], [])
+        self.assertIn("仓库终核", guarded["overall_audit"]["core_reason"])
+        self.assertEqual(guarded["adopted_evidence"][0]["source_type"], "warehouse_verification")
+        atomic_claim = guarded["claim_fact_assessment"]["atomic_claim_results"][0]
+        self.assertEqual(atomic_claim["support_status"], "not_supported")
+        self.assertIn("确定未漏发", atomic_claim["reason"])
+        self.assertEqual(atomic_claim["evidence_refs"][0]["asset_ref"], "WH-CHECK-1")
 
     def test_pending_warehouse_note_does_not_override_visual_evidence(self):
         current = case()

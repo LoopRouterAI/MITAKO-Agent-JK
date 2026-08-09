@@ -6,13 +6,14 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 
 from review_media_safety import ignored_upload_reason, valid_media_magic
 from review_service.schemas import ReviewCaseMetadata
-from review_service import service
+from review_service import service, store
 
 
 def upload(name: str, body: bytes, content_type: str = "application/octet-stream") -> UploadFile:
@@ -86,6 +87,32 @@ class MediaUploadSafetyTest(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse((Path(temp_dir) / "RJ-FAKE-1").exists())
             finally:
                 service.upload_root = original_upload_root
+
+    async def test_idempotency_key_rejects_same_name_with_different_content(self) -> None:
+        metadata = ReviewCaseMetadata(client_case_id="CASE-IDEMPOTENCY-1", scenario="product_damage")
+        first_body = b"\x00\x00\x00\x18ftypmp42" + b"1" * 64
+        second_body = b"\x00\x00\x00\x18ftypmp42" + b"2" * 64
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            store, "DB_PATH", Path(temp_dir) / "review.sqlite3"
+        ), patch.object(
+            service, "upload_root", return_value=Path(temp_dir) / "uploads"
+        ), patch.object(service, "enqueue"):
+            first, created = await service.create_job_from_uploads(
+                metadata,
+                [upload("evidence.mp4", first_body, "video/mp4")],
+                "mitako",
+                "same-key",
+            )
+            with self.assertRaisesRegex(ValueError, "idempotency_key_conflict"):
+                await service.create_job_from_uploads(
+                    metadata,
+                    [upload("evidence.mp4", second_body, "video/mp4")],
+                    "mitako",
+                    "same-key",
+                )
+
+        self.assertTrue(created)
+        self.assertEqual(first["assets"][0]["sha256"], hashlib.sha256(first_body).hexdigest())
 
 
 if __name__ == "__main__":

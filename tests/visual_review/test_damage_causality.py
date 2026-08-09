@@ -7,7 +7,8 @@ from poc.visual_review_poc.damage_causality import (
     aggregate_damage_causality,
     apply_damage_causality_guard,
 )
-from poc.visual_review_poc.model_selection_e2e import build_selection_prompt
+from poc.visual_review_poc.model_selection_e2e import _damage_key_evidence, build_selection_prompt
+from prompts.visual_review.core import build_system_prompt
 
 
 def assessment(**overrides):
@@ -39,6 +40,36 @@ def action_chain():
 
 
 class DamageCausalityTest(unittest.TestCase):
+    def test_key_damage_evidence_excludes_generic_position_frames(self):
+        evidence = _damage_key_evidence([{
+            "frame_findings": [
+                {
+                    "video_index": 1,
+                    "global_frame_index": 1,
+                    "damage_state": "not_visible",
+                    "action": "none",
+                    "visible_facts": "外箱面单可见。",
+                },
+                {
+                    "video_index": 1,
+                    "global_frame_index": 8,
+                    "damage_state": "visible",
+                    "action": "none",
+                    "visible_facts": "商品争议部位可见断裂。",
+                },
+            ],
+        }])
+
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["global_frame_index"], 8)
+
+    def test_product_damage_system_prompt_separates_visible_fact_from_origin(self):
+        prompt = build_system_prompt("product_damage")
+
+        self.assertIn("即使损伤成因仍无法确定", prompt)
+        self.assertIn("不能只为确认损伤成因要求重交开箱视频", prompt)
+        self.assertIn("外箱完成开箱起点证明后离镜", prompt)
+
     def test_evidence_guard_does_not_rewrite_case_classification(self):
         result = apply_damage_causality_guard(
             {
@@ -143,6 +174,36 @@ class DamageCausalityTest(unittest.TestCase):
         self.assertNotIn("predicted_label", result)
         self.assertEqual(result["damage_evidence_tendency"], "supports_claim")
         self.assertEqual(result["confidence"], 0.92)
+
+    def test_direct_origin_without_action_chain_is_downgraded_but_visible_damage_is_kept(self):
+        result = apply_damage_causality_guard(
+            {
+                "predicted_label": "positive",
+                "damage_causality_assessment": assessment(
+                    damage_timing="pre_opening_visible",
+                    pre_opening_state_visible=True,
+                    most_likely_origin="manufacturing_or_original_packaging",
+                    causal_evidence_level="direct",
+                    claim_support="supported",
+                    origin_confidence=0.85,
+                    first_visible_evidence={
+                        "video_index": 1,
+                        "asset_ref": "native_video_1",
+                        "timestamp": "01:54.00",
+                        "fact": "商品取出时可见表面折痕。",
+                    },
+                ),
+            },
+            "product_damage",
+            [],
+        )
+
+        resolved = result["damage_causality_assessment"]
+        self.assertEqual(resolved["damage_presence"], "confirmed")
+        self.assertEqual(resolved["most_likely_origin"], "indeterminate")
+        self.assertEqual(resolved["causal_evidence_level"], "indirect")
+        self.assertEqual(resolved["origin_confidence"], 0.0)
+        self.assertEqual(result["damage_evidence_tendency"], "supports_claim")
 
     def test_customer_damage_requires_visible_action_and_observed_change(self):
         base = assessment(

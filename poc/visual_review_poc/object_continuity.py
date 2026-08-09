@@ -32,6 +32,21 @@ def _enum(value: Any, allowed: set[str], fallback: str) -> str:
     return normalized if normalized in allowed else fallback
 
 
+def subject_longest_out_of_frame(value: Any, subject_id: str) -> float | None:
+    durations = []
+    for subject in (value if isinstance(value, dict) else {}).get("tracked_subjects") or []:
+        if not isinstance(subject, dict) or str(subject.get("subject_id") or "") != subject_id:
+            continue
+        if subject.get("longest_out_of_frame_seconds") not in (None, ""):
+            durations.append(_float(subject.get("longest_out_of_frame_seconds")))
+        durations.extend(
+            _float(event.get("duration_seconds"))
+            for event in subject.get("out_of_frame_events") or []
+            if isinstance(event, dict)
+        )
+    return max(durations) if durations else None
+
+
 def _events(value: Any) -> List[Dict[str, Any]]:
     result: List[Dict[str, Any]] = []
     for raw in value if isinstance(value, list) else []:
@@ -162,6 +177,11 @@ def apply_object_continuity_guard(
         "effect": "超过阈值建议补充连续原视频，不自动拒绝，也不单独强制人工复核",
     }
     output["object_continuity_assessment"] = assessment
+    relevant_subject_id = "claimed_item" if scenario == "product_damage" else ""
+    relevant_absence = subject_longest_out_of_frame(assessment, relevant_subject_id) if relevant_subject_id else None
+    relevant_absence = assessment["longest_out_of_frame_seconds"] if relevant_absence is None else relevant_absence
+    assessment["relevant_subject_id"] = relevant_subject_id or "all_tracked_subjects"
+    assessment["relevant_longest_out_of_frame_seconds"] = relevant_absence
     if not assessment["tracked_subject_defined"]:
         if _confirmed_damage_fact(output, scenario):
             return _preserve_damage_fact_with_warning(output, "本轮没有形成完整的争议商品主体时间轴")
@@ -170,15 +190,15 @@ def apply_object_continuity_guard(
         if _confirmed_damage_fact(output, scenario):
             return _preserve_damage_fact_with_warning(output, "争议商品连续性仍不确定")
         return _review_output(output, "主体连续性结论不确定，需要查看原视频和离镜时间点。")
-    if assessment["continuity_verdict"] == "long_absence" or assessment["longest_out_of_frame_seconds"] >= warning_seconds:
+    if relevant_absence >= warning_seconds:
         output["continuity_recommendation"] = "request_more_material"
         output["continuity_requires_human_review"] = False
         output["continuity_guard_reason"] = (
-            f"检测到主体最长连续离镜/不可观察 {assessment['longest_out_of_frame_seconds']:.2f} 秒，"
+            f"检测到当前审核主体最长连续离镜/不可观察 {relevant_absence:.2f} 秒，"
             f"达到 {warning_seconds:.2f} 秒补件阈值；该信号不能单独证明调包、剪辑或欺诈。"
         )
         return output
-    output["continuity_recommendation"] = "continue_with_warning" if assessment["longest_out_of_frame_seconds"] > 0 else "continue"
+    output["continuity_recommendation"] = "continue_with_warning" if relevant_absence > 0 else "continue"
     output["continuity_requires_human_review"] = False
     output["continuity_guard_reason"] = "已按主体输出连续性时间轴，未超过配置的离镜复核阈值。"
     return output

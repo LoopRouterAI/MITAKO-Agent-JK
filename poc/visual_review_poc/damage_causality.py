@@ -236,18 +236,32 @@ def apply_damage_causality_guard(
     if supplemental_reference:
         assessment["supplemental_damage_presence"] = "confirmed"
         assessment["supplemental_damage_reference"] = supplemental_reference
+    valid_frame_keys = None if valid_frames is None else {
+        key
+        for frame in valid_frames
+        if (key := _frame_key(frame)) is not None
+    }
+    if (
+        assessment["causal_evidence_level"] == "direct"
+        and not _has_structured_action_chain(assessment, valid_frame_keys)
+    ):
+        reference = assessment.get("first_visible_evidence")
+        assessment["causal_evidence_level"] = (
+            "indirect"
+            if assessment["damage_presence"] == "confirmed"
+            and isinstance(reference, dict)
+            and bool(reference.get("timestamp"))
+            else "insufficient"
+        )
+        assessment["most_likely_origin"] = "indeterminate"
+        assessment["origin_confidence"] = 0.0
+
     output["damage_causality_assessment"] = assessment
     presence = assessment["damage_presence"]
     timing = assessment["damage_timing"]
     origin = assessment["most_likely_origin"]
     evidence_level = assessment["causal_evidence_level"]
     claim_support = assessment["claim_support"]
-    origin_confidence = assessment["origin_confidence"]
-    valid_frame_keys = None if valid_frames is None else {
-        key
-        for frame in valid_frames
-        if (key := _frame_key(frame)) is not None
-    }
 
     direct_customer_damage = (
         presence == "confirmed"

@@ -212,6 +212,8 @@ OPENING_VIDEO_COMPLIANCE = _object(
     ),
 )
 
+OPENING_COMPLIANCE_RESPONSE_SCHEMA = OPENING_VIDEO_COMPLIANCE
+
 OPENING_START_RESPONSE_SCHEMA = _object(
     {
         "result": _string(enum=["sealed", "unsealed", "indeterminate"]),
@@ -544,9 +546,29 @@ MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA = _object(
         "consistency_check": _object(
             {
                 "check_id": _string(),
+                "relationship_evidence_type": _string(enum=[
+                    "same_household_direct_link", "birth_certificate", "legal_guardianship_proof",
+                    "separate_household_books_without_bridge", "uncertain", "not_applicable",
+                ]),
                 "age_band": _string(enum=["under_10", "10_to_17", "18_or_over", "unknown"]),
                 "low_age": _boolean(nullable=True),
+                "under_nine": _boolean(nullable=True),
+                "age_confidence": _string(enum=["high", "low", "unknown"]),
                 "payment_capability_risk": _string(enum=["none", "high", "unknown"]),
+                "relationship_document_groups": _array(_object(
+                    {
+                        "image_index": _integer(),
+                        "document_type": _string(enum=[
+                            "household_register", "birth_certificate",
+                            "legal_guardianship_proof", "other",
+                        ]),
+                        "subject_role": _string(enum=["guardian", "minor", "both", "unknown"]),
+                        "document_group": _string(enum=[
+                            "group_1", "group_2", "group_3", "group_4", "uncertain", "not_applicable",
+                        ]),
+                    },
+                    required=("image_index", "document_type", "subject_role", "document_group"),
+                )),
                 "field_results": _array(_object(
                     {
                         "field_name": _string(),
@@ -564,7 +586,8 @@ MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA = _object(
                 "tamper_evidence_image_indices": _array(_integer()),
             },
             required=(
-                "check_id", "age_band", "low_age", "payment_capability_risk", "field_results", "tamper_risk",
+                "check_id", "relationship_evidence_type", "age_band", "low_age", "under_nine", "age_confidence",
+                "payment_capability_risk", "relationship_document_groups", "field_results", "tamper_risk",
                 "risk_reason_codes", "tamper_evidence_image_indices",
             ),
         ),

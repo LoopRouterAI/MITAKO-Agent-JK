@@ -82,6 +82,8 @@ class InputReadinessTest(unittest.TestCase):
         self.assertTrue(result["full_review_ready"])
         self.assertTrue(result["capabilities"]["missing_item_decision"])
         self.assertEqual(result["missing_required"], [])
+        self.assertEqual(result["missing_recommended"], [])
+        self.assertFalse(any("视频未完整" in warning for warning in result["warnings"]))
 
     def test_wrong_item_is_ready_with_package_and_submitted_tracking_linkage(self):
         result = assess_input_readiness(

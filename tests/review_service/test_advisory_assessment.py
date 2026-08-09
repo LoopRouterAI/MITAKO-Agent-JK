@@ -33,6 +33,31 @@ def review_result(
 
 
 class AdvisoryAssessmentTest(unittest.TestCase):
+    def test_trusted_warehouse_conclusion_replaces_the_earlier_visual_brief(self):
+        review = review_result(label="negative", confidence=1.0, parsed_extra={
+            "overall_audit": {
+                "conclusion": "甲方可追溯仓库终核确认实收商品与应发商品一致，本案确定未漏发。",
+                "confidence": 1.0,
+            },
+            "fulfillment_reconciliation": {
+                "resolution_basis": "warehouse_verification",
+                "warehouse_verification": {
+                    "status": "confirmed_not_missing",
+                    "source": "customer_warehouse",
+                    "verification_ref": "WH-CHECK-1",
+                },
+            },
+        })
+
+        result = attach_advisory_assessment(review, {"scenario": "missing_item"})
+
+        self.assertIn("确定未漏发", result["advisory_assessment"]["assessment"]["conclusion"])
+        self.assertIn("确定未漏发", result["agent_brief"]["conclusion"])
+        focus = "。".join(result["advisory_assessment"]["evidence_attention"]["customer_focus"])
+        self.assertIn("仓库终核", focus)
+        self.assertNotIn("补证", focus)
+        self.assertNotIn("视频覆盖不全", focus)
+
     def test_four_scenarios_expose_customer_evidence_attention(self):
         scenarios = (
             (
@@ -171,6 +196,29 @@ class AdvisoryAssessmentTest(unittest.TestCase):
             advisory["assessment"]["conclusion"],
         )
 
+    def test_unapplied_policy_reason_cannot_contradict_final_recommendation(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="positive",
+                confidence=0.91,
+                parsed_extra={
+                    "decision_policy_audit": {
+                        "applied": False,
+                        "reason": "主视频条件不足，保持人工复核。",
+                    },
+                },
+            ),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["sop_recommendation"]["code"], "support_claim")
+        self.assertEqual(
+            advisory["sop_recommendation"]["basis"],
+            advisory["assessment"]["conclusion"],
+        )
+
     def test_legacy_advisory_without_sop_recommendation_remains_readable(self):
         advisory = attach_advisory_assessment(
             review_result(),
@@ -204,6 +252,8 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertIn("short_out_of_frame", [item["code"] for item in advisory["signals"]])
         self.assertIn("不要求逐单", result["agent_brief"]["next_step"])
         self.assertNotIn("VIP客服复核", result["agent_brief"]["next_step"])
+        self.assertIn("建议按风险偏好抽检", advisory["evidence_attention"]["headline"])
+        self.assertNotIn("需先处理", advisory["evidence_attention"]["headline"])
 
     def test_confirmed_fact_with_unresolved_continuity_is_optional_not_forced_review(self):
         result = attach_advisory_assessment(
@@ -244,9 +294,49 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "not_required")
         self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
+        self.assertTrue(result["agent_report"]["parsed"]["material_gaps"])
         self.assertIn("补充", advisory["assessment"]["conclusion"])
         self.assertNotIn("VIP客服复核", advisory["assessment"]["conclusion"])
         self.assertIn("out_of_frame_over_threshold", [item["code"] for item in advisory["signals"]])
+
+    def test_shipping_package_absence_after_item_exposure_does_not_request_new_video(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="positive",
+                confidence=0.91,
+                continuity={
+                    "continuity_verdict": "long_absence",
+                    "longest_out_of_frame_seconds": 31.8,
+                    "tracked_subjects": [
+                        {
+                            "subject_id": "shipping_package",
+                            "longest_out_of_frame_seconds": 31.8,
+                            "out_of_frame_events": [{
+                                "duration_seconds": 31.8,
+                                "identity_reestablished": True,
+                            }],
+                        },
+                        {
+                            "subject_id": "claimed_item",
+                            "visibility_coverage": 1.0,
+                            "longest_out_of_frame_seconds": 0.0,
+                            "out_of_frame_events": [],
+                        },
+                    ],
+                },
+            ),
+            {
+                "scenario": "product_damage",
+                "review_routing_policy": {"out_of_frame_resubmit_seconds": 3.0},
+            },
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        parsed = result["agent_report"]["parsed"]
+        signal_codes = [item["code"] for item in result["advisory_assessment"]["signals"]]
+        self.assertEqual(parsed["material_gaps"], [])
+        self.assertNotIn("out_of_frame_over_threshold", signal_codes)
+        self.assertEqual(result["advisory_assessment"]["workflow_recommendation"], "continue_by_customer_policy")
 
     def test_decisive_fact_keeps_material_gaps_as_optional_risk(self):
         result = attach_advisory_assessment(
@@ -271,6 +361,31 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_supports_claim")
         self.assertEqual(advisory["human_review"]["level"], "optional")
         self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
+
+    def test_missing_business_defect_standard_is_not_requested_from_customer(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="review",
+                confidence=0.5,
+                parsed_extra={
+                    "material_gaps": ["缺少可执行的商品缺陷标准或合理公差边界。"],
+                    "decision_policy_audit": {
+                        "applied": True,
+                        "rule_id": "PD-R-SPECIAL-PRODUCT-DEFECT-UNRESOLVED",
+                        "reason": "已观察到特殊商品外观差异，但缺少可执行的商品缺陷标准。",
+                    },
+                },
+            ),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        parsed = result["agent_report"]["parsed"]
+        advisory = result["advisory_assessment"]
+        self.assertEqual(parsed["material_gaps"], [])
+        self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
+        self.assertEqual(advisory["human_review"]["level"], "optional")
+        self.assertNotEqual(advisory["sop_recommendation"]["code"], "request_more_material")
 
     def test_conflicting_evidence_requires_human_review(self):
         result = attach_advisory_assessment(
@@ -543,6 +658,57 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["human_review"]["level"], "optional")
         self.assertIn("minor_low_age_process_verified", advisory["human_review"]["reason_codes"])
         self.assertNotIn("minor_payment_capability_risk", advisory["human_review"]["reason_codes"])
+
+    def test_minor_under_nine_high_confidence_requires_human_payment_review(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="positive",
+                confidence=0.9,
+                parsed_extra={"minor_material_assessment": {
+                    "declared_image_count": 20,
+                    "accepted_image_count": 20,
+                    "processed_image_count": 20,
+                    "payment_capability_risk": {
+                        "level": "none",
+                        "low_age": True,
+                        "under_nine": True,
+                        "age_confidence": "high",
+                        "process_evidence_status": "matched",
+                        "requires_review": True,
+                        "requires_more_material": False,
+                        "evidence_image_indices": [1, 3],
+                    },
+                }},
+            ),
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["human_review"]["level"], "required")
+        self.assertEqual(advisory["workflow_recommendation"], "human_review")
+        self.assertIn("minor_under_nine_high_confidence", advisory["human_review"]["reason_codes"])
+        signal = next(
+            item for item in advisory["signals"]
+            if item["code"] == "minor_under_nine_high_confidence"
+        )
+        self.assertEqual(signal["severity"], "critical")
+        self.assertIn("独立支付能力", signal["effect"])
+        self.assertEqual(result["agent_report"]["parsed"]["predicted_label"], "positive")
+
+    def test_failed_review_does_not_ask_user_for_business_materials(self):
+        result = attach_advisory_assessment(
+            review_result(label="review", confidence=0.4),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": False, "missing_required": ["customer_claim_or_claim_scope"]},
+            succeeded=False,
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["evidence_attention"]["level"], "gray")
+        self.assertEqual(advisory["evidence_attention"]["missing_evidence"], [])
+        self.assertEqual(result["agent_report"]["parsed"]["material_gaps"], [])
+        self.assertFalse(any(item["code"] == "material_gap" for item in advisory["signals"]))
 
     def test_minor_high_risk_without_confirmed_low_age_does_not_request_process_material(self):
         result = attach_advisory_assessment(

@@ -84,7 +84,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
             f"/api/v1/review/jobs/{job['job_id']}/media/{media_id}",
         )
 
-    def test_job_json_hides_model_channel_attempts_but_keeps_usage_summary(self):
+    def test_job_json_hides_internal_inference_usage_and_cost(self):
         job = {
             "job_id": "RJ-PUBLIC-METRICS",
             "result": {"review": {"agent_report": {"inference_estimate": {
@@ -96,11 +96,57 @@ class ReportOutputOptionsTest(unittest.TestCase):
         }
 
         public = service.public_job(job)
-        estimate = public["result"]["review"]["agent_report"]["inference_estimate"]
+        agent_report = public["result"]["review"]["agent_report"]
 
-        self.assertEqual(estimate["total_tokens"], 120)
-        self.assertEqual(estimate["concurrency"]["configured_workers"], 2)
-        self.assertNotIn("channel_route_attempts", estimate)
+        self.assertNotIn("inference_estimate", agent_report)
+
+    def test_job_json_uses_strict_public_projection(self):
+        job = {
+            "job_id": "RJ-PUBLIC-PROJECTION",
+            "tenant_id": "tenant-secret",
+            "client_case_id": "CASE-PUBLIC-1",
+            "idempotency_key": "private-key",
+            "scenario": "minor_refund",
+            "status": "SUCCEEDED",
+            "metadata": {"source_record": {"name": "张三", "phone": "13800138000"}},
+            "assets": [{
+                "asset_id": "RA-PUBLIC-1",
+                "original_name": "张三身份证.jpg",
+                "stored_name": "001_private.jpg",
+                "mime_type": "image/jpeg",
+                "size": 123,
+                "sha256": "secret-sha",
+                "fields": ["guardian_id"],
+            }],
+            "result": {
+                "review": {"summary": {"predicted_label": "review"}},
+                "boundary": "仅提供审核建议",
+                "source_record": {"local_path": "E:/private/sample"},
+                "workbench_transport": {"attempts": [{"internal_url": "http://127.0.0.1"}]},
+            },
+            "diagnostics": {"message": "provider secret"},
+            "attempts": 1,
+            "created_at": 1.0,
+            "started_at": 2.0,
+            "completed_at": 3.0,
+            "updated_at": 4.0,
+            "unexpected_private_field": "must-not-leak",
+        }
+
+        public = service.public_job(job)
+        serialized = str(public)
+
+        self.assertEqual(
+            set(public),
+            {
+                "job_id", "client_case_id", "scenario", "status", "assets", "result",
+                "attempts", "created_at", "started_at", "completed_at", "updated_at",
+            },
+        )
+        self.assertEqual(set(public["assets"][0]), {"asset_id", "mime_type", "size", "fields"})
+        self.assertEqual(set(public["result"]), {"review", "boundary"})
+        for secret in ("张三", "13800138000", "private-key", "E:/private", "provider secret"):
+            self.assertNotIn(secret, serialized)
 
     def test_batch_json_rewrites_media_to_authenticated_job_route(self):
         media_id = "e" * 32
@@ -396,6 +442,82 @@ class ReportOutputOptionsTest(unittest.TestCase):
         self.assertIsNone(review["report"]["html_url"])
         self.assertEqual(review["advisory_assessment"]["human_review"]["level"], "not_required")
 
+    def test_public_job_drops_nested_review_diagnostics(self):
+        job = {
+            "job_id": "RV-PUBLIC-PROJECTION",
+            "client_case_id": "CASE-PUBLIC-PROJECTION",
+            "scenario": "product_damage",
+            "status": "SUCCEEDED",
+            "assets": [],
+            "attempts": 1,
+            "created_at": 1,
+            "started_at": 2,
+            "completed_at": 3,
+            "updated_at": 3,
+            "result": {
+                "review": {
+                    "review_label": "positive",
+                    "sampling": {"strategy": "native_video"},
+                    "diagnostics": {"provider": "internal-provider"},
+                    "unexpected_internal": "secret",
+                }
+            },
+        }
+
+        public = service.public_job(job)
+
+        self.assertEqual(public["result"]["review"]["sampling"], {"strategy": "native_video"})
+        self.assertNotIn("diagnostics", public["result"]["review"])
+        self.assertNotIn("unexpected_internal", public["result"]["review"])
+
+    def test_public_job_strips_private_fields_and_local_paths_inside_allowed_sections(self):
+        private_path = r"D:\private\review_jobs\case-1\frame.jpg"
+        job = {
+            "job_id": "RV-NESTED-PUBLIC-PROJECTION",
+            "client_case_id": "CASE-NESTED-PUBLIC-PROJECTION",
+            "scenario": "product_damage",
+            "status": "SUCCEEDED",
+            "assets": [],
+            "attempts": 1,
+            "created_at": 1,
+            "started_at": 2,
+            "completed_at": 3,
+            "updated_at": 3,
+            "result": {
+                "review": {
+                    "agent_report": {
+                        "case_id": "CASE-NESTED-PUBLIC-PROJECTION",
+                        "public_brief": {"conclusion": "evidence requires review"},
+                        "diagnostics": {"provider": "internal-provider"},
+                        "system_prompt": "private system prompt",
+                        "parsed": {
+                            "decision": "manual_review",
+                            "source_record": {"phone": "13800138000"},
+                            "debug": {"local_path": private_path},
+                            "message": f"failed to read {private_path}",
+                            "supporting_evidence": [{"fact": f"证据来源={private_path}"}],
+                        },
+                    },
+                    "media_forensics": {
+                        "assets": [{"asset_id": "RA-PUBLIC", "file": private_path}],
+                    },
+                },
+            },
+        }
+
+        public = service.public_job(job)
+        serialized = str(public)
+
+        self.assertEqual(
+            public["result"]["review"]["agent_report"]["public_brief"]["conclusion"],
+            "evidence requires review",
+        )
+        for secret in (
+            "diagnostics", "internal-provider", "system_prompt", "private system prompt",
+            "source_record", "13800138000", "local_path", private_path,
+        ):
+            self.assertNotIn(secret, serialized)
+
     def test_formal_deferred_postprocess_replaces_stale_next_step_with_final_advisory(self):
         stale_next_step = "必须进入VIP人工复核。"
         job = {
@@ -417,6 +539,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
             "conclusion": "旧结论",
             "next_step": stale_next_step,
         }
+        upstream["review"]["agent_report"]["parsed"]["next_step"] = stale_next_step
 
         def finish(job_id, *, status, result, diagnostics):
             return {**job, "status": status, "completed_at": 1, "result": result, "diagnostics": diagnostics}
@@ -436,6 +559,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
         self.assertEqual(review["advisory_assessment"]["workflow_recommendation"], "continue_by_customer_policy")
         self.assertEqual(review["agent_brief"]["next_step"], recommendation)
         self.assertEqual(review["agent_report"]["public_brief"]["next_step"], recommendation)
+        self.assertEqual(review["agent_report"]["parsed"]["next_step"], recommendation)
         report_html = service.render_job_report(completed)
         self.assertIn(recommendation, report_html)
         self.assertNotIn(stale_next_step, report_html)

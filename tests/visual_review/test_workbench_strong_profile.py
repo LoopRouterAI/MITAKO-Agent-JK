@@ -13,6 +13,36 @@ from poc.visual_review_poc import workbench_server
 
 
 class WorkbenchStrongProfileTest(unittest.TestCase):
+    def test_native_positive_requires_all_opening_fields_verified(self) -> None:
+        result = {
+            "parsed": {
+                "predicted_label": "positive",
+                "video_audit_conclusion": {
+                    "opening_video_compliance": {
+                        "validated_fields": ["sealed_start", "waybill_visible"],
+                    }
+                },
+            }
+        }
+
+        self.assertFalse(
+            workbench_server._native_positive_opening_fully_verified(result, "product_damage")
+        )
+        result["parsed"]["video_audit_conclusion"]["opening_video_compliance"]["validated_fields"] = [
+            "sealed_start",
+            "waybill_visible",
+            "single_take_continuity",
+            "issue_visible_in_continuous_opening",
+        ]
+        self.assertTrue(
+            workbench_server._native_positive_opening_fully_verified(result, "product_damage")
+        )
+
+    def test_model_call_accounting_ignores_skipped_opening_verification(self) -> None:
+        self.assertEqual(workbench_server._incurred_model_call({"status": "skipped"}), 0)
+        self.assertEqual(workbench_server._incurred_model_call({"status": "success"}), 1)
+        self.assertEqual(workbench_server._incurred_model_call({"status": "error"}), 1)
+
     def test_internal_estimate_exposes_native_fallback_reason_without_media_url(self) -> None:
         estimate = workbench_server._internal_inference_estimate({
             "chunking": {
@@ -550,11 +580,30 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     "parsed": {
                         "result": "sealed",
                         "sealed_start": True,
-                        "evidence_refs": [{"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}],
+                        "evidence_refs": [{"video_index": 1, "global_frame_index": 1, "timestamp": "0s"}],
                         "reason": "完整未拆封外箱可见。",
                     },
                 },
             ) as opening_model, patch.object(
+                workbench_server,
+                "call_opening_compliance_verification",
+                return_value={
+                    "status": "success",
+                    "parsed": {
+                        "sealed_start": True,
+                        "waybill_visible": True,
+                        "single_take_continuity": True,
+                        "issue_visible_in_continuous_opening": True,
+                        "evidence_refs": [
+                            {"field": field, "video_index": 1, "global_frame_index": 2, "timestamp": "00:01.00"}
+                            for field in (
+                                "sealed_start", "waybill_visible", "single_take_continuity",
+                                "issue_visible_in_continuous_opening",
+                            )
+                        ],
+                    },
+                },
+            ) as compliance_model, patch.object(
                 workbench_server, "call_model_chunked"
             ) as chunked_model, patch.object(
                 workbench_server,
@@ -567,10 +616,104 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
 
         self.assertEqual(native_model.call_count, 1)
         self.assertEqual(opening_model.call_count, 1)
+        self.assertEqual(compliance_model.call_count, 1)
         self.assertEqual(chunked_model.call_count, 0)
         self.assertEqual(observed["native_video"]["api_path"], str(video))
         self.assertEqual(result["sampling"]["sampling_mode"], "native_video")
         self.assertEqual(result["sampling"]["sampled_frames"], 2)
+
+    def test_native_fallback_keeps_verified_opening_start_evidence(self) -> None:
+        captured = {}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video = Path(temp_dir) / "evidence.mp4"
+            video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
+
+            def load_bundle(_sample_dir, _args, _run_dir, scenario_override="", native_video=None):
+                return {
+                    "case_id": "CASE-NATIVE-FALLBACK",
+                    "scenario": "product_damage",
+                    "scenario_label": "商品有伤审核",
+                    "videos": [{"sampled_frames": 2}],
+                    "frames": [
+                        {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+                        {"video_index": 1, "global_frame_index": 2, "timestamp": "00:01.00"},
+                    ],
+                    "supplemental_images": [],
+                    "native_video": dict(native_video or {}),
+                    "structured_business_context": {},
+                }
+
+            native = {
+                "status": "success",
+                "parsed": {
+                    "predicted_label": "positive",
+                    "confidence": 0.9,
+                    "video_audit_conclusion": {"opening_video_compliance": {"sealed_start": True}},
+                },
+            }
+            frames = {
+                "status": "success",
+                "parsed": {
+                    "predicted_label": "positive",
+                    "confidence": 0.8,
+                    "video_audit_conclusion": {
+                        "opening_video_compliance": {
+                            "sealed_start": True,
+                            "waybill_visible": False,
+                            "single_take_continuity": True,
+                        },
+                    },
+                },
+                "chunking": {"total_model_calls": 1},
+            }
+
+            def capture(_case, _sample_dir, result, *_args, **_kwargs):
+                captured["parsed"] = result["parsed"]
+                return {"summary": {"review_status": "completed"}, "agent_report": {}}
+
+            with patch.object(workbench_server, "load_visual_env"), patch.object(
+                workbench_server, "load_case_bundle", side_effect=load_bundle
+            ), patch.object(
+                workbench_server, "apply_frontdesk_context", side_effect=lambda current, *_: current
+            ), patch.object(
+                workbench_server, "prepare_official_reference_images", side_effect=lambda current: current
+            ), patch.object(
+                workbench_server, "call_model", return_value=native
+            ), patch.object(
+                workbench_server,
+                "native_dimension_gaps",
+                side_effect=[
+                    ["opening_start_verification", "opening_video_hard_failure_candidate"],
+                    ["opening_video_hard_failure_candidate"],
+                ],
+            ), patch.object(
+                workbench_server,
+                "call_opening_start_verification",
+                return_value={
+                    "status": "success",
+                    "parsed": {
+                        "result": "unsealed",
+                        "sealed_start": False,
+                        "evidence_refs": [{
+                            "video_index": 1,
+                            "global_frame_index": 1,
+                            "timestamp": "00:00.00",
+                        }],
+                        "reason": "首帧已是气泡内包装。",
+                    },
+                },
+            ), patch.object(
+                workbench_server, "_call_model_chunked_with_fallback", return_value=frames
+            ), patch.object(
+                workbench_server, "_agent_report_response", side_effect=capture
+            ):
+                workbench_server._run_review(
+                    video, "product_damage", 1.0, 24, 24, 12, "standard", {}
+                )
+
+        opening = captured["parsed"]["video_audit_conclusion"]["opening_video_compliance"]
+        self.assertIs(opening["sealed_start"], False)
+        self.assertEqual(opening["field_sources"]["sealed_start"], "opening_start_verification")
 
     def test_standard_profile_keeps_distinct_multi_video_case_on_frame_path(self) -> None:
         observed_modes = []
@@ -622,8 +765,100 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
         chunked_model.assert_called_once()
         self.assertEqual(result["sampling"]["sampling_mode"], "adaptive")
 
+    def test_multi_video_damage_runs_one_opening_compliance_fallback(self) -> None:
+        captured = {}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first_video = Path(temp_dir) / "001_closeup.mp4"
+            opening_video = Path(temp_dir) / "002_opening.mp4"
+            first_video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"1" * 64)
+            opening_video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"2" * 64)
+
+            def load_bundle(_sample_dir, _args, _run_dir, scenario_override="", native_video=None):
+                return {
+                    "case_id": "CASE-MULTI-DAMAGE",
+                    "scenario": scenario_override,
+                    "scenario_label": "商品有伤审核",
+                    "videos": [
+                        {"video_index": 1, "duration_seconds": 2.0},
+                        {"video_index": 2, "duration_seconds": 96.0},
+                    ],
+                    "frames": [
+                        {"video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+                        {"video_index": 2, "global_frame_index": 2, "timestamp": "00:00.00"},
+                        {"video_index": 2, "global_frame_index": 3, "timestamp": "01:36.00"},
+                    ],
+                    "supplemental_images": [],
+                    "structured_business_context": {},
+                }
+
+            frame_result = {
+                "status": "success",
+                "parsed": {"video_audit_conclusion": {"opening_video_compliance": {
+                    "sealed_start": False,
+                    "waybill_visible": False,
+                    "single_take_continuity": False,
+                    "issue_visible_in_continuous_opening": False,
+                    "evidence_refs": [],
+                    "validated_fields": [],
+                    "result": "noncompliant",
+                }}},
+                "chunking": {"total_model_calls": 2, "channels": {}},
+            }
+            verification = {
+                "status": "success",
+                "parsed": {
+                    "sealed_start": True,
+                    "waybill_visible": False,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": False,
+                    "evidence_refs": [
+                        {
+                            "field": field,
+                            "video_index": 2,
+                            "global_frame_index": 2,
+                            "timestamp": "00:00.00",
+                        }
+                        for field in (
+                            "sealed_start", "waybill_visible", "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        )
+                    ],
+                    "result": "noncompliant",
+                },
+            }
+
+            def capture(_case, _sample_dir, result, *_args, **_kwargs):
+                captured["result"] = result
+                return {"summary": {"review_status": "completed"}, "agent_report": {}}
+
+            with patch.object(workbench_server, "load_visual_env"), patch.object(
+                workbench_server, "load_case_bundle", side_effect=load_bundle
+            ), patch.object(
+                workbench_server, "apply_frontdesk_context", side_effect=lambda current, *_: current
+            ), patch.object(
+                workbench_server, "prepare_official_reference_images", side_effect=lambda current: current
+            ), patch.object(
+                workbench_server, "_call_model_chunked_with_fallback", return_value=frame_result
+            ), patch.object(
+                workbench_server, "call_opening_compliance_verification", return_value=verification
+            ) as verifier, patch.object(
+                workbench_server, "_agent_report_response", side_effect=capture
+            ):
+                workbench_server._run_review(
+                    first_video, "product_damage", 1.0, 24, 24, 12, "standard", {}
+                )
+
+        verifier.assert_called_once()
+        opening = captured["result"]["parsed"]["video_audit_conclusion"]["opening_video_compliance"]
+        self.assertIs(opening["sealed_start"], True)
+        self.assertIs(opening["waybill_visible"], False)
+        self.assertEqual(opening["result"], "noncompliant")
+        self.assertEqual(captured["result"]["chunking"]["total_model_calls"], 3)
+
     def test_standard_profile_falls_back_to_frames_when_native_output_is_incomplete(self) -> None:
         observed_modes = []
+        observed_rule_versions = []
+        published_version = {"value": 0}
         with tempfile.TemporaryDirectory() as temp_dir:
             video = Path(temp_dir) / "evidence.mp4"
             video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
@@ -641,6 +876,23 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     "structured_business_context": {},
                 }
 
+            def freeze_snapshot(current, _tenant_id):
+                published_version["value"] += 1
+                current["_business_rule_snapshot"] = {"version": published_version["value"]}
+                return current
+
+            def native_call(_config, current, **_kwargs):
+                observed_rule_versions.append(current["_business_rule_snapshot"]["version"])
+                return {"status": "success", "parsed": {"overall_audit": {}}}
+
+            def frame_call(_config, current, **_kwargs):
+                observed_rule_versions.append(current["_business_rule_snapshot"]["version"])
+                return {
+                    "status": "success",
+                    "parsed": {"predicted_label": "review", "confidence": 0.6},
+                    "chunking": {"total_model_calls": 2},
+                }
+
             with patch.object(workbench_server, "load_visual_env"), patch.object(
                 workbench_server, "load_case_bundle", side_effect=load_bundle
             ), patch.object(
@@ -648,17 +900,15 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
             ), patch.object(
                 workbench_server, "prepare_official_reference_images", side_effect=lambda current: current
             ), patch.object(
+                workbench_server, "freeze_rule_snapshot", side_effect=freeze_snapshot
+            ), patch.object(
                 workbench_server,
                 "call_model",
-                return_value={"status": "success", "parsed": {"overall_audit": {}}},
+                side_effect=native_call,
             ), patch.object(
                 workbench_server,
                 "call_model_chunked",
-                return_value={
-                    "status": "success",
-                    "parsed": {"predicted_label": "review", "confidence": 0.6},
-                    "chunking": {"total_model_calls": 2},
-                },
+                side_effect=frame_call,
             ) as chunked_model, patch.object(
                 workbench_server,
                 "_agent_report_response",
@@ -677,6 +927,8 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                 )
 
         self.assertEqual(observed_modes, ["native", "frames"])
+        self.assertEqual(observed_rule_versions, [1, 1])
+        self.assertEqual(published_version["value"], 1)
         self.assertEqual(chunked_model.call_count, 1)
         self.assertEqual(chunked_model.call_args.args[0]["model"], workbench_server.MODEL_CONFIGS["gemini31lite"]["model"])
         self.assertEqual(result["sampling"]["sampling_mode"], "adaptive")

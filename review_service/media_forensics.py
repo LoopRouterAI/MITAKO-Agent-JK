@@ -424,6 +424,21 @@ def resolve_ffprobe() -> str:
     return shutil.which("ffprobe") or ""
 
 
+def forensics_timeout_seconds() -> int:
+    try:
+        timeout = int(os.getenv("REVIEW_FFPROBE_TIMEOUT_SECONDS", "20") or 20)
+    except ValueError:
+        timeout = 20
+    return max(3, min(timeout, 120))
+
+
+def is_video_asset(asset: Dict[str, Any]) -> bool:
+    return (
+        str(asset.get("mime_type") or "").lower().startswith("video/")
+        or Path(str(asset.get("original_name") or "")).suffix.lower() in VIDEO_SUFFIXES
+    )
+
+
 def inspect_job_media(
     job_dir: Path,
     assets: Iterable[Dict[str, Any]],
@@ -435,8 +450,7 @@ def inspect_job_media(
     video_assets = [
         item
         for item in assets
-        if str(item.get("mime_type") or "").lower().startswith("video/")
-        or Path(str(item.get("original_name") or "")).suffix.lower() in VIDEO_SUFFIXES
+        if is_video_asset(item)
     ]
     base = {
         "status": "not_applicable",
@@ -487,13 +501,7 @@ def inspect_job_media(
         ]
         return base
 
-    timeout = timeout_seconds
-    if timeout is None:
-        try:
-            timeout = int(os.getenv("REVIEW_FFPROBE_TIMEOUT_SECONDS", "20") or 20)
-        except ValueError:
-            timeout = 20
-    timeout = max(3, min(int(timeout), 120))
+    timeout = forensics_timeout_seconds() if timeout_seconds is None else max(3, min(int(timeout_seconds), 120))
     highest_risk = "none"
     total_risks = 0
     unavailable = 0

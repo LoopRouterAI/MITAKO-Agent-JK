@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
+from poc.visual_review_poc.object_continuity import subject_longest_out_of_frame
+
 
 POLICY_REF = "MITAKO-ADVISORY-20260723@1"
 MATERIAL_GAP_LABELS = {
@@ -147,12 +149,17 @@ def _evidence_attention(
         level = "orange"
     else:
         level = "green"
-    headline = {
-        "green": "关键证据已形成清晰结论",
-        "orange": "证据可继续审核，但需先处理标黄项",
-        "red": "存在关键冲突或必须复核项",
-        "gray": "技术处理未完成，暂不形成证据结论",
-    }[level]
+    if level == "orange" and workflow == "request_more_material":
+        headline = "请先补充标黄材料"
+    elif level == "orange" and human_level == "optional":
+        headline = "建议按风险偏好抽检"
+    else:
+        headline = {
+            "green": "关键证据已形成清晰结论",
+            "orange": "请关注标黄风险",
+            "red": "存在关键冲突或必须复核项",
+            "gray": "技术处理未完成，暂不形成证据结论",
+        }[level]
     return {
         "level": level,
         "headline": headline,
@@ -175,11 +182,11 @@ def _sop_recommendation(
     conclusion: str,
 ) -> Dict[str, str]:
     audit = _dict(parsed.get("decision_policy_audit"))
-    audit_reason = str(audit.get("reason") or "")
-    basis = str(
-        conclusion or "本轮未形成可用依据。"
-        if audit_reason.startswith("未启用商品有伤规则")
-        else audit_reason or conclusion or "本轮未形成可用依据。"
+    audit_reason = str(audit.get("reason") or "").strip()
+    basis = (
+        audit_reason
+        if audit.get("applied") is True and audit_reason
+        else conclusion or "本轮未形成可用依据。"
     )
     if workflow == "system_retry":
         code = "system_retry"
@@ -241,6 +248,9 @@ def attach_advisory_assessment(
         or parsed.get("conclusion")
         or "当前证据尚不足以形成明确事实判断。"
     ).strip()
+    fulfillment = _dict(parsed.get("fulfillment_reconciliation"))
+    if fulfillment.get("resolution_basis") == "warehouse_verification" and overall.get("conclusion"):
+        conclusion = str(overall["conclusion"]).strip()
     readiness_guard = _dict(output.get("input_readiness_guard")) or _dict(parsed.get("input_readiness_guard"))
     if readiness_guard.get("applied") is True:
         conclusion = "当前业务基准或必需材料不完整，现有证据不足以形成明确事实判断。"
@@ -263,6 +273,12 @@ def attach_advisory_assessment(
         + _actionable_material_gap_items(material_gaps)
         + _actionable_material_gap_items(required_materials)
     ))
+    decision_audit = _dict(parsed.get("decision_policy_audit"))
+    if decision_audit.get("rule_id") == "PD-R-SPECIAL-PRODUCT-DEFECT-UNRESOLVED":
+        missing_material = [
+            item for item in missing_material
+            if not any(marker in item for marker in ("商品缺陷标准", "量化标准", "公差边界"))
+        ]
     conflicts = _conflicts(parsed)
     authoritative = _dict(parsed.get("authoritative_verification")) or _dict(minor.get("authoritative_verification"))
     minor_policy = _dict(metadata.get("minor_refund_policy"))
@@ -293,14 +309,25 @@ def attach_advisory_assessment(
     failed = succeeded is False or summary.get("review_status") == "failed" or bool(diagnostics)
 
     continuity = _dict(parsed.get("object_continuity_assessment"))
+    scenario = str(metadata.get("scenario") or "")
     try:
-        out_of_frame_seconds = max(0.0, float(continuity.get("longest_out_of_frame_seconds") or 0.0))
+        global_out_of_frame_seconds = max(0.0, float(continuity.get("longest_out_of_frame_seconds") or 0.0))
     except (TypeError, ValueError):
-        out_of_frame_seconds = 0.0
+        global_out_of_frame_seconds = 0.0
+    claimed_item_absence = subject_longest_out_of_frame(continuity, "claimed_item")
+    out_of_frame_seconds = (
+        claimed_item_absence
+        if scenario == "product_damage" and claimed_item_absence is not None
+        else global_out_of_frame_seconds
+    )
+    identity_subjects = [
+        subject for subject in continuity.get("tracked_subjects") or []
+        if isinstance(subject, dict)
+        and (scenario != "product_damage" or claimed_item_absence is None or subject.get("subject_id") == "claimed_item")
+    ]
     identity_unresolved = any(
         event.get("identity_reestablished") is False
-        for subject in continuity.get("tracked_subjects") or []
-        if isinstance(subject, dict)
+        for subject in identity_subjects
         for event in subject.get("out_of_frame_events") or []
         if isinstance(event, dict)
     )
@@ -308,6 +335,24 @@ def attach_advisory_assessment(
         str(continuity.get("continuity_verdict") or "").lower() == "indeterminate"
         and parsed.get("continuity_recommendation") == "continue_with_warning"
     )
+    under_nine_high_confidence = (
+        payment_capability.get("under_nine") is True
+        and payment_capability.get("age_confidence") == "high"
+        and payment_capability.get("requires_review") is True
+    )
+    if failed:
+        missing_material = []
+        conflicts = []
+        authoritative_pending = False
+        authenticity = {}
+        authenticity_critical = False
+        payment_process_gap = False
+        low_age_process_verified = False
+        under_nine_high_confidence = False
+        customer_risk_level = "unknown"
+        out_of_frame_seconds = 0.0
+        identity_unresolved = False
+        continuity_unresolved = False
 
     signals: List[Dict[str, Any]] = []
     if technical_processing_incomplete:
@@ -392,6 +437,13 @@ def attach_advisory_assessment(
             "低龄材料已核对支付来源和监护发现过程；保留抽检提示，但不覆盖材料事实结论。",
             evidence_image_indices=_items(payment_capability.get("evidence_image_indices"))[:20],
         ))
+    if under_nine_high_confidence:
+        signals.append(_signal(
+            "minor_under_nine_high_confidence",
+            "critical",
+            "申请时未满9周岁（高置信），请授权人员重点核对独立支付能力、支付密码来源及监护发现过程；年龄本身不决定退款或支持结论。",
+            evidence_image_indices=_items(payment_capability.get("evidence_image_indices"))[:20],
+        ))
     if customer_risk_level in {"medium", "high"}:
         signals.append(_signal(
             "customer_risk_context",
@@ -421,6 +473,8 @@ def attach_advisory_assessment(
         required_reasons.append("authoritative_verification_pending")
     if authenticity_critical:
         required_reasons.append("image_authenticity_risk")
+    if under_nine_high_confidence:
+        required_reasons.append("minor_under_nine_high_confidence")
     if confidence is None and not missing_material and not technical_processing_incomplete:
         required_reasons.append("confidence_unavailable")
     elif (
@@ -497,6 +551,11 @@ def attach_advisory_assessment(
         missing_material,
         failed,
     )
+    if fulfillment.get("resolution_basis") == "warehouse_verification":
+        evidence_attention["customer_focus"] = [
+            "优先核对可追溯仓库终核及其核实编号；该终态覆盖历史待核实备注。"
+        ]
+        evidence_attention["missing_evidence"] = []
 
     advisory = {
         "scenario": str(metadata.get("scenario") or ""),

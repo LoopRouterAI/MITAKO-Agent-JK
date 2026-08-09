@@ -77,6 +77,7 @@ from auth.roles import (
     APPROVAL_ACCESS_ROLES,
     APPROVAL_CREATE_ROLES,
     APPROVAL_DECIDE_ROLES,
+    ALL_ROLES,
 )
 from auth.roles import Role
 from auth.store import verify_user
@@ -88,6 +89,7 @@ from private_domain.router import router as private_domain_router
 from private_domain import store as private_domain_store
 from review_service.router import router as review_service_router
 from review_service import service as review_service_core
+from prompts.router import router as business_rules_router
 
 SUPER_ADMIN_ONLY = frozenset({Role.SUPER_ADMIN.value})
 
@@ -111,6 +113,7 @@ if _business_demo_enabled():
 
 app.include_router(private_domain_router)
 app.include_router(review_service_router)
+app.include_router(business_rules_router)
 
 
 def _cors_origins() -> List[str]:
@@ -1157,7 +1160,7 @@ async def get_image_models():
 
 
 @app.post("/api/v1/images/generate")
-async def post_generate_image(req: ImageGenerateRequest):
+async def post_generate_image(req: ImageGenerateRequest, _user=require_roles(ALL_ROLES, require_tenant=True)):
     """图片生成：客户响应只返回可展示结果。"""
     try:
         result = await generate_image(req.prompt, req.model_id, req.size, req.n)
@@ -1644,6 +1647,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     "configurable": {
                         "event_queue": queue,
                         "model_id": req.model_id,
+                        "tenant_id": tenant_id,
                         "stream_reply": req.stream_reply,
                         "fixtures": req.fixtures or [],
                         "attachments": chat_attachments,

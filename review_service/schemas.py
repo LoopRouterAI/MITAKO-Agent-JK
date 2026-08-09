@@ -490,29 +490,52 @@ class ReviewReportReference(BaseModel):
 
 
 class ReviewPayload(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
+    review_label: str = ""
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    frame_strategy: str = ""
+    media_warnings: List[Any] = Field(default_factory=list)
+    agent_brief: Dict[str, Any] = Field(default_factory=dict)
+    agent_report: Dict[str, Any] = Field(default_factory=dict)
+    media_forensics: Optional[Dict[str, Any]] = None
     advisory_assessment: Optional[ReviewAdvisoryAssessment] = None
     report: Optional[ReviewReportReference] = None
+    sampling: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ReviewJobResult(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
+    client_case_id: str = ""
+    scenario: str = ""
+    scenario_label: str = ""
+    source_status: str = ""
+    media_forensics: Dict[str, Any] = Field(default_factory=dict)
+    input_readiness: Dict[str, Any] = Field(default_factory=dict)
+    boundary: str = ""
     review: Optional[ReviewPayload] = None
+    recommended_escalation: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ReviewPublicAsset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str
+    mime_type: str
+    size: int = 0
+    fields: List[str] = Field(default_factory=list)
 
 
 class ReviewJob(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     job_id: str
-    tenant_id: str
     client_case_id: str
-    idempotency_key: str = ""
     scenario: ReviewScenario
     status: str
-    metadata: Dict[str, Any]
-    assets: List[ReviewAsset]
+    assets: List[ReviewPublicAsset]
     result: ReviewJobResult = Field(default_factory=ReviewJobResult)
-    diagnostics: Dict[str, Any] = Field(default_factory=dict)
     attempts: int = 0
     created_at: float
     started_at: float = 0

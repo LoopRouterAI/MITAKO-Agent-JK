@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [string]$BaseUrl = "http://127.0.0.1:8015",
-    [string]$VisualUrl = "http://127.0.0.1:7861"
+    [string]$VisualUrl = "http://127.0.0.1:7861",
+    [switch]$IncludeSecrets
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,20 +20,31 @@ $PythonCandidates = @(
 $Python = $PythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $Python) { throw "Missing Python runtime: expected .venv or venv." }
 $GitCommit = (git rev-parse HEAD).Trim()
-$TrackedChanges = @(git status --porcelain --untracked-files=no)
-if ($TrackedChanges.Count -gt 0) {
-    throw "Working tree contains tracked changes. Commit them before creating an auditable internal package."
+$RuntimeSnapshots = [System.Collections.Generic.List[object]]::new()
+
+function Assert-NoTrackedChanges([string]$Message) {
+    & git diff --quiet --
+    if ($LASTEXITCODE -ne 0) { throw $Message }
+    & git diff --cached --quiet --
+    if ($LASTEXITCODE -ne 0) { throw $Message }
 }
 
+function Assert-NoUntrackedCode([string]$Message) {
+    $untracked = @(& git ls-files --others --exclude-standard)
+    if ($LASTEXITCODE -ne 0) { throw $Message }
+    if ($untracked.Count -gt 0) { throw "$Message`n$($untracked -join "`n")" }
+}
+
+Assert-NoTrackedChanges "Working tree contains tracked changes. Commit them before creating an auditable internal package."
+Assert-NoUntrackedCode "Working tree contains untracked code. Commit or remove it before creating an auditable internal package."
+
 function Invoke-InternalValidation {
-    & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl
+    & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl -RunModelBatch
 }
 
 Invoke-InternalValidation
-$TrackedChangesAfterValidation = @(git status --porcelain --untracked-files=no)
-if ($TrackedChangesAfterValidation.Count -gt 0) {
-    throw "Release validation changed tracked files. Review and commit them before packaging."
-}
+Assert-NoTrackedChanges "Release validation changed tracked files. Review and commit them before packaging."
+Assert-NoUntrackedCode "Release validation created untracked code. Review it before packaging."
 
 function Reset-Stage {
     $fullStage = [System.IO.Path]::GetFullPath($Stage)
@@ -65,6 +77,12 @@ function Copy-LatestReport([string]$Pattern, [string]$TargetRelativePath) {
     $target = Join-Path $Stage $TargetRelativePath
     New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
     Copy-Item -LiteralPath $source.FullName -Destination $target -Force
+    $RuntimeSnapshots.Add([ordered]@{
+        source_type = "runtime_report_snapshot"
+        source_path = [System.IO.Path]::GetRelativePath($Root, $source.FullName).Replace("\", "/")
+        packaged_path = $TargetRelativePath.Replace("\", "/")
+        sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+    })
 }
 
 function Copy-SafeSampleLabels {
@@ -113,28 +131,34 @@ Reset-Stage
 
 Write-Host "[1/5] Copy committed source ..." -ForegroundColor Cyan
 git -c core.quotepath=false ls-files | ForEach-Object { Copy-Path $_ }
-Copy-Path ".env"
 Copy-Path ".env.example"
+if ($IncludeSecrets) { Copy-Path ".env" }
 
-Write-Host "[2/5] Snapshot runtime databases ..." -ForegroundColor Cyan
-$databaseNames = @("admin.db", "auth.db", "handoff.db", "private_domain.db", "review_service.db")
-foreach ($databaseName in $databaseNames) {
-    $source = Join-Path $Root "data\$databaseName"
-    if (-not (Test-Path -LiteralPath $source)) { throw "Missing runtime database: $databaseName" }
-    $target = Join-Path $Stage "data\$databaseName"
-    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-    & $Python -c "import sqlite3,sys; src=sqlite3.connect(sys.argv[1]); dst=sqlite3.connect(sys.argv[2]); src.backup(dst); dst.close(); src.close()" $source $target
-    if ($LASTEXITCODE -ne 0) { throw "Database snapshot failed: $databaseName" }
+$databaseNames = @()
+Write-Host "[2/5] Handle optional runtime secrets ..." -ForegroundColor Cyan
+if ($IncludeSecrets) {
+    $databaseNames = @("admin.db", "auth.db", "handoff.db", "private_domain.db", "review_service.db")
+    foreach ($databaseName in $databaseNames) {
+        $source = Join-Path $Root "data\$databaseName"
+        if (-not (Test-Path -LiteralPath $source)) { throw "Missing runtime database: $databaseName" }
+        $target = Join-Path $Stage "data\$databaseName"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        & $Python -c "import sqlite3,sys; src=sqlite3.connect(sys.argv[1]); dst=sqlite3.connect(sys.argv[2]); src.backup(dst); dst.close(); src.close()" $source $target
+        if ($LASTEXITCODE -ne 0) { throw "Database snapshot failed: $databaseName" }
+        $RuntimeSnapshots.Add([ordered]@{
+            source_type = "runtime_database_snapshot"
+            packaged_path = "data/$databaseName"
+            sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+        })
+    }
 }
 
-Write-Host "[3/5] Copy runnable samples and small attachments ..." -ForegroundColor Cyan
+Write-Host "[3/5] Copy runnable samples and acceptance evidence ..." -ForegroundColor Cyan
 Copy-Path "docs\三大审核场景的小量样本\sample_002"
 Copy-Path "docs\三大审核场景的小量样本\sample_003"
 Copy-Path "docs\三大审核场景的小量样本\sample_004"
 Copy-SafeSampleLabels
 Copy-Path "poc\visual_review_poc\sample_videos"
-Copy-Path "data\chat_attachments"
-Copy-Path "data\private_domain_uploads"
 Copy-Path "tests\reports\customer_agent_0714_regression_latest.json"
 Copy-Path "tests\reports\review_service_batch_latest.json"
 Copy-Path "tests\reports\review_media_preprocessing_latest.json"
@@ -168,6 +192,7 @@ Copy-Path "tests\reports\blind_0806_final_product_rp.json"
 Copy-Path "tests\reports\blind_0806_final_minor_m1.json"
 Copy-Path "tests\reports\review_0807_random_acceptance_latest.json"
 Copy-Path "tests\reports\review_0807_random_acceptance_latest.html"
+Copy-Path "tests\reports\review_0809_commercial_acceptance_latest.json"
 Copy-Path "tests\reports\0808-four-scenario-validation\PD-612691-final-0809-result.json"
 Copy-Path "tests\reports\0808-four-scenario-validation\WI-76139-final-0809-result.json"
 Copy-Path "tests\reports\0808-four-scenario-validation\MI-589330-final-0809-result.json"
@@ -180,6 +205,9 @@ $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "甲方沟通交付文档\0809四场景业务理解与审核能力验收说明.html",
+    "我方内部开发文档\代码审查与商业验收报告-2026-08-09.md",
+    "tests\reports\review_0809_commercial_acceptance_latest.json",
     "docs\delivery\mitako-0807-guide-acceptance-20260807.html",
     "甲方沟通交付文档\0807黄金指南学习与审核能力更新说明.html",
     "我方内部开发文档\升级日志-2026-08-07-黄金指南与速度影响闭环.md",
@@ -266,8 +294,11 @@ foreach ($relativePath in $evidenceFiles) {
 $manifest = @{
     generated_at = (Get-Date).ToString("s")
     git_commit = $GitCommit
+    content_provenance = "Committed source is bound to git_commit; generated reports and optional databases are listed as runtime snapshots."
+    secrets_included = [bool]$IncludeSecrets
     env_included = (Test-Path -LiteralPath (Join-Path $Stage ".env"))
     databases = $databaseNames
+    runtime_snapshots = @($RuntimeSnapshots)
     samples = @("sample_002", "sample_003", "sample_004", "sample_labels.json (report evaluation only)", "visual_review_poc/sample_videos")
     evidence = $evidenceHashes
     excluded = @(".venv", "venv", "node_modules", ".git", ".codegraph", "tmp", "logs", "archive", "sample_001", "data/review_jobs", "120G customer assets")
@@ -277,7 +308,6 @@ $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $Stage
 Write-Host "[4/5] Validate internal package boundary ..." -ForegroundColor Cyan
 $required = @(
     "main.py",
-    ".env",
     "我方内部开发文档\Java开发部署与联调指南.md",
     "我方内部开发文档\升级日志-2026-07-30-未成年人策略与客服报告.md",
     "我方内部开发文档\升级日志-2026-07-28-事实结论与人工复审闭环.md",
@@ -318,7 +348,6 @@ $required = @(
     "我方内部开发文档\升级日志-2026-07-23-多源证据与接口联调.md",
     "docs\三大审核场景的小量样本\sample_labels.json",
     "scripts\pre_release_internal_validation.ps1",
-    "data\review_service.db",
     "tests\reports\review_0717_four_samples_20260717-final.json",
     "tests\reports\minor_refund_144989_20260717-final.json",
     "tests\reports\minor_refund_144989_20260720-latest.json",
@@ -348,6 +377,13 @@ foreach ($blocked in @(".venv", "venv", "node_modules", ".git", ".codegraph", "t
     if (Test-Path -LiteralPath (Join-Path $Stage $blocked)) {
         throw "Internal package contains blocked path: $blocked"
     }
+}
+if (-not $IncludeSecrets) {
+    if (Test-Path -LiteralPath (Join-Path $Stage ".env")) {
+        throw "Internal package contains .env without -IncludeSecrets."
+    }
+    $packagedDatabases = Get-ChildItem -LiteralPath (Join-Path $Stage "data") -File -Filter "*.db" -ErrorAction SilentlyContinue
+    if ($packagedDatabases) { throw "Internal package contains runtime databases without -IncludeSecrets." }
 }
 
 Write-Host "[5/5] Create internal development ZIP ..." -ForegroundColor Cyan

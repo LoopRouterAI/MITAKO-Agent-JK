@@ -104,10 +104,7 @@ def unified_dimension_gaps(results: Iterable[Dict[str, Any]], scenario: str) -> 
             fully_covered = targets.issubset(findings) and all(
                 finding_subjects.get(index) == CONTINUITY_SUBJECTS for index in targets
             )
-            sparse_anchored = (
-                any(subjects == CONTINUITY_SUBJECTS for subjects in finding_subjects.values())
-            )
-            if not fully_covered and not sparse_anchored:
+            if not fully_covered:
                 gaps.add("object_continuity")
         if scenario == "product_damage":
             damage = parsed.get("damage_causality_assessment")

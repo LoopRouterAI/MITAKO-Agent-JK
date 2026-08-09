@@ -128,7 +128,6 @@ def _verify_local_html_links(root: Path) -> None:
 def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[str, Any]:
     names = _zip_names(zip_path)
     required = {
-        ".env",
         "README.md",
         "requirements.txt",
         "internal-package-manifest.json",
@@ -148,6 +147,9 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "我方内部开发文档/升级日志-2026-07-15.md",
         "我方内部开发文档/升级日志-2026-08-06-四场景与五类材料闭环.md",
         "我方内部开发文档/升级日志-2026-08-07-黄金指南与速度影响闭环.md",
+        "我方内部开发文档/代码审查与商业验收报告-2026-08-09.md",
+        "甲方沟通交付文档/0809四场景业务理解与审核能力验收说明.html",
+        "tests/reports/review_0809_commercial_acceptance_latest.json",
         "docs/delivery/mitako-0807-guide-acceptance-20260807.html",
         "甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html",
         "tests/reports/review_0807_random_acceptance_latest.json",
@@ -199,11 +201,6 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "tests/reports/customer_order_info_sync_strict_verify_20260720.json",
         "tests/reports/customer_order_info_reconcile_applied_20260720.json",
         "tests/reports/customer_order_info_integration_strict_final_20260720.json",
-        "data/admin.db",
-        "data/auth.db",
-        "data/handoff.db",
-        "data/private_domain.db",
-        "data/review_service.db",
     }
     missing = sorted(required - names)
     _assert(not missing, f"内部包缺少文件：{missing}")
@@ -213,7 +210,13 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(not blocked, f"内部包包含禁止路径：{blocked[:20]}")
 
     manifest = json.loads((root / "internal-package-manifest.json").read_text(encoding="utf-8-sig"))
-    _assert(manifest.get("env_included") is True, "内部包清单未确认 .env")
+    _assert(manifest.get("secrets_included") is False, "默认内部包不得包含运行密钥或数据库")
+    _assert(manifest.get("env_included") is False, "默认内部包不得包含 .env")
+    _assert(".env" not in names, "默认内部包包含 .env")
+    _assert(
+        all(not name.startswith("data/") or not name.endswith(".db") for name in names),
+        "默认内部包包含运行数据库",
+    )
     _assert(manifest.get("git_commit") == expected_commit, "内部包提交号不是当前验收提交")
     dynamic_report = json.loads(
         (root / "tests/reports/dynamic_material_capacity_http_latest.json").read_text(encoding="utf-8")
@@ -239,7 +242,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/openapi.yaml",
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
-        "docs/delivery/mitako-0807-guide-acceptance-20260807.html",
+        "甲方沟通交付文档/0809四场景业务理解与审核能力验收说明.html",
         "甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html",
         "docs/delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
         "甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html",
@@ -283,6 +286,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     manifest = json.loads((root / "customer-package-manifest.json").read_text(encoding="utf-8-sig"))
     _assert(manifest.get("git_commit") == expected_commit, "甲方包提交号不是当前验收提交")
     _assert(manifest.get("delivery_mode") == "customer_demo_preview", "甲方包未声明演示交付边界")
+    _assert(manifest.get("runtime_python_version") == "3.11", "甲方编译运行时未锁定 Python 3.11")
     _verify_hashes(root, list(manifest.get("evidence") or []))
 
     with zipfile.ZipFile(root / "runtime" / "app_runtime.zip") as runtime:
@@ -291,6 +295,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(any(name.endswith("review_media_safety.pyc") for name in runtime_names), "甲方运行时缺少媒体上传安全模块")
     _assert(any(name.endswith("minor_material_pipeline.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料审核管线")
     _assert(any(name.endswith("minor_material_model_prompt.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料识别协议")
+    _assert(any(name.endswith("prompts/customer_service.pyc") for name in runtime_names), "甲方运行时缺少集中客服规则模块")
+    _assert(any(name.endswith("prompts/visual_review/core.pyc") for name in runtime_names), "甲方运行时缺少集中视觉审核规则模块")
     _assert(any(name.endswith("official_reference_images.pyc") for name in runtime_names), "甲方运行时缺少官方商品图按需读取模块")
     _assert(any(name.endswith("order_info_adapter.pyc") for name in runtime_names), "甲方运行时缺少订单快照适配模块")
     _assert(any(name.endswith("advisory_assessment.pyc") for name in runtime_names), "甲方运行时缺少统一审核建议模块")
@@ -636,7 +642,7 @@ def main() -> int:
         "customer_zip": {"path": str(customer_zip), "bytes": customer_zip.stat().st_size, "sha256": _sha256(customer_zip), **customer},
         "extracted_runtime": runtime,
         "boundaries": {
-            "internal_package": "包含源码、内部文档、当前环境配置与数据库快照，仅限我方研发。",
+            "internal_package": "包含源码、内部文档与验收证据；默认不含 Key、运行数据库或用户附件，仅限我方研发。",
             "customer_package": "仅含演示运行时和公开文档，不含 Key、数据库、源码、内部文档或盲测标签。",
         },
     }

@@ -58,13 +58,15 @@ async def _recover_expired_jobs_forever() -> None:
 
 
 def _integration_user():
-    return require_roles(ADMIN_MUTATE_ROLES)
+    return require_roles(ADMIN_MUTATE_ROLES, require_tenant=True)
 
 
 def _optional_integration_user(request: Request) -> Optional[Dict]:
     user = get_current_user_optional(request)
     if user and user.get("role") not in ADMIN_MUTATE_ROLES:
         raise HTTPException(status_code=403, detail="权限不足")
+    if user and not str(user.get("tenant_id") or "").strip():
+        raise HTTPException(status_code=403, detail="tenant_claim_required")
     return user
 
 
@@ -101,7 +103,7 @@ async def batch_detail(
 ):
     if not batch_id.strip() or len(batch_id) > 160:
         raise HTTPException(status_code=422, detail="invalid_review_batch_id")
-    result = service.batch_status(user.get("tenant_id") or "mitako", batch_id, limit=limit, offset=offset)
+    result = service.batch_status(user["tenant_id"], batch_id, limit=limit, offset=offset)
     if not result["summary"]["total"]:
         raise HTTPException(status_code=404, detail="review_batch_not_found")
     return {"ok": True, **result}
@@ -159,7 +161,7 @@ async def create_job(
         job, created = await service.create_job_from_uploads(
             case,
             files,
-            user.get("tenant_id") or "mitako",
+            user["tenant_id"],
             idempotency_key,
         )
     except ValueError as exc:
@@ -188,7 +190,7 @@ async def list_jobs(
     return {
         "ok": True,
         "jobs": [service.public_job(job) for job in store.list_jobs(
-            user.get("tenant_id") or "mitako",
+            user["tenant_id"],
             status=status,
             scenario=scenario,
             limit=limit,
@@ -199,7 +201,7 @@ async def list_jobs(
 @router.get("/jobs/{job_id}", response_model=ReviewJobResponse)
 async def job_detail(job_id: str, user=_integration_user()):
     job = store.get_job(job_id)
-    if not job or job.get("tenant_id") != (user.get("tenant_id") or "mitako"):
+    if not job or job.get("tenant_id") != user["tenant_id"]:
         raise HTTPException(status_code=404, detail="review_job_not_found")
     return {"ok": True, "created": False, "job": service.public_job(job)}
 
@@ -211,7 +213,7 @@ async def job_detail(job_id: str, user=_integration_user()):
 )
 async def job_report(job_id: str, user=_integration_user()):
     job = store.get_job(job_id)
-    if not job or job.get("tenant_id") != (user.get("tenant_id") or "mitako"):
+    if not job or job.get("tenant_id") != user["tenant_id"]:
         raise HTTPException(status_code=404, detail="review_job_not_found")
     if not service.html_report_requested(job):
         raise HTTPException(status_code=409, detail="review_report_not_requested")
@@ -300,7 +302,7 @@ async def job_media(
 @router.post("/jobs/{job_id}/retry", response_model=ReviewJobResponse, status_code=202)
 async def retry_job(job_id: str, user=_integration_user()):
     existing = store.get_job(job_id)
-    if not existing or existing.get("tenant_id") != (user.get("tenant_id") or "mitako"):
+    if not existing or existing.get("tenant_id") != user["tenant_id"]:
         raise HTTPException(status_code=404, detail="review_job_not_found")
     try:
         job = service.retry_job(job_id)
@@ -311,7 +313,7 @@ async def retry_job(job_id: str, user=_integration_user()):
 
 @router.get("/metrics", response_model=ReviewMetricsResponse)
 async def review_metrics(user=_integration_user()):
-    return {"ok": True, "metrics": service.metrics(user.get("tenant_id") or "mitako")}
+    return {"ok": True, "metrics": service.metrics(user["tenant_id"])}
 
 
 @router.get("/readiness")

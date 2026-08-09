@@ -515,6 +515,10 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     overall = parsed.get("overall_audit") or {}
     visual = parsed.get("visual_qc_conclusion") or {}
     video = parsed.get("video_audit_conclusion") or parsed.get("continuity_assessment") or {}
+    continuity_status = (
+        video.get("evidence_continuity_status")
+        or (parsed.get("object_continuity_assessment") or {}).get("continuity_verdict")
+    )
     runtime = report.get("runtime") or {}
     inference = report.get("inference_estimate") or {}
     media_forensics = data.get("media_forensics") or {}
@@ -568,6 +572,24 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         )
     else:
         speed_impact_html = "<p><b>橙色风险：</b>疑似加速，但尚未形成速度影响结论，不能据此判负。</p>"
+    opening_compliance = video.get("opening_video_compliance") or {}
+    opening_field_labels = (
+        ("sealed_start", "封箱起始"),
+        ("waybill_visible", "面单可核验"),
+        ("single_take_continuity", "一镜到底连续拆封"),
+        ("issue_visible_in_continuous_opening", "伤点在连续开箱中清晰展示"),
+    )
+    opening_status_labels = {True: "符合", False: "不符合", None: "未判断"}
+    opening_rows = "".join(
+        f"<li><b>{_h(label)}：</b>{_h(opening_status_labels.get(opening_compliance.get(field), '未判断'))}</li>"
+        for field, label in opening_field_labels
+    )
+    opening_compliance_html = (
+        f'<div class="opening-checks"><h3>主开箱视频硬要求</h3><ul class="boundary-list">{opening_rows}</ul></div>'
+        if isinstance(opening_compliance, dict)
+        and any(isinstance(opening_compliance.get(field), bool) for field, _ in opening_field_labels)
+        else ""
+    )
     advisory = report.get("advisory_assessment") or data.get("advisory_assessment") or {}
     advisory_assessment = advisory.get("assessment") or {}
     sop_recommendation = advisory.get("sop_recommendation") or {}
@@ -618,6 +640,10 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     )
     quality = report.get("quality") or {}
     media_gallery = report.get("media_gallery") or {}
+    restricted_media_notice = (
+        '<p class="muted">为保护用户隐私，公开报告不展示原始视频、抽帧和补充图片；授权人员可在受控工单中回看原始证据。</p>'
+        if media_gallery.get("restricted_original_evidence") else ""
+    )
     evidence_package = report.get("evidence_package") or {}
     video_deduplication = evidence_package.get("video_deduplication") or {}
     official_reference_status = evidence_package.get("official_reference_status") or {}
@@ -826,6 +852,49 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
         "</tr>"
         for item in evidence_package.get("videos") or []
     )
+    video_metrics_html = ""
+    video_density_html = ""
+    video_proof_html = ""
+    video_gallery_html = ""
+    if video_count:
+        video_metrics_html = f"""
+      <div class="metric"><small>商品连续性分数</small><b>{_h(video.get("continuity_score") or "-")}</b></div>
+      <div class="metric"><small>疑似调包风险</small><b>{_h(video.get("swap_risk_level") or "-")}</b></div>
+      <div class="metric"><small>审核视频</small><b>{_h(video_count)}</b></div>
+      <div class="metric"><small>查看画面</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
+      <div class="metric"><small>重复视频已跳过</small><b>{_h(video_deduplication.get("duplicate_count") or 0)}</b></div>"""
+        video_density_html = f"""
+    <section class="panel">
+      <div class="section-head"><h2>视频查看密度</h2><p>这里说明系统每秒实际查看多少个画面。</p></div>
+      <div class="table-wrap"><table><thead><tr><th>视频</th><th>时长</th><th>原视频每秒帧数</th><th>计划每秒查看</th><th>实际查看画面</th><th>实际每秒查看</th></tr></thead><tbody>{sampling_rows}</tbody></table></div>
+    </section>"""
+        continuity_label = {
+            "continuous": "连续",
+            "brief_occlusion": "短暂遮挡",
+            "long_absence": "较长离镜",
+            "indeterminate": "不确定",
+        }.get(continuity_status, continuity_status or "未知")
+        video_proof_html = f"""
+  <section class="panel proof">
+    <h2>视频审核论证</h2>
+    <div class="causality-grid">
+      <article><small>抽帧首尾覆盖</small><b>{_h({"covered": "已覆盖", "incomplete": "未完整覆盖", "unknown": "未知"}.get(video.get("sampling_boundary_status"), video.get("sampling_boundary_status") or "未知"))}</b></article>
+      <article><small>媒体技术取证</small><b>{_h(_public_status((parsed.get("decision_policy_audit") or data.get("decision_policy_audit") or {}).get("evidence_gate", {}).get("media_forensics_status") or video.get("technical_timeline_status") or "未提供"))}</b></article>
+      <article><small>开箱过程完整性</small><b>{_h({"complete": "完整", "incomplete": "不完整", "indeterminate": "不确定"}.get(video.get("opening_integrity"), video.get("opening_integrity") or "未知"))}</b></article>
+      <article><small>商品证据连续性</small><b>{_h(continuity_label)}</b></article>
+    </div>
+    <p><b>口径说明：</b>视频时间轴完整不等于争议商品全程连续可见；抽帧覆盖、媒体技术取证、开箱过程和商品连续性是四个独立维度。</p>
+    <p><b>画面节奏判断：{_h(visual_playback_speed)}</b>。这是模型对画面节奏的观察，不是精确倍速测量。</p>
+    {speed_impact_html}
+    {opening_compliance_html}
+    <p><b>播放速度技术取证：</b></p><ul class="boundary-list">{playback_speed_evidence}</ul>
+    <p><b>连续性：</b>{_h(video.get("continuity_reason") or video.get("reason") or "本轮没有输出明确连续性理由。")}</p>
+    <p><b>剪辑/调包风险：</b>{_h(video.get("edit_or_cut_risk") or "-")} / {_h(video.get("swap_risk_level") or "-")}</p>
+  </section>"""
+    if media_gallery.get("frames"):
+        video_gallery_html = f"""
+    <h3>视频画面</h3>
+    <div class="media-grid">{_gallery_items(media_gallery.get("frames") or [], "视频帧")}</div>"""
     diagnostic_panel = ""
     if failed:
         diagnostic_panel = (
@@ -873,14 +942,10 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 	  <div class="technical-details-body">
 	  <section class="metrics">
 		    <div class="metric hot"><small>视觉质检</small><b>{_h("审核未完成" if failed else visual_verdict)}</b></div>
-	    <div class="metric video-only"><small>商品连续性分数</small><b>{_h(video.get("continuity_score") or "-")}</b></div>
-	    <div class="metric video-only"><small>疑似调包风险</small><b>{_h(video.get("swap_risk_level") or "-")}</b></div>
+	    {video_metrics_html}
 	    <div class="metric"><small>本次审核用时</small><b>{_h(latency)} 秒</b></div>
-	    <div class="metric video-only"><small>审核视频</small><b>{_h(video_count or "-")}</b></div>
-	    <div class="metric video-only"><small>查看画面</small><b>{_h(evidence_package.get("frames_sent") or "-")}</b></div>
 	    <div class="metric"><small>补充图片</small><b>{_h(evidence_package.get("supplemental_images_sent") or "-")}</b></div>
 	    <div class="metric product-only"><small>官方参考图</small><b>{_h(evidence_package.get("official_reference_images_sent") or "-")}</b></div>
-	    <div class="metric video-only"><small>重复视频已跳过</small><b>{_h(video_deduplication.get("duplicate_count") or 0)}</b></div>
 	    {internal_metrics_html}
 		    <div class="metric"><small>报告用途</small><b>客服审核建议</b></div>
 		  </section>
@@ -889,10 +954,7 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
 		    <p><b>本次总用时：</b>{_h(runtime.get("latency_seconds") or "-")} 秒；<b>各次识别累计用时：</b>{_h(runtime.get("model_latency_seconds_sum") or "-")} 秒（并行任务会重叠）。</p>
 		    <div class="boundary-grid">{channel_cards or '<p class="muted">本轮没有分通道统计。</p>'}</div>
 		  </details>
-		  <section class="panel video-only">
-		    <div class="section-head"><h2>视频查看密度</h2><p>这里说明系统每秒实际查看多少个画面。</p></div>
-		    <div class="table-wrap"><table><thead><tr><th>视频</th><th>时长</th><th>原视频每秒帧数</th><th>计划每秒查看</th><th>实际查看画面</th><th>实际每秒查看</th></tr></thead><tbody>{sampling_rows or '<tr><td colspan="6">本轮没有视频。</td></tr>'}</tbody></table></div>
-		  </section>
+		  {video_density_html}
 	  {diagnostic_panel}
 
 	  <section class="panel">
@@ -903,27 +965,13 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
   {risk_panel}
   {issue_panel}
 
-  <section class="panel proof video-only">
-    <h2>视频审核论证</h2>
-    <div class="causality-grid">
-      <article><small>抽帧首尾覆盖</small><b>{_h({"covered": "已覆盖", "incomplete": "未完整覆盖", "unknown": "未知"}.get(video.get("sampling_boundary_status"), video.get("sampling_boundary_status") or "未知"))}</b></article>
-      <article><small>媒体技术取证</small><b>{_h(_public_status((parsed.get("decision_policy_audit") or data.get("decision_policy_audit") or {}).get("evidence_gate", {}).get("media_forensics_status") or video.get("technical_timeline_status") or "未提供"))}</b></article>
-      <article><small>开箱过程完整性</small><b>{_h({"complete": "完整", "incomplete": "不完整", "indeterminate": "不确定"}.get(video.get("opening_integrity"), video.get("opening_integrity") or "未知"))}</b></article>
-      <article><small>商品证据连续性</small><b>{_h({"continuous": "连续", "brief_occlusion": "短暂遮挡", "long_absence": "较长离镜", "indeterminate": "不确定"}.get(video.get("evidence_continuity_status"), video.get("evidence_continuity_status") or "未知"))}</b></article>
-    </div>
-    <p><b>口径说明：</b>视频时间轴完整不等于争议商品全程连续可见；抽帧覆盖、媒体技术取证、开箱过程和商品连续性是四个独立维度。</p>
-    <p><b>画面节奏判断：{_h(visual_playback_speed)}</b>。这是模型对画面节奏的观察，不是精确倍速测量。</p>
-    {speed_impact_html}
-    <p><b>播放速度技术取证：</b></p><ul class="boundary-list">{playback_speed_evidence}</ul>
-    <p><b>连续性：</b>{_h(video.get("continuity_reason") or video.get("reason") or "本轮没有输出明确连续性理由。")}</p>
-    <p><b>剪辑/调包风险：</b>{_h(video.get("edit_or_cut_risk") or "-")} / {_h(video.get("swap_risk_level") or "-")}</p>
-  </section>
+  {video_proof_html}
   {decision_policy_panel}
 
 	  <section class="panel boundary-panel">
 	    <div class="section-head"><h2>置信度与已知边界</h2><p>帮助VIP客服理解分数依据、缺失材料和本轮视觉判断无法覆盖的范围。</p></div>
 	    <div class="boundary-grid">
-	      <article class="boundary-card"><h3>置信度理由</h3><p>{_h(confidence_reason or "本轮没有输出明确的置信度理由，需结合证据卡片人工复核。")}</p></article>
+	      <article class="boundary-card"><h3>置信度理由</h3><p>{_h(confidence_reason or "本轮没有输出明确的置信度理由，请结合证据卡片理解结论。")}</p></article>
 	      <article class="boundary-card"><h3>材料缺口</h3>{_list_html(material_gaps, "本轮未声明额外材料缺口；" + ("最终退款决定仍由授权人员按 SOP 执行。" if is_minor_report else "最终处置仍需核对订单、库存和售后规则。"))}</article>
 	      <article class="boundary-card"><h3>模型局限</h3>{_list_html(model_limitations, "本轮未单独声明模型局限；报告结论仍仅作为VIP客服复核参考。")}</article>
 	    </div>
@@ -949,10 +997,10 @@ def _render_agent_report(data: Dict[str, Any]) -> str:
     <div class="media-grid">{_gallery_items(media_gallery.get("official_references") or [], "官方商品参考图")}</div>
   </section>
 
-			  <section class="panel">
+  <section class="panel">
     <div class="section-head"><h2>送审证据画廊</h2><p>用于快速复核审核Agent看到的帧图和用户补充图片。</p></div>
-    <h3 class="video-only">视频画面</h3>
-    <div class="media-grid video-only">{_gallery_items(media_gallery.get("frames") or [], "视频帧")}</div>
+    {restricted_media_notice}
+    {video_gallery_html}
     <h3>补充图片</h3>
     <div class="media-grid">{_gallery_items(media_gallery.get("images") or [], "补充图片")}</div>
 	  </section>

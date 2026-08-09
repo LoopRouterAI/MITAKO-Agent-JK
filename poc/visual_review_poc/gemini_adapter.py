@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 from fixtures import VISUAL_REVIEW_CASES
 from review_engine import review_case
+from prompts.visual_review.diagnostics import build_fixture_contract_prompt
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -20,10 +21,7 @@ GEMINI_MODEL = "gemini-3.5-flash"
 
 
 def build_gemini_prompt(case: Dict[str, Any]) -> str:
-    return f"""你是客服视觉审核助手。请只输出 JSON，不要输出解释。
-任务：判断 {case['title']}。
-要求字段：case_id, scenario, decision, confidence, issues, evidence, next_step, human_required, mock_only, boundary。
-边界：不得自动定责、拒赔、退款、补发；未成年人资料必须人工审批。"""
+    return build_fixture_contract_prompt(case)
 
 
 def run_gemini_fixture(case: Dict[str, Any]) -> Dict[str, Any]:

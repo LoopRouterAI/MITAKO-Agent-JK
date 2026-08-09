@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, Route, ListOrdered, FileText, Shield, LogOut, ClipboardCheck, BarChart3, Monitor,
-  Network,
+  Network, BookOpenCheck,
 } from 'lucide-react';
 import t from '../i18n/index.js';
 import { authFetch, clearAuthSession } from '../lib/authClient.js';
@@ -15,6 +15,7 @@ import Approvals from './pages/Approvals.jsx';
 import Reports from './pages/Reports.jsx';
 import OpsMonitor from './pages/OpsMonitor.jsx';
 import PrivateDomainAgent from './pages/PrivateDomainAgent.jsx';
+import BusinessRules from './pages/BusinessRules.jsx';
 
 const NAV = [
   { id: 'dashboard', icon: LayoutDashboard, labelKey: 'admin.navDashboard', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
@@ -24,6 +25,7 @@ const NAV = [
   { id: 'audit', icon: FileText, labelKey: 'admin.navAudit', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'qc', icon: Shield, labelKey: 'admin.navQc', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'approvals', icon: ClipboardCheck, labelKey: 'admin.navApprovals', roles: ['super_admin', 'supervisor'] },
+  { id: 'businessRules', icon: BookOpenCheck, labelKey: 'admin.navBusinessRules', roles: ['super_admin', 'supervisor'] },
   { id: 'reports', icon: BarChart3, labelKey: 'admin.navReports', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'privateDomain', icon: Network, labelKey: 'admin.navPrivateDomain', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'ops', icon: Monitor, labelKey: 'admin.navOps', roles: ['super_admin'] },
@@ -56,10 +58,10 @@ export default function AdminShell({ user, legacyRouting }) {
       const r = await authFetch(`/api/v1/admin/demo/${action}`, { method: 'POST' });
       const data = await r.json();
       if (data.ok) setDemo(data);
-      else window.alert(data.message || data.error || '演示数据操作失败');
+      else window.alert(data.message || data.error || t('admin.demoActionFailed'));
     } catch (e) {
       console.error(e);
-      window.alert('演示数据操作失败，请稍后重试');
+      window.alert(t('admin.demoActionRetry'));
     } finally {
       setDemoBusy(false);
     }
@@ -101,27 +103,27 @@ export default function AdminShell({ user, legacyRouting }) {
       <main className="flex-1 min-w-0 overflow-auto">
         <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-black text-slate-950">客服运营管理中心</p>
-            <p className="text-xs text-slate-500">{demo?.message || '正在读取数据状态'}</p>
+            <p className="text-sm font-black text-slate-950">{t('admin.opsCenterTitle')}</p>
+            <p className="text-xs text-slate-500">{demo?.message || t('admin.loadingDataStatus')}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-[8px] px-2 py-1 text-[11px] font-bold ${demo?.mode === 'demo' ? 'bg-[var(--mitako-lime-soft)] text-slate-900' : 'bg-slate-100 text-slate-600'}`}>
-              {demo?.mode === 'demo' ? `演示数据 ${demo.session_count || 0} 条` : '空状态/待接入'}
+              {demo?.mode === 'demo' ? t('admin.demoDataCount', 'zh-CN', { count: demo.session_count || 0 }) : t('admin.emptyPending')}
             </span>
             {isSuperAdmin && (
               <>
                 <button type="button" disabled={demoBusy} onClick={() => runDemoAction('load')} className="min-h-[36px] rounded-[8px] bg-[var(--mitako-lime)] px-3 text-xs font-bold text-slate-950 disabled:opacity-60">
-                  加载演示数据
+                  {t('admin.loadDemoData')}
                 </button>
                 <button
                   type="button"
                   disabled={demoBusy}
                   onClick={() => {
-                    if (window.confirm('确认清空演示数据？真实接口数据不会被删除。')) runDemoAction('clear');
+                    if (window.confirm(t('admin.clearDemoConfirm'))) runDemoAction('clear');
                   }}
                   className="min-h-[36px] rounded-[8px] bg-white border border-slate-200 px-3 text-xs font-bold text-slate-700 disabled:opacity-60"
                 >
-                  清空演示数据
+                  {t('admin.clearDemoData')}
                 </button>
               </>
             )}
@@ -134,6 +136,7 @@ export default function AdminShell({ user, legacyRouting }) {
         {tab === 'audit' && <AuditLog />}
         {tab === 'qc' && <ObserverQC />}
         {tab === 'approvals' && <Approvals user={user} />}
+        {tab === 'businessRules' && <BusinessRules />}
         {tab === 'reports' && <Reports />}
         {tab === 'privateDomain' && <PrivateDomainAgent />}
         {tab === 'ops' && <OpsMonitor />}

@@ -219,6 +219,28 @@ class MediaForensicsTest(unittest.TestCase):
 
 
 class ReviewJobIntegrationTest(unittest.TestCase):
+    def test_job_lease_covers_every_workbench_attempt_and_backoff(self) -> None:
+        job = {
+            "assets": [
+                {"mime_type": "application/octet-stream", "original_name": f"clip-{index}.mp4"}
+                for index in range(200)
+            ]
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "REVIEW_JOB_TIMEOUT_SECONDS": "1800",
+                "REVIEW_WORKBENCH_RETRIES": "2",
+                "REVIEW_FFPROBE_TIMEOUT_SECONDS": "20",
+            },
+        ), patch.object(service.store, "claim_job", return_value=False) as claim_job, patch.object(
+            service.store, "get_job", return_value=job
+        ):
+            service.run_job("RJ-LEASE")
+
+        lease_seconds = claim_job.call_args.args[1]
+        self.assertGreaterEqual(lease_seconds, 200 * 20 + 1800 * 3 + 1 + 2 + 60)
+
     def test_workbench_transient_503_is_retried_with_fresh_upload_stream(self) -> None:
         class Response:
             def __init__(self, status_code, payload=None):
@@ -247,6 +269,7 @@ class ReviewJobIntegrationTest(unittest.TestCase):
             def post(self, url, headers, data, files):
                 self_outer.assertFalse(self.trust_env)
                 self_outer.assertEqual(headers.get("X-MITAKO-Internal-Metrics"), "1")
+                self_outer.assertEqual(headers.get("X-MITAKO-Internal-Token"), "test-internal-token")
                 observed_sizes.append(sum(len(item[1][1].read()) for item in files))
                 return responses.pop(0)
 
@@ -278,7 +301,9 @@ class ReviewJobIntegrationTest(unittest.TestCase):
                     }
                 ],
             }
-            with patch.object(service, "upload_root", return_value=root), patch.object(
+            with patch.dict(os.environ, {"VISUAL_REPORT_SIGNING_SECRET": "test-internal-token"}), patch.object(
+                service, "upload_root", return_value=root
+            ), patch.object(
                 service.httpx, "Client", Client
             ), patch.object(service.time, "sleep"):
                 payload = service._call_workbench(job)
@@ -287,6 +312,11 @@ class ReviewJobIntegrationTest(unittest.TestCase):
         self.assertEqual(len(health_requests), 1)
         self.assertEqual(payload["_workbench_transport"]["retry_count"], 1)
         self.assertEqual([item["status_code"] for item in payload["_workbench_transport"]["attempts"]], [503, 200])
+
+    def test_formal_api_requires_internal_token_before_workbench_call(self) -> None:
+        with patch.dict(os.environ, {"VISUAL_REPORT_SIGNING_SECRET": ""}):
+            with self.assertRaisesRegex(ValueError, "visual_internal_token_required"):
+                service._call_workbench({"job_id": "RJ-NO-TOKEN", "scenario": "product_damage"})
 
     def test_workbench_contract_rejects_old_capacity_before_upload(self) -> None:
         with self.assertRaisesRegex(ValueError, "visual_workbench_contract_mismatch"):

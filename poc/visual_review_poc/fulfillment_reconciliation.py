@@ -254,7 +254,11 @@ def aggregate_fulfillment_reconciliation(
         "unexpected_items": unexpected,
         "unconfirmed_items": unconfirmed[:100],
         "package_observations": list(package_observations.values()),
-        "package_coverage": f"{len(visually_complete_packages)}/{len(expected_packages)} 个应发包裹完成开箱并铺开展示",
+        "package_coverage": (
+            "仓库终核已覆盖本案履约事实；本轮不以开箱视频数量作为结论门槛"
+            if warehouse_verification
+            else f"{len(visually_complete_packages)}/{len(expected_packages)} 个应发包裹完成开箱并铺开展示"
+        ),
         "all_packages_uploaded": coverage.get("all_packages_uploaded") is True,
         "all_items_displayed": coverage.get("all_items_displayed") is True,
         "visual_coverage_verified": coverage_verified,
@@ -288,7 +292,65 @@ def apply_fulfillment_guard(result: Dict[str, Any], scenario: str) -> Dict[str, 
         output["confidence"] = min(_confidence(output.get("confidence")), 0.69)
         output["fulfillment_guard_reason"] = reconciliation.get("decision_boundary") or "履约证据不足，应先补齐可获得的材料。"
     elif reconciliation.get("resolution_basis") == "warehouse_verification":
-        output["fulfillment_guard_reason"] = reconciliation.get("decision_boundary") or "甲方仓库已提供可追溯终核。"
+        boundary = reconciliation.get("decision_boundary") or "甲方仓库已提供可追溯终核。"
+        warehouse = reconciliation.get("warehouse_verification") or {}
+        warehouse_status = warehouse.get("status")
+        warehouse_fact = (
+            "甲方可追溯仓库终核确认实收商品与应发商品一致，本案确定未漏发。"
+            if warehouse_status == "confirmed_not_missing"
+            else "甲方可追溯仓库终核确认本案存在漏发。"
+        )
+        reconciliation = dict(reconciliation)
+        if warehouse_status == "confirmed_not_missing":
+            reconciliation["suspected_missing_items"] = []
+        output["fulfillment_reconciliation"] = reconciliation
+        output["confidence"] = _confidence(reconciliation.get("confidence"))
+        output["fulfillment_guard_reason"] = boundary
+        output["confidence_reason"] = boundary
+        output["business_follow_up_reason"] = boundary
+        output["next_step"] = (
+            "按甲方仓库终核结果继续处理，本轮无需因开箱材料重复补件或人工复核。"
+            if label == "negative"
+            else "按甲方仓库终核结果继续处理；具体补发、退款等业务动作由甲方授权系统或人员决定。"
+        )
+        output["visual_evidence_verdict"] = warehouse_fact
+        output["overall_audit"] = {
+            "conclusion": warehouse_fact,
+            "confidence": output["confidence"],
+            "core_reason": boundary,
+            "business_follow_up_suggestion": output["next_step"],
+        }
+        claim_fact_assessment = output.get("claim_fact_assessment")
+        if isinstance(claim_fact_assessment, dict):
+            claim_fact_assessment = dict(claim_fact_assessment)
+            claim_fact_assessment["atomic_claim_results"] = [
+                {
+                    **item,
+                    "support_status": (
+                        "not_supported" if warehouse_status == "confirmed_not_missing" else "supported"
+                    ),
+                    "reason": warehouse_fact,
+                    "evidence_refs": [{
+                        "source_type": "warehouse_verification",
+                        "asset_ref": warehouse.get("verification_ref") or "warehouse_verification",
+                        "fact": warehouse_fact,
+                    }],
+                }
+                for item in claim_fact_assessment.get("atomic_claim_results") or []
+                if isinstance(item, dict)
+            ]
+            output["claim_fact_assessment"] = claim_fact_assessment
+        warehouse_evidence = {
+            "source_type": "warehouse_verification",
+            "asset_ref": warehouse.get("verification_ref") or "warehouse_verification",
+            "fact": warehouse_fact,
+            "why_it_matters": "可信仓库终核覆盖历史待核实备注，并决定本案履约事实。",
+            "confidence": output["confidence"],
+        }
+        output["adopted_evidence"] = [warehouse_evidence] + [
+            item for item in output.get("adopted_evidence") or []
+            if isinstance(item, dict) and item.get("source_type") != "warehouse_verification"
+        ]
     else:
         output["fulfillment_guard_reason"] = "版本化应发基准与全部包裹视频展示已完成结构化对账。"
     return output

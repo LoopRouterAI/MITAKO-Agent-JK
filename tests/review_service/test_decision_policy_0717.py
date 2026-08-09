@@ -227,6 +227,10 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
 
         self.assertEqual(result["summary"]["predicted_label"], "negative")
         self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-DIRECT-CUSTOMER-DAMAGE")
+        parsed = result["agent_report"]["parsed"]
+        self.assertNotIn("补齐", parsed["overall_audit"]["business_follow_up_suggestion"])
+        self.assertNotIn("重新提交", result["agent_brief"]["next_step"])
+        self.assertIn("SOP", result["agent_brief"]["next_step"])
 
     def test_pre_opening_visible_damage_remains_supported(self):
         result = self._default_visible_damage_case()
@@ -961,6 +965,236 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
 
         self.assertEqual(result["summary"]["predicted_label"], "negative")
         self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+
+    def test_issue_not_visible_in_continuous_opening_is_a_verified_hard_failure(self):
+        result = self._default_visible_damage_case(video_overrides={
+            "source": "global_timeline_aggregation",
+            "sampling_boundary_status": "covered",
+            "opening_video_compliance": {
+                "sealed_start": True,
+                "waybill_visible": True,
+                "single_take_continuity": True,
+                "issue_visible_in_continuous_opening": False,
+                "source": "global_timeline_aggregation",
+                "validated_fields": ["issue_visible_in_continuous_opening"],
+                "evidence_refs": {
+                    "issue_visible_in_continuous_opening": [{
+                        "video_index": 1,
+                        "global_frame_index": 18,
+                        "timestamp": "00:17.00",
+                    }],
+                },
+            },
+        })
+
+        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+
+    def test_unverified_noncompliant_opening_review_cannot_keep_positive_follow_up(self):
+        result = self._default_visible_damage_case(
+            damage_overrides={
+                "damage_presence": "uncertain",
+                "claim_support": "supported",
+                "first_visible_evidence": {},
+                "evidence_source_summary": {
+                    "primary_video": {
+                        "damage_presence": "uncertain",
+                        "claim_support": "supported",
+                    },
+                    "supplemental_images": {
+                        "provided_count": 1,
+                        "referenced_count": 1,
+                        "linkage_status": "unresolved",
+                    },
+                },
+            },
+            video_overrides={
+                "opening_video_compliance": {
+                    "sealed_start": True,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": False,
+                    "source": "hybrid_native_video_with_opening_start_verification",
+                    "validated_fields": ["sealed_start"],
+                    "result": "noncompliant",
+                },
+            },
+        )
+
+        parsed = result["agent_report"]["parsed"]
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertIn("保留复核信号", parsed["business_follow_up_reason"])
+        self.assertEqual(
+            parsed["damage_causality_assessment"]["evidence_source_summary"]["primary_video"]["claim_support"],
+            "insufficient",
+        )
+
+    def test_full_timeline_absence_can_verify_issue_not_shown_without_single_frame_anchor(self):
+        result = self._default_visible_damage_case(video_overrides={
+            "source": "global_timeline_aggregation",
+            "sampling_boundary_status": "covered",
+            "opening_video_compliance": {
+                "sealed_start": True,
+                "waybill_visible": True,
+                "single_take_continuity": True,
+                "issue_visible_in_continuous_opening": False,
+                "source": "global_timeline_aggregation",
+                "result": "noncompliant",
+                "validated_fields": [],
+                "evidence_refs": {
+                    "single_take_continuity": [{
+                        "video_index": 1,
+                        "global_frame_index": 2,
+                        "timestamp": "00:16.90",
+                    }],
+                    "issue_visible_in_continuous_opening": [],
+                },
+            },
+        })
+
+        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+        facts = [item.get("fact") for item in result["agent_report"]["parsed"]["adopted_evidence"]]
+        self.assertTrue(any("伤点在连续开箱中清晰展示" in str(fact) and "不符合" in str(fact) for fact in facts))
+
+    def test_opening_compliance_verification_can_trigger_hard_failure(self):
+        fields = (
+            "sealed_start", "waybill_visible", "single_take_continuity",
+            "issue_visible_in_continuous_opening",
+        )
+        result = self._default_visible_damage_case(
+            damage_overrides={
+                "damage_presence": "uncertain",
+                "claim_support": "supported",
+                "evidence_source_summary": {
+                    "primary_video": {
+                        "damage_presence": "uncertain",
+                        "claim_support": "supported",
+                    },
+                    "supplemental_images": {
+                        "provided_count": 2,
+                        "referenced_count": 2,
+                        "linkage_status": "unresolved",
+                    },
+                },
+            },
+            video_overrides={
+                "source": "global_timeline_aggregation",
+                "sampling_boundary_status": "covered",
+                "opening_video_compliance": {
+                    "sealed_start": True,
+                    "waybill_visible": False,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": False,
+                    "source": "opening_compliance_verification",
+                    "validated_fields": list(fields),
+                    "evidence_refs": [
+                        {
+                            "field": field,
+                            "video_index": 9,
+                            "global_frame_index": 35,
+                            "timestamp": "00:00.00",
+                        }
+                        for field in fields
+                    ],
+                },
+            },
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-N-NONCOMPLIANT-OPENING-VIDEO",
+        )
+        reason = result["decision_policy_audit"]["reason"]
+        self.assertIn("面单可核验", reason)
+        self.assertIn("伤点在连续开箱中清晰展示", reason)
+        self.assertNotIn("封箱起始", reason)
+        self.assertNotIn("一镜到底连续拆封", reason)
+        parsed = result["agent_report"]["parsed"]
+        self.assertNotIn("支持用户", parsed["next_step"])
+        self.assertNotIn("支持用户", parsed["business_follow_up_reason"])
+        self.assertIn("开箱材料不合规", parsed["business_follow_up_reason"])
+        damage = parsed["damage_causality_assessment"]
+        self.assertEqual(damage["claim_support"], "insufficient")
+        self.assertEqual(
+            damage["evidence_source_summary"]["primary_video"]["claim_support"],
+            "insufficient",
+        )
+        self.assertEqual(
+            damage["evidence_source_summary"]["supplemental_images"]["provided_count"],
+            2,
+        )
+
+    def test_verified_opening_evidence_replaces_conflicting_model_anchor(self):
+        result = self._default_visible_damage_case(
+            video_overrides={
+                "source": "global_timeline_aggregation",
+                "sampling_boundary_status": "covered",
+                "opening_video_compliance": {
+                    "sealed_start": True,
+                    "waybill_visible": False,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": False,
+                    "source": "opening_compliance_verification",
+                    "validated_fields": [
+                        "sealed_start", "waybill_visible", "single_take_continuity",
+                        "issue_visible_in_continuous_opening",
+                    ],
+                    "evidence_refs": [
+                        {"field": "sealed_start", "video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+                        {"field": "waybill_visible", "video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+                        {"field": "single_take_continuity", "video_index": 1, "global_frame_index": 2, "timestamp": "00:01.00"},
+                        {"field": "issue_visible_in_continuous_opening", "video_index": 1, "global_frame_index": 3, "timestamp": "00:02.00"},
+                    ],
+                },
+            },
+        )
+        parsed = result["agent_report"]["parsed"]
+        parsed["adopted_evidence"] = [
+            {
+                "source_type": "video",
+                "video_index": 1,
+                "global_frame_index": 1,
+                "timestamp": "00:00.00",
+                "fact": "面单及封箱完好。",
+            },
+            {
+                "source_type": "video",
+                "video_index": 2,
+                "global_frame_index": 9,
+                "timestamp": "00:08.00",
+                "fact": "争议部位可见划痕。",
+            },
+        ]
+
+        reapplied = apply_review_decision_policy(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": {
+                    "client_case_id": "verified-opening-evidence",
+                    "scenario": "product_damage",
+                    "customer_claim": "商品有划痕",
+                    "claim_scope": {
+                        "split_status": "single_legacy",
+                        "claim_text": "商品有划痕",
+                        "issue_types": ["product_damage"],
+                    },
+                    "decision_policy": {
+                        "mode": "classification_recommendation",
+                        "policy_ref": DEFAULT_PRODUCT_DAMAGE_POLICY_REF,
+                    },
+                },
+                "assets": [{"mime_type": "video/mp4"}],
+            },
+            result,
+        )
+        evidence = reapplied["agent_report"]["parsed"]["adopted_evidence"]
+        facts = [item.get("fact") for item in evidence]
+        self.assertNotIn("面单及封箱完好。", facts)
+        self.assertIn("争议部位可见划痕。", facts)
+        self.assertTrue(any("面单" in fact and "不符合" in fact for fact in facts))
 
     def test_verified_opening_start_anchor_can_prove_missing_sealed_start(self):
         result = self._default_visible_damage_case(video_overrides={

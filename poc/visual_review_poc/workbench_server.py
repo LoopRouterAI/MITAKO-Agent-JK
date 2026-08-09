@@ -33,6 +33,8 @@ load_dotenv(
 )
 
 from runtime_paths import app_root
+from prompts.governance import public_snapshot_metadata
+from prompts.visual_review.core import freeze_rule_snapshot
 from review_service.media_forensics import inspect_job_media
 from review_service.service import ensure_label_isolation, postprocess_review
 from review_service.decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
@@ -57,7 +59,21 @@ except ImportError:
     from url_video_fetcher import detect_platform, download_video_url, extract_video_url, fetch_metadata
 
 try:
-    from poc.visual_review_poc.model_selection_e2e import MODEL_CONFIGS, call_model, call_model_chunked, call_opening_start_verification, derive_claim_identity, discover_case_videos, is_retryable_failure, load_case_bundle, merge_model_billing, merge_opening_start_verification, score_result
+    from poc.visual_review_poc.model_selection_e2e import (
+        MODEL_CONFIGS,
+        call_model,
+        call_model_chunked,
+        call_opening_compliance_verification,
+        call_opening_start_verification,
+        derive_claim_identity,
+        discover_case_videos,
+        is_retryable_failure,
+        load_case_bundle,
+        merge_model_billing,
+        merge_opening_compliance_verification,
+        merge_opening_start_verification,
+        score_result,
+    )
     from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
     from poc.visual_review_poc.native_video_proxy import prepare_native_video_proxy
@@ -69,7 +85,21 @@ try:
     )
     from poc.visual_review_poc.sample_evaluation import evaluate_sample_rows, read_sample_rows
 except ImportError:
-    from model_selection_e2e import MODEL_CONFIGS, call_model, call_model_chunked, call_opening_start_verification, derive_claim_identity, discover_case_videos, is_retryable_failure, load_case_bundle, merge_model_billing, merge_opening_start_verification, score_result
+    from model_selection_e2e import (
+        MODEL_CONFIGS,
+        call_model,
+        call_model_chunked,
+        call_opening_compliance_verification,
+        call_opening_start_verification,
+        derive_claim_identity,
+        discover_case_videos,
+        is_retryable_failure,
+        load_case_bundle,
+        merge_model_billing,
+        merge_opening_compliance_verification,
+        merge_opening_start_verification,
+        score_result,
+    )
     from local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from official_reference_images import prepare_official_reference_images
     from native_video_proxy import prepare_native_video_proxy
@@ -432,6 +462,11 @@ def _strip_private_report_fields(value: Any) -> Any:
         }
     if isinstance(value, list):
         return [_strip_private_report_fields(item) for item in value]
+    if isinstance(value, str) and re.search(
+        r"(?i)(?:file://|[a-z]:[\\/]|\\\\|/(?:home|users|tmp|var|opt|mnt|private|workspace)(?:/|$))",
+        value,
+    ):
+        return ""
     return value
 
 
@@ -495,6 +530,7 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
             "message": True,
             "checks": [{
                 "check_id": True,
+                "relationship_evidence_type": True,
                 "status": True,
                 "message": True,
                 "field_results": [{
@@ -517,6 +553,8 @@ _MINOR_PUBLIC_PARSED_SCHEMA = {
             "effect": True,
             "evidence_image_indices": [True],
             "low_age": True,
+            "under_nine": True,
+            "age_confidence": True,
             "process_evidence_status": True,
             "requires_review": True,
             "requires_more_material": True,
@@ -608,7 +646,7 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "playback_speed", "segment_playback_speed_values", "sampling_fps", "speed_review_impact",
     "critical_evidence_observable", "affected_review_items", "evidence_refs", "opening_video_compliance",
     "sealed_start", "waybill_visible", "single_take_continuity", "issue_visible_in_continuous_opening",
-    "validated_fields", "result", "source",
+    "validated_fields", "field", "field_sources", "result", "source",
     "technical_timeline_status", "evidence_continuity_status", "object_continuity_assessment",
     "tracked_subjects", "subject_id", "description", "tracking_start", "tracking_end",
     "first_exposed_timestamp", "visibility_coverage", "out_of_frame_events", "start_timestamp",
@@ -629,7 +667,7 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "issue_timestamps", "skeptical_questions", "material_gaps", "conclusion_argument", "support",
     "challenge", "why_not_final_business_decision", "business_action_allowed", "human_required",
     "human_required_for_business_action", "business_follow_up_reason", "next_step",
-    "damage_causality_assessment", "damage_presence", "damage_type_and_location", "first_visible_evidence",
+    "damage_causality_assessment", "damage_presence", "supplemental_damage_presence", "damage_type_and_location", "first_visible_evidence",
     "pre_opening_state_visible", "opening_action_visible", "damage_change_observed", "damage_timing",
     "possible_origins", "origin", "most_likely_origin", "origin_confidence", "causal_evidence_level",
     "appearance_difference", "business_defect_qualification", "special_product_rule",
@@ -644,6 +682,8 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "decision_boundary", "key_evidence", "fulfillment_reconciliation", "baseline_version", "expected_items",
     "observed_items", "suspected_missing_items", "unexpected_items", "unconfirmed_items",
     "package_observations", "package_coverage", "all_packages_uploaded", "all_items_displayed",
+    "warehouse_verification", "resolution_basis", "evidence_sufficiency", "observation_confidence",
+    "verification_ref",
     "evidence_timestamps", "item_ref", "sku", "product_name", "specification", "expected_quantity",
     "observed_quantity", "package_ref", "opening_complete", "all_contents_laid_out",
     "confidence_components", "main_segment_mean", "damage_origin", "continuity_visibility_coverage",
@@ -735,6 +775,15 @@ def _internal_request_authorized(token: str) -> bool:
     return bool(expected and token and hmac.compare_digest(token, expected))
 
 
+def _resolve_rule_tenant_id(value: str, internal_request: bool) -> str:
+    if not internal_request:
+        return "mitako"
+    tenant_id = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", tenant_id):
+        raise HTTPException(status_code=422, detail="invalid_rule_tenant_id")
+    return tenant_id
+
+
 def _require_public_signature(path: str, expires: str, sig: str) -> None:
     try:
         expires_at = int(expires)
@@ -755,11 +804,23 @@ def _refresh_signed_urls(value: Any) -> Any:
     return value
 
 
-def _sanitize_public_report_data(data: Dict[str, Any]) -> Dict[str, Any]:
+def _sanitize_public_report_data(
+    data: Dict[str, Any],
+    *,
+    include_customer_media: bool = False,
+) -> Dict[str, Any]:
     public = _strip_private_report_fields(data)
     agent_report = public.get("agent_report") if isinstance(public.get("agent_report"), dict) else {}
     scenario = str(agent_report.get("scenario") or "")
     agent_report["parsed"] = _public_parsed(agent_report.get("parsed") or {}, scenario)
+    gallery = agent_report.get("media_gallery")
+    if isinstance(gallery, dict) and not include_customer_media:
+        for group in ("videos", "frames", "images"):
+            for item in gallery.get(group) or []:
+                if isinstance(item, dict):
+                    item.pop("url", None)
+                    item.pop("video_url", None)
+        gallery["restricted_original_evidence"] = True
     return _refresh_signed_urls(_redact_minor_identifiers(public))
 
 
@@ -1321,6 +1382,23 @@ def _public_failure_reason(result: Dict[str, Any], structured_ok: bool) -> Dict[
     }
 
 
+def _incurred_model_call(result: Any) -> int:
+    if not isinstance(result, dict) or not result:
+        return 0
+    return 0 if str(result.get("status") or "").lower() in {"skipped", "not_run", "not_incurred"} else 1
+
+
+def _native_positive_opening_fully_verified(result: Dict[str, Any], scenario: str) -> bool:
+    parsed = result.get("parsed") or {}
+    if scenario != "product_damage" or parsed.get("predicted_label") != "positive":
+        return True
+    opening = ((parsed.get("video_audit_conclusion") or {}).get("opening_video_compliance") or {})
+    return {
+        "sealed_start", "waybill_visible", "single_take_continuity",
+        "issue_visible_in_continuous_opening",
+    }.issubset(set(opening.get("validated_fields") or []))
+
+
 def _run_review(
     video: Path,
     scenario: str,
@@ -1335,6 +1413,7 @@ def _run_review(
     defer_postprocess: bool = False,
     requested_model_key: str = "auto",
     sampling_mode_override: str = "",
+    rule_tenant_id: str = "mitako",
 ) -> Dict[str, Any]:
     deadline_at = _new_review_deadline()
     profile = REVIEW_MODEL_PROFILES.get(review_model) or REVIEW_MODEL_PROFILES["standard"]
@@ -1364,8 +1443,10 @@ def _run_review(
         supplemental_image_limit=MAX_SUPPLEMENTAL_IMAGES,
     )
     run_dir = ROOT / "tmp" / "visual_review_workbench" / f"single_{video.parent.name}_{time.time_ns()}"
+    frozen_rule_snapshot: Optional[Dict[str, Any]] = None
 
     def prepared_case(native_video: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        nonlocal frozen_rule_snapshot
         try:
             native_options = {"native_video": native_video} if native_video else {}
             current = load_case_bundle(
@@ -1382,6 +1463,12 @@ def _run_review(
             scenario,
             json.dumps(evidence_context or {}, ensure_ascii=False),
         )
+        if frozen_rule_snapshot is None:
+            freeze_rule_snapshot(current, rule_tenant_id)
+            frozen_rule_snapshot = dict(current.get("_business_rule_snapshot") or {})
+        else:
+            current["_rule_tenant_id"] = rule_tenant_id
+            current["_business_rule_snapshot"] = dict(frozen_rule_snapshot)
         current.setdefault("structured_business_context", {})["continuity_claim_identity"] = derive_claim_identity([], current)
         prepare_official_reference_images(current)
         return current
@@ -1403,6 +1490,8 @@ def _run_review(
     case = prepared_case(native_source)
     native_result: Dict[str, Any] = {}
     native_gaps: List[str] = []
+    opening_verification: Dict[str, Any] = {}
+    compliance_verification: Dict[str, Any] = {}
     if native_source:
         native_result = call_model(
             primary_config,
@@ -1430,15 +1519,46 @@ def _run_review(
                 scenario=scenario,
             )
             native_gaps = native_dimension_gaps(native_result.get("parsed") or {}, scenario)
+        if (
+            native_result.get("status") == "success"
+            and not native_gaps
+            and scenario == "product_damage"
+            and (native_result.get("parsed") or {}).get("predicted_label") == "positive"
+        ):
+            compliance_verification = call_opening_compliance_verification(
+                primary_config,
+                case,
+                timeout=model_timeout,
+                retries=model_retries,
+                deadline_at=deadline_at,
+            )
+            native_result = merge_opening_compliance_verification(
+                native_result,
+                compliance_verification,
+                case.get("frames") or [],
+                scenario=scenario,
+            )
+            native_gaps = native_dimension_gaps(native_result.get("parsed") or {}, scenario)
+            if not _native_positive_opening_fully_verified(native_result, scenario):
+                native_gaps = sorted(set(native_gaps) | {"opening_compliance_verification"})
     if native_source and native_result.get("status") == "success" and not native_gaps:
         proxy = native_source.get("proxy") if isinstance(native_source.get("proxy"), dict) else {}
+        opening_result = native_result.get("opening_start_verification") or opening_verification
+        compliance_result = native_result.get("opening_compliance_verification") or compliance_verification
+        native_incurred = _incurred_model_call(native_result)
+        opening_incurred = _incurred_model_call(opening_result)
+        compliance_incurred = _incurred_model_call(compliance_result)
         result = dict(native_result)
         result["chunking"] = {
-            "total_model_calls": 2,
+            "total_model_calls": native_incurred + opening_incurred + compliance_incurred,
             "main_review_frames": 0,
             "channels": {
-                "native_video": {"model_calls": 1, "model_images": 1 + len(case.get("frames") or [])},
-                "opening_start_verification": {"model_calls": 1, "model_images": len(case.get("frames") or [])},
+                "native_video": {"model_calls": native_incurred, "model_images": 1 + len(case.get("frames") or [])},
+                "opening_start_verification": {"model_calls": opening_incurred, "model_images": len(case.get("frames") or [])},
+                "opening_compliance_verification": {
+                    "model_calls": compliance_incurred,
+                    "model_images": len(case.get("frames") or []),
+                },
             },
             "native_video": {
                 "status": "completed",
@@ -1456,7 +1576,8 @@ def _run_review(
         }
         result["model_latency_seconds_sum"] = round(
             float(result.get("latency_seconds") or 0)
-            + float((result.get("opening_start_verification") or {}).get("latency_seconds") or 0),
+            + float((result.get("opening_start_verification") or {}).get("latency_seconds") or 0)
+            + float((result.get("opening_compliance_verification") or {}).get("latency_seconds") or 0),
             2,
         )
     else:
@@ -1470,12 +1591,72 @@ def _run_review(
             retries=model_retries,
             deadline_at=deadline_at,
         )
+        opening = (
+            ((result.get("parsed") or {}).get("video_audit_conclusion") or {}).get(
+                "opening_video_compliance"
+            )
+            or {}
+        )
+        validated_fields = set(opening.get("validated_fields") or [])
+        opening_fields = (
+            "sealed_start", "waybill_visible", "single_take_continuity",
+            "issue_visible_in_continuous_opening",
+        )
+        needs_opening_verification = (
+            scenario == "product_damage"
+            and len(case_videos) > 1
+            and result.get("status") == "success"
+            and any(
+                opening.get(field) is False and field not in validated_fields
+                for field in opening_fields
+            )
+        )
+        if needs_opening_verification:
+            compliance_verification = call_opening_compliance_verification(
+                primary_config,
+                case,
+                timeout=model_timeout,
+                retries=model_retries,
+                deadline_at=deadline_at,
+            )
+            result = merge_opening_compliance_verification(
+                result,
+                compliance_verification,
+                case.get("frames") or [],
+                scenario=scenario,
+            )
+            incurred = _incurred_model_call(compliance_verification)
+            chunking = dict(result.get("chunking") or {})
+            chunking["total_model_calls"] = int(chunking.get("total_model_calls") or 0) + incurred
+            channels = dict(chunking.get("channels") or {})
+            usage = compliance_verification.get("usage") or {}
+            channels["opening_compliance_verification"] = {
+                "model_calls": incurred,
+                "total_tokens": int(usage.get("total_tokens") or 0),
+                "estimated_usd": float(
+                    (compliance_verification.get("cost") or {}).get("estimated_usd") or 0
+                ),
+            }
+            chunking["channels"] = channels
+            chunking["opening_compliance_verification_status"] = (
+                compliance_verification.get("status") or "not_run"
+            )
+            result["chunking"] = chunking
         if native_source:
+            if opening_verification:
+                result = merge_opening_start_verification(
+                    result,
+                    opening_verification,
+                    case.get("frames") or [],
+                    scenario=scenario,
+                    include_billing=False,
+                )
             result = merge_model_billing(result, [native_result])
             chunking = dict(result.get("chunking") or {})
-            native_incurred = 0 if native_result.get("status") == "skipped" else 1
-            opening_status = (native_result.get("opening_start_verification") or {}).get("status")
-            opening_incurred = 1 if opening_status and opening_status != "skipped" else 0
+            opening_result = native_result.get("opening_start_verification") or opening_verification
+            native_incurred = _incurred_model_call(native_result)
+            opening_status = opening_result.get("status") if isinstance(opening_result, dict) else None
+            opening_incurred = _incurred_model_call(opening_result)
             chunking["total_model_calls"] = int(chunking.get("total_model_calls") or 0) + native_incurred + opening_incurred
             chunking["native_video"] = {
                 "status": "fallback_to_frames",
@@ -1544,6 +1725,7 @@ def _agent_report_response(
         public_conclusion=public_conclusion,
         public_next_step=public_next_step,
     )
+    agent_report["parsed"] = parsed
     data = {
         "ok": ok,
         "review_label": f"{case['scenario_label']} / {review_profile_label}",
@@ -1627,7 +1809,7 @@ def _agent_report_response(
         media_forensics = inspect_job_media(sample_dir, forensic_assets)
         normalized = postprocess_review(
             {
-                "tenant_id": "mitako",
+                "tenant_id": str(case.get("_rule_tenant_id") or "mitako"),
                 "scenario": business_scenario,
                 "metadata": metadata,
                 "assets": review_assets,
@@ -1650,11 +1832,12 @@ def _agent_report_response(
         public_brief["conclusion"] = data["conclusion"]
         public_brief["next_step"] = raw_brief.get("next_step") or public_brief.get("next_step") or ""
         data["media_forensics"] = media_forensics
-    data = _sanitize_public_report_data(data)
+    public_data = _sanitize_public_report_data(data)
+    data = _sanitize_public_report_data(data, include_customer_media=True)
     if include_html_report:
-        ALLOWED_REPORTS[report_name] = data
+        ALLOWED_REPORTS[report_name] = public_data
         PUBLIC_SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
-        (PUBLIC_SUMMARY_DIR / _report_data_name(report_name)).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        (PUBLIC_SUMMARY_DIR / _report_data_name(report_name)).write_text(json.dumps(public_data, ensure_ascii=False, indent=2), encoding="utf-8")
         report = {
             "requested": True,
             "status": "ready",
@@ -1680,6 +1863,9 @@ def _agent_report_response(
         response["advisory_assessment"] = data["advisory_assessment"]
     if include_internal_metrics:
         response["agent_report"]["inference_estimate"] = _internal_inference_estimate(result)
+        response["agent_report"]["business_rule_version"] = public_snapshot_metadata(
+            case.get("_business_rule_snapshot")
+        )
     if data.get("diagnostics"):
         response["diagnostics"] = data["diagnostics"]
     return response
@@ -1793,7 +1979,7 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
     }
 
 
-def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False, include_html_report: bool = True, defer_postprocess: bool = False) -> Dict[str, Any]:
+def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False, include_html_report: bool = True, defer_postprocess: bool = False, rule_tenant_id: str = "mitako") -> Dict[str, Any]:
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     videos, _ = discover_case_videos(folder_dir)
@@ -1812,6 +1998,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
             defer_postprocess=defer_postprocess,
             requested_model_key=model_key,
             sampling_mode_override=sampling_mode,
+            rule_tenant_id=rule_tenant_id,
         )
         return {"ok": review.get("ok") is True, "source_status": "folder_ready", "review": review}
     load_visual_env()
@@ -1830,6 +2017,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
     except SystemExit as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     case = apply_frontdesk_context(case, scenario, json.dumps(evidence_context or {}, ensure_ascii=False))
+    freeze_rule_snapshot(case, rule_tenant_id)
     case.setdefault("structured_business_context", {})["continuity_claim_identity"] = derive_claim_identity([], case)
     prepare_official_reference_images(case)
     model_timeout = max(30, min(int(os.getenv("REVIEW_MODEL_TIMEOUT_SECONDS", "180") or 180), 600))
@@ -2097,6 +2285,7 @@ def review_folder(
     evidence_coverage: str = Form(""),
     review_routing_policy: str = Form(""),
     minor_refund_policy: str = Form(""),
+    rule_tenant_id: str = Form(""),
     defer_postprocess: bool = Form(False),
     include_html_report: bool = Form(True),
     sampling_mode: str = Form("adaptive"),
@@ -2115,6 +2304,7 @@ def review_folder(
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
     folder_dir, ingestion = _save_folder_uploads(files)
     internal_request = _internal_request_authorized(x_mitako_internal_token)
+    resolved_rule_tenant = _resolve_rule_tenant_id(rule_tenant_id, internal_request)
     evidence_context = {
         "business_scenario": business_scenario,
         "ticket_id": ticket_id,
@@ -2154,6 +2344,7 @@ def review_folder(
         include_internal_metrics=internal_request and x_mitako_internal_metrics == "1",
         include_html_report=include_html_report,
         defer_postprocess=internal_request and defer_postprocess,
+        rule_tenant_id=resolved_rule_tenant,
     )
     response["ingestion"] = ingestion
     return JSONResponse(response)

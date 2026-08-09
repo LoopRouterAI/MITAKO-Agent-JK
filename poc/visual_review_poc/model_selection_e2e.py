@@ -71,9 +71,14 @@ from poc.visual_review_poc.review_response_schema import (
     MINOR_MATERIAL_INVENTORY_RESPONSE_SCHEMA,
     MINOR_MATERIAL_VIDEO_RESPONSE_SCHEMA,
     NATIVE_VIDEO_RESPONSE_SCHEMA,
+    OPENING_COMPLIANCE_RESPONSE_SCHEMA,
     OPENING_START_RESPONSE_SCHEMA,
 )
-from poc.visual_review_poc.review_model_prompt import build_opening_start_prompt, build_selection_prompt
+from poc.visual_review_poc.review_model_prompt import (
+    build_opening_compliance_prompt,
+    build_opening_start_prompt,
+    build_selection_prompt,
+)
 from poc.visual_review_poc.model_result_scoring import score_result
 from poc.visual_review_poc.fulfillment_reconciliation import (
     aggregate_fulfillment_reconciliation,
@@ -88,6 +93,11 @@ from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
 from poc.visual_review_poc.model_auth import gemini_channel_options
 from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text
+from prompts.visual_review.core import (
+    OPENING_COMPLIANCE_SYSTEM_PROMPT,
+    OPENING_START_SYSTEM_PROMPT,
+    freeze_rule_snapshot,
+)
 
 ROOT = app_root()
 SAMPLE_ROOT = ROOT / "docs" / "三大审核场景的小量样本"
@@ -368,6 +378,7 @@ def gemini_payload(system_prompt: str, user_prompt: str, case: Dict[str, Any]) -
         parts.append({"inlineData": {"mimeType": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     analysis_mode = str((case.get("structured_business_context") or {}).get("analysis_mode") or "")
     response_schemas = {
+        "opening_compliance_only": OPENING_COMPLIANCE_RESPONSE_SCHEMA,
         "opening_start_only": OPENING_START_RESPONSE_SCHEMA,
         "minor_material_inventory": MINOR_MATERIAL_INVENTORY_RESPONSE_SCHEMA,
         "minor_material_process_video": MINOR_MATERIAL_VIDEO_RESPONSE_SCHEMA,
@@ -376,6 +387,7 @@ def gemini_payload(system_prompt: str, user_prompt: str, case: Dict[str, Any]) -
     default_schema = NATIVE_VIDEO_RESPONSE_SCHEMA if native_video else FRAME_RESPONSE_SCHEMA
     response_schema = response_schemas.get(analysis_mode, default_schema)
     max_output_tokens = {
+        "opening_compliance_only": 1536,
         "opening_start_only": 1024,
         "minor_material_process_video": 2048,
         "minor_material_inventory": 4096,
@@ -603,10 +615,18 @@ def call_model(
     business_scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or "")
     analysis_mode = str((case.get("structured_business_context") or {}).get("analysis_mode") or "")
     if analysis_mode == "opening_start_only":
-        system_prompt = "你是开箱视频起始证据复核器。只依据提供的首帧锚点按固定口径判断，不推断画面外事实。"
+        system_prompt = OPENING_START_SYSTEM_PROMPT
         user_prompt = build_opening_start_prompt(case)
+    elif analysis_mode == "opening_compliance_only":
+        system_prompt = OPENING_COMPLIANCE_SYSTEM_PROMPT
+        user_prompt = build_opening_compliance_prompt(case)
     else:
-        system_prompt = build_system_prompt(business_scenario or case["scenario"])
+        freeze_rule_snapshot(case)
+        system_prompt = build_system_prompt(
+            business_scenario or case["scenario"],
+            tenant_id=str(case.get("_rule_tenant_id") or "mitako"),
+            rule_snapshot=case.get("_business_rule_snapshot"),
+        )
         user_prompt = build_selection_prompt(case)
     failures: List[Dict[str, Any]] = []
     channel_attempts: List[Dict[str, Any]] = []
@@ -702,7 +722,10 @@ def call_model(
             "raw": raw_usage,
         }
     parsed_before_boundary = parse_model_json(text)
-    if analysis_mode in {"object_continuity_only", "damage_causality_only", "opening_start_only"}:
+    if analysis_mode in {
+        "object_continuity_only", "damage_causality_only",
+        "opening_start_only", "opening_compliance_only",
+    }:
         parsed = parsed_before_boundary
     else:
         if (business_scenario or case["scenario"]) in {"wrong_item", "missing_item"}:
@@ -787,13 +810,200 @@ def call_opening_start_verification(
     )
 
 
+def opening_compliance_verification_case(case: Dict[str, Any]) -> Dict[str, Any]:
+    videos = sorted(
+        [
+            (
+                _safe_int(video.get("video_index") or index),
+                _safe_number(video.get("duration_seconds")),
+            )
+            for index, video in enumerate(case.get("videos") or [], start=1)
+        ],
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    primary_video_index = videos[0][0] if videos else 0
+    if len(videos) > 1 and (videos[0][1] < 15 or videos[0][1] < videos[1][1] * 3):
+        primary_video_index = 0
+    primary_frames = [
+        copy.deepcopy(frame)
+        for frame in case.get("frames") or []
+        if _safe_int(frame.get("video_index")) == primary_video_index
+    ]
+    return {
+        "case_id": case.get("case_id") or "opening-compliance-verification",
+        "scenario": case.get("scenario") or "video_unboxing",
+        "scenario_label": case.get("scenario_label") or "开箱视频审核",
+        "customer_claim": case.get("customer_claim") or "",
+        "order_context": {},
+        "videos": [
+            copy.deepcopy(video)
+            for video in case.get("videos") or []
+            if _safe_int(video.get("video_index")) == primary_video_index
+        ],
+        "frames": _representative_frames(primary_frames, 24),
+        "supplemental_images": [],
+        "official_reference_images": [],
+        "structured_business_context": {
+            "business_scenario": case.get("scenario") or "video_unboxing",
+            "analysis_mode": "opening_compliance_only",
+        },
+    }
+
+
+def call_opening_compliance_verification(
+    cfg: Dict[str, Any],
+    case: Dict[str, Any],
+    timeout: int,
+    retries: int,
+    deadline_at: Optional[float] = None,
+) -> Dict[str, Any]:
+    verification_case = opening_compliance_verification_case(case)
+    if not verification_case["frames"]:
+        return {
+            "status": "skipped",
+            "error": "primary_opening_video_unresolved",
+            "cost_status": "not_incurred",
+        }
+    return call_model(
+        cfg,
+        verification_case,
+        timeout=timeout,
+        retries=retries,
+        deadline_at=deadline_at,
+    )
+
+
+def merge_opening_compliance_verification(
+    result: Dict[str, Any],
+    verification_result: Dict[str, Any],
+    anchors: Optional[List[Dict[str, Any]]] = None,
+    scenario: str = "",
+) -> Dict[str, Any]:
+    output = merge_model_billing(result, [verification_result])
+    output["opening_compliance_verification"] = {
+        key: copy.deepcopy(verification_result.get(key))
+        for key in (
+            "status", "latency_seconds", "usage", "cost",
+            "cost_status", "_channel_route_attempts",
+        )
+        if verification_result.get(key) is not None
+    }
+    verification = (
+        verification_result.get("parsed")
+        if verification_result.get("status") == "success"
+        else None
+    )
+    if not isinstance(verification, dict):
+        return output
+    registry = {
+        (
+            _safe_int(frame.get("video_index")),
+            _safe_int(frame.get("global_frame_index")),
+        ): str(frame.get("timestamp") or "")
+        for frame in anchors or []
+    }
+    field_names = (
+        "sealed_start", "waybill_visible", "single_take_continuity",
+        "issue_visible_in_continuous_opening",
+    )
+    refs_by_field: Dict[str, List[Dict[str, Any]]] = {
+        field: [] for field in field_names
+    }
+    for reference in verification.get("evidence_refs") or []:
+        if not isinstance(reference, dict) or reference.get("field") not in refs_by_field:
+            continue
+        key = (
+            _safe_int(reference.get("video_index")),
+            _safe_int(reference.get("global_frame_index")),
+        )
+        timestamp = registry.get(key)
+        if not key[0] or not key[1] or not timestamp:
+            continue
+        refs_by_field[str(reference["field"])].append({
+            "field": reference["field"],
+            "video_index": key[0],
+            "global_frame_index": key[1],
+            "timestamp": timestamp,
+        })
+    verified_fields = {
+        field
+        for field in field_names
+        if isinstance(verification.get(field), bool) and refs_by_field[field]
+    }
+    if not verified_fields:
+        return output
+    for parsed_key in ("parsed_before_boundary", "parsed"):
+        parsed = output.get(parsed_key)
+        if not isinstance(parsed, dict):
+            continue
+        opening = parsed.setdefault("video_audit_conclusion", {}).setdefault(
+            "opening_video_compliance", {}
+        )
+        protected_fields = {
+            "sealed_start"
+        } if (
+            (opening.get("field_sources") or {}).get("sealed_start") == "opening_start_verification"
+            and "sealed_start" in (opening.get("validated_fields") or [])
+        ) else set()
+        fields_to_apply = verified_fields - protected_fields
+        old_refs = opening.get("evidence_refs") or []
+        if isinstance(old_refs, dict):
+            old_refs = [
+                {**item, "field": field}
+                for field, items in old_refs.items()
+                for item in items or []
+                if isinstance(item, dict)
+            ]
+        opening["evidence_refs"] = [
+            item
+            for item in old_refs
+            if isinstance(item, dict) and item.get("field") not in fields_to_apply
+        ] + [
+            reference
+            for field in field_names
+            if field in fields_to_apply
+            for reference in refs_by_field[field]
+        ]
+        for field in fields_to_apply:
+            opening[field] = verification[field]
+        opening["field_sources"] = {
+            **(opening.get("field_sources") or {}),
+            **{
+                field: "opening_compliance_verification"
+                for field in fields_to_apply
+            },
+        }
+        opening["validated_fields"] = sorted(
+            set(opening.get("validated_fields") or []) | fields_to_apply
+        )
+        required_fields = field_names if scenario == "product_damage" else field_names[:3]
+        values = [opening.get(field) for field in required_fields]
+        opening["result"] = (
+            "noncompliant"
+            if False in values
+            else "compliant"
+            if all(value is True for value in values)
+            else "indeterminate"
+        )
+        opening["source"] = "opening_compliance_verification"
+    if isinstance(output.get("parsed"), dict):
+        output["policy_decision"] = policy_decision(output["parsed"])
+    return output
+
+
 def merge_opening_start_verification(
     native_result: Dict[str, Any],
     verification_result: Dict[str, Any],
     anchors: Optional[List[Dict[str, Any]]] = None,
     scenario: str = "",
+    include_billing: bool = True,
 ) -> Dict[str, Any]:
-    output = merge_model_billing(native_result, [verification_result])
+    output = (
+        merge_model_billing(native_result, [verification_result])
+        if include_billing
+        else copy.deepcopy(native_result)
+    )
     verification = verification_result.get("parsed") if verification_result.get("status") == "success" else None
     output["opening_start_verification"] = {
         key: copy.deepcopy(verification_result.get(key))
@@ -806,7 +1016,7 @@ def merge_opening_start_verification(
     if verification.get("sealed_start") is not expected_value or expected_value is None:
         return output
     registry = {
-        (int(frame.get("video_index") or 0), int(frame.get("global_frame_index") or 0), str(frame.get("timestamp") or ""))
+        (int(frame.get("video_index") or 0), int(frame.get("global_frame_index") or 0)): str(frame.get("timestamp") or "")
         for frame in anchors or []
     }
     refs = []
@@ -814,16 +1024,17 @@ def merge_opening_start_verification(
         if not isinstance(ref, dict):
             continue
         try:
-            key = (int(ref.get("video_index") or 0), int(ref.get("global_frame_index") or 0), str(ref.get("timestamp") or ""))
+            key = (int(ref.get("video_index") or 0), int(ref.get("global_frame_index") or 0))
         except (TypeError, ValueError, OverflowError):
             continue
-        if not key[0] or not key[1] or not key[2] or (registry and key not in registry):
+        trusted_timestamp = registry.get(key) if registry else str(ref.get("timestamp") or "")
+        if not key[0] or not key[1] or not trusted_timestamp:
             continue
         refs.append({
             "field": "sealed_start",
             "video_index": key[0],
             "global_frame_index": key[1],
-            "timestamp": key[2],
+            "timestamp": trusted_timestamp,
         })
     if not refs:
         return output
@@ -853,7 +1064,10 @@ def merge_opening_start_verification(
         opening["validated_fields"] = sorted(set(opening.get("validated_fields") or []) | {"sealed_start"})
         opening["source"] = "hybrid_native_video_with_opening_start_verification"
         opening["start_verification_reason"] = str(verification.get("reason") or "")
-        hard_values = [opening.get(field) for field in ("sealed_start", "waybill_visible", "single_take_continuity")]
+        hard_fields = ["sealed_start", "waybill_visible", "single_take_continuity"]
+        if scenario == "product_damage":
+            hard_fields.append("issue_visible_in_continuous_opening")
+        hard_values = [opening.get(field) for field in hard_fields]
         opening["result"] = "noncompliant" if False in hard_values else "compliant" if all(value is True for value in hard_values) else "indeterminate"
         if parsed_key == "parsed" and scenario == "product_damage" and expected_value is False:
             confidence = _safe_confidence(parsed.get("confidence"), 0.9)
@@ -946,9 +1160,6 @@ def _damage_key_evidence(
         if str(item.get("damage_state") or "") in {"visible", "uncertain"}
         or str(item.get("action") or "none") != "none"
     ]
-    if ordered:
-        positions = {0, len(ordered) - 1, len(ordered) // 4, len(ordered) // 2, len(ordered) * 3 // 4}
-        priority.extend(ordered[index] for index in sorted(positions))
     selected = list({_frame_key(item): item for item in priority}.values())[:limit]
     return [
         {
@@ -1151,17 +1362,60 @@ def _apply_global_timeline_summary(
     ]
     opening_compliance_rows = [item for item in opening_compliance_rows if isinstance(item, dict)]
 
+    def opening_field_refs(item: Dict[str, Any], field_name: str) -> List[Dict[str, Any]]:
+        raw_refs = item.get("evidence_refs") or []
+        candidates = (
+            raw_refs.get(field_name, [])
+            if isinstance(raw_refs, dict)
+            else [ref for ref in raw_refs if isinstance(ref, dict) and ref.get("field") == field_name]
+        )
+        return [dict(ref) for ref in candidates if registered_reference(ref)]
+
+    sealed_true_video_indices = {
+        _safe_int(ref.get("video_index"))
+        for item in opening_compliance_rows
+        if item.get("sealed_start") is True
+        for ref in opening_field_refs(item, "sealed_start")
+        if _safe_int(ref.get("video_index")) > 0
+    }
+    sealed_evidence_video_indices = {
+        _safe_int(ref.get("video_index"))
+        for item in opening_compliance_rows
+        for ref in opening_field_refs(item, "sealed_start")
+        if _safe_int(ref.get("video_index")) > 0
+    }
+    primary_opening_video_indices = sealed_true_video_indices or sealed_evidence_video_indices
+
+    def scoped_opening_values(
+        field_name: str,
+        expected_value: bool | None = None,
+    ) -> tuple[List[bool], List[Dict[str, Any]]]:
+        values: List[bool] = []
+        refs: List[Dict[str, Any]] = []
+        for item in opening_compliance_rows:
+            value = item.get(field_name)
+            if not isinstance(value, bool):
+                continue
+            if expected_value is not None and value is not expected_value:
+                continue
+            field_refs = opening_field_refs(item, field_name)
+            if primary_opening_video_indices:
+                primary_refs = [
+                    ref for ref in field_refs
+                    if _safe_int(ref.get("video_index")) in primary_opening_video_indices
+                ]
+                if field_refs and not primary_refs:
+                    continue
+                field_refs = primary_refs
+            values.append(value)
+            refs.extend(field_refs)
+        return values, refs
+
     def aggregate_opening_field(field_name: str) -> bool | None:
-        values = [item.get(field_name) for item in opening_compliance_rows]
-        if field_name == "sealed_start":
-            return values[0] if values and isinstance(values[0], bool) else None
-        if field_name in {"waybill_visible", "issue_visible_in_continuous_opening"}:
-            if True in values:
-                return True
-            return False if values and all(value is False for value in values) else None
+        values, _ = scoped_opening_values(field_name)
         if False in values:
             return False
-        return True if values and all(value is True for value in values) else None
+        return True if True in values else None
 
     opening_field_names = (
         "sealed_start", "waybill_visible", "single_take_continuity",
@@ -1174,27 +1428,37 @@ def _apply_global_timeline_summary(
     opening_evidence_refs = {
         field_name: [
             {key: value for key, value in reference.items() if key != "field"}
-            for item in opening_compliance_rows
-            if item.get(field_name) is aggregated_opening_values[field_name]
-            for reference in (
-                item.get("evidence_refs", {}).get(field_name, [])
-                if isinstance(item.get("evidence_refs"), dict)
-                else [
-                    candidate
-                    for candidate in item.get("evidence_refs") or []
-                    if isinstance(candidate, dict) and candidate.get("field") == field_name
-                ]
-            )
-            if registered_reference(reference)
+            for reference in scoped_opening_values(
+                field_name,
+                aggregated_opening_values[field_name],
+            )[1]
         ]
+        if aggregated_opening_values[field_name] is not None else []
         for field_name in opening_field_names
     }
 
     opening_video_compliance = dict(aggregated_opening_values)
     opening_video_compliance["evidence_refs"] = opening_evidence_refs
+    damage_assessment = output.get("damage_causality_assessment") or {}
+    primary_damage = (damage_assessment.get("evidence_source_summary") or {}).get("primary_video") or {}
+    damage_presence = str(primary_damage.get("damage_presence") or damage_assessment.get("damage_presence") or "").lower()
+    claim_support = str(primary_damage.get("claim_support") or damage_assessment.get("claim_support") or "").lower()
+    if (
+        str(case.get("scenario") or "") == "product_damage"
+        and opening_video_compliance["issue_visible_in_continuous_opening"] is True
+        and (damage_presence != "confirmed" or claim_support != "supported")
+    ):
+        opening_video_compliance["issue_visible_in_continuous_opening"] = False
+        opening_evidence_refs["issue_visible_in_continuous_opening"] = []
+    opening_required_fields = (
+        "sealed_start", "waybill_visible", "single_take_continuity",
+        "issue_visible_in_continuous_opening",
+    ) if str(case.get("scenario") or "") == "product_damage" else (
+        "sealed_start", "waybill_visible", "single_take_continuity",
+    )
     opening_video_compliance["validated_fields"] = sorted(
         field_name
-        for field_name in ("sealed_start", "waybill_visible", "single_take_continuity")
+        for field_name in opening_required_fields
         if sampling_boundary_status == "covered"
         and opening_video_compliance[field_name] is False
         and opening_evidence_refs[field_name]
@@ -1202,16 +1466,9 @@ def _apply_global_timeline_summary(
     opening_video_compliance["source"] = "global_timeline_aggregation"
     opening_video_compliance["result"] = (
         "noncompliant"
-        if False in (
-            opening_video_compliance["sealed_start"],
-            opening_video_compliance["waybill_visible"],
-            opening_video_compliance["single_take_continuity"],
-        )
+        if any(opening_video_compliance[field] is False for field in opening_required_fields)
         else "compliant"
-        if all(
-            opening_video_compliance[field] is True
-            for field in ("sealed_start", "waybill_visible", "single_take_continuity")
-        )
+        if all(opening_video_compliance[field] is True for field in opening_required_fields)
         else "indeterminate"
     )
     opening_integrity, opening_integrity_source = _opening_integrity_from_continuity(
@@ -1717,6 +1974,7 @@ def call_model_chunked(
     deadline_at: Optional[float] = None,
 ) -> Dict[str, Any]:
     wall_started = time.time()
+    freeze_rule_snapshot(case)
 
     def invoke_model(current_case: Dict[str, Any]) -> Dict[str, Any]:
         if deadline_at is None:
@@ -1793,6 +2051,7 @@ def call_model_chunked(
             case.get("official_reference_images") or []
         ) if index in reference_segment_indices else []
         structured = dict(case.get("structured_business_context") or {})
+        structured["unified_multitask"] = unified_multitask
         structured["review_chunk"] = {
             "index": index + 1,
             "total": len(chunks),

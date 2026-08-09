@@ -217,6 +217,15 @@ class ModelResilienceTest(unittest.TestCase):
         self.assertEqual(result["parsed"]["confidence"], 0.0)
         self.assertEqual(result["policy_decision"]["system_yes_no"], "REVIEW")
 
+    def test_medium_confidence_fact_keeps_label_and_only_requests_sampling(self) -> None:
+        from poc.visual_review_poc.local_video_triage_demo import policy_decision
+
+        result = policy_decision({"predicted_label": "positive", "confidence": 0.7})
+
+        self.assertEqual(result["system_yes_no"], "YES")
+        self.assertEqual(result["review_mode"], "optional_sample_review")
+        self.assertIn("不要求逐单人工", result["action"])
+
     def test_claim_identity_ignores_non_object_model_items(self) -> None:
         from poc.visual_review_poc.model_selection_e2e import derive_claim_identity
 

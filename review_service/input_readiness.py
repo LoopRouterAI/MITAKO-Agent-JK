@@ -147,7 +147,7 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
     baseline = metadata.get("fulfillment_baseline") or {}
     warehouse_verification = trusted_warehouse_verification(baseline if isinstance(baseline, dict) else {})
 
-    if not _nonempty(metadata.get("customer_claim")):
+    if not warehouse_verification and not _nonempty(metadata.get("customer_claim")):
         missing_recommended.append("customer_claim")
 
     if scenario == "wrong_item":
@@ -188,10 +188,10 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
                 missing_required.append("complete_evidence_coverage")
             if not fulfillment["all_expected_packages_delivered"]:
                 missing_required.append("all_expected_packages_delivered")
-        if not has_product_master:
-            missing_recommended.append("product_master_data_or_standard_packing_list")
-        alternatives.append("SKU/条码/包装编码或可唯一商品组合 + 每项应发数量 + 版本化规则 + 包裹关联")
-        warnings.append("视频未完整展示全部包裹、商品、配件或赠品时只能输出证据不足并补材料或复核，不能直接认定漏发。")
+            if not has_product_master:
+                missing_recommended.append("product_master_data_or_standard_packing_list")
+            alternatives.append("SKU/条码/包装编码或可唯一商品组合 + 每项应发数量 + 版本化规则 + 包裹关联")
+            warnings.append("视频未完整展示全部包裹、商品、配件或赠品时只能输出证据不足并补材料或复核，不能直接认定漏发。")
     elif scenario == "product_damage":
         if not _nonempty(metadata.get("customer_claim")) and not _has_resolved_claim_scope(metadata):
             missing_required.append("customer_claim_or_claim_scope")
