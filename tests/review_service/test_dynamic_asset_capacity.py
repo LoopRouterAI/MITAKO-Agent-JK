@@ -19,6 +19,7 @@ from review_service import router, service, store
 from review_service.advisory_assessment import attach_advisory_assessment
 from review_service.schemas import ReviewCaseMetadata
 from scripts.check_dynamic_material_capacity_http import capacity_checks_from_public_job, release_gate_result
+from scripts.check_review_service_batch import public_submission_evidence
 
 
 PNG_BODY = base64.b64decode(
@@ -68,6 +69,20 @@ def _observation(index: int) -> dict:
 
 
 class DynamicAssetCapacityTest(unittest.IsolatedAsyncioTestCase):
+    def test_live_batch_evidence_uses_public_case_and_asset_fields(self) -> None:
+        evidence = public_submission_evidence(
+            {
+                "client_case_id": "CASE-PUBLIC-BATCH",
+                "assets": [
+                    {"asset_id": "A-1", "mime_type": "image/png", "size": 7},
+                    {"asset_id": "A-2", "mime_type": "video/mp4", "size": 11},
+                ],
+            },
+            {"client_case_id": "CASE-PUBLIC-BATCH", "file_count": 2, "bytes": 18},
+        )
+
+        self.assertEqual(evidence, {"source_case_preserved": True, "submitted_assets_preserved": True})
+
     def test_capacity_evidence_uses_public_counts_without_private_ingestion_metadata(self) -> None:
         checks = capacity_checks_from_public_job(
             {"status": "SUCCEEDED", "assets": [{} for _ in range(62)]},
