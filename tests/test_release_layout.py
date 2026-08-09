@@ -81,6 +81,17 @@ class ReleaseLayoutTest(unittest.TestCase):
             self.assertNotIn("[System.IO.Path]::GetRelativePath", script)
             self.assertIn("function Get-RepositoryRelativePath", script)
 
+    def test_customer_acceptance_page_links_to_packaged_0807_guide(self) -> None:
+        page = (ROOT / "docs" / "delivery" / "mitako-visual-evaluation-engineering-acceptance-20260716.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn('href="mitako-0807-guide-acceptance-20260807.html"', page)
+        self.assertIn(
+            'href="../../甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html"',
+            page,
+        )
+
     def test_customer_package_only_copies_committed_inputs(self) -> None:
         customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")
 
