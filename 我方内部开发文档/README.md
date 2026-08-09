@@ -5,7 +5,7 @@
 
 本目录用于研发交接和私有化部署，不进入甲方客户测试 ZIP。对外材料只使用 `甲方沟通交付文档/` 与 `docs/delivery/`。
 
-最新审查：[0809 代码审查与商业验收报告](./代码审查与商业验收报告-2026-08-09.md)。最终真实回归已收口 `598089`、`140592`、`606669` 与 `568689`；`598089` 两次独立复跑均稳定识别开箱材料不合规且不重复补件，但顶层分类仍有 `negative/review` 波动，因此只能作为可控试点证据。全量自动化为 `600 passed、51 subtests passed`。业务判断基线仍以 [MITAKO 售后审核 Agent 业务认知基线](./MITAKO售后审核Agent业务认知基线-20260727.md) 为准；Java/后端联调同时阅读 `../docs/delivery/after-sales-agent-integration.md`、`../docs/delivery/review-advisory-api.md` 和当前 OpenAPI。
+最新审查：[0809 代码审查与商业验收报告](./代码审查与商业验收报告-2026-08-09.md)。最终真实回归已收口 `598089`、`140592`、`606669` 与 `568689`；`598089` 两次独立复跑均稳定识别开箱材料不合规且不重复补件，但顶层分类仍有 `negative/review` 波动，因此只能作为可控试点证据。全量自动化为 `601 passed、51 subtests passed`。业务判断基线仍以 [MITAKO 售后审核 Agent 业务认知基线](./MITAKO售后审核Agent业务认知基线-20260727.md) 为准；Java/后端联调同时阅读 `../docs/delivery/after-sales-agent-integration.md`、`../docs/delivery/review-advisory-api.md` 和当前 OpenAPI。
 
 ## 新同事阅读顺序
 

@@ -40,6 +40,21 @@ def release_gate_result(checks: dict, assessment: dict) -> dict[str, bool]:
     }
 
 
+def capacity_checks_from_public_job(job: dict, assessment: dict, requested_count: int) -> dict[str, bool]:
+    saved_count = len(job.get("assets") or [])
+    accepted_count = assessment.get("accepted_image_count")
+    return {
+        "job_succeeded": job.get("status") == "SUCCEEDED",
+        "all_assets_saved": saved_count == requested_count,
+        "expanded_capacity": requested_count <= 40 or (
+            saved_count == requested_count and accepted_count == requested_count
+        ),
+        "all_images_accepted": accepted_count == requested_count,
+        "all_images_processed": assessment.get("processed_image_count") == requested_count,
+        "coverage_complete": assessment.get("coverage_complete") is True,
+    }
+
+
 def git_commit() -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"],
@@ -161,14 +176,7 @@ def main() -> int:
         .get("parsed", {})
         .get("minor_material_assessment", {})
     )
-    checks = {
-        "job_succeeded": job.get("status") == "SUCCEEDED",
-        "all_assets_saved": len(job.get("assets") or []) == options.count,
-        "expanded_capacity": ingestion.get("capacity_mode") == ("expanded" if options.count > 40 else "standard"),
-        "all_images_accepted": assessment.get("accepted_image_count") == options.count,
-        "all_images_processed": assessment.get("processed_image_count") == options.count,
-        "coverage_complete": assessment.get("coverage_complete") is True,
-    }
+    checks = capacity_checks_from_public_job(job, assessment, options.count)
     gate = release_gate_result(checks, assessment)
     report = {
         "ok": all(checks.values()),

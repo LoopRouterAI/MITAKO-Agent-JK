@@ -18,7 +18,7 @@ from poc.visual_review_poc.minor_material_pipeline import aggregate_minor_materi
 from review_service import router, service, store
 from review_service.advisory_assessment import attach_advisory_assessment
 from review_service.schemas import ReviewCaseMetadata
-from scripts.check_dynamic_material_capacity_http import release_gate_result
+from scripts.check_dynamic_material_capacity_http import capacity_checks_from_public_job, release_gate_result
 
 
 PNG_BODY = base64.b64decode(
@@ -68,6 +68,20 @@ def _observation(index: int) -> dict:
 
 
 class DynamicAssetCapacityTest(unittest.IsolatedAsyncioTestCase):
+    def test_capacity_evidence_uses_public_counts_without_private_ingestion_metadata(self) -> None:
+        checks = capacity_checks_from_public_job(
+            {"status": "SUCCEEDED", "assets": [{} for _ in range(62)]},
+            {
+                "accepted_image_count": 62,
+                "processed_image_count": 62,
+                "coverage_complete": True,
+            },
+            62,
+        )
+
+        self.assertTrue(checks["expanded_capacity"])
+        self.assertTrue(release_gate_result(checks, {})["release_gate_ok"])
+
     def test_release_gate_accepts_only_complete_processing_or_explicit_system_retry(self) -> None:
         capacity_checks = {
             "all_assets_saved": True,
