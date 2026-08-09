@@ -75,6 +75,12 @@ class ReleaseLayoutTest(unittest.TestCase):
             self.assertIn("Assert-NoUntrackedCode", script)
             self.assertIn("-RunModelBatch", script)
 
+    def test_package_scripts_support_windows_powershell_5(self) -> None:
+        for script_name in ("package_release.ps1", "package_internal_release.ps1"):
+            script = (ROOT / "scripts" / script_name).read_text(encoding="utf-8-sig")
+            self.assertNotIn("[System.IO.Path]::GetRelativePath", script)
+            self.assertIn("function Get-RepositoryRelativePath", script)
+
     def test_customer_package_only_copies_committed_inputs(self) -> None:
         customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")
 

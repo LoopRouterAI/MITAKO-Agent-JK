@@ -32,6 +32,16 @@ function Assert-NoUntrackedCode([string]$Message) {
     if ($untracked.Count -gt 0) { throw "$Message`n$($untracked -join "`n")" }
 }
 
+function Get-RepositoryRelativePath([string]$Path) {
+    $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]"\/")
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $prefix = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $fullPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path is outside repository root: $fullPath"
+    }
+    return $fullPath.Substring($prefix.Length)
+}
+
 Assert-NoTrackedChanges "Working tree contains tracked changes. Commit them before creating an auditable customer package."
 Assert-NoUntrackedCode "Working tree contains untracked code. Commit or remove it before creating an auditable customer package."
 & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl -RunModelBatch
@@ -81,7 +91,7 @@ function Assert-CommittedPath([string]$RelPath, [switch]$IgnorePythonCaches) {
         @(Get-Item -LiteralPath $source)
     }
     foreach ($file in $actualFiles) {
-        $relative = [System.IO.Path]::GetRelativePath($Root, $file.FullName)
+        $relative = Get-RepositoryRelativePath $file.FullName
         if ($IgnorePythonCaches -and $relative -match '(^|\\)__pycache__(\\|$)') { continue }
         if (-not $trackedSet.Contains($relative)) {
             throw "Customer package input contains an uncommitted file: $relative"

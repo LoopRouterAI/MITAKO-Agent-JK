@@ -35,6 +35,16 @@ function Assert-NoUntrackedCode([string]$Message) {
     if ($untracked.Count -gt 0) { throw "$Message`n$($untracked -join "`n")" }
 }
 
+function Get-RepositoryRelativePath([string]$Path) {
+    $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]"\/")
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $prefix = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $fullPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path is outside repository root: $fullPath"
+    }
+    return $fullPath.Substring($prefix.Length)
+}
+
 Assert-NoTrackedChanges "Working tree contains tracked changes. Commit them before creating an auditable internal package."
 Assert-NoUntrackedCode "Working tree contains untracked code. Commit or remove it before creating an auditable internal package."
 
@@ -79,7 +89,7 @@ function Copy-LatestReport([string]$Pattern, [string]$TargetRelativePath) {
     Copy-Item -LiteralPath $source.FullName -Destination $target -Force
     $RuntimeSnapshots.Add([ordered]@{
         source_type = "runtime_report_snapshot"
-        source_path = [System.IO.Path]::GetRelativePath($Root, $source.FullName).Replace("\", "/")
+        source_path = (Get-RepositoryRelativePath $source.FullName).Replace("\", "/")
         packaged_path = $TargetRelativePath.Replace("\", "/")
         sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
     })
