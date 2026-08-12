@@ -36,12 +36,15 @@ def technical_scenario(scenario: str) -> str:
         raise ValueError("unsupported_business_scenario") from exc
 
 
-def internal_metrics_headers() -> dict[str, str]:
+def internal_metrics_headers(request_id: str = "") -> dict[str, str]:
     token = os.getenv("VISUAL_REPORT_SIGNING_SECRET", "").strip()
-    return {
+    headers = {
         "X-MITAKO-Internal-Metrics": "1",
         "X-MITAKO-Internal-Token": token,
     } if token else {}
+    if headers and request_id:
+        headers["X-Request-ID"] = request_id
+    return headers
 
 
 def internal_metrics_fields() -> dict[str, str]:
@@ -139,7 +142,7 @@ def run_case(
         ) as client:
             response = client.post(
                 base_url.rstrip("/") + "/api/review-folder",
-                headers=internal_metrics_headers(),
+                headers=internal_metrics_headers(f"{blind_case_id(bundle)}-workbench"),
                 data=data,
                 files=files,
             )

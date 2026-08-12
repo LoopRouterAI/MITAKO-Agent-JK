@@ -33,8 +33,11 @@ def _boolean(*, nullable: bool = False) -> dict:
     return value
 
 
-def _array(items: dict) -> dict:
-    return {"type": "array", "items": items}
+def _array(items: dict, *, max_items: int | None = None) -> dict:
+    value = {"type": "array", "items": items}
+    if max_items is not None:
+        value["maxItems"] = max_items
+    return value
 
 
 def _object(
@@ -229,6 +232,228 @@ OPENING_START_RESPONSE_SCHEMA = _object(
         "reason": _string(),
     },
     required=("result", "sealed_start", "evidence_refs", "reason"),
+)
+
+NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA = _object(
+    {
+        "sealed_start": _boolean(nullable=True),
+        "waybill_visible": _boolean(nullable=True),
+        "continuous": _boolean(nullable=True),
+        "has_edit": _boolean(nullable=True),
+        "has_offscreen": _boolean(nullable=True),
+        "has_speed_change": _boolean(nullable=True),
+        "all_items_shown": _boolean(nullable=True),
+        "issue_visible": _boolean(nullable=True),
+        "claimed_item_assessment": _object(
+            {
+                "identity_description": _string(),
+                "identity_anchor_asset_ref": _string(),
+                "identity_confidence": _number(),
+                "alternative_candidates_checked": _string(),
+                "appeared": _boolean(nullable=True),
+                "first_visible_timestamp": _string(nullable=True),
+                "last_visible_timestamp": _string(nullable=True),
+                "presentation_complete": _boolean(nullable=True),
+                "offscreen_during_presentation": _boolean(nullable=True),
+                "reason": _string(),
+            },
+            required=(
+                "identity_description",
+                "identity_anchor_asset_ref",
+                "identity_confidence",
+                "alternative_candidates_checked",
+                "appeared",
+                "first_visible_timestamp",
+                "last_visible_timestamp",
+                "presentation_complete",
+                "offscreen_during_presentation",
+                "reason",
+            ),
+        ),
+        "speed_assessment": _object(
+            {
+                "value": _string(enum=["normal", "accelerated", "unknown"]),
+                "confidence": _number(),
+                "evidence_basis": _string(enum=[
+                    "observable_realtime_anchor",
+                    "natural_audio_cadence",
+                    "motion_semantics_only",
+                    "none",
+                ]),
+                "affects_visual_judgement": _boolean(nullable=True),
+                "reason": _string(),
+            },
+            required=(
+                "value",
+                "confidence",
+                "evidence_basis",
+                "affects_visual_judgement",
+                "reason",
+            ),
+        ),
+        "damage_assessment": _object(
+            {
+                "visible_in_continuous_opening": _boolean(nullable=True),
+                "main_video_detail_sufficient": _boolean(nullable=True),
+                "supplemental_damage_visible": _boolean(nullable=True),
+                "same_item_linkage": _boolean(nullable=True),
+                "timestamp": _string(nullable=True),
+                "location": _string(),
+                "severity_level": _string(enum=[
+                    "none", "minor", "moderate", "severe", "extreme", "unknown",
+                ]),
+                "structural_failure": _boolean(nullable=True),
+                "severity_reason": _string(),
+                "causal_chain_status": _string(enum=[
+                    "direct_customer_action",
+                    "pre_existing_visible",
+                    "no_observed_change",
+                    "indeterminate",
+                ]),
+                "causal_evidence_level": _string(enum=[
+                    "direct", "corroborated", "indirect", "none",
+                ]),
+                "causal_reason": _string(),
+                "causal_evidence_refs": _array(
+                    _object(
+                        {
+                            "stage": _string(enum=["before_action", "action", "after_action"]),
+                            "asset_ref": _string(),
+                            "timestamp": _string(),
+                            "subject": _string(),
+                            "location": _string(),
+                            "chain_id": _string(),
+                            "damage_visible": _boolean(nullable=True),
+                            "fact": _string(),
+                        },
+                        required=(
+                            "stage", "asset_ref", "timestamp", "subject", "location",
+                            "chain_id", "damage_visible", "fact",
+                        ),
+                    ),
+                    max_items=3,
+                ),
+                "reason": _string(),
+            },
+            required=(
+                "visible_in_continuous_opening",
+                "main_video_detail_sufficient",
+                "supplemental_damage_visible",
+                "same_item_linkage",
+                "timestamp",
+                "location",
+                "severity_level",
+                "structural_failure",
+                "severity_reason",
+                "causal_chain_status",
+                "causal_evidence_level",
+                "causal_reason",
+                "causal_evidence_refs",
+                "reason",
+            ),
+        ),
+        "field_confidences": {
+            "type": "array",
+            "items": _number(),
+            "minItems": 8,
+            "maxItems": 8,
+        },
+        "evidence_refs": _array(
+            _object(
+                {
+                    # 百度云对完整契约存在复杂度上限；允许值由本地适配层白名单校验。
+                    "field": _string(),
+                    "asset_ref": _string(),
+                    "timestamp": _string(nullable=True),
+                    "fact": _string(),
+                },
+                required=("field", "asset_ref", "timestamp", "fact"),
+            ),
+            max_items=18,
+        ),
+    },
+    required=(
+        "sealed_start",
+        "waybill_visible",
+        "continuous",
+        "has_edit",
+        "has_offscreen",
+        "has_speed_change",
+        "all_items_shown",
+        "issue_visible",
+        "claimed_item_assessment",
+        "speed_assessment",
+        "damage_assessment",
+        "field_confidences",
+        "evidence_refs",
+    ),
+)
+
+CLAIM_IDENTITY_RESPONSE_SCHEMA = _object(
+    {
+        "match_status": _string(enum=["matched", "ambiguous", "not_matched"]),
+        "confidence": _number(),
+        "expected_order_item": _object(
+            {
+                "item_ref": _string(),
+                "sku": _string(),
+                "product_name": _string(),
+                "specification": _string(),
+            },
+            required=("item_ref", "sku", "product_name", "specification"),
+        ),
+        "evidence_refs": _array(
+            _object(
+                {
+                    "asset_ref": _string(),
+                    "fact": _string(),
+                },
+                required=("asset_ref", "fact"),
+            ),
+            max_items=12,
+        ),
+        "reason": _string(),
+    },
+    required=("match_status", "confidence", "expected_order_item", "evidence_refs", "reason"),
+)
+
+CLAIMED_ITEM_DETAIL_RESPONSE_SCHEMA = _object(
+    {
+        "identity_match": _string(enum=["matched", "not_matched", "uncertain"]),
+        "identity_confidence": _number(),
+        "issue_visibility": _string(enum=["visible", "not_visible", "uncertain"]),
+        "issue_confidence": _number(),
+        "issue_location": _string(),
+        "presentation_quality": _string(enum=["clear", "partial", "insufficient"]),
+        "evidence_refs": _array(
+            _object(
+                {
+                    "global_frame_index": _integer(),
+                    "timestamp": _string(),
+                    "identity_fact": _string(),
+                    "issue_fact": _string(),
+                },
+                required=(
+                    "global_frame_index",
+                    "timestamp",
+                    "identity_fact",
+                    "issue_fact",
+                ),
+            ),
+            max_items=12,
+        ),
+        "reason": _string(),
+    },
+    required=(
+        "identity_match",
+        "identity_confidence",
+        "issue_visibility",
+        "issue_confidence",
+        "issue_location",
+        "presentation_quality",
+        "evidence_refs",
+        "reason",
+    ),
 )
 
 VIDEO_AUDIT = _object(

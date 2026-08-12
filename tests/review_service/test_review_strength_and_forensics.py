@@ -184,6 +184,9 @@ class MediaForensicsTest(unittest.TestCase):
         self.assertEqual(assessment["reason_code"], "source_clock_reference_unavailable")
         self.assertEqual(assessment["method"], "ffprobe_encoded_timeline_only")
         self.assertFalse(assessment["is_model_inference"])
+        self.assertEqual(assessment["semantic_speed_status"], "not_assessed")
+        self.assertIn("光流", assessment["scientific_boundary"])
+        self.assertIn("不能", assessment["scientific_boundary"])
         self.assertEqual(assessment["encoded_timeline"]["average_fps"], 60.0)
         self.assertEqual(assessment["encoded_timeline"]["container_duration_seconds"], 5.0)
         self.assertEqual(assessment["encoded_timeline"]["packet_delta_median_seconds"], 0.017)
@@ -253,6 +256,7 @@ class ReviewJobIntegrationTest(unittest.TestCase):
 
         responses = [Response(503), Response(200, {"ok": True, "review": {}})]
         observed_sizes = []
+        observed_request_ids = []
         health_requests = []
 
         class Client:
@@ -270,6 +274,7 @@ class ReviewJobIntegrationTest(unittest.TestCase):
                 self_outer.assertFalse(self.trust_env)
                 self_outer.assertEqual(headers.get("X-MITAKO-Internal-Metrics"), "1")
                 self_outer.assertEqual(headers.get("X-MITAKO-Internal-Token"), "test-internal-token")
+                observed_request_ids.append(headers.get("X-Request-ID"))
                 observed_sizes.append(sum(len(item[1][1].read()) for item in files))
                 return responses.pop(0)
 
@@ -289,6 +294,7 @@ class ReviewJobIntegrationTest(unittest.TestCase):
             (job_dir / "asset.mp4").write_bytes(b"video-bytes")
             job = {
                 "job_id": "RJ-RETRY",
+                "attempts": 1,
                 "client_case_id": "CASE-RETRY",
                 "scenario": "product_damage",
                 "metadata": {"sampling_policy": {"preset": "adaptive"}},
@@ -309,14 +315,39 @@ class ReviewJobIntegrationTest(unittest.TestCase):
                 payload = service._call_workbench(job)
 
         self.assertEqual(observed_sizes, [11, 11])
+        self.assertEqual(observed_request_ids, ["RJ-RETRY-workbench-1", "RJ-RETRY-workbench-1"])
         self.assertEqual(len(health_requests), 1)
         self.assertEqual(payload["_workbench_transport"]["retry_count"], 1)
         self.assertEqual([item["status_code"] for item in payload["_workbench_transport"]["attempts"]], [503, 200])
+
+    def test_workbench_request_id_changes_only_between_business_executions(self) -> None:
+        first = service._workbench_request_id({"job_id": "RJ-BUSINESS-RETRY", "attempts": 1})
+        second = service._workbench_request_id({"job_id": "RJ-BUSINESS-RETRY", "attempts": 2})
+
+        self.assertEqual(first, "RJ-BUSINESS-RETRY-workbench-1")
+        self.assertEqual(second, "RJ-BUSINESS-RETRY-workbench-2")
+        self.assertNotEqual(first, second)
 
     def test_formal_api_requires_internal_token_before_workbench_call(self) -> None:
         with patch.dict(os.environ, {"VISUAL_REPORT_SIGNING_SECRET": ""}):
             with self.assertRaisesRegex(ValueError, "visual_internal_token_required"):
                 service._call_workbench({"job_id": "RJ-NO-TOKEN", "scenario": "product_damage"})
+
+    def test_forensics_error_summary_uses_same_video_classifier_as_lease(self) -> None:
+        job = {
+            "job_id": "RJ-FORENSICS-ERROR",
+            "metadata": {"sampling_policy": {}},
+            "assets": [{
+                "mime_type": "application/octet-stream",
+                "original_name": "evidence.mp4",
+                "stored_name": "evidence.mp4",
+            }],
+        }
+        with patch.object(service, "inspect_job_media", side_effect=RuntimeError("probe failed")):
+            result = service._media_forensics(job)
+
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["summary"]["video_assets"], 1)
 
     def test_workbench_contract_rejects_old_capacity_before_upload(self) -> None:
         with self.assertRaisesRegex(ValueError, "visual_workbench_contract_mismatch"):
@@ -390,7 +421,7 @@ class ReviewJobIntegrationTest(unittest.TestCase):
             self.assertIs(current_job, job)
             return model_payload
 
-        def finish(job_id: str, *, status: str, result: dict, diagnostics: dict) -> dict:
+        def finish(job_id: str, *, status: str, result: dict, diagnostics: dict, expected_attempts=None) -> dict:
             calls.append("finish")
             return {"job_id": job_id, "status": status, "result": result, "diagnostics": diagnostics}
 
@@ -438,7 +469,7 @@ class ReviewJobIntegrationTest(unittest.TestCase):
             "interpretation": "本轮不可用，不能据此判断剪辑。",
         }
 
-        def finish(job_id: str, *, status: str, result: dict, diagnostics: dict) -> dict:
+        def finish(job_id: str, *, status: str, result: dict, diagnostics: dict, expected_attempts=None) -> dict:
             return {"job_id": job_id, "status": status, "result": result, "diagnostics": diagnostics}
 
         with patch.object(service.store, "claim_job", return_value=True), patch.object(

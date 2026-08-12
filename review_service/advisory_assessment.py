@@ -274,7 +274,10 @@ def attach_advisory_assessment(
         + _actionable_material_gap_items(required_materials)
     ))
     decision_audit = _dict(parsed.get("decision_policy_audit"))
-    if decision_audit.get("rule_id") == "PD-R-SPECIAL-PRODUCT-DEFECT-UNRESOLVED":
+    internal_defect_standard_unresolved = (
+        decision_audit.get("rule_id") == "PD-R-SPECIAL-PRODUCT-DEFECT-UNRESOLVED"
+    )
+    if internal_defect_standard_unresolved:
         missing_material = [
             item for item in missing_material
             if not any(marker in item for marker in ("商品缺陷标准", "量化标准", "公差边界"))
@@ -440,7 +443,7 @@ def attach_advisory_assessment(
     if under_nine_high_confidence:
         signals.append(_signal(
             "minor_under_nine_high_confidence",
-            "critical",
+            "warning",
             "申请时未满9周岁（高置信），请授权人员重点核对独立支付能力、支付密码来源及监护发现过程；年龄本身不决定退款或支持结论。",
             evidence_image_indices=_items(payment_capability.get("evidence_image_indices"))[:20],
         ))
@@ -475,6 +478,14 @@ def attach_advisory_assessment(
         required_reasons.append("image_authenticity_risk")
     if under_nine_high_confidence:
         required_reasons.append("minor_under_nine_high_confidence")
+    if (
+        label == "review"
+        and str(metadata.get("scenario") or "") == "product_damage"
+        and not internal_defect_standard_unresolved
+        and not missing_material
+        and not technical_processing_incomplete
+    ):
+        required_reasons.append("inconclusive_product_damage_gate")
     if confidence is None and not missing_material and not technical_processing_incomplete:
         required_reasons.append("confidence_unavailable")
     elif (
@@ -597,16 +608,18 @@ def attach_advisory_assessment(
         parsed["confidence"] = confidence
     parsed["human_required"] = level == "required"
     parsed["decision"] = workflow
-    parsed["system_yes_no"] = {
+    final_system_yes_no = {
         "positive": "YES",
         "negative": "NO",
         "review": "REVIEW",
     }.get(label, "REVIEW")
+    parsed["system_yes_no"] = final_system_yes_no
     parsed["advisory_assessment"] = advisory
     agent_report["parsed"] = parsed
     agent_report["advisory_assessment"] = advisory
     summary["needs_human_review"] = level == "required"
     summary["predicted_label"] = label
+    summary["system_yes_no"] = final_system_yes_no
     if technical_processing_incomplete:
         summary["confidence"] = None
         parsed["confidence"] = None
@@ -615,6 +628,7 @@ def attach_advisory_assessment(
     summary["human_review_level"] = level
     summary["workflow_recommendation"] = workflow
     brief["conclusion"] = conclusion
+    brief["system_yes_no"] = final_system_yes_no
     brief["human_review_level"] = level
     brief["workflow_recommendation"] = workflow
     if workflow == "request_more_material":

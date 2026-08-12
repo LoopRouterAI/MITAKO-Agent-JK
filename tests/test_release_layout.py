@@ -73,7 +73,13 @@ class ReleaseLayoutTest(unittest.TestCase):
             self.assertIn("git ls-files --others --exclude-standard", script)
             self.assertNotIn('"*.py" "*.js"', script)
             self.assertIn("Assert-NoUntrackedCode", script)
-            self.assertIn("-RunModelBatch", script)
+
+    def test_release_model_batch_requires_explicit_opt_in(self) -> None:
+        for script_name in ("package_release.ps1", "package_internal_release.ps1"):
+            script = (ROOT / "scripts" / script_name).read_text(encoding="utf-8-sig")
+            self.assertIn("[switch]$RunModelBatch", script)
+            self.assertIn("if ($RunModelBatch)", script)
+            self.assertNotIn("-VisualUrl $VisualUrl -RunModelBatch", script)
 
     def test_package_scripts_support_windows_powershell_5(self) -> None:
         for script_name in ("package_release.ps1", "package_internal_release.ps1"):
@@ -115,6 +121,24 @@ class ReleaseLayoutTest(unittest.TestCase):
             "0cd83d944a6ca7822b4a8306cecc60a36e859b041f6702c6a1ad9ead78924451",
         ):
             self.assertIn(expected_hash, customer_script.lower())
+
+        for runtime_module in (
+            '"poc\\visual_review_poc\\native_video_perception.py"',
+            '"poc\\visual_review_poc\\secure_media_tunnel.py"',
+            '"poc\\visual_review_poc\\internal_review_ledger.py"',
+            '"poc\\visual_review_poc\\report_assets.py"',
+            '"poc\\visual_review_poc\\report_evidence.py"',
+        ):
+            self.assertIn(runtime_module, customer_script)
+        self.assertIn("imageio_ffmpeg", customer_script)
+        self.assertIn("imageio-ffmpeg", customer_script)
+        self.assertIn("Cloudflare.cloudflared", customer_script)
+        verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")
+        self.assertIn('name.endswith("native_video_perception.pyc")', verifier)
+        self.assertIn('name.endswith("secure_media_tunnel.pyc")', verifier)
+        self.assertIn('name.endswith("internal_review_ledger.pyc")', verifier)
+        self.assertIn('name.endswith("report_assets.pyc")', verifier)
+        self.assertIn('name.endswith("report_evidence.pyc")', verifier)
 
     def test_compiled_customer_runtime_locks_python_minor_version(self) -> None:
         customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")

@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [string]$BaseUrl = $(if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }),
-    [string]$VisualUrl = $(if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" })
+    [string]$VisualUrl = $(if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }),
+    [switch]$RunModelBatch
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,7 +45,9 @@ function Get-RepositoryRelativePath([string]$Path) {
 
 Assert-NoTrackedChanges "Working tree contains tracked changes. Commit them before creating an auditable customer package."
 Assert-NoUntrackedCode "Working tree contains untracked code. Commit or remove it before creating an auditable customer package."
-& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl -RunModelBatch
+$modelBatchParams = @{}
+if ($RunModelBatch) { $modelBatchParams.RunModelBatch = $true }
+& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl @modelBatchParams
 Assert-NoTrackedChanges "Release validation changed tracked files. Review and commit them before customer packaging."
 Assert-NoUntrackedCode "Release validation created untracked code. Review it before customer packaging."
 
@@ -544,7 +547,7 @@ $deliveryEngineer = Join-Path $Stage "docs\delivery\engineer-onboarding.md"
 if (Test-Path $deliveryEngineer) { Remove-Item -LiteralPath $deliveryEngineer -Force }
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
-$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0809四场景业务理解与审核能力验收说明.html"
+$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0812视频审核业务理解与模型路线验收说明.html"
 if (-not (Test-Path -LiteralPath $CustomerHtmlSource -PathType Leaf)) {
     throw "Customer delivery HTML is missing: $CustomerHtmlSource"
 }
@@ -668,7 +671,10 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\review_response_schema.py",
     "poc\visual_review_poc\media_deduplication.py",
     "poc\visual_review_poc\media_registry.py",
+    "poc\visual_review_poc\internal_review_ledger.py",
     "poc\visual_review_poc\native_video_proxy.py",
+    "poc\visual_review_poc\native_video_perception.py",
+    "poc\visual_review_poc\secure_media_tunnel.py",
     "poc\visual_review_poc\observability.py",
     "poc\visual_review_poc\minor_material_model_prompt.py",
     "poc\visual_review_poc\minor_material_pipeline.py",
@@ -682,6 +688,8 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\official_reference_images.py",
     "poc\visual_review_poc\order_info_adapter.py",
     "poc\visual_review_poc\report_assessment_sections.py",
+    "poc\visual_review_poc\report_assets.py",
+    "poc\visual_review_poc\report_evidence.py",
     "poc\visual_review_poc\report_renderer.py",
     "poc\visual_review_poc\review_model_prompt.py",
     "poc\visual_review_poc\sample_evaluation.py",
@@ -742,8 +750,8 @@ setlocal
 cd /d "%~dp0"
 
 if exist venv\Scripts\python.exe (
-  venv\Scripts\python.exe -c "import sys; assert sys.version_info[:2] == (3,11); mods=['fastapi','uvicorn','httpx','jwt','multipart','sse_starlette','pydantic','dotenv','cv2','PIL','yt_dlp','redis','jinja2','websockets','celery',''.join(('lang','graph')),''.join(('lang','chain_core')),''.join(('lang','chain_','op','en','ai'))]; [__import__(m) for m in mods]" >nul 2>nul
-  if not errorlevel 1 exit /b 0
+  venv\Scripts\python.exe -c "import sys; assert sys.version_info[:2] == (3,11); mods=['fastapi','uvicorn','httpx','jwt','multipart','sse_starlette','pydantic','dotenv','cv2','PIL','yt_dlp','imageio_ffmpeg','redis','jinja2','websockets','celery',''.join(('lang','graph')),''.join(('lang','chain_core')),''.join(('lang','chain_','op','en','ai'))]; [__import__(m) for m in mods]" >nul 2>nul
+  if not errorlevel 1 goto CHECK_CLOUDFLARED
   echo [INFO] Existing runtime is incompatible or incomplete; rebuilding with Python 3.11...
   rmdir /s /q venv
 )
@@ -767,15 +775,36 @@ echo [2/4] Upgrading package installer...
 venv\Scripts\python.exe -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
-echo [3/3] Installing runtime dependencies...
+echo [3/4] Installing runtime dependencies...
 set "LG=lang"
 set "WG=graph"
 set "LC=langchain"
 set "OC=op"
 set "AI=enai"
-venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple fastapi uvicorn sse-starlette python-multipart pydantic httpx PyJWT python-dotenv %LG%%WG% %LC%-core %LC%-%OC%%AI% pyahocorasick redis jinja2 websockets celery opencv-python Pillow yt-dlp
+venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple fastapi uvicorn sse-starlette python-multipart pydantic httpx PyJWT python-dotenv %LG%%WG% %LC%-core %LC%-%OC%%AI% pyahocorasick redis jinja2 websockets celery opencv-python Pillow yt-dlp imageio-ffmpeg
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
+:CHECK_CLOUDFLARED
+echo [4/4] Checking secure large-video tunnel...
+where cloudflared >nul 2>nul
+if not errorlevel 1 goto RUNTIME_READY
+if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\cloudflared.exe" goto RUNTIME_READY
+where winget >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] cloudflared is required for secure large-video URL review, and WinGet is unavailable.
+  echo Install Cloudflare cloudflared, then rerun this script.
+  exit /b 1
+)
+winget install --id Cloudflare.cloudflared --exact --silent --accept-package-agreements --accept-source-agreements
+if errorlevel 1 exit /b %ERRORLEVEL%
+where cloudflared >nul 2>nul
+if not errorlevel 1 goto RUNTIME_READY
+if not exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\cloudflared.exe" (
+  echo [ERROR] cloudflared installation completed but the executable was not found.
+  exit /b 1
+)
+
+:RUNTIME_READY
 echo [OK] Runtime is ready.
 exit /b 0
 '@
@@ -936,6 +965,7 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
+    "甲方沟通交付文档\0812视频审核业务理解与模型路线验收说明.html",
     "甲方沟通交付文档\0809四场景业务理解与审核能力验收说明.html",
     "甲方沟通交付文档\0807黄金指南学习与审核能力更新说明.html",
     "docs\delivery\mitako-0806-four-scenario-minor-material-acceptance-20260806.html",

@@ -58,14 +58,13 @@ class RuntimeMediaRouteTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=workbench_server.RUNTIME_MEDIA_DIR) as temp_dir:
             frame = Path(temp_dir) / "frame.png"
             frame.write_bytes(PNG_1X1)
-            relative = frame.relative_to(workbench_server.ROOT).as_posix()
             response = TestClient(workbench_server.app).get(
-                workbench_server._sign_public_url(f"/media/{relative}")
+                workbench_server._media_url(frame)
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.content, PNG_1X1)
 
-    def test_media_route_does_not_expose_other_workspace_files(self):
+    def test_legacy_media_route_is_disabled(self):
         response = TestClient(workbench_server.app).get(
             workbench_server._sign_public_url("/media/.env")
         )

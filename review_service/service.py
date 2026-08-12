@@ -720,6 +720,14 @@ def _workbench_lease_seconds(job: Dict[str, Any]) -> int:
     )
 
 
+def _workbench_request_id(job: Dict[str, Any]) -> str:
+    try:
+        execution_attempt = max(1, int(job.get("attempts") or 1))
+    except (TypeError, ValueError, OverflowError):
+        execution_attempt = 1
+    return f"{job['job_id']}-workbench-{execution_attempt}"
+
+
 def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
     job_dir = upload_root() / job["job_id"]
     timeout_seconds, retries = _workbench_request_policy()
@@ -754,7 +762,7 @@ def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
                 response = client.post(
                     f"{_workbench_url()}/api/review-folder",
                     headers={
-                        "X-Request-ID": f"{job['job_id']}-workbench-{attempt}",
+                        "X-Request-ID": _workbench_request_id(job),
                         "X-MITAKO-Internal-Metrics": "1",
                         "X-MITAKO-Internal-Token": internal_token,
                     },
@@ -801,7 +809,7 @@ def _media_forensics(job: Dict[str, Any]) -> Dict[str, Any]:
                 "video_assets": sum(
                     1
                     for item in job.get("assets") or []
-                    if str(item.get("mime_type") or "").lower().startswith("video/")
+                    if is_video_asset(item)
                 ),
                 "analyzed_assets": 0,
                 "unavailable_assets": 0,
@@ -834,16 +842,6 @@ def _recommended_escalation(
         for item in signals
         if str(item.get("code") or "") not in reason_codes
     )
-    parsed = (
-        (review.get("agent_report") or {}).get("parsed")
-        if isinstance(review.get("agent_report"), dict)
-        else {}
-    ) or {}
-    video_audit = parsed.get("video_audit_conclusion") if isinstance(parsed, dict) else {}
-    video_audit = video_audit if isinstance(video_audit, dict) else {}
-    speed_impact = video_audit.get("speed_review_impact")
-    speed_impact = speed_impact if isinstance(speed_impact, dict) else {}
-
     actions: List[Dict[str, Any]] = []
     if workflow == "system_retry":
         actions.append({
@@ -879,27 +877,6 @@ def _recommended_escalation(
                 "bounded": True,
                 "description": "仅在疑点可能通过更密抽帧获得新证据时建议强化，不因材料缺口重复烧模型。",
             })
-
-    speed_status = str(speed_impact.get("status") or "none").lower()
-    if (
-        video_audit.get("playback_speed") == "accelerated"
-        and speed_status in {"uncertain", "material"}
-        and current_fps < 2.0
-        and workflow != "request_more_material"
-    ):
-        sampling_action = next(
-            (item for item in actions if item.get("type") == "increase_sampling_strength"),
-            None,
-        )
-        if sampling_action is None:
-            sampling_action = {"type": "increase_sampling_strength"}
-            actions.append(sampling_action)
-        sampling_action.update({
-            "target_preset": "forensic",
-            "target_fps": 2.0,
-            "bounded": True,
-            "description": "疑似加速使关键节点在当前抽帧密度下无法判断，建议受控提升到 2 FPS 强化复核；不因加速本身判负。",
-        })
 
     return {
         "recommended": bool(actions),
@@ -1022,6 +999,7 @@ def run_job(job_id: str) -> Dict[str, Any]:
     if not store.claim_job(job_id, _workbench_lease_seconds(queued_job)):
         return queued_job or store.get_job(job_id) or {}
     job = store.get_job(job_id) or {}
+    execution_attempt = max(1, int(job.get("attempts") or 1))
     forensics = _media_forensics(job)
     readiness = assess_input_readiness(job.get("metadata") or {})
     base_result = {
@@ -1063,7 +1041,13 @@ def run_job(job_id: str) -> Dict[str, Any]:
             "workbench_transport": workbench_transport,
         }
         status = "SUCCEEDED" if payload.get("ok") is True else "FAILED"
-        return store.finish_job(job_id, status=status, result=result, diagnostics=diagnostics)
+        return store.finish_job(
+            job_id,
+            status=status,
+            result=result,
+            diagnostics=diagnostics,
+            expected_attempts=execution_attempt,
+        )
     except WorkbenchRequestError as exc:
         diagnostics = {
             "error_type": "workbench_http_error",
@@ -1090,7 +1074,13 @@ def run_job(job_id: str) -> Dict[str, Any]:
         failed_review["report"] = {"requested": False, "status": "not_requested", "html_url": None}
     base_result["review"] = failed_review
     base_result["recommended_escalation"] = _recommended_escalation(job, failed_review, forensics)
-    return store.finish_job(job_id, status="FAILED", result=base_result, diagnostics=diagnostics)
+    return store.finish_job(
+        job_id,
+        status="FAILED",
+        result=base_result,
+        diagnostics=diagnostics,
+        expected_attempts=execution_attempt,
+    )
 
 
 def render_job_report(job: Dict[str, Any]) -> str:
@@ -1258,11 +1248,17 @@ def contract() -> Dict[str, Any]:
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",
         "media_processing": {
-            "model_input": "服务端本地完成全时轴抽帧、压缩和分段；细节、连续性与成因通道均逐张发送带帧号和时间戳的 JPEG 独立帧。原视频和拼图均不作为模型审核输入。",
-            "model_request_transport": "inline_base64_images",
+            "model_input": "优先把完整时长视频交给百度 Gemini 原生视频理解：正常大小和质量的原片直接内联，超过请求上限时使用受控 HTTPS URL；仅在超 2K、超 24 FPS 或视频码率超 6 Mbps 时尝试 HEVC/VP9 质量代理。抽帧回退使用带全局帧号和时间戳的独立 WebP，不使用拼图。",
+            "model_request_transport": "baidu_native_video_inline_or_https_url",
             "supplier_file_uri_required": False,
-            "detail_frame_format": "image/jpeg",
-            "temporal_sheet_format": "image/webp",
+            "detail_frame_format": "image/webp",
+            "temporal_sheet_format": "not_used",
+            "native_video_defaults": {
+                "sampling_fps": 1.0,
+                "thinking_level": "high",
+                "media_resolution": "high",
+                "max_output_tokens": "provider_default",
+            },
             "official_product_references": {
                 "mode": "per_review_on_demand",
                 "bulk_download_enabled": False,

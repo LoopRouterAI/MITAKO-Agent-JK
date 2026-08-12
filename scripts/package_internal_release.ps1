@@ -2,7 +2,8 @@
 param(
     [string]$BaseUrl = "http://127.0.0.1:8015",
     [string]$VisualUrl = "http://127.0.0.1:7861",
-    [switch]$IncludeSecrets
+    [switch]$IncludeSecrets,
+    [switch]$RunModelBatch
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +50,9 @@ Assert-NoTrackedChanges "Working tree contains tracked changes. Commit them befo
 Assert-NoUntrackedCode "Working tree contains untracked code. Commit or remove it before creating an auditable internal package."
 
 function Invoke-InternalValidation {
-    & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl -RunModelBatch
+    $modelBatchParams = @{}
+    if ($RunModelBatch) { $modelBatchParams.RunModelBatch = $true }
+    & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl @modelBatchParams
 }
 
 Invoke-InternalValidation

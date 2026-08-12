@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
-PRICING_NOTE = "Gemini 3.5 Flash Lite 与 Gemini 3.5 Flash 按官方标准价估算；Gemini 3.1 Flash Lite 按用户成本表 0.25/1.50 USD 每百万 tokens 并按 7 元/USD 折算；Qwen3.5-Flash 与 Doubao Seed 2.0 Lite 按用户提供阶梯价依据输入 tokens 选择区间；本轮未使用音频输入。"
+PRICING_NOTE = "Gemini 3.5 Flash Lite、Gemini 3.5 Flash 与 Gemini 3.6 Flash 按官方标准价估算；Gemini 3.1 Flash Lite 按用户成本表 0.25/1.50 USD 每百万 tokens 并按 7 元/USD 折算；Qwen3.5-Flash 与 Doubao Seed 2.0 Lite 按用户提供阶梯价依据输入 tokens 选择区间；媒体模态按供应商 usage 中计入的输入 tokens 估算。"
 
 
 def _positive_count(value: Any) -> int:
@@ -56,6 +56,11 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "label": "Gemini 3.5 Flash Lite",
         "provider": "gemini_native",
         "model": "gemini-3.5-flash-lite",
+        "thinking_level": "high",
+        "media_resolution": "high",
+        "native_perception_pipeline": True,
+        "request_timeout_seconds": 420,
+        "case_deadline_seconds": 600,
         "input_price": 0.30,
         "output_price": 2.50,
         "currency": "USD",
@@ -67,6 +72,20 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "model": "gemini-3.5-flash",
         "input_price": 1.50,
         "output_price": 9.00,
+        "currency": "USD",
+        "source": "https://ai.google.dev/gemini-api/docs/pricing",
+    },
+    "gemini36": {
+        "label": "Gemini 3.6 Flash",
+        "provider": "gemini_native",
+        "model": "gemini-3.6-flash",
+        "thinking_level": "high",
+        "media_resolution": "high",
+        "native_perception_pipeline": True,
+        "request_timeout_seconds": 420,
+        "case_deadline_seconds": 900,
+        "input_price": 1.50,
+        "output_price": 7.50,
         "currency": "USD",
         "source": "https://ai.google.dev/gemini-api/docs/pricing",
     },

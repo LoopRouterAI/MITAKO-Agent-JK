@@ -17,7 +17,7 @@ from fastapi import UploadFile
 from starlette.datastructures import Headers
 
 from poc.visual_review_poc import workbench_server
-from poc.visual_review_poc.local_video_triage_demo import load_case_from_folder
+from poc.visual_review_poc.local_video_triage_demo import load_case_from_folder, sample_video_frames
 from poc.visual_review_poc.model_selection_e2e import load_case_bundle
 
 
@@ -26,6 +26,35 @@ def upload(name: str, body: bytes) -> UploadFile:
 
 
 class WorkbenchUploadSafetyTest(unittest.TestCase):
+    def test_complete_frame_fallback_extracts_lossless_webp_without_jpeg_intermediate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video = root / "evidence.mp4"
+            writer = cv2.VideoWriter(
+                str(video),
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                5.0,
+                (64, 48),
+            )
+            self.assertTrue(writer.isOpened())
+            for level in range(10):
+                writer.write(np.full((48, 64, 3), 20 + level * 20, dtype=np.uint8))
+            writer.release()
+
+            sample = sample_video_frames(
+                video,
+                fps=1.0,
+                max_frames=10,
+                probe_seconds=1.0,
+                frame_width=1920,
+                run_dir=root / "frames",
+                sampling_mode="dense",
+            )
+
+        self.assertTrue(sample["frames"])
+        self.assertTrue(all(Path(frame["path"]).suffix == ".webp" for frame in sample["frames"]))
+        self.assertEqual(sample["model_input"]["type"], "individual_lossless_webp_frames")
+
     def test_new_upload_cleans_expired_case_cache_only(self) -> None:
         valid_body = b"\x00\x00\x00\x18ftypmp42" + b"0" * 64
         original_upload_dir = workbench_server.UPLOAD_DIR

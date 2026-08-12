@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -12,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi.testclient import TestClient
 
 from poc.visual_review_poc import workbench_server
+from poc.visual_review_poc.internal_review_ledger import ReviewRequestLedger
 from poc.visual_review_poc.media_registry import MediaRegistry
 
 
@@ -48,6 +50,23 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertNotIn("入口 01 / 开箱与发错货", workbench)
         self.assertEqual(self.client.get("/wrong-item").status_code, 200)
         self.assertEqual(self.client.get("/missing-item").status_code, 200)
+
+    def test_workbench_summary_only_surfaces_high_confidence_visible_severe_damage(self) -> None:
+        workbench = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
+
+        self.assertIn("严重商品质量问题：", workbench)
+        self.assertIn("severity_assessment", workbench)
+        self.assertIn("['severe', 'extreme']", workbench)
+        self.assertIn("issueVisible === true", workbench)
+        self.assertIn("severityConfidence >= 0.8", workbench)
+        self.assertNotIn("'严重商品质量问题：' + severeText", workbench)
+
+    def test_workbench_describes_current_complete_video_review_path(self) -> None:
+        workbench = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
+
+        self.assertIn("完整视频原生审核", workbench)
+        self.assertIn("受控 WebP 证据回退", workbench)
+        self.assertNotIn("不会把整段大视频直接送入模型", workbench)
 
     def test_workbench_batch_api_preserves_wrong_and_missing_business_scenarios(self) -> None:
         scenarios = {
@@ -103,6 +122,54 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_internal_review_folder_reuses_completed_response_for_same_request_id(self) -> None:
+        request_headers = {
+            "X-MITAKO-Internal-Token": "test-internal-token",
+            "X-Request-ID": "RJ-IDEMPOTENT-workbench",
+        }
+        review_result = {
+            "ok": True,
+            "review": {"summary": {"review_status": "completed"}},
+        }
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"VISUAL_REPORT_SIGNING_SECRET": "test-internal-token"},
+            clear=False,
+        ), patch.object(
+            workbench_server,
+            "INTERNAL_REVIEW_LEDGER",
+            ReviewRequestLedger(Path(temp_dir) / "internal_requests.sqlite3"),
+        ), patch.object(
+            workbench_server,
+            "_save_folder_uploads",
+            return_value=(Path("case"), {"accepted_count": 1}),
+        ) as save_uploads, patch.object(
+            workbench_server,
+            "_run_folder_agent_review",
+            return_value=review_result,
+        ) as run_review:
+            first = self.client.post(
+                "/api/review-folder",
+                headers=request_headers,
+                data={"scenario": "product_damage", "rule_tenant_id": "mitako"},
+                files={"files": ("evidence.jpg", b"image", "image/jpeg")},
+            )
+            workbench_server.INTERNAL_REVIEW_LEDGER = ReviewRequestLedger(
+                Path(temp_dir) / "internal_requests.sqlite3"
+            )
+            second = self.client.post(
+                "/api/review-folder",
+                headers=request_headers,
+                data={"scenario": "product_damage", "rule_tenant_id": "mitako"},
+                files={"files": ("evidence.jpg", b"image", "image/jpeg")},
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(save_uploads.call_count, 1)
+        self.assertEqual(run_review.call_count, 1)
+
     def test_sample_api_preserves_business_scenario(self) -> None:
         with patch.object(
             workbench_server,
@@ -136,8 +203,8 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             second = Path(temp_dir) / "second.jpg"
             first.write_bytes(b"first")
             second.write_bytes(b"second")
-            first_path = "/media/" + first.relative_to(workbench_server.ROOT).as_posix()
-            second_path = "/media/" + second.relative_to(workbench_server.ROOT).as_posix()
+            first_path = urlsplit(workbench_server._media_url(first)).path
+            second_path = urlsplit(workbench_server._media_url(second)).path
             targets = [
                 (f"/reports/{report_name}", "/reports/tampered-report.html"),
                 (first_path, second_path),
@@ -155,6 +222,39 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                         expires=int(time.time()) - 1,
                     )
                     self.assertEqual(self.client.get(expired_url).status_code, 403)
+
+            legacy_path = "/media/" + first.relative_to(workbench_server.ROOT).as_posix()
+            self.assertEqual(
+                self.client.get(workbench_server._sign_public_url(legacy_path)).status_code,
+                404,
+            )
+
+    def test_free_text_cannot_mint_signed_media_url(self) -> None:
+        media_id = "a" * 32
+        malicious = f"/media-item/{media_id}"
+        public = workbench_server._sanitize_public_report_data({
+            "agent_report": {
+                "scenario": "product_damage",
+                "parsed": {
+                    "adopted_evidence": [{
+                        "asset_ref": malicious,
+                        "visible_facts": malicious,
+                    }],
+                },
+                "media_gallery": {
+                    "official_references": [{"url": malicious}],
+                },
+            },
+        })
+
+        serialized_evidence = json.dumps(
+            public["agent_report"]["parsed"], ensure_ascii=False
+        )
+        self.assertNotIn("sig=", serialized_evidence)
+        self.assertIn(
+            "sig=",
+            public["agent_report"]["media_gallery"]["official_references"][0]["url"],
+        )
 
     def test_all_generated_report_and_media_urls_are_signed(self) -> None:
         (workbench_server.ROOT / "tmp").mkdir(exist_ok=True)
@@ -275,6 +375,8 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertIn("image/webp", transport["accepted_model_media_types"])
         self.assertIn("video/mp4", transport["accepted_model_media_types"])
         self.assertEqual(transport["native_video_max_unique_files"], 1)
+        self.assertIn("单次完整原生视频", transport["strategy"])
+        self.assertNotIn("开场锚点复核", transport["strategy"])
 
     def test_technical_processing_incomplete_is_completed_transport_with_system_retry(self) -> None:
         self.assertTrue(workbench_server._structured_review_ok({
@@ -290,11 +392,29 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
 
     def test_product_damage_public_projection_preserves_speed_and_opening_review_facts(self) -> None:
         parsed = {
+            "all_items_shown": True,
+            "continuous": True,
+            "has_edit": False,
+            "has_offscreen": False,
+            "has_speed_change": None,
+            "issue_visible": True,
+            "overall_video_result": "indeterminate",
+            "sealed_start": True,
+            "waybill_visible": True,
+            "field_confidences": {
+                "sealed_start": 0.95,
+                "issue_visible": 0.92,
+            },
             "damage_causality_assessment": {
                 "appearance_difference": "visible",
                 "business_defect_qualification": "indeterminate",
                 "supplemental_damage_presence": "confirmed",
                 "special_product_rule": "required_but_not_quantified",
+                "severity_assessment": {
+                    "level": "severe",
+                    "structural_failure": True,
+                    "reason": "主体结构断裂。",
+                },
             },
             "video_audit_conclusion": {
                 "playback_speed": "accelerated",
@@ -319,16 +439,36 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                     "result": "noncompliant",
                 },
             },
+            "opening_video_evidence": {
+                "present": False,
+                "status": "yellow",
+                "confidence": 0.88,
+                "reason": "未形成可信的初次开箱证据。",
+            },
             "internal_prompt": "不得公开",
         }
 
         projected = workbench_server._public_parsed(parsed, "product_damage")
         video = projected["video_audit_conclusion"]
 
+        self.assertEqual(projected["overall_video_result"], "indeterminate")
+        self.assertFalse(projected["has_edit"])
+        self.assertIsNone(projected["has_speed_change"])
         self.assertEqual(video["sampling_fps"], 1.0)
         self.assertEqual(video["speed_review_impact"]["status"], "uncertain")
         self.assertEqual(video["opening_video_compliance"]["waybill_visible"], False)
         self.assertEqual(video["opening_video_compliance"]["validated_fields"], ["waybill_visible"])
+        self.assertEqual(projected["opening_video_evidence"]["status"], "yellow")
+        self.assertEqual(projected["opening_video_evidence"]["confidence"], 0.88)
+        self.assertEqual(projected["field_confidences"]["issue_visible"], 0.92)
+        self.assertEqual(
+            projected["damage_causality_assessment"]["severity_assessment"]["level"],
+            "severe",
+        )
+        self.assertTrue(
+            projected["damage_causality_assessment"]["severity_assessment"]
+            ["structural_failure"]
+        )
         self.assertEqual(
             projected["damage_causality_assessment"]["business_defect_qualification"],
             "indeterminate",

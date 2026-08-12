@@ -26,6 +26,10 @@ LABELS = {
     "continuous": "连续可观察",
     "brief_occlusion": "存在短暂遮挡",
     "long_absence": "存在较长离镜",
+    "claimed_item": "争议商品",
+    "complete": "完整",
+    "completed": "已完成",
+    "not_applicable": "不适用",
 }
 
 
@@ -226,7 +230,7 @@ def render_object_continuity_panel(
         )
         subjects.append(
             '<article class="boundary-card">'
-            f'<h3>{escape(subject.get("description") or subject.get("subject_id") or "未命名主体")}</h3>'
+            f'<h3>{escape(subject.get("description") or _label(subject.get("subject_id")) or "未命名主体")}</h3>'
             f'<p><b>跟踪区间：</b>{escape(subject.get("tracking_start") or "-")} 至 {escape(subject.get("tracking_end") or "-")}</p>'
             f'<p><b>首次曝光：</b>{escape(subject.get("first_exposed_timestamp") or "-")}</p>'
             f'<p><b>可见覆盖率：</b>{escape(subject.get("visibility_coverage") if subject.get("visibility_coverage") is not None else "-")}</p>'
@@ -462,7 +466,7 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
     passport_readability_labels = {
         "clear": "清晰",
         "partial": "部分可读",
-        "unknown": "unknown",
+        "unknown": "未知",
     }
     for item in (value.get("material_inventory") or [])[:50]:
         if not isinstance(item, dict) or item.get("document_type") != "passport":
@@ -473,8 +477,8 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
             '<article class="boundary-card status-card status-amber">'
             '<h3>护照</h3>'
             f'<p><b>材料角色：</b>{escape(passport_role_labels.get(str(item.get("subject_role") or "unknown"), "角色未知"))}</p>'
-            f'<p><b>签发国家/地区：</b>{escape(country_or_region)}</p>'
-            f'<p><b>可读性：</b>{escape(passport_readability_labels.get(readability, "unknown"))}</p>'
+            f'<p><b>签发国家/地区：</b>{escape("未知" if country_or_region == "unknown" else country_or_region)}</p>'
+            f'<p><b>可读性：</b>{escape(passport_readability_labels.get(readability, "未知"))}</p>'
             f'<p><b>点击回看：</b>{evidence_links([item.get("image_index")])}</p>'
             '<p>仅作视觉/OCR 初审并参与身份、年龄和监护关系一致性比较；不替代身份证必交项，不代表权威验真。</p>'
             '</article>'

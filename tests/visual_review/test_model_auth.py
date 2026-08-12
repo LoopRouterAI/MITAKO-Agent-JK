@@ -112,10 +112,10 @@ class ModelAuthTest(unittest.TestCase):
             channels = gemini_channels()
             options = gemini_request_options({"model": "gemini-3.5-flash-lite"})
 
-        self.assertEqual([item["channel"] for item in channels], ["bananarouter", "baidu", "apiyi", "official"])
-        self.assertEqual([item["channel"] for item in options], ["bananarouter", "baidu", "apiyi", "official"])
-        self.assertEqual(channels[0]["headers"]["Authorization"], "Bearer banana-secret")
-        self.assertNotIn("x-goog-api-key", channels[0]["headers"])
+        self.assertEqual([item["channel"] for item in channels], ["baidu", "bananarouter", "apiyi", "official"])
+        self.assertEqual([item["channel"] for item in options], ["baidu", "bananarouter", "apiyi", "official"])
+        self.assertEqual(channels[1]["headers"]["Authorization"], "Bearer banana-secret")
+        self.assertNotIn("x-goog-api-key", channels[1]["headers"])
         self.assertEqual(channels[2]["headers"]["Authorization"], "Bearer apiyi-secret")
         self.assertNotIn("x-goog-api-key", channels[2]["headers"])
 
@@ -190,7 +190,7 @@ class ModelAuthTest(unittest.TestCase):
         }
         with patch.dict("os.environ", {**legacy, **explicit}, clear=True):
             options = gemini_channel_options()
-        self.assertEqual([item["channel"] for item in options], ["bananarouter", "baidu", "apiyi", "official"])
+        self.assertEqual([item["channel"] for item in options], ["baidu", "bananarouter", "apiyi", "official"])
 
         with patch.dict("os.environ", legacy, clear=True):
             fallback = gemini_channel_options()
@@ -239,7 +239,7 @@ class ModelAuthTest(unittest.TestCase):
         }
         with patch.dict("os.environ", env, clear=True):
             options = gemini_channel_options()
-        self.assertEqual([item["channel"] for item in options], ["bananarouter", "baidu", "apiyi", "official"])
+        self.assertEqual([item["channel"] for item in options], ["baidu", "bananarouter", "apiyi", "official"])
 
     def test_unknown_shared_base_remains_single_legacy_fallback(self):
         from poc.visual_review_poc.model_auth import gemini_channel_options
@@ -498,7 +498,7 @@ class ModelAuthTest(unittest.TestCase):
         schema = payload["generationConfig"]["responseSchema"]
         self.assertEqual(set(schema["required"]), {"result", "sealed_start", "evidence_refs", "reason"})
         self.assertNotIn("frame_findings", schema["properties"])
-        self.assertEqual(payload["generationConfig"]["maxOutputTokens"], 1024)
+        self.assertNotIn("maxOutputTokens", payload["generationConfig"])
 
     def test_minor_material_modes_use_dedicated_compact_schemas(self):
         from poc.visual_review_poc.model_selection_e2e import gemini_payload
@@ -523,7 +523,7 @@ class ModelAuthTest(unittest.TestCase):
                 schema = payload["generationConfig"]["responseSchema"]
                 self.assertTrue(fields.issubset(schema["properties"]))
                 self.assertNotIn("frame_findings", schema["properties"])
-                self.assertLessEqual(payload["generationConfig"]["maxOutputTokens"], 4096)
+                self.assertNotIn("maxOutputTokens", payload["generationConfig"])
 
     def test_gemini_payload_can_reference_baidu_public_video_url(self):
         from poc.visual_review_poc.model_selection_e2e import gemini_payload

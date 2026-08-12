@@ -14,6 +14,7 @@ from poc.visual_review_poc.report_renderer import (
     safe_agent_conclusion,
     safe_agent_next_step,
 )
+from poc.visual_review_poc.report_evidence import _merge_evidence_items, _summary_evidence_items
 from poc.visual_review_poc.workbench_server import _public_agent_report_payload
 
 
@@ -257,6 +258,126 @@ def _report_data():
 
 
 class ReportEvidenceRenderingTest(unittest.TestCase):
+    def test_summary_evidence_prioritizes_issue_and_merges_same_video_moment(self):
+        parsed = {
+            "adopted_evidence": [
+                {"video_index": 1, "timestamp": "00:00", "visible_facts": "封箱起拍"},
+            ],
+            "evidence_refs": [
+                {"field": "sealed_start", "asset_ref": "native_video_1", "timestamp": "00:00", "fact": "封箱起拍"},
+                {"field": "waybill_visible", "asset_ref": "native_video_1", "timestamp": "00:00", "fact": "面单可见"},
+                {"field": "issue_visible", "asset_ref": "native_video_1", "timestamp": "01:55", "fact": "划痕清晰可见"},
+                {"field": "claimed_item", "asset_ref": "native_video_1", "timestamp": "01:50", "fact": "争议商品出现"},
+            ],
+        }
+
+        items = _summary_evidence_items(parsed)
+
+        self.assertEqual(items[0]["field"], "issue_visible")
+        self.assertEqual(items[0]["timestamp"], "01:55")
+        self.assertEqual(items[1]["field"], "claimed_item")
+        opening = next(item for item in items if item.get("timestamp") == "00:00")
+        self.assertEqual(opening["fact"], "封箱起拍；面单可见")
+        self.assertEqual(len([item for item in items if item.get("timestamp") == "00:00"]), 1)
+
+    def test_detailed_evidence_merges_same_video_moment_without_double_punctuation(self):
+        items = _merge_evidence_items([
+            {"field": "sealed_start", "asset_ref": "native_video_1", "timestamp": "00:00", "fact": "封箱起拍。"},
+            {"field": "waybill_visible", "asset_ref": "native_video_1", "timestamp": "00:00", "fact": "面单可见"},
+        ])
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["fact"], "封箱起拍；面单可见")
+
+    def test_report_renders_customer_nine_field_video_checklist(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed.update({
+            "all_items_shown": True,
+            "continuous": True,
+            "has_edit": False,
+            "has_offscreen": False,
+            "has_speed_change": None,
+            "issue_visible": True,
+            "overall_video_result": "indeterminate",
+            "sealed_start": True,
+            "waybill_visible": True,
+        })
+
+        report_html = render_public_report(data)
+
+        self.assertIn("开箱视频九项核对", report_html)
+        for label in (
+            "相关商品是否全部展示",
+            "关键过程是否连续",
+            "是否存在剪辑",
+            "商品是否离开画面",
+            "是否存在变速",
+            "投诉问题是否清晰可见",
+            "视频综合结论",
+            "是否封箱起拍",
+            "面单是否可见",
+        ):
+            self.assertIn(label, report_html)
+        self.assertIn("<td>待确认</td>", report_html)
+        self.assertIn("<td>否</td>", report_html)
+        self.assertNotIn("<td>不符合</td>", report_html)
+
+    def test_report_highlights_severe_quality_issue_and_field_evidence_confidence(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed.update({
+            "all_items_shown": True,
+            "continuous": True,
+            "has_edit": False,
+            "has_offscreen": False,
+            "has_speed_change": None,
+            "issue_visible": True,
+            "overall_video_result": "compliant",
+            "sealed_start": True,
+            "waybill_visible": True,
+            "field_confidences": {
+                "all_items_shown": 0.88,
+                "continuous": 0.9,
+                "has_edit": 0.91,
+                "has_offscreen": 0.89,
+                "has_speed_change": 0.62,
+                "issue_visible": 0.92,
+                "sealed_start": 0.95,
+                "waybill_visible": 0.94,
+            },
+            "evidence_refs": [
+                {
+                    "field": "issue_visible",
+                    "asset_ref": "native_video_1",
+                    "timestamp": "02:19.00",
+                    "fact": "同一折痕在清晰近景中持续可见。",
+                },
+                {
+                    "field": "issue_visible",
+                    "asset_ref": "native_video_1",
+                    "timestamp": "02:23.00",
+                    "fact": "换角度后折痕仍然存在。",
+                },
+            ],
+            "damage_causality_assessment": {
+                "severity_assessment": {
+                    "level": "severe",
+                    "structural_failure": True,
+                    "reason": "主体结构断裂，影响正常展示。",
+                }
+            },
+        })
+
+        report_html = render_public_report(data)
+
+        self.assertIn("严重商品质量问题", report_html)
+        self.assertIn('class="severity-flag severity-yes"', report_html)
+        self.assertIn("<b>是</b>", report_html)
+        self.assertIn("<th>判断置信度</th>", report_html)
+        self.assertIn("92%", report_html)
+        self.assertIn("02:19.00、02:23.00", report_html)
+
     def test_video_continuity_uses_object_tracking_when_video_summary_omits_it(self):
         data = _report_data()
         parsed = data["agent_report"]["parsed"]
@@ -437,10 +558,10 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         report_html = render_public_report(data)
 
-        self.assertIn("按照 SOP 的审核倾向", report_html)
+        self.assertIn("先看结论和关键证据", report_html)
         self.assertIn("证据结论", report_html)
         self.assertIn("当前材料倾向支持用户诉求", report_html)
-        self.assertIn("建议进一步评估", report_html)
+        self.assertIn("复核重点", report_html)
         self.assertIn("建议抽检", report_html)
         self.assertIn("按甲方规则继续", report_html)
         self.assertIn("短暂离镜仅降低证据强度", report_html)
@@ -478,10 +599,10 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         report_html = render_public_report(data)
 
-        self.assertIn("客服证据优先级", report_html)
-        self.assertIn("先看什么", report_html)
-        self.assertIn("需要对齐的分歧", report_html)
-        self.assertIn("缺少的具体证据", report_html)
+        self.assertIn("复核顺序", report_html)
+        self.assertIn("优先核对", report_html)
+        self.assertIn("证据分歧", report_html)
+        self.assertIn("材料缺口", report_html)
         self.assertIn("关键证据存在冲突", report_html)
         self.assertIn("同一商品同一部位", report_html)
 
@@ -508,8 +629,8 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         report_html = render_public_report(_report_data())
 
         self.assertIn("客服审核摘要", report_html)
-        self.assertIn("为什么这样建议", report_html)
-        self.assertIn("客服下一步", report_html)
+        self.assertIn("判断依据", report_html)
+        self.assertIn("建议下一步", report_html)
         self.assertIn("关键证据", report_html)
         self.assertIn('<details class="panel technical-details">', report_html)
 
@@ -566,7 +687,12 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("开箱过程完整性", report_html)
         self.assertIn("商品证据连续性", report_html)
         self.assertIn("媒体技术取证", report_html)
-        self.assertIn("视频时间轴完整不等于争议商品全程连续可见", report_html)
+        self.assertIn(
+            '<p class="fine-print"><b>说明：</b>视频从头拍到尾，不代表争议商品一直在镜头里。',
+            report_html,
+        )
+        self.assertIn("系统会分别检查开箱过程、商品展示和文件异常", report_html)
+        self.assertNotIn("抽帧覆盖、媒体技术取证、开箱过程和商品连续性是四个独立维度", report_html)
         self.assertNotIn("requires_media_forensics", report_html)
         self.assertIn("SOP 规则判定说明", report_html)
         self.assertNotIn("MITAKO-PD-20260720@2", report_html)
@@ -644,7 +770,7 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("3.0 至 6.0 秒", report_html)
         self.assertIn("采样分辨率 2.0 秒", report_html)
 
-    def test_report_explains_orange_speed_signal_and_two_fps_escalation(self):
+    def test_report_explains_orange_speed_signal_without_dense_retry(self):
         data = _report_data()
         video = data["agent_report"]["parsed"]["video_audit_conclusion"]
         video.update({
@@ -656,18 +782,31 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
                 "affected_review_items": ["opening_action", "issue_first_visible"],
             },
         })
-        data["agent_report"]["parsed"]["decision_policy_audit"]["sampling_upgrade"] = {
-            "required": True,
-            "target_fps": 2.0,
-        }
-
         report_html = render_public_report(data)
 
         self.assertIn("橙色风险", report_html)
-        self.assertIn("当前 1 FPS 不足", report_html)
-        self.assertIn("2 FPS", report_html)
+        self.assertIn("请客服只回看对应原视频片段", report_html)
+        self.assertNotIn("2 FPS", report_html)
         self.assertIn("拆封动作", report_html)
         self.assertIn("伤情首次出现", report_html)
+
+    def test_report_keeps_unknown_speed_as_visible_yellow_signal(self):
+        data = _report_data()
+        video = data["agent_report"]["parsed"]["video_audit_conclusion"]
+        video.update({
+            "playback_speed": "unknown",
+            "sampling_fps": 4.0,
+            "speed_review_impact": {
+                "status": "uncertain",
+                "critical_evidence_observable": False,
+                "affected_review_items": ["claimed_item_continuity"],
+            },
+        })
+
+        report_html = render_public_report(data)
+
+        self.assertIn("无法可靠判断视频是否加速", report_html)
+        self.assertIn("请客服回看原视频", report_html)
 
     def test_report_lists_each_opening_video_requirement(self):
         data = _report_data()
@@ -686,6 +825,69 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("一镜到底连续拆封：</b>符合", report_html)
         self.assertIn("伤点在连续开箱中清晰展示：</b>不符合", report_html)
 
+    def test_report_highlights_initial_opening_video_evidence_without_fake_score(self):
+        data = _report_data()
+        data["agent_report"]["parsed"]["opening_video_evidence"] = {
+            "present": False,
+            "status": "yellow",
+            "confidence": 0.88,
+            "reason": "未从封箱状态连续记录到初次拆开包裹。",
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("初次开箱视频证据", report_html)
+        self.assertIn("黄标", report_html)
+        self.assertIn("88%", report_html)
+        self.assertIn("未从封箱状态连续记录到初次拆开包裹", report_html)
+        self.assertNotIn("0.82", report_html)
+
+    def test_report_renders_visible_facts_and_prioritizes_issue_evidence(self):
+        data = _report_data()
+        data["agent_report"]["parsed"]["adopted_evidence"] = [
+            {
+                "field": field,
+                "video_index": 1,
+                "timestamp": f"00:0{index}",
+                "visible_facts": fact,
+                "asset_ref": "native_video_1",
+            }
+            for index, (field, fact) in enumerate(
+                (
+                    ("sealed_start", "快递外箱封口未拆"),
+                    ("waybill_visible", "快递面单清晰可见"),
+                    ("continuous", "开箱过程一镜到底"),
+                    ("has_edit", "未发现剪辑痕迹"),
+                    ("has_offscreen", "商品展示期间未离镜"),
+                    ("has_speed_change", "视频速度无法可靠确认"),
+                    ("issue_visible", "02:25 可见文件夹表面划痕"),
+                )
+            )
+        ]
+
+        report_html = render_public_report(data)
+        key_evidence_html = report_html.split("<h3>关键证据</h3>", 1)[1]
+
+        self.assertIn("02:25 可见文件夹表面划痕", key_evidence_html)
+        self.assertNotIn("{'field':", key_evidence_html)
+        self.assertLess(
+            key_evidence_html.index("02:25 可见文件夹表面划痕"),
+            key_evidence_html.index("快递外箱封口未拆"),
+        )
+
+    def test_unknown_speed_uses_plain_small_print_limitation(self):
+        data = _report_data()
+        data["agent_report"]["parsed"]["video_audit_conclusion"].update({
+            "playback_speed": "unknown",
+            "sampling_fps": 1.0,
+            "speed_review_impact": {"status": "uncertain"},
+        })
+
+        report_html = render_public_report(data)
+
+        self.assertIn('class="fine-print speed-limit"', report_html)
+        self.assertIn("目前没有稳定方法确认原视频是否加速", report_html)
+
     def test_report_hides_opening_requirements_when_every_field_is_unknown(self):
         data = _report_data()
         data["agent_report"]["parsed"]["video_audit_conclusion"]["opening_video_compliance"] = {
@@ -700,7 +902,7 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         self.assertNotIn("主开箱视频硬要求", report_html)
 
-    def test_report_does_not_claim_two_fps_completed_for_one_fps_material_signal(self):
+    def test_report_does_not_require_two_fps_for_material_speed_signal(self):
         data = _report_data()
         data["agent_report"]["parsed"]["video_audit_conclusion"].update({
             "playback_speed": "accelerated",
@@ -710,8 +912,8 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         report_html = render_public_report(data)
 
-        self.assertIn("仍需 2 FPS", report_html)
-        self.assertNotIn("2 FPS 强化复核后仍无法判断", report_html)
+        self.assertIn("不把播放速度本身写成材料不合规", report_html)
+        self.assertNotIn("2 FPS", report_html)
 
     def test_report_does_not_assume_observable_when_speed_impact_is_missing(self):
         data = _report_data()
@@ -766,6 +968,199 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         )
         self.assertNotIn('/media/video-1-frame-7.jpg', ambiguous_timestamp)
         self.assertNotIn('/media/video-2-frame-7.jpg', ambiguous_timestamp)
+
+    def test_native_timestamp_evidence_links_to_original_video_without_raw_json(self):
+        gallery = {
+            "videos": [{"video_index": 1, "url": "/media/full-review.mp4"}],
+            "frames": [],
+        }
+        html = _evidence_items(
+            [{
+                "source_type": "video_frame",
+                "video_index": 1,
+                "timestamp": "00:12.50",
+                "visible_facts": [
+                    {"subject": "争议商品", "fact": "面具表面的红痕清晰可见"},
+                    {"subject": "快递外箱", "state": "封口完整"},
+                ],
+            }],
+            gallery,
+        )
+
+        self.assertIn("面具表面的红痕清晰可见", html)
+        self.assertIn("快递外箱：封口完整", html)
+        self.assertNotIn("{'subject'", html)
+        self.assertIn('data-preview-kind="video"', html)
+        self.assertIn('data-preview-seconds="12.500"', html)
+        self.assertIn('/media/full-review.mp4#t=12.500', html)
+
+    def test_report_humanizes_nested_summary_values_without_raw_structures(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed["overall_audit"]["core_reason"] = {
+            "subject": "争议商品",
+            "fact": "表面划痕在近景中可见。",
+            "debug": {"internal": True},
+        }
+        parsed["material_gaps"] = [{
+            "subject": "开箱视频",
+            "reason": "面单区域仍需回看。",
+            "internal_code": "RAW-GAP-01",
+        }]
+
+        html = render_public_report(data)
+
+        self.assertIn("争议商品：表面划痕在近景中可见。", html)
+        self.assertIn("开箱视频：面单区域仍需回看。", html)
+        self.assertNotIn("{'subject'", html)
+        self.assertNotIn("RAW-GAP-01", html)
+        self.assertNotIn("debug", html)
+
+    def test_report_omits_empty_score_and_duplicate_sop_summary(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed["confidence"] = None
+        parsed["overall_audit"]["confidence"] = None
+
+        html = render_public_report(data)
+
+        self.assertNotIn("证据分数 None", html)
+        self.assertNotIn("<small>证据分数</small>", html)
+        self.assertNotIn("<small>SOP 处理建议</small>", html)
+
+    def test_report_omits_empty_optional_sections(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed["material_gaps"] = []
+        parsed["challenging_evidence"] = []
+        parsed["frame_findings"] = []
+        parsed["issue_timestamps"] = []
+        data["agent_report"]["evidence_attention"] = {}
+
+        html = render_public_report(data)
+
+        self.assertNotIn("<h3>需要补什么</h3>", html)
+        self.assertNotIn("反证与可疑帧：未发现", html)
+        self.assertNotIn("问题时间点：未发现", html)
+        self.assertNotIn("查看其他风险信号", html)
+        self.assertIn('class="fine-print summary-boundary"', html)
+
+    def test_report_hides_empty_attention_columns_and_duplicate_reason(self):
+        data = _report_data()
+        report = data["agent_report"]
+        parsed = report["parsed"]
+        repeated_reason = "连续开箱画面已清楚展示伤点。"
+        report["advisory_assessment"] = {
+            "assessment": {
+                "conclusion_code": "evidence_supports_claim",
+                "conclusion": repeated_reason,
+                "confidence": 0.88,
+            },
+            "human_review": {"level": "not_required"},
+            "workflow_recommendation": "continue_by_customer_policy",
+            "evidence_attention": {
+                "level": "green",
+                "headline": "证据链可直接复核。",
+                "customer_focus": ["回看伤点首次清晰出现的时间点。"],
+                "disagreements": [],
+                "missing_evidence": [],
+            },
+            "policy": {},
+        }
+        parsed["overall_audit"]["core_reason"] = repeated_reason
+        parsed["confidence_reason"] = repeated_reason
+
+        html = render_public_report(data)
+
+        self.assertIn("88%", html)
+        self.assertNotIn("<small>证据分数</small><b>0.88</b>", html)
+        self.assertNotIn("<h4>证据分歧</h4>", html)
+        self.assertNotIn("<h4>材料缺口</h4>", html)
+        self.assertNotIn("<h3>判断依据</h3>", html)
+
+    def test_report_background_has_no_decorative_gradient_orbs(self):
+        html = render_public_report(_report_data())
+
+        self.assertNotIn("radial-gradient", html)
+
+    def test_restricted_share_report_explains_where_to_preview_original_video(self):
+        data = _report_data()
+        gallery = data["agent_report"]["media_gallery"]
+        gallery["restricted_original_evidence"] = True
+        for group in ("videos", "frames", "images"):
+            for item in gallery.get(group) or []:
+                item.pop("url", None)
+                item.pop("video_url", None)
+
+        html = render_public_report(data)
+
+        self.assertIn("脱敏分享页不包含原始素材", html)
+        self.assertIn("登录后的正式工单报告", html)
+        self.assertLess(html.index("脱敏分享页不包含原始素材"), html.index("展开完整技术分析"))
+
+    def test_header_only_shows_high_confidence_severe_quality_flag(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed["damage_causality_assessment"]["severity_assessment"] = {
+            "level": "severe",
+            "structural_failure": True,
+            "reason": "主体疑似断裂，但画面证据不足。",
+        }
+        parsed["field_confidences"] = {"issue_visible": 0.62}
+
+        low_confidence_html = render_public_report(data)
+        self.assertNotIn('class="severity-flag', low_confidence_html)
+
+        parsed["issue_visible"] = True
+        parsed["field_confidences"]["issue_visible"] = 0.91
+        high_confidence_html = render_public_report(data)
+        self.assertIn('class="severity-flag severity-yes"', high_confidence_html)
+
+        parsed["issue_visible"] = False
+        contradictory_html = render_public_report(data)
+        self.assertNotIn('class="severity-flag', contradictory_html)
+
+        parsed["issue_visible"] = True
+        parsed["damage_causality_assessment"]["severity_assessment"]["level"] = "minor"
+        non_severe_html = render_public_report(data)
+        self.assertNotIn('class="severity-flag', non_severe_html)
+
+    def test_header_uses_short_dynamic_verdict_instead_of_long_business_sentence(self):
+        data = _report_data()
+        assessment = {
+            "conclusion_code": "evidence_inconclusive",
+            "conclusion": "当前开箱视频中的目标部位过小，补充图片虽显示痕迹，但尚不能确认它与连续开箱中的同一商品和同一部位相对应。",
+        }
+        data["agent_report"]["advisory_assessment"] = {"assessment": assessment}
+
+        html = render_public_report(data)
+
+        self.assertIn("<h1>现有证据尚不足以判断</h1>", html)
+        self.assertIn(assessment["conclusion"], html)
+        self.assertNotIn(f'<h1>{assessment["conclusion"]}</h1>', html)
+
+    def test_compact_video_confidence_array_renders_nine_field_table(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed.update({
+            "all_items_shown": True,
+            "continuous": True,
+            "has_edit": False,
+            "has_offscreen": None,
+            "has_speed_change": None,
+            "issue_visible": True,
+            "overall_video_result": "indeterminate",
+            "sealed_start": True,
+            "waybill_visible": True,
+            "field_confidences": [0.81, 0.82, 0.83, 0.84, 0.85, 0.86, 0.87, 0.88],
+        })
+
+        html = render_public_report(data)
+
+        self.assertIn("相关商品是否全部展示", html)
+        self.assertIn("81%", html)
+        self.assertIn("投诉问题是否清晰可见", html)
+        self.assertIn("88%", html)
 
     def test_report_separates_official_reference_images_from_customer_evidence(self):
         data = _report_data()

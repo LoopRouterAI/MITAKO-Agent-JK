@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api/v1/private-domain", tags=["private-domain"])
 
 
 def _admin_user():
-    return require_roles(ADMIN_MUTATE_ROLES)
+    return require_roles(ADMIN_MUTATE_ROLES, require_tenant=True)
 
 
 def _customer_user(request: Request, user_id: str, session_id: str) -> Dict[str, Any]:
@@ -58,12 +58,12 @@ def _assert_review_task_access(request: Request, task: Dict[str, Any]) -> None:
         raise HTTPException(status_code=401, detail="review_task_token_required")
 
     role = user.get("role")
+    if role not in ADMIN_MUTATE_ROLES | {Role.CUSTOMER_USER.value, Role.HANDOFF_USER.value}:
+        raise HTTPException(status_code=403, detail="review_task_forbidden")
+    if not user.get("tenant_id") or user.get("tenant_id") != task.get("tenant_id"):
+        raise HTTPException(status_code=403, detail="review_task_tenant_mismatch")
     if role in ADMIN_MUTATE_ROLES:
         return
-    if role not in {Role.CUSTOMER_USER.value, Role.HANDOFF_USER.value}:
-        raise HTTPException(status_code=403, detail="review_task_forbidden")
-    if (user.get("tenant_id") or "mitako") != (task.get("tenant_id") or "mitako"):
-        raise HTTPException(status_code=403, detail="review_task_tenant_mismatch")
     if user.get("sub") != task.get("user_id"):
         raise HTTPException(status_code=403, detail="review_task_user_mismatch")
     if user.get("session_id") and user.get("session_id") != task.get("session_id"):
@@ -77,7 +77,7 @@ async def startup() -> None:
 
 @router.get("/dashboard", response_model=DashboardResponse)
 async def dashboard(user=_admin_user()):
-    return {"ok": True, **service.dashboard_payload()}
+    return {"ok": True, **service.dashboard_payload(tenant_id=user["tenant_id"])}
 
 
 @router.get("/contracts", response_model=ContractsResponse)
@@ -87,18 +87,23 @@ async def contracts(user=_admin_user()):
 
 @router.post("/demo/load", response_model=DemoLoadResponse)
 async def demo_load(user=_admin_user()):
-    return {"ok": True, **service.load_demo_data()}
+    return {"ok": True, **service.load_demo_data(tenant_id=user["tenant_id"])}
 
 
 @router.post("/demo/clear", response_model=DemoClearResponse)
 async def demo_clear(user=_admin_user()):
-    return {"ok": True, **service.clear_demo_data()}
+    return {"ok": True, **service.clear_demo_data(tenant_id=user["tenant_id"])}
 
 
 @router.post("/group-message", response_model=GroupMessageResponse)
 async def group_message(payload: GroupMessageIn, user=_admin_user()):
     try:
-        return {"ok": True, **service.process_group_message(payload.model_dump(exclude_none=True))}
+        return {
+            "ok": True,
+            **service.process_group_message(
+                payload.model_dump(exclude_none=True), tenant_id=user["tenant_id"]
+            ),
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -106,7 +111,12 @@ async def group_message(payload: GroupMessageIn, user=_admin_user()):
 @router.post("/product-event", response_model=ProductEventResponse)
 async def product_event(payload: ProductEventIn, user=_admin_user()):
     try:
-        return {"ok": True, **service.process_product_event(payload.model_dump(exclude_none=True))}
+        return {
+            "ok": True,
+            **service.process_product_event(
+                payload.model_dump(exclude_none=True), tenant_id=user["tenant_id"]
+            ),
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -193,7 +203,7 @@ async def review_task_list(
     user = _customer_user(request, user_id, session_id)
     tenant_id = user.get("tenant_id") or "mitako"
     tasks = [
-        task for task in store.list_review_tasks(limit=100)
+        task for task in store.list_review_tasks(limit=100, tenant_id=tenant_id)
         if task.get("user_id") == user_id
         and task.get("session_id") == session_id
         and (task.get("tenant_id") or "mitako") == tenant_id

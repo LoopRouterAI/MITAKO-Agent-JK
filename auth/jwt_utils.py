@@ -68,7 +68,7 @@ def create_token(
     role: str,
     agent_id: str = "",
     display_name: str = "",
-    tenant_id: str = "mitako",
+    tenant_id: str,
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
     extra: Optional[Dict[str, Any]] = None,
 ) -> str:
@@ -88,7 +88,7 @@ def create_token(
     return jwt.encode(payload, _secret(), algorithm=ALGORITHM)
 
 
-def create_handoff_user_token(*, session_id: str, user_id: str, tenant_id: str = "mitako") -> str:
+def create_handoff_user_token(*, session_id: str, user_id: str, tenant_id: str) -> str:
     from auth.roles import Role
 
     return create_token(

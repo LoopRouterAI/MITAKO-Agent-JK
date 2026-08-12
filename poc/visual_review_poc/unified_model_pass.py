@@ -25,35 +25,48 @@ def native_dimension_gaps(parsed: Dict[str, Any], scenario: str) -> List[str]:
         gaps.append("object_continuity")
     video_audit = parsed.get("video_audit_conclusion")
     opening = video_audit.get("opening_video_compliance") if isinstance(video_audit, dict) else None
-    hard_opening_fields = ("sealed_start", "waybill_visible", "single_take_continuity")
+    required_opening_fields = (
+        "sealed_start",
+        "waybill_visible",
+        "single_take_continuity",
+        "issue_visible_in_continuous_opening",
+    )
+    validated_fields = set(opening.get("validated_fields") or []) if isinstance(opening, dict) else set()
+    evidence_refs = opening.get("evidence_refs") or [] if isinstance(opening, dict) else []
+    evidenced_fields = {
+        str(ref.get("field") or "")
+        for ref in evidence_refs
+        if isinstance(ref, dict) and str(ref.get("timestamp") or "").strip()
+    }
     if (
         not isinstance(opening, dict)
         or not opening.get("result")
-        or not isinstance(opening.get("evidence_refs"), (dict, list))
-        or not all(isinstance(opening.get(field), bool) for field in hard_opening_fields)
-        or "issue_visible_in_continuous_opening" not in opening
+        or not isinstance(opening.get("evidence_refs"), list)
+        or not all(isinstance(opening.get(field), bool) for field in required_opening_fields)
+        or not set(required_opening_fields).issubset(validated_fields)
+        or not set(required_opening_fields).issubset(evidenced_fields)
     ):
         gaps.append("opening_video_compliance")
-    sealed_start_verified = (
-        isinstance(opening, dict)
-        and (opening.get("field_sources") or {}).get("sealed_start") == "opening_start_verification"
-        and "sealed_start" in (opening.get("validated_fields") or [])
-        and any(
-            isinstance(ref, dict)
-            and ref.get("field") == "sealed_start"
-            and ref.get("global_frame_index")
-            and ref.get("timestamp")
-            for ref in opening.get("evidence_refs") or []
-        )
-    )
-    if not sealed_start_verified:
-        gaps.append("opening_start_verification")
     unverified_hard_failure = isinstance(opening, dict) and any(
-        opening.get(field) is False and not (field == "sealed_start" and sealed_start_verified)
-        for field in hard_opening_fields
+        opening.get(field) is False
+        and (field not in validated_fields or field not in evidenced_fields)
+        for field in required_opening_fields
     )
     if unverified_hard_failure:
         gaps.append("opening_video_hard_failure_candidate")
+    validated_atomic_fields = set(
+        video_audit.get("validated_atomic_fields") or []
+    ) if isinstance(video_audit, dict) else set()
+    resolved_atomic_fields = {
+        field
+        for field in (
+            "sealed_start", "waybill_visible", "continuous", "has_edit",
+            "has_offscreen", "has_speed_change", "all_items_shown", "issue_visible",
+        )
+        if isinstance(parsed.get(field), bool)
+    }
+    if not resolved_atomic_fields.issubset(validated_atomic_fields):
+        gaps.append("atomic_video_field_evidence")
     if scenario == "product_damage":
         damage = parsed.get("damage_causality_assessment")
         if not isinstance(damage, dict) or not damage.get("damage_presence") or not damage.get("claim_support"):

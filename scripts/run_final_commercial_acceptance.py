@@ -39,7 +39,7 @@ CASES = (
             "review_0809_native_optimized_pd_latest.html",
             "review_0809_native_optimized_pd_stability_2.html",
         ),
-        "manual_baseline": "开箱视频不合格：偏离过久、商品未完整展示",
+        "manual_baseline": "主管终审：九字段合格，关键物品不离框，伤点可见",
     },
     {
         "case_id": "606669",
@@ -196,6 +196,13 @@ def case_summary(row: Dict[str, Any], json_name: str, html_name: str) -> Dict[st
     advisory = result.get("advisory_assessment") or review.get("advisory_assessment") or {}
     assessment = parsed(job)
     opening = ((assessment.get("video_audit_conclusion") or {}).get("opening_video_compliance") or {})
+    continuity = assessment.get("object_continuity_assessment") or {}
+    continuity_verdict = str(continuity.get("continuity_verdict") or "")
+    has_offscreen = (
+        True if continuity_verdict == "long_absence"
+        else False if continuity_verdict in {"continuous", "brief_occlusion"}
+        else None
+    )
     damage = assessment.get("damage_causality_assessment") or {}
     primary_video = ((damage.get("evidence_source_summary") or {}).get("primary_video") or {})
     return {
@@ -208,6 +215,7 @@ def case_summary(row: Dict[str, Any], json_name: str, html_name: str) -> Dict[st
         "material_gaps": assessment.get("material_gaps") or [],
         "opening_result": opening.get("result"),
         "issue_visible_in_continuous_opening": opening.get("issue_visible_in_continuous_opening"),
+        "has_offscreen": has_offscreen,
         "business_follow_up_reason": assessment.get("business_follow_up_reason") or "",
         "primary_claim_support": primary_video.get("claim_support"),
         "overall_conclusion": (assessment.get("overall_audit") or {}).get("conclusion") or "",
@@ -227,6 +235,33 @@ def damage_follow_up_consistent(item: Dict[str, Any]) -> bool:
     return item.get("primary_claim_support") == "insufficient" and not any(
         phrase in reason for phrase in contradictory
     )
+
+
+def build_commercial_checks(grouped: Dict[str, List[Dict[str, Any]]]) -> Dict[str, bool]:
+    return {
+        "all_jobs_succeeded": all(
+            item["status"] == "SUCCEEDED"
+            for items in grouped.values()
+            for item in items
+        ),
+        "598089_stable_manual_alignment": len(grouped["598089"]) == 2
+        and all(
+            item["predicted_label"] == "positive"
+            and item["opening_result"] == "compliant"
+            and item["issue_visible_in_continuous_opening"] is True
+            and item["has_offscreen"] is False
+            and not item["material_gaps"]
+            for item in grouped["598089"]
+        ),
+        "606669_negative_without_material_gap": grouped["606669"][0]["predicted_label"] == "negative"
+        and grouped["606669"][0]["opening_result"] == "noncompliant"
+        and damage_follow_up_consistent(grouped["606669"][0])
+        and not grouped["606669"][0]["material_gaps"],
+        "568689_warehouse_closed_without_human": grouped["568689"][0]["predicted_label"] == "negative"
+        and grouped["568689"][0]["human_review"] == "not_required"
+        and "确定未漏发" in grouped["568689"][0]["overall_conclusion"]
+        and not grouped["568689"][0]["material_gaps"],
+    }
 
 
 def export(client: httpx.Client, base_url: str, token: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -251,26 +286,7 @@ def export(client: httpx.Client, base_url: str, token: str, rows: List[Dict[str,
         (REPORT_DIR / html_name).write_text(report.text, encoding="utf-8")
         grouped.setdefault(case["case_id"], []).append(case_summary(row, json_name, html_name))
 
-    checks = {
-        "all_jobs_succeeded": all(item["status"] == "SUCCEEDED" for items in grouped.values() for item in items),
-        "598089_stable_manual_alignment": len(grouped["598089"]) == 2
-        and all(
-            item["predicted_label"] in {"negative", "review"}
-            and item["opening_result"] == "noncompliant"
-            and item["issue_visible_in_continuous_opening"] is False
-            and damage_follow_up_consistent(item)
-            and not item["material_gaps"]
-            for item in grouped["598089"]
-        ),
-        "606669_negative_without_material_gap": grouped["606669"][0]["predicted_label"] == "negative"
-        and grouped["606669"][0]["opening_result"] == "noncompliant"
-        and damage_follow_up_consistent(grouped["606669"][0])
-        and not grouped["606669"][0]["material_gaps"],
-        "568689_warehouse_closed_without_human": grouped["568689"][0]["predicted_label"] == "negative"
-        and grouped["568689"][0]["human_review"] == "not_required"
-        and "确定未漏发" in grouped["568689"][0]["overall_conclusion"]
-        and not grouped["568689"][0]["material_gaps"],
-    }
+    checks = build_commercial_checks(grouped)
     commercial = {
         "generated_at": datetime.now(CHINA_TZ).strftime("%Y-%m-%d %H:%M:%S %z"),
         "generator": "scripts/run_final_commercial_acceptance.py",

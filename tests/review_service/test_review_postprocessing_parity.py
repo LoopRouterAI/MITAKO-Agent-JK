@@ -135,6 +135,37 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
                     "opening_integrity": "complete",
                     "opening_integrity_source": "full_timeline_continuity",
                     "sampling_boundary_status": "covered",
+                    "opening_video_compliance": {
+                        "sealed_start": True,
+                        "waybill_visible": True,
+                        "single_take_continuity": True,
+                        "issue_visible_in_continuous_opening": False,
+                        "result": "noncompliant",
+                        "source": "native_video_perception",
+                        "validated_fields": [
+                            "sealed_start",
+                            "waybill_visible",
+                            "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        ],
+                        "evidence_refs": [
+                            {
+                                "field": field,
+                                "video_index": 1,
+                                "global_frame_index": index,
+                                "timestamp": f"00:0{index}.00",
+                            }
+                            for index, field in enumerate(
+                                (
+                                    "sealed_start",
+                                    "waybill_visible",
+                                    "single_take_continuity",
+                                    "issue_visible_in_continuous_opening",
+                                ),
+                                start=1,
+                            )
+                        ],
+                    },
                 },
                 "object_continuity_assessment": {
                     "continuity_verdict": "continuous",

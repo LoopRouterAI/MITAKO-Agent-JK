@@ -4,6 +4,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -50,6 +51,7 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     "status": "fallback_to_frames",
                     "technical_status": "success",
                     "dimension_gaps": ["opening_video_hard_failure_candidate"],
+                    "error_summary": "inlineData video is not accepted",
                     "opening_start_verification_status": "success",
                     "status_code": 200,
                     "file_uri": "https://private.example.com/video.mp4",
@@ -61,6 +63,10 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
         self.assertEqual(
             estimate["native_video"]["dimension_gaps"],
             ["opening_video_hard_failure_candidate"],
+        )
+        self.assertEqual(
+            estimate["native_video"]["error_summary"],
+            "inlineData video is not accepted",
         )
         self.assertNotIn("file_uri", estimate["native_video"])
 
@@ -219,6 +225,35 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
             "https://audit.example.com/media-item/opaque?expires=123&sig=abc",
         )
 
+    def test_large_native_video_prefers_original_signed_url_over_lossy_proxy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video = root / "evidence.mp4"
+            video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
+            with patch.object(
+                workbench_server, "NATIVE_INLINE_MEDIA_MAX_BYTES", 32
+            ), patch.dict(
+                "os.environ",
+                {"VISUAL_WORKBENCH_PUBLIC_BASE_URL": "https://audit.example.com"},
+                clear=False,
+            ), patch.object(
+                workbench_server,
+                "_media_url",
+                return_value="/media-item/opaque?expires=123&sig=abc",
+            ), patch.object(
+                workbench_server, "prepare_native_video_proxy"
+            ) as prepare_proxy:
+                source = workbench_server._native_video_source(
+                    video, root / "prepared"
+                )
+
+        prepare_proxy.assert_not_called()
+        self.assertEqual(
+            source["file_uri"],
+            "https://audit.example.com/media-item/opaque?expires=123&sig=abc",
+        )
+        self.assertNotIn("api_path", source)
+
     def test_large_native_video_without_approved_https_url_falls_back(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             video = Path(temp_dir) / "evidence.mp4"
@@ -247,6 +282,62 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
 
         self.assertEqual(source["api_path"], str(proxy))
         self.assertEqual(source["proxy"]["status"], "ready")
+
+    def test_high_bitrate_1080p_uses_smaller_quality_proxy_before_inline_original(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video = root / "evidence.mp4"
+            proxy = root / "proxy.mp4"
+            video.write_bytes(b"x" * 128)
+            proxy.write_bytes(b"y" * 64)
+            with patch.object(
+                workbench_server,
+                "NATIVE_INLINE_MEDIA_MAX_BYTES",
+                1024,
+            ), patch.object(
+                workbench_server,
+                "video_proxy_recommendation",
+                return_value={"recommended": True, "reasons": ["bitrate_above_6mbps"]},
+            ), patch.object(
+                workbench_server,
+                "prepare_native_video_proxy",
+                return_value={
+                    "status": "ready",
+                    "path": str(proxy),
+                    "mime_type": "video/mp4",
+                    "proxy_bytes": proxy.stat().st_size,
+                },
+            ):
+                source = workbench_server._native_video_source(video, root / "prepared")
+
+        self.assertEqual(source["api_path"], str(proxy))
+        self.assertEqual(
+            source["proxy"]["recommendation"]["reasons"],
+            ["bitrate_above_6mbps"],
+        )
+
+    def test_failed_quality_proxy_keeps_inline_original(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video = root / "evidence.mp4"
+            video.write_bytes(b"x" * 128)
+            with patch.object(
+                workbench_server,
+                "NATIVE_INLINE_MEDIA_MAX_BYTES",
+                1024,
+            ), patch.object(
+                workbench_server,
+                "video_proxy_recommendation",
+                return_value={"recommended": True, "reasons": ["bitrate_above_6mbps"]},
+            ), patch.object(
+                workbench_server,
+                "prepare_native_video_proxy",
+                return_value={"status": "failed", "error_type": "quality_budget_conflict"},
+            ):
+                source = workbench_server._native_video_source(video, root / "prepared")
+
+        self.assertEqual(source["api_path"], str(video))
+        self.assertNotIn("proxy", source)
 
     def test_auto_model_route_uses_configured_fallback_after_primary_transport_failure(self) -> None:
         failed = {
@@ -512,8 +603,17 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
         self.assertEqual(result["sampling"]["sampled_frames"], 905)
         self.assertEqual(result["sampling"]["model_segments"], 38)
 
-    def test_standard_profile_uses_native_video_plus_lightweight_opening_check(self) -> None:
+    def test_standard_profile_uses_one_complete_native_video_call(self) -> None:
         observed = {}
+
+        class Tunnel:
+            url = "https://unit-test.trycloudflare.com/media/token"
+            diagnostics = {"status": "ready"}
+
+        @contextmanager
+        def fake_tunnel(*_args, **_kwargs):
+            yield Tunnel()
+
         with tempfile.TemporaryDirectory() as temp_dir:
             video = Path(temp_dir) / "evidence.mp4"
             video.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"0" * 64)
@@ -549,7 +649,35 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                         "waybill_visible": True,
                         "single_take_continuity": True,
                         "issue_visible_in_continuous_opening": True,
-                        "evidence_refs": {},
+                        "evidence_refs": [
+                            {
+                                "field": field,
+                                "video_index": 1,
+                                "timestamp": "00:01.00",
+                                "visible_facts": "完整视频中的对应事实",
+                            }
+                            for field in (
+                                "sealed_start",
+                                "waybill_visible",
+                                "single_take_continuity",
+                                "issue_visible_in_continuous_opening",
+                            )
+                        ],
+                        "validated_fields": [
+                            "sealed_start",
+                            "waybill_visible",
+                            "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        ],
+                        "field_sources": {
+                            field: "native_full_video_perception"
+                            for field in (
+                                "sealed_start",
+                                "waybill_visible",
+                                "single_take_continuity",
+                                "issue_visible_in_continuous_opening",
+                            )
+                        },
                         "result": "compliant",
                     },
                 },
@@ -564,12 +692,18 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     "assembly": {},
                 },
             }
-            with patch.object(workbench_server, "load_visual_env"), patch.object(
+            with patch.dict(
+                "os.environ",
+                {"VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash"},
+                clear=False,
+            ), patch.object(workbench_server, "load_visual_env"), patch.object(
                 workbench_server, "load_case_bundle", side_effect=load_bundle
             ), patch.object(
                 workbench_server, "apply_frontdesk_context", side_effect=lambda current, *_: current
             ), patch.object(
                 workbench_server, "prepare_official_reference_images", side_effect=lambda current: current
+            ), patch.object(
+                workbench_server, "open_secure_media_tunnel", side_effect=fake_tunnel
             ), patch.object(
                 workbench_server, "call_model", return_value={"status": "success", "parsed": parsed}
             ) as native_model, patch.object(
@@ -615,14 +749,14 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                 )
 
         self.assertEqual(native_model.call_count, 1)
-        self.assertEqual(opening_model.call_count, 1)
-        self.assertEqual(compliance_model.call_count, 1)
+        self.assertEqual(opening_model.call_count, 0)
+        self.assertEqual(compliance_model.call_count, 0)
         self.assertEqual(chunked_model.call_count, 0)
-        self.assertEqual(observed["native_video"]["api_path"], str(video))
+        self.assertEqual(observed["native_video"]["file_uri"], Tunnel.url)
         self.assertEqual(result["sampling"]["sampling_mode"], "native_video")
         self.assertEqual(result["sampling"]["sampled_frames"], 2)
 
-    def test_native_fallback_keeps_verified_opening_start_evidence(self) -> None:
+    def test_incomplete_native_opening_is_preserved_without_frame_overwrite(self) -> None:
         captured = {}
         with tempfile.TemporaryDirectory() as temp_dir:
             video = Path(temp_dir) / "evidence.mp4"
@@ -651,27 +785,29 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     "video_audit_conclusion": {"opening_video_compliance": {"sealed_start": True}},
                 },
             }
-            frames = {
-                "status": "success",
-                "parsed": {
-                    "predicted_label": "positive",
-                    "confidence": 0.8,
-                    "video_audit_conclusion": {
-                        "opening_video_compliance": {
-                            "sealed_start": True,
-                            "waybill_visible": False,
-                            "single_take_continuity": True,
-                        },
-                    },
-                },
-                "chunking": {"total_model_calls": 1},
-            }
-
             def capture(_case, _sample_dir, result, *_args, **_kwargs):
                 captured["parsed"] = result["parsed"]
                 return {"summary": {"review_status": "completed"}, "agent_report": {}}
 
-            with patch.object(workbench_server, "load_visual_env"), patch.object(
+            fallback = {
+                "status": "success",
+                "parsed": {
+                    "predicted_label": "review",
+                    "video_audit_conclusion": {
+                        "opening_video_compliance": {
+                            "sealed_start": None,
+                            "waybill_visible": None,
+                            "single_take_continuity": None,
+                            "issue_visible_in_continuous_opening": None,
+                            "result": "indeterminate",
+                        }
+                    },
+                },
+            }
+
+            with patch.dict(
+                "os.environ", {"VISUAL_REVIEW_EPHEMERAL_TUNNEL": "0"}, clear=False
+            ), patch.object(workbench_server, "load_visual_env"), patch.object(
                 workbench_server, "load_case_bundle", side_effect=load_bundle
             ), patch.object(
                 workbench_server, "apply_frontdesk_context", side_effect=lambda current, *_: current
@@ -682,10 +818,7 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
             ), patch.object(
                 workbench_server,
                 "native_dimension_gaps",
-                side_effect=[
-                    ["opening_start_verification", "opening_video_hard_failure_candidate"],
-                    ["opening_video_hard_failure_candidate"],
-                ],
+                return_value=["opening_video_compliance"],
             ), patch.object(
                 workbench_server,
                 "call_opening_start_verification",
@@ -703,7 +836,37 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     },
                 },
             ), patch.object(
-                workbench_server, "_call_model_chunked_with_fallback", return_value=frames
+                workbench_server,
+                "call_opening_compliance_verification",
+                return_value={
+                    "status": "success",
+                    "parsed": {
+                        "sealed_start": True,
+                        "waybill_visible": False,
+                        "single_take_continuity": True,
+                        "issue_visible_in_continuous_opening": True,
+                        "evidence_refs": [
+                            {
+                                "field": field,
+                                "video_index": 1,
+                                "global_frame_index": 2,
+                            }
+                            for field in (
+                                "waybill_visible",
+                                "single_take_continuity",
+                                "issue_visible_in_continuous_opening",
+                            )
+                        ],
+                    },
+                },
+            ) as compliance_model, patch.object(
+                workbench_server,
+                "_call_model_chunked_with_fallback",
+                return_value=fallback,
+            ) as frame_pipeline, patch.object(
+                workbench_server,
+                "merge_opening_compliance_verification",
+                wraps=workbench_server.merge_opening_compliance_verification,
             ), patch.object(
                 workbench_server, "_agent_report_response", side_effect=capture
             ):
@@ -712,8 +875,58 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                 )
 
         opening = captured["parsed"]["video_audit_conclusion"]["opening_video_compliance"]
-        self.assertIs(opening["sealed_start"], False)
-        self.assertEqual(opening["field_sources"]["sealed_start"], "opening_start_verification")
+        self.assertEqual(compliance_model.call_count, 0)
+        self.assertEqual(frame_pipeline.call_count, 0)
+        self.assertIsNone(opening["sealed_start"])
+        self.assertIsNone(opening["waybill_visible"])
+
+    def test_verified_hard_opening_failure_is_not_a_native_dimension_gap(self) -> None:
+        gaps = workbench_server.native_dimension_gaps(
+            {
+                "overall_audit": {"conclusion": "面单未清晰展示，开箱视频不合格。"},
+                "frame_findings": [{"timestamp": "00:01.00", "visible_facts": "开始拆箱"}],
+                "object_continuity_assessment": {
+                    "continuity_verdict": "continuous",
+                    "tracked_subjects": [{"subject_id": "claimed_item"}],
+                },
+                "video_audit_conclusion": {
+                    "opening_video_compliance": {
+                        "result": "noncompliant",
+                        "sealed_start": True,
+                        "waybill_visible": False,
+                        "single_take_continuity": True,
+                        "issue_visible_in_continuous_opening": True,
+                        "validated_fields": [
+                            "sealed_start",
+                            "waybill_visible",
+                            "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        ],
+                        "field_sources": {
+                            "sealed_start": "opening_start_verification",
+                            "waybill_visible": "opening_compliance_verification",
+                        },
+                        "evidence_refs": [
+                            {"field": "sealed_start", "video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"},
+                            {"field": "waybill_visible", "video_index": 1, "global_frame_index": 2, "timestamp": "00:01.00"},
+                        ],
+                    },
+                },
+                "damage_causality_assessment": {
+                    "damage_presence": "confirmed",
+                    "claim_support": "supported",
+                },
+                "claim_fact_assessment": {
+                    "atomic_claim_results": [],
+                    "order_linkage": {},
+                    "scene_match": {},
+                    "assembly": {},
+                },
+            },
+            "product_damage",
+        )
+
+        self.assertNotIn("opening_video_hard_failure_candidate", gaps)
 
     def test_standard_profile_keeps_distinct_multi_video_case_on_frame_path(self) -> None:
         observed_modes = []
@@ -735,7 +948,9 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     "structured_business_context": {},
                 }
 
-            with patch.object(workbench_server, "load_visual_env"), patch.object(
+            with patch.dict(
+                "os.environ", {"VISUAL_REVIEW_EPHEMERAL_TUNNEL": "0"}, clear=False
+            ), patch.object(workbench_server, "load_visual_env"), patch.object(
                 workbench_server, "load_case_bundle", side_effect=load_bundle
             ), patch.object(
                 workbench_server, "apply_frontdesk_context", side_effect=lambda current, *_: current
@@ -855,7 +1070,7 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
         self.assertEqual(opening["result"], "noncompliant")
         self.assertEqual(captured["result"]["chunking"]["total_model_calls"], 3)
 
-    def test_standard_profile_falls_back_to_frames_when_native_output_is_incomplete(self) -> None:
+    def test_standard_profile_keeps_incomplete_native_output_for_review(self) -> None:
         observed_modes = []
         observed_rule_versions = []
         published_version = {"value": 0}
@@ -893,7 +1108,9 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     "chunking": {"total_model_calls": 2},
                 }
 
-            with patch.object(workbench_server, "load_visual_env"), patch.object(
+            with patch.dict(
+                "os.environ", {"VISUAL_REVIEW_EPHEMERAL_TUNNEL": "0"}, clear=False
+            ), patch.object(workbench_server, "load_visual_env"), patch.object(
                 workbench_server, "load_case_bundle", side_effect=load_bundle
             ), patch.object(
                 workbench_server, "apply_frontdesk_context", side_effect=lambda current, *_: current
@@ -926,12 +1143,11 @@ class WorkbenchStrongProfileTest(unittest.TestCase):
                     requested_model_key="gemini31lite",
                 )
 
-        self.assertEqual(observed_modes, ["native", "frames"])
-        self.assertEqual(observed_rule_versions, [1, 1])
+        self.assertEqual(observed_modes, ["native"])
+        self.assertEqual(observed_rule_versions, [1])
         self.assertEqual(published_version["value"], 1)
-        self.assertEqual(chunked_model.call_count, 1)
-        self.assertEqual(chunked_model.call_args.args[0]["model"], workbench_server.MODEL_CONFIGS["gemini31lite"]["model"])
-        self.assertEqual(result["sampling"]["sampling_mode"], "adaptive")
+        self.assertEqual(chunked_model.call_count, 0)
+        self.assertEqual(result["sampling"]["sampling_mode"], "native_video")
 
     def test_standard_profile_uses_bounded_adaptive_sampling(self) -> None:
         observed = {}

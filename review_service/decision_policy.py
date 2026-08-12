@@ -7,11 +7,54 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 from poc.visual_review_poc.object_continuity import subject_longest_out_of_frame
 
 
-DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-PD-ADVISORY@20260806.1"
+DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-PD-ADVISORY@20260811.2"
 
 
 APPROVED_POLICY_SNAPSHOTS: Dict[Any, Dict[str, Any]] = {
     ("mitako", DEFAULT_PRODUCT_DAMAGE_POLICY_REF): {
+        "mode": "classification_recommendation",
+        "recommendation_gate_mode": "core_sop",
+        "opening_video_required": True,
+        "missing_required_opening_video": "negative",
+        "noncompliant_opening_video": "negative",
+        "direct_customer_damage": "negative",
+        "extreme_visible_damage_without_opening": "positive",
+        "confirmed_visible_damage": "positive",
+        "complete_video_no_claimed_damage": "negative",
+        "require_claim_scope": True,
+        "minimum_visibility_coverage": 0.7,
+        "minimum_required_view_coverage": 0.6,
+        "minimum_confidence": 0.65,
+        "require_continuity_complete": False,
+        "require_fully_observable": False,
+        "require_claimed_region_closeup": False,
+        "require_same_item_linkage": False,
+        "require_media_forensics": False,
+        "maximum_forensic_risk": "medium",
+        "max_unobserved_seconds": 3.0,
+    },
+    ("mitako", "MITAKO-PD-ADVISORY@20260811.1"): {
+        "mode": "classification_recommendation",
+        "recommendation_gate_mode": "core_sop",
+        "opening_video_required": True,
+        "missing_required_opening_video": "negative",
+        "noncompliant_opening_video": "negative",
+        "direct_customer_damage": "negative",
+        "confirmed_visible_damage": "positive",
+        "complete_video_no_claimed_damage": "negative",
+        "require_claim_scope": True,
+        "minimum_visibility_coverage": 0.7,
+        "minimum_required_view_coverage": 0.6,
+        "minimum_confidence": 0.65,
+        "require_continuity_complete": False,
+        "require_fully_observable": False,
+        "require_claimed_region_closeup": False,
+        "require_same_item_linkage": False,
+        "require_media_forensics": False,
+        "maximum_forensic_risk": "medium",
+        "max_unobserved_seconds": 3.0,
+    },
+    ("mitako", "MITAKO-PD-ADVISORY@20260806.1"): {
         "mode": "classification_recommendation",
         "recommendation_gate_mode": "core_sop",
         "opening_video_required": False,
@@ -590,6 +633,38 @@ def apply_review_decision_policy(
         and supplemental_count > 0
         and supplemental_referenced > 0
     )
+    severity = _dict(damage.get("severity_assessment"))
+    extreme_structural_damage = (
+        not has_video
+        and policy.get("extreme_visible_damage_without_opening") == "positive"
+        and supplemental_damage_confirmed
+        and damage.get("damage_presence") == "confirmed"
+        and damage.get("business_defect_qualification") == "confirmed"
+        and severity.get("level") == "extreme"
+        and severity.get("structural_failure") is True
+        and order_linkage.get("status") == "verified"
+        and observability.get("same_item_linkage") is True
+        and observability.get("conflicting_evidence") is False
+        and forensics.get("status") == "completed"
+        and str(forensic_summary.get("risk_level") or "unknown") in {"none", "low", "medium"}
+        and model_confidence >= 0.8
+    )
+    if extreme_structural_damage:
+        audit.update({
+            "applied": True,
+            "rule_id": "PD-P-EXTREME-VISIBLE-DAMAGE-WITHOUT-OPENING",
+            "reason": (
+                "现有清晰材料确认争议商品存在极重结构性损坏，且订单、同物与真实性核验均无冲突；"
+                "即使缺少开箱视频，当前证据也倾向跟进处理。损伤存在已确认，成因未确认。"
+            ),
+        })
+        audit["evidence_gate"].update({
+            "severity_level": severity.get("level"),
+            "structural_failure": True,
+            "same_item_linkage": True,
+            "business_defect_qualification": "confirmed",
+        })
+        return _apply_positive(output, audit, model_confidence)
     if (
         not has_video
         and policy.get("verified_supplemental_damage") == "positive"
@@ -722,54 +797,41 @@ def apply_review_decision_policy(
         })
         return _apply_negative(output, audit, model_confidence)
 
-    if (
-        is_current_advisory
-        and video_audit.get("playback_speed") == "accelerated"
-        and speed_status in {"uncertain", "material"}
-        and sampling_fps < 2.0
-    ):
+    native_overall_result = str(parsed.get("overall_video_result") or "").strip().lower()
+    native_timeline = video_audit.get("technical_timeline_status") == "native_full_video"
+    if is_current_advisory and native_timeline and native_overall_result == "noncompliant":
         audit.update({
             "applied": True,
-            "rule_id": "PD-R-SPEED-REVIEW-NEEDS-DENSE-SCAN",
-            "reason": "疑似加速使关键审核节点在当前抽帧密度下无法判断，需受控提升到 2 FPS 强化复核；加速本身不构成不合规或用户责任。",
-            "sampling_upgrade": {"required": True, "target_fps": 2.0, "bounded": True},
+            "rule_id": "PD-N-NATIVE-VIDEO-NONCOMPLIANT",
+            "reason": "完整原生视频九项核对已确定存在硬门槛失败，后续伤点或补充图片不能覆盖该不合格结论。",
         })
-        audit["evidence_gate"].update({
-            "playback_speed": "accelerated",
-            "sampling_fps": sampling_fps,
-            "speed_review_impact": speed_status,
-            "affected_review_items": speed_impact.get("affected_review_items") or [],
-        })
-        return _apply_review(output, audit, min(model_confidence, 0.69))
-    if (
-        is_current_advisory
-        and video_audit.get("playback_speed") == "accelerated"
-        and speed_status == "material"
-        and sampling_fps >= 2.0
-        and bool(speed_impact.get("evidence_refs"))
-    ):
-        audit.update({
-            "applied": True,
-            "rule_id": "PD-N-SPEED-MATERIAL-IMPACT",
-            "reason": "疑似加速视频经 2 FPS 强化复核后，封箱、面单、连续拆封或伤情首次出现等关键节点仍不可判断，当前开箱材料不合规。",
-        })
-        audit["evidence_gate"].update({
-            "playback_speed": "accelerated",
-            "sampling_fps": sampling_fps,
-            "speed_review_impact": speed_status,
-            "affected_review_items": speed_impact.get("affected_review_items") or [],
-        })
+        audit["evidence_gate"]["overall_video_result"] = native_overall_result
         return _apply_negative(output, audit, model_confidence)
+    if is_current_advisory and native_timeline and native_overall_result == "indeterminate":
+        audit.update({
+            "applied": True,
+            "rule_id": "PD-R-NATIVE-VIDEO-INDETERMINATE",
+            "reason": "完整原生视频仍有开箱、商品身份、伤点或速度影响无法确认，保留黄色复核，不允许由后续规则直接转为支持。",
+        })
+        audit["evidence_gate"]["overall_video_result"] = native_overall_result
+        return _apply_review(output, audit, min(model_confidence, 0.69))
+
     if (
         is_current_advisory
-        and video_audit.get("playback_speed") == "accelerated"
-        and speed_status == "material"
-        and sampling_fps >= 2.0
+        and video_audit.get("playback_speed") in {"accelerated", "unknown"}
+        and speed_status in {"uncertain", "material"}
+        and speed_impact.get("critical_evidence_observable") is not True
     ):
         audit.update({
             "applied": True,
-            "rule_id": "PD-R-SPEED-EVIDENCE-UNVERIFIED",
-            "reason": "模型报告速度已产生实质影响，但缺少可回链的视频帧和时间戳，不能据此形成开箱不合规结论。",
+            "rule_id": "PD-R-SPEED-UNRESOLVED",
+            "reason": "视频速度无法可靠确认，且当前证据不足以判断受影响的关键节点；保留黄色复核，不因速度本身判负，也不强制提高抽帧密度。",
+        })
+        audit["evidence_gate"].update({
+            "playback_speed": video_audit.get("playback_speed"),
+            "sampling_fps": sampling_fps,
+            "speed_review_impact": speed_status,
+            "affected_review_items": speed_impact.get("affected_review_items") or [],
         })
         return _apply_review(output, audit, min(model_confidence, 0.69))
 
@@ -914,6 +976,49 @@ def apply_review_decision_policy(
             "rule_id": "PD-R-SPECIAL-PRODUCT-DEFECT-UNRESOLVED",
             "reason": "已观察到特殊商品外观差异，但缺少可执行的商品缺陷标准，不能把材质、工艺或形态差异直接认定为业务缺陷。",
         })
+        return _apply_review(output, audit, min(model_confidence, 0.69))
+
+    structural_opening_fields = {
+        "sealed_start",
+        "waybill_visible",
+        "single_take_continuity",
+    }
+    required_opening_fields = structural_opening_fields | {
+        "issue_visible_in_continuous_opening",
+    }
+    opening_gate_resolved = (
+        opening_compliance.get("result") in {"compliant", "noncompliant"}
+        and all(opening_compliance.get(field) is True for field in structural_opening_fields)
+        and isinstance(opening_compliance.get("issue_visible_in_continuous_opening"), bool)
+        and required_opening_fields.issubset(validated_opening_fields)
+        and all(
+            _opening_field_has_reference(opening_compliance, field)
+            for field in required_opening_fields
+        )
+    )
+    if (
+        is_current_advisory
+        and has_video
+        and policy.get("opening_video_required") is True
+        and not opening_gate_resolved
+    ):
+        audit.update({
+            "applied": True,
+            "rule_id": "PD-R-OPENING-GATE-INDETERMINATE",
+            "reason": (
+                "商品有伤必须先通过开箱视频门槛；当前封箱起始、面单、连续拆封或伤点展示"
+                "仍有字段未确认或无法回链，不能仅凭后补图片或孤立伤点转为支持。"
+            ),
+        })
+        audit["evidence_gate"].update({
+            "opening_complete": False,
+            "opening_video_compliance": opening_compliance,
+            "opening_validated_fields": sorted(validated_opening_fields),
+        })
+        if opening_compliance.get("result") == "noncompliant":
+            _normalize_noncompliant_opening_damage(output_parsed, opening_compliance)
+            output_agent_report["parsed"] = output_parsed
+            output["agent_report"] = output_agent_report
         return _apply_review(output, audit, min(model_confidence, 0.69))
 
     main_damage_confirmed = (

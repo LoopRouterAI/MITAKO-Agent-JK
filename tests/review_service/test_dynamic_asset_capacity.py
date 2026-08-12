@@ -260,6 +260,51 @@ class DynamicAssetCapacityTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retried["status"], "RETRYING")
         self.assertIsNone(rejected)
 
+    def test_stale_worker_cannot_overwrite_newer_review_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            store, "DB_PATH", Path(temp_dir) / "review.sqlite3"
+        ):
+            job = store.create_job(
+                {
+                    "job_id": "RJ-FENCING",
+                    "tenant_id": "mitako",
+                    "client_case_id": "CASE-FENCING",
+                    "idempotency_key": "",
+                    "scenario": "product_damage",
+                    "metadata": {},
+                    "assets": [],
+                },
+                "hash-fencing",
+            )
+            self.assertTrue(store.claim_job(job["job_id"], 60))
+            stale_attempt = int((store.get_job(job["job_id"]) or {})["attempts"])
+            with store._connect() as conn:
+                conn.execute(
+                    "UPDATE review_jobs SET lease_until=0 WHERE job_id=?",
+                    (job["job_id"],),
+                )
+            self.assertIn(job["job_id"], store.recover_incomplete())
+            self.assertTrue(store.claim_job(job["job_id"], 60))
+            current_attempt = int((store.get_job(job["job_id"]) or {})["attempts"])
+
+            stale_result = store.finish_job(
+                job["job_id"],
+                status="SUCCEEDED",
+                result={"worker": "stale"},
+                diagnostics={},
+                expected_attempts=stale_attempt,
+            )
+            accepted_result = store.finish_job(
+                job["job_id"],
+                status="SUCCEEDED",
+                result={"worker": "current"},
+                diagnostics={},
+                expected_attempts=current_attempt,
+            )
+
+        self.assertEqual(stale_result["status"], "RUNNING")
+        self.assertEqual(accepted_result["result"], {"worker": "current"})
+
 
 if __name__ == "__main__":
     unittest.main()

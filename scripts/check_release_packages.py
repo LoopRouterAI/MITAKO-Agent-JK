@@ -148,6 +148,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "我方内部开发文档/升级日志-2026-08-06-四场景与五类材料闭环.md",
         "我方内部开发文档/升级日志-2026-08-07-黄金指南与速度影响闭环.md",
         "我方内部开发文档/代码审查与商业验收报告-2026-08-09.md",
+        "甲方沟通交付文档/0812视频审核业务理解与模型路线验收说明.html",
         "甲方沟通交付文档/0809四场景业务理解与审核能力验收说明.html",
         "tests/reports/review_0809_commercial_acceptance_latest.json",
         "docs/delivery/mitako-0807-guide-acceptance-20260807.html",
@@ -242,6 +243,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/openapi.yaml",
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
+        "甲方沟通交付文档/0812视频审核业务理解与模型路线验收说明.html",
         "甲方沟通交付文档/0809四场景业务理解与审核能力验收说明.html",
         "甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html",
         "docs/delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
@@ -302,6 +304,23 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(any(name.endswith("advisory_assessment.pyc") for name in runtime_names), "甲方运行时缺少统一审核建议模块")
     _assert(any(name.endswith("model_auth.pyc") for name in runtime_names), "甲方运行时缺少模型认证适配模块")
     _assert(any(name.endswith("observability.pyc") for name in runtime_names), "甲方运行时缺少视觉调用可观测模块")
+    _assert(any(name.endswith("native_video_perception.pyc") for name in runtime_names), "甲方运行时缺少原生视频感知模块")
+    _assert(any(name.endswith("secure_media_tunnel.pyc") for name in runtime_names), "甲方运行时缺少安全媒体隧道模块")
+    _assert(any(name.endswith("report_assets.pyc") for name in runtime_names), "甲方运行时缺少报告静态资源模块")
+    _assert(any(name.endswith("report_evidence.pyc") for name in runtime_names), "甲方运行时缺少报告证据回链模块")
+    _assert(
+        any(name.endswith("internal_review_ledger.pyc") for name in runtime_names),
+        "customer runtime is missing the persistent review request ledger",
+    )
+    installer = (root / "install-runtime-windows.bat").read_text(encoding="utf-8-sig")
+    _assert(
+        "imageio-ffmpeg" in installer and "imageio_ffmpeg" in installer,
+        "customer runtime installer is missing video transcoding support",
+    )
+    _assert(
+        "Cloudflare.cloudflared" in installer,
+        "customer runtime installer is missing secure large-video tunnel support",
+    )
     workbench_html = (root / "visual_review_workbench" / "workbench.html").read_text(encoding="utf-8-sig")
     _assert("/api/review-folders-batch" in workbench_html and "batchFolderTab" in workbench_html, "甲方工作台缺少批量工单入口")
     return {"entries": len(names), "runtime_entries": len(runtime_names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}

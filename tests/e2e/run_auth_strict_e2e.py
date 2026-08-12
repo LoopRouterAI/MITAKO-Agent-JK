@@ -146,7 +146,7 @@ async def run_auth_strict_suite() -> list[CaseResult]:
 
         # 有效 token → 200
         t0 = time.time()
-        lr = await client.post(f"{base}/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+        lr = await client.post(f"{base}/api/v1/auth/login", json={"username": "admin", "password": "admin123", "tenant_id": "mitako"})
         token = lr.json().get("token", "")
         headers = {"Authorization": f"Bearer {token}"}
         ar = await client.get(f"{base}/api/v1/admin/agents", headers=headers)

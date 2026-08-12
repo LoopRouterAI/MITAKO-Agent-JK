@@ -1354,7 +1354,7 @@
               <option value="fast">经济初筛（不输出连续通过）</option>
               <option value="backup">Strong 强化复核（全时间轴 · 2 FPS）</option>
             </select>
-            <div class="hint">标准档自适应提取关键帧；Strong 档按 2 FPS 加密取证；经济档只做粗筛。</div>
+            <div class="hint">标准档执行完整视频原生审核；无法稳定读取原片时，才使用受控 WebP 证据回退。</div>
 
             <details class="advanced-settings">
               <summary>高级取证设置</summary>
@@ -1407,7 +1407,7 @@
                   </div>
                 </div>
                 <div class="source-note">
-                  本工作台不会把整段大视频直接送入模型。标准档自适应提取最多 24 个关键帧；Strong 档按 1 秒 2 帧取证，并将证据分成每组最多 24 帧并行复核。超大素材建议由对象存储和转码服务先做受控码率转码，再提交审核服务。
+                  默认审核完整视频，并以每秒 1 帧作为视频理解采样语义。原视频无法稳定读取时，系统才会使用独立 WebP 图片分批复核；需要转码的素材会保留完整时长和必要清晰度，原始文件不会被覆盖。
                 </div>
               </div>
             </details>
@@ -1836,6 +1836,25 @@
           }
           if (review.agent_brief) {
             const brief = review.agent_brief;
+            const parsed = review.agent_report && review.agent_report.parsed || {};
+            const damage = parsed.damage_causality_assessment || {};
+            const severity = damage.severity_assessment || null;
+            const severeLevels = ['severe', 'extreme'];
+            const issueVisible = parsed.issue_visible;
+            const fieldConfidences = parsed.field_confidences || {};
+            const severityConfidence = Number(
+              severity && severity.confidence != null
+                ? severity.confidence
+                : Array.isArray(fieldConfidences) ? fieldConfidences[7] : fieldConfidences.issue_visible
+            );
+            const severeText = businessScenarioInput.value === 'product_damage'
+              && severity
+              && severeLevels.includes(severity.level)
+              && issueVisible === true
+              && Number.isFinite(severityConfidence)
+              && severityConfidence >= 0.8
+                ? '严重商品质量问题：是'
+                : '';
             const confidence = Number(brief.confidence);
             const confidenceText = Number.isFinite(confidence) ? Math.round(confidence * 100) + '%' : '暂不计算';
             const verdictText = { YES: '证据支持', NO: '证据不支持', REVIEW: '待确认' }[brief.system_yes_no] || safeText(brief.system_yes_no);
@@ -1844,6 +1863,7 @@
               ...ingestionLines(data),
               ...mediaWarningLines(data),
               '结论：' + safeText(brief.conclusion),
+              severeText,
               '证据分数：' + confidenceText + ' / 审核建议：' + verdictText,
               reviewLevel ? '人工处理：' + reviewLevel : '',
               '下一步：' + safeText(brief.next_step),

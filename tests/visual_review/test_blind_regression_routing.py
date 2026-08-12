@@ -17,10 +17,11 @@ from scripts.run_blind_damage_regression import (
 class BlindRegressionRoutingTest(unittest.TestCase):
     def test_internal_metrics_headers_require_existing_signing_secret(self) -> None:
         with patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "secret-value"}, clear=False):
-            headers = internal_metrics_headers()
+            headers = internal_metrics_headers("CASE-ABC123-workbench")
 
         self.assertEqual(headers["X-MITAKO-Internal-Metrics"], "1")
         self.assertEqual(headers["X-MITAKO-Internal-Token"], "secret-value")
+        self.assertEqual(headers["X-Request-ID"], "CASE-ABC123-workbench")
 
     def test_internal_metrics_request_declares_trusted_mitako_rule_tenant(self) -> None:
         with patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "secret-value"}, clear=False):

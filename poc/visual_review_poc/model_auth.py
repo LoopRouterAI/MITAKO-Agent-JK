@@ -131,7 +131,7 @@ def gemini_channel_options(model: str = "") -> List[Dict[str, Any]]:
 
     options: List[Dict[str, Any]] = []
     seen_endpoints = set()
-    priorities = {"bananarouter": 0, "legacy": 0, "baidu": 1, "apiyi": 2, "official": 3}
+    priorities = {"baidu": 0, "bananarouter": 1, "legacy": 1, "apiyi": 2, "official": 3}
     candidates.sort(key=lambda item: priorities.get(item[0], 4))
     for channel, key, base, auth_mode in candidates:
         endpoint = gemini_generate_endpoint(base, resolved_model)

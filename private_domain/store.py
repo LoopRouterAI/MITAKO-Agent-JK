@@ -53,6 +53,7 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS private_groups (
               group_id TEXT PRIMARY KEY,
+              tenant_id TEXT NOT NULL DEFAULT 'mitako',
               group_name TEXT NOT NULL,
               owner_id TEXT NOT NULL DEFAULT '',
               member_count INTEGER NOT NULL DEFAULT 0,
@@ -68,6 +69,7 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS private_events (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
+              tenant_id TEXT NOT NULL DEFAULT 'mitako',
               event_type TEXT NOT NULL,
               group_id TEXT NOT NULL DEFAULT '',
               user_id TEXT NOT NULL DEFAULT '',
@@ -78,6 +80,7 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS product_events (
               event_id TEXT PRIMARY KEY,
+              tenant_id TEXT NOT NULL DEFAULT 'mitako',
               event_type TEXT NOT NULL,
               item_id TEXT NOT NULL,
               ip_name TEXT NOT NULL,
@@ -91,6 +94,7 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS private_campaign_candidates (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
+              tenant_id TEXT NOT NULL DEFAULT 'mitako',
               event_id TEXT NOT NULL,
               group_id TEXT NOT NULL,
               match_score INTEGER NOT NULL,
@@ -101,6 +105,7 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS customer_service_tasks (
               task_id TEXT PRIMARY KEY,
+              tenant_id TEXT NOT NULL DEFAULT 'mitako',
               user_id TEXT NOT NULL,
               external_user_id TEXT NOT NULL DEFAULT '',
               group_id TEXT NOT NULL,
@@ -149,21 +154,34 @@ def init_db() -> None:
             conn.execute("ALTER TABLE review_tasks ADD COLUMN order_id TEXT NOT NULL DEFAULT ''")
         if "context" not in cols:
             conn.execute("ALTER TABLE review_tasks ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
+        for table in (
+            "private_groups", "private_events", "product_events",
+            "private_campaign_candidates", "customer_service_tasks", "review_tasks",
+        ):
+            table_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if "tenant_id" not in table_cols:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'mitako'"
+                )
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS {table}_tenant_idx ON {table}(tenant_id)"
+            )
 
 
 def upsert_group(group: Dict[str, Any]) -> Dict[str, Any]:
     init_db()
     now = time.time()
-    current = get_group(group["group_id"]) or {}
+    tenant_id = str(group.get("tenant_id") or "mitako")
+    current = get_group(group["group_id"], tenant_id=tenant_id) or {}
     merged_tags = {**(current.get("tags") or {}), **(group.get("tags") or {})}
     merged_metrics = {**(current.get("metrics") or {}), **(group.get("metrics") or {})}
     with _connect() as conn:
         conn.execute(
             """
             INSERT INTO private_groups (
-              group_id, group_name, owner_id, member_count, status, risk_level,
+              group_id, tenant_id, group_name, owner_id, member_count, status, risk_level,
               fatigue_score, health_score, marketing_disabled_until, tags, metrics, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(group_id) DO UPDATE SET
               group_name=excluded.group_name,
               owner_id=excluded.owner_id,
@@ -176,9 +194,11 @@ def upsert_group(group: Dict[str, Any]) -> Dict[str, Any]:
               tags=excluded.tags,
               metrics=excluded.metrics,
               updated_at=excluded.updated_at
+            WHERE private_groups.tenant_id=excluded.tenant_id
             """,
             (
                 group["group_id"],
+                tenant_id,
                 group.get("group_name") or current.get("group_name") or group["group_id"],
                 group.get("owner_id") or current.get("owner_id") or "",
                 int(group.get("member_count") or current.get("member_count") or 0),
@@ -192,49 +212,58 @@ def upsert_group(group: Dict[str, Any]) -> Dict[str, Any]:
                 now,
             ),
         )
-    return get_group(group["group_id"]) or {}
+    return get_group(group["group_id"], tenant_id=tenant_id) or {}
 
 
-def get_group(group_id: str) -> Optional[Dict[str, Any]]:
+def get_group(group_id: str, tenant_id: str = "mitako") -> Optional[Dict[str, Any]]:
     init_db()
     with _connect() as conn:
-        return _row(conn.execute("SELECT * FROM private_groups WHERE group_id=?", (group_id,)).fetchone())
+        return _row(conn.execute(
+            "SELECT * FROM private_groups WHERE group_id=? AND tenant_id=?",
+            (group_id, tenant_id),
+        ).fetchone())
 
 
-def list_groups(limit: int = 50) -> List[Dict[str, Any]]:
+def list_groups(limit: int = 50, tenant_id: str = "mitako") -> List[Dict[str, Any]]:
     init_db()
     with _connect() as conn:
-        rows = conn.execute("SELECT * FROM private_groups ORDER BY updated_at DESC LIMIT ?", (limit,)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM private_groups WHERE tenant_id=? ORDER BY updated_at DESC LIMIT ?",
+            (tenant_id, limit),
+        ).fetchall()
     return [_row(row) or {} for row in rows]
 
 
-def add_event(event_type: str, payload: Dict[str, Any], result: Dict[str, Any], group_id: str = "", user_id: str = "") -> Dict[str, Any]:
+def add_event(event_type: str, payload: Dict[str, Any], result: Dict[str, Any], group_id: str = "", user_id: str = "", tenant_id: str = "mitako") -> Dict[str, Any]:
     init_db()
     now = time.time()
     with _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO private_events(event_type, group_id, user_id, payload, result, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (event_type, group_id, user_id, _json(payload), _json(result), now),
+            "INSERT INTO private_events(tenant_id, event_type, group_id, user_id, payload, result, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tenant_id, event_type, group_id, user_id, _json(payload), _json(result), now),
         )
         event_id = cur.lastrowid
-    return {"id": event_id, "event_type": event_type, "group_id": group_id, "user_id": user_id, "payload": payload, "result": result, "created_at": now}
+    return {"id": event_id, "tenant_id": tenant_id, "event_type": event_type, "group_id": group_id, "user_id": user_id, "payload": payload, "result": result, "created_at": now}
 
 
-def list_events(limit: int = 30) -> List[Dict[str, Any]]:
+def list_events(limit: int = 30, tenant_id: str = "mitako") -> List[Dict[str, Any]]:
     init_db()
     with _connect() as conn:
-        rows = conn.execute("SELECT * FROM private_events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM private_events WHERE tenant_id=? ORDER BY id DESC LIMIT ?",
+            (tenant_id, limit),
+        ).fetchall()
     return [_row(row) or {} for row in rows]
 
 
-def save_product_event(event: Dict[str, Any]) -> Dict[str, Any]:
+def save_product_event(event: Dict[str, Any], tenant_id: str = "mitako") -> Dict[str, Any]:
     init_db()
     now = time.time()
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO product_events(event_id, event_type, item_id, ip_name, character_name, category, stock, risk_flag, payload, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO product_events(event_id, tenant_id, event_type, item_id, ip_name, character_name, category, stock, risk_flag, payload, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(event_id) DO UPDATE SET
               event_type=excluded.event_type,
               item_id=excluded.item_id,
@@ -244,9 +273,11 @@ def save_product_event(event: Dict[str, Any]) -> Dict[str, Any]:
               stock=excluded.stock,
               risk_flag=excluded.risk_flag,
               payload=excluded.payload
+            WHERE product_events.tenant_id=excluded.tenant_id
             """,
             (
                 event["event_id"],
+                tenant_id,
                 event.get("event_type") or "",
                 event.get("item_id") or "",
                 event.get("ip_name") or "",
@@ -261,37 +292,37 @@ def save_product_event(event: Dict[str, Any]) -> Dict[str, Any]:
     return event
 
 
-def add_campaign_candidate(event_id: str, group_id: str, match_score: int, decision: str, reason: str) -> None:
+def add_campaign_candidate(event_id: str, group_id: str, match_score: int, decision: str, reason: str, tenant_id: str = "mitako") -> None:
     init_db()
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO private_campaign_candidates(event_id, group_id, match_score, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (event_id, group_id, int(match_score), decision, reason, time.time()),
+            "INSERT INTO private_campaign_candidates(tenant_id, event_id, group_id, match_score, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tenant_id, event_id, group_id, int(match_score), decision, reason, time.time()),
         )
 
 
-def add_campaign_candidates(event_id: str, candidates: List[Dict[str, Any]]) -> None:
+def add_campaign_candidates(event_id: str, candidates: List[Dict[str, Any]], tenant_id: str = "mitako") -> None:
     if not candidates:
         return
     init_db()
     created_at = time.time()
     with _connect() as conn:
         conn.executemany(
-            "INSERT INTO private_campaign_candidates(event_id, group_id, match_score, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO private_campaign_candidates(tenant_id, event_id, group_id, match_score, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (event_id, item["group_id"], int(item["match_score"]), item["decision"], item["reason"], created_at)
+                (tenant_id, event_id, item["group_id"], int(item["match_score"]), item["decision"], item["reason"], created_at)
                 for item in candidates
             ],
         )
 
 
-def list_campaign_candidates(event_id: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+def list_campaign_candidates(event_id: str = "", limit: int = 50, tenant_id: str = "mitako") -> List[Dict[str, Any]]:
     init_db()
-    sql = "SELECT * FROM private_campaign_candidates"
-    params: tuple[Any, ...] = ()
+    sql = "SELECT * FROM private_campaign_candidates WHERE tenant_id=?"
+    params: tuple[Any, ...] = (tenant_id,)
     if event_id:
-        sql += " WHERE event_id=?"
-        params = (event_id,)
+        sql += " AND event_id=?"
+        params = (tenant_id, event_id)
     sql += " ORDER BY id DESC LIMIT ?"
     params = (*params, limit)
     with _connect() as conn:
@@ -305,13 +336,17 @@ def create_customer_service_task(task: Dict[str, Any]) -> Dict[str, Any]:
     with _connect() as conn:
         conn.execute(
             """
-            INSERT OR REPLACE INTO customer_service_tasks(
-              task_id, user_id, external_user_id, group_id, risk_level, issue_type,
+            INSERT INTO customer_service_tasks(
+              task_id, tenant_id, user_id, external_user_id, group_id, risk_level, issue_type,
               message_summary, evidence_messages, priority, required_action, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(task_id) DO UPDATE SET
+              status=excluded.status, updated_at=excluded.updated_at
+            WHERE customer_service_tasks.tenant_id=excluded.tenant_id
             """,
             (
                 task["task_id"],
+                task.get("tenant_id") or "mitako",
                 task.get("user_id") or "",
                 task.get("external_user_id") or "",
                 task.get("group_id") or "",
@@ -326,19 +361,27 @@ def create_customer_service_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 now,
             ),
         )
-    return get_customer_service_task(task["task_id"]) or task
+    return get_customer_service_task(
+        task["task_id"], tenant_id=task.get("tenant_id") or "mitako"
+    ) or task
 
 
-def get_customer_service_task(task_id: str) -> Optional[Dict[str, Any]]:
+def get_customer_service_task(task_id: str, tenant_id: str = "mitako") -> Optional[Dict[str, Any]]:
     init_db()
     with _connect() as conn:
-        return _row(conn.execute("SELECT * FROM customer_service_tasks WHERE task_id=?", (task_id,)).fetchone())
+        return _row(conn.execute(
+            "SELECT * FROM customer_service_tasks WHERE task_id=? AND tenant_id=?",
+            (task_id, tenant_id),
+        ).fetchone())
 
 
-def list_customer_service_tasks(limit: int = 30) -> List[Dict[str, Any]]:
+def list_customer_service_tasks(limit: int = 30, tenant_id: str = "mitako") -> List[Dict[str, Any]]:
     init_db()
     with _connect() as conn:
-        rows = conn.execute("SELECT * FROM customer_service_tasks ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM customer_service_tasks WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
+            (tenant_id, limit),
+        ).fetchall()
     return [_row(row) or {} for row in rows]
 
 
@@ -378,35 +421,52 @@ def create_review_task(task: Dict[str, Any]) -> Dict[str, Any]:
     return get_review_task(task["task_id"]) or task
 
 
-def update_review_task_result(task_id: str, *, status: str, result: Dict[str, Any], boundary: str = "") -> Dict[str, Any]:
+def update_review_task_result(task_id: str, *, status: str, result: Dict[str, Any], boundary: str = "", tenant_id: str | None = None) -> Dict[str, Any]:
     init_db()
     now = time.time()
     with _connect() as conn:
-        conn.execute(
-            """
+        sql = """
             UPDATE review_tasks
             SET status=?, result=?, boundary=COALESCE(NULLIF(?, ''), boundary), reviewed_at=?, updated_at=?
             WHERE task_id=?
-            """,
-            (status, _json(result), boundary or "", now, now, task_id),
-        )
-    return get_review_task(task_id) or {}
+        """
+        params: tuple[Any, ...] = (status, _json(result), boundary or "", now, now, task_id)
+        if tenant_id is not None:
+            sql += " AND tenant_id=?"
+            params = (*params, tenant_id)
+        conn.execute(sql, params)
+    return get_review_task(task_id, tenant_id=tenant_id) or {}
 
 
-def get_review_task(task_id: str) -> Optional[Dict[str, Any]]:
+def get_review_task(task_id: str, tenant_id: str | None = None) -> Optional[Dict[str, Any]]:
     init_db()
     with _connect() as conn:
-        return _row(conn.execute("SELECT * FROM review_tasks WHERE task_id=?", (task_id,)).fetchone())
+        if tenant_id is None:
+            row = conn.execute("SELECT * FROM review_tasks WHERE task_id=?", (task_id,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM review_tasks WHERE task_id=? AND tenant_id=?",
+                (task_id, tenant_id),
+            ).fetchone()
+        return _row(row)
 
 
-def list_review_tasks(limit: int = 30) -> List[Dict[str, Any]]:
+def list_review_tasks(limit: int = 30, tenant_id: str | None = None) -> List[Dict[str, Any]]:
     init_db()
     with _connect() as conn:
-        rows = conn.execute("SELECT * FROM review_tasks ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        if tenant_id is None:
+            rows = conn.execute(
+                "SELECT * FROM review_tasks ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM review_tasks WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
+                (tenant_id, limit),
+            ).fetchall()
     return [_row(row) or {} for row in rows]
 
 
-def clear_all_private_domain_data() -> Dict[str, int]:
+def clear_all_private_domain_data(tenant_id: str = "mitako") -> Dict[str, int]:
     init_db()
     tables = (
         "private_campaign_candidates",
@@ -418,30 +478,29 @@ def clear_all_private_domain_data() -> Dict[str, int]:
     )
     with _connect() as conn:
         counts = {
-            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            table: int(conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE tenant_id=?", (tenant_id,)
+            ).fetchone()[0])
             for table in tables
         }
         for table in tables:
-            conn.execute(f"DELETE FROM {table}")
-        conn.execute(
-            "DELETE FROM sqlite_sequence WHERE name IN (?, ?, ?)",
-            ("private_campaign_candidates", "private_events", "review_tasks"),
-        )
+            conn.execute(f"DELETE FROM {table} WHERE tenant_id=?", (tenant_id,))
     return counts
 
 
-def snapshot() -> Dict[str, Any]:
+def snapshot(tenant_id: str = "mitako") -> Dict[str, Any]:
     init_db()
     with _connect() as conn:
         row = conn.execute(
             """
             SELECT
-              (SELECT COUNT(*) FROM private_groups) AS group_count,
-              (SELECT COUNT(*) FROM private_groups WHERE risk_level >= 2 OR status='marketing_disabled') AS risky_group_count,
-              (SELECT COUNT(*) FROM customer_service_tasks WHERE status='pending') AS pending_task_count,
-              (SELECT COUNT(*) FROM review_tasks) AS review_task_count,
-              (SELECT COUNT(*) FROM private_events) AS event_count
-            """
+              (SELECT COUNT(*) FROM private_groups WHERE tenant_id=?) AS group_count,
+              (SELECT COUNT(*) FROM private_groups WHERE tenant_id=? AND (risk_level >= 2 OR status='marketing_disabled')) AS risky_group_count,
+              (SELECT COUNT(*) FROM customer_service_tasks WHERE tenant_id=? AND status='pending') AS pending_task_count,
+              (SELECT COUNT(*) FROM review_tasks WHERE tenant_id=?) AS review_task_count,
+              (SELECT COUNT(*) FROM private_events WHERE tenant_id=?) AS event_count
+            """,
+            (tenant_id, tenant_id, tenant_id, tenant_id, tenant_id),
         ).fetchone()
     return dict(row)
 

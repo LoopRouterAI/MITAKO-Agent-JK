@@ -306,7 +306,55 @@ class ModelResilienceTest(unittest.TestCase):
             result = selection.post_with_retries("https://example.invalid", {}, {}, 10, 1)
 
         self.assertTrue(result["ok"])
+        self.assertEqual(
+            [item["outcome"] for item in result["request_attempts"]],
+            ["failed", "success"],
+        )
         sleep.assert_called_once_with(1.25)
+
+    def test_success_after_http_retry_reports_partial_unknown_cost(self) -> None:
+        from poc.visual_review_poc import model_selection_e2e as selection
+
+        cfg = dict(selection.MODEL_CONFIGS["gemini35lite"])
+        case = {
+            "case_id": "retry-cost-ledger",
+            "scenario": "product_damage",
+            "structured_business_context": {},
+            "frames": [],
+            "supplemental_images": [],
+            "official_reference_images": [],
+        }
+        response = {
+            "ok": True,
+            "status_code": 200,
+            "attempt": 2,
+            "latency_seconds": 0.2,
+            "data": {
+                "candidates": [{"content": {"parts": [{"text": "{}"}]}}],
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 5,
+                    "totalTokenCount": 15,
+                },
+            },
+            "request_attempts": [
+                {"attempt": 1, "outcome": "failed", "status_code": 503, "latency_seconds": 0.3, "request_sent": True},
+                {"attempt": 2, "outcome": "success", "status_code": 200, "latency_seconds": 0.2, "request_sent": True},
+            ],
+        }
+        with patch.object(
+            selection,
+            "gemini_request_options",
+            return_value=[{"channel": "baidu", "endpoint": "https://example.invalid", "headers": {}}],
+        ), patch.object(selection, "post_with_retries", return_value=response):
+            result = selection.call_model(cfg, case, timeout=1, retries=1)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["cost_status"], "partial_unknown")
+        self.assertEqual(result["unknown_cost_calls"], 1)
+        self.assertEqual(len(result["http_attempts"]), 2)
+        self.assertEqual(result["model_http_request_count"], 2)
+        self.assertEqual(result["model_latency_seconds_sum"], 0.5)
 
     def test_http_error_redacts_credentials_before_returning(self) -> None:
         from poc.visual_review_poc import model_selection_e2e as selection

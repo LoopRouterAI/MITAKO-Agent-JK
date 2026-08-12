@@ -12,6 +12,8 @@ import secrets
 import shutil
 import sys
 import time
+from copy import deepcopy
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -38,6 +40,7 @@ from prompts.visual_review.core import freeze_rule_snapshot
 from review_service.media_forensics import inspect_job_media
 from review_service.service import ensure_label_isolation, postprocess_review
 from review_service.decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
+from poc.visual_review_poc.internal_review_ledger import ReviewRequestLedger
 from poc.visual_review_poc.media_registry import MediaRegistry
 from review_media_safety import (
     FOLDER_SUFFIXES,
@@ -76,7 +79,10 @@ try:
     )
     from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
-    from poc.visual_review_poc.native_video_proxy import prepare_native_video_proxy
+    from poc.visual_review_poc.native_video_proxy import prepare_native_video_proxy, video_proxy_recommendation
+    from poc.visual_review_poc.native_video_perception import run_native_perception_pipeline
+    from poc.visual_review_poc.observability import sanitize_error_text
+    from poc.visual_review_poc.secure_media_tunnel import open_secure_media_tunnel
     from poc.visual_review_poc.unified_model_pass import native_dimension_gaps
     from poc.visual_review_poc.report_renderer import (
         render_public_report as _render_public_report,
@@ -102,7 +108,10 @@ except ImportError:
     )
     from local_video_triage_demo import apply_frontdesk_context, load_env as load_visual_env
     from official_reference_images import prepare_official_reference_images
-    from native_video_proxy import prepare_native_video_proxy
+    from native_video_proxy import prepare_native_video_proxy, video_proxy_recommendation
+    from native_video_perception import run_native_perception_pipeline
+    from observability import sanitize_error_text
+    from secure_media_tunnel import open_secure_media_tunnel
     from unified_model_pass import native_dimension_gaps
     from report_renderer import (
         render_public_report as _render_public_report,
@@ -126,6 +135,11 @@ RUNTIME_MEDIA_DIR = Path(
 INDEX_HTML = WORKBENCH_DIR / "workbench.html"
 SAMPLE_MATERIAL_DIR = (ROOT / "docs" / "三大审核场景的小量样本").resolve()
 ALLOWED_REPORTS: dict[str, Dict[str, Any]] = {}
+_INTERNAL_REVIEW_CACHE_MAX = 256
+INTERNAL_REVIEW_LEDGER = ReviewRequestLedger(
+    REPORT_DIR / "internal" / "internal_review_requests.sqlite3",
+    completed_limit=_INTERNAL_REVIEW_CACHE_MAX,
+)
 PUBLIC_MEDIA_REGISTRY = MediaRegistry(REPORT_DIR / "internal" / "public_media_registry.sqlite3", ROOT)
 PUBLIC_WORKBENCH_MEDIA_REGISTRY = MediaRegistry(
     REPORT_DIR / "internal" / "public_workbench_media_registry.sqlite3",
@@ -640,6 +654,9 @@ _LABELED_ADDRESS_PATTERN = re.compile(
 # 所有场景只公开报告实际消费的受控字段；未知模型字段一律丢弃。
 _PUBLIC_PARSED_FIELD_NAMES = {
     "decision", "predicted_label", "system_yes_no", "confidence", "overall_audit", "conclusion",
+    "all_items_shown", "continuous", "has_edit", "has_offscreen", "has_speed_change",
+    "issue_visible", "overall_video_result", "sealed_start", "waybill_visible", "field_confidences",
+    "opening_video_evidence", "present", "status",
     "core_reason", "business_follow_up_suggestion", "visual_evidence_verdict", "visual_qc_conclusion",
     "verdict", "confidence_reason", "video_audit_conclusion", "continuity_score", "continuity_reason",
     "swap_risk_level", "edit_or_cut_risk", "opening_integrity", "opening_integrity_source", "sampling_boundary_status",
@@ -668,6 +685,7 @@ _PUBLIC_PARSED_FIELD_NAMES = {
     "challenge", "why_not_final_business_decision", "business_action_allowed", "human_required",
     "human_required_for_business_action", "business_follow_up_reason", "next_step",
     "damage_causality_assessment", "damage_presence", "supplemental_damage_presence", "damage_type_and_location", "first_visible_evidence",
+    "main_video_detail_sufficient", "severity_assessment", "level", "structural_failure",
     "pre_opening_state_visible", "opening_action_visible", "damage_change_observed", "damage_timing",
     "possible_origins", "origin", "most_likely_origin", "origin_confidence", "causal_evidence_level",
     "appearance_difference", "business_defect_qualification", "special_product_rule",
@@ -775,6 +793,46 @@ def _internal_request_authorized(token: str) -> bool:
     return bool(expected and token and hmac.compare_digest(token, expected))
 
 
+def _claim_internal_review_request(request_id: str, tenant_id: str) -> tuple[str, Any]:
+    request_id = str(request_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id):
+        return "disabled", None
+    wait_seconds = max(
+        30,
+        min(int(os.getenv("REVIEW_JOB_TIMEOUT_SECONDS", "1800") or 1800) + 30, 3630),
+    )
+    state, response = INTERNAL_REVIEW_LEDGER.claim(tenant_id, request_id)
+    if state == "completed":
+        return "cached", deepcopy(response or {})
+    if state == "owner":
+        return "owner", (tenant_id, request_id)
+    if state == "failed":
+        raise HTTPException(status_code=409, detail="internal_review_request_failed")
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        time.sleep(0.2)
+        state, response = INTERNAL_REVIEW_LEDGER.lookup(tenant_id, request_id)
+        if state == "completed":
+            return "cached", deepcopy(response or {})
+        if state in {"failed", "missing"}:
+            raise HTTPException(status_code=409, detail="internal_review_request_failed")
+    raise HTTPException(status_code=504, detail="internal_review_request_timeout")
+
+
+def _complete_internal_review_request(key: Any, response: Dict[str, Any]) -> None:
+    if not key:
+        return
+    tenant_id, request_id = key
+    INTERNAL_REVIEW_LEDGER.complete(tenant_id, request_id, response)
+
+
+def _fail_internal_review_request(key: Any) -> None:
+    if not key:
+        return
+    tenant_id, request_id = key
+    INTERNAL_REVIEW_LEDGER.fail(tenant_id, request_id)
+
+
 def _resolve_rule_tenant_id(value: str, internal_request: bool) -> str:
     if not internal_request:
         return "mitako"
@@ -794,13 +852,26 @@ def _require_public_signature(path: str, expires: str, sig: str) -> None:
         raise HTTPException(status_code=403, detail="forbidden")
 
 
-def _refresh_signed_urls(value: Any) -> Any:
+def _refresh_signed_urls(value: Any, field_name: str = "") -> Any:
     if isinstance(value, dict):
-        return {str(key): _refresh_signed_urls(item) for key, item in value.items()}
+        return {
+            str(key): _refresh_signed_urls(item, str(key))
+            for key, item in value.items()
+        }
     if isinstance(value, list):
-        return [_refresh_signed_urls(item) for item in value]
-    if isinstance(value, str) and urlsplit(value).path.startswith(("/reports/", "/media/", "/media-item/")):
-        return _sign_public_url(value)
+        return [_refresh_signed_urls(item, field_name) for item in value]
+    if isinstance(value, str):
+        split = urlsplit(value)
+        if split.scheme or split.netloc:
+            return value
+        if field_name in {"url", "video_url"} and re.fullmatch(
+            r"/media-item/[a-f0-9]{32}", split.path
+        ):
+            return _sign_public_url(value)
+        if field_name == "html_url" and re.fullmatch(
+            r"/reports/[A-Za-z0-9._-]{1,180}\.html", split.path
+        ):
+            return _sign_public_url(value)
     return value
 
 
@@ -969,16 +1040,18 @@ def _native_video_source(video: Path, proxy_dir: Optional[Path] = None) -> Optio
         ".webm": "video/webm",
         ".mkv": "video/x-matroska",
     }.get(video.suffix.lower(), "video/mp4")
+    recommendation = video_proxy_recommendation(video) if proxy_dir else {"recommended": False}
+    if recommendation.get("recommended"):
+        proxy = prepare_native_video_proxy(video, proxy_dir, NATIVE_INLINE_MEDIA_MAX_BYTES)
+        if proxy.get("status") == "ready" and int(proxy.get("proxy_bytes") or 0) < video.stat().st_size:
+            return {
+                "video_index": 1,
+                "api_path": str(proxy["path"]),
+                "api_mime_type": str(proxy.get("mime_type") or "video/mp4"),
+                "proxy": {**proxy, "recommendation": recommendation},
+            }
     if video.stat().st_size <= NATIVE_INLINE_MEDIA_MAX_BYTES:
         return {"video_index": 1, "api_path": str(video), "api_mime_type": mime_type}
-    proxy = prepare_native_video_proxy(video, proxy_dir, NATIVE_INLINE_MEDIA_MAX_BYTES) if proxy_dir else {}
-    if proxy.get("status") == "ready":
-        return {
-            "video_index": 1,
-            "api_path": str(proxy["path"]),
-            "api_mime_type": "video/mp4",
-            "proxy": proxy,
-        }
     public_base = os.getenv("VISUAL_WORKBENCH_PUBLIC_BASE_URL", "").strip().rstrip("/")
     parsed_base = urlsplit(public_base)
     if (
@@ -990,15 +1063,185 @@ def _native_video_source(video: Path, proxy_dir: Optional[Path] = None) -> Optio
         or parsed_base.fragment
         or parsed_base.path not in {"", "/"}
     ):
-        return None
-    signed_path = _media_url(video)
-    if not signed_path.startswith("/media-item/"):
-        return None
-    return {
+        public_base = ""
+    if public_base:
+        signed_path = _media_url(video)
+        if signed_path.startswith("/media-item/"):
+            return {
+                "video_index": 1,
+                "file_uri": f"{public_base}{signed_path}",
+                "api_mime_type": mime_type,
+            }
+    proxy = (
+        prepare_native_video_proxy(video, proxy_dir, NATIVE_INLINE_MEDIA_MAX_BYTES)
+        if proxy_dir and not recommendation.get("recommended")
+        else {}
+    )
+    if proxy.get("status") == "ready":
+        return {
+            "video_index": 1,
+            "api_path": str(proxy["path"]),
+            "api_mime_type": str(proxy.get("mime_type") or "video/mp4"),
+            "proxy": proxy,
+        }
+    return None
+
+
+@contextmanager
+def _native_video_source_context(
+    video: Path,
+    proxy_dir: Optional[Path] = None,
+):
+    """视频优先通过受控 HTTPS URL 送审；隧道不可用时才回退内联。"""
+    recommendation = video_proxy_recommendation(video)
+    if recommendation.get("recommended") and proxy_dir:
+        with _native_video_proxy_source_context(video, proxy_dir) as proxy_source:
+            if proxy_source:
+                yield proxy_source
+                return
+
+    direct = _native_video_source(video)
+    if direct and direct.get("file_uri"):
+        direct["transport"] = "configured_original_url"
+        yield direct
+        return
+
+    tunnel_diagnostics: Dict[str, Any] = {}
+    tunnel_enabled = str(
+        os.getenv("VISUAL_REVIEW_EPHEMERAL_TUNNEL", "1") or "1"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    if tunnel_enabled:
+        stack = ExitStack()
+        try:
+            tunnel = stack.enter_context(
+                open_secure_media_tunnel(
+                    video,
+                    cloudflared_executable=(
+                        os.getenv("CLOUDFLARED_PATH", "cloudflared") or "cloudflared"
+                    ),
+                    startup_timeout=60.0,
+                )
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            stack.close()
+            tunnel_diagnostics = {
+                "status": "unavailable",
+                "error_type": type(exc).__name__,
+            }
+        else:
+            with stack:
+                yield {
+                    "video_index": 1,
+                    "file_uri": tunnel.url,
+                    "api_mime_type": {
+                        ".mov": "video/quicktime",
+                        ".webm": "video/webm",
+                        ".mkv": "video/x-matroska",
+                    }.get(video.suffix.lower(), "video/mp4"),
+                    "transport": "ephemeral_original_url",
+                    "tunnel": tunnel.diagnostics,
+                }
+            return
+
+    fallback = direct or _native_video_source(video, proxy_dir)
+    if fallback:
+        fallback["transport"] = (
+            "full_duration_quality_proxy" if fallback.get("proxy") else "raw_original_inline"
+        )
+        if tunnel_diagnostics:
+            fallback["tunnel"] = tunnel_diagnostics
+    yield fallback
+
+
+def _native_transport_requires_proxy_retry(result: Dict[str, Any]) -> bool:
+    if str(result.get("status") or "").lower() != "failed":
+        return False
+    if result.get("status_code") in {413, 415}:
+        return True
+    error = " ".join(
+        str(result.get(key) or "")
+        for key in ("error", "error_message", "detail")
+    ).lower()
+    if any(
+        marker in error
+        for marker in ("response schema", "response_schema", "json schema", "structured output")
+    ):
+        return False
+    return any(
+        marker in error
+        for marker in (
+            "unable to download",
+            "failed to download",
+            "unable to fetch",
+            "failed to fetch",
+            "file uri",
+            "file_uri",
+            "video codec",
+            "decode video",
+            "video decode",
+            "unsupported video",
+            "media too large",
+            "payload too large",
+            "maximum file size",
+            "content length",
+            "content-type",
+            "mime type",
+            "100 mb",
+        )
+    )
+
+
+@contextmanager
+def _native_video_proxy_source_context(video: Path, proxy_dir: Path):
+    proxy = prepare_native_video_proxy(video, proxy_dir, NATIVE_INLINE_MEDIA_MAX_BYTES)
+    if proxy.get("status") != "ready":
+        yield None
+        return
+    proxy_path = Path(str(proxy["path"]))
+    mime_type = str(proxy.get("mime_type") or "video/mp4")
+    tunnel_enabled = str(
+        os.getenv("VISUAL_REVIEW_EPHEMERAL_TUNNEL", "1") or "1"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    tunnel_diagnostics: Dict[str, Any] = {}
+    if tunnel_enabled:
+        stack = ExitStack()
+        try:
+            tunnel = stack.enter_context(
+                open_secure_media_tunnel(
+                    proxy_path,
+                    cloudflared_executable=(
+                        os.getenv("CLOUDFLARED_PATH", "cloudflared") or "cloudflared"
+                    ),
+                    startup_timeout=60.0,
+                )
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            stack.close()
+            tunnel_diagnostics = {
+                "status": "unavailable",
+                "error_type": type(exc).__name__,
+            }
+        else:
+            with stack:
+                yield {
+                    "video_index": 1,
+                    "file_uri": tunnel.url,
+                    "api_mime_type": mime_type,
+                    "transport": "ephemeral_proxy_url",
+                    "proxy": proxy,
+                    "tunnel": tunnel.diagnostics,
+                }
+            return
+    source = {
         "video_index": 1,
-        "file_uri": f"{public_base}{signed_path}",
+        "api_path": str(proxy_path),
         "api_mime_type": mime_type,
+        "transport": "full_duration_quality_proxy",
+        "proxy": proxy,
     }
+    if tunnel_diagnostics:
+        source["tunnel"] = tunnel_diagnostics
+    yield source
 
 
 def _media_gallery(case: Dict[str, Any], sample_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -1139,6 +1382,10 @@ def _configured_model_keys(requested_model_key: str) -> List[str]:
         if key and key not in keys:
             keys.append(key)
     return keys or ["gemini35lite"]
+
+
+def _native_perception_enabled(config: Dict[str, Any], scenario: str) -> bool:
+    return bool(config.get("native_perception_pipeline")) and scenario == "product_damage"
 
 
 def _new_review_deadline() -> float:
@@ -1327,6 +1574,7 @@ def _internal_inference_estimate(result: Dict[str, Any]) -> Dict[str, Any]:
                 "technical_status",
                 "status_code",
                 "error_type",
+                "error_summary",
                 "dimension_gaps",
                 "opening_start_verification_status",
                 "transport",
@@ -1388,6 +1636,26 @@ def _incurred_model_call(result: Any) -> int:
     return 0 if str(result.get("status") or "").lower() in {"skipped", "not_run", "not_incurred"} else 1
 
 
+def _native_model_call_count(result: Any) -> int:
+    if not isinstance(result, dict):
+        return 0
+    try:
+        physical_calls = max(0, int(result.get("model_http_request_count") or 0))
+    except (TypeError, ValueError, OverflowError):
+        physical_calls = 0
+    if physical_calls:
+        return physical_calls
+    pipeline = result.get("perception_pipeline")
+    if isinstance(pipeline, dict):
+        try:
+            model_calls = max(0, int(pipeline.get("model_calls") or 0))
+        except (TypeError, ValueError, OverflowError):
+            model_calls = 0
+        if model_calls:
+            return model_calls
+    return _incurred_model_call(result)
+
+
 def _native_positive_opening_fully_verified(result: Dict[str, Any], scenario: str) -> bool:
     parsed = result.get("parsed") or {}
     if scenario != "product_damage" or parsed.get("predicted_label") != "positive":
@@ -1397,6 +1665,18 @@ def _native_positive_opening_fully_verified(result: Dict[str, Any], scenario: st
         "sealed_start", "waybill_visible", "single_take_continuity",
         "issue_visible_in_continuous_opening",
     }.issubset(set(opening.get("validated_fields") or []))
+
+
+def _complete_frame_fallback_args(args: SimpleNamespace) -> SimpleNamespace:
+    return SimpleNamespace(
+        fps=1.0,
+        sampling_mode="dense",
+        max_frames_per_video=1800,
+        api_frame_limit=24,
+        probe_seconds=args.probe_seconds,
+        frame_width=1920,
+        supplemental_image_limit=args.supplemental_image_limit,
+    )
 
 
 def _run_review(
@@ -1445,13 +1725,17 @@ def _run_review(
     run_dir = ROOT / "tmp" / "visual_review_workbench" / f"single_{video.parent.name}_{time.time_ns()}"
     frozen_rule_snapshot: Optional[Dict[str, Any]] = None
 
-    def prepared_case(native_video: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def prepared_case(
+        native_video: Optional[Dict[str, Any]] = None,
+        *,
+        bundle_args: Optional[SimpleNamespace] = None,
+    ) -> Dict[str, Any]:
         nonlocal frozen_rule_snapshot
         try:
             native_options = {"native_video": native_video} if native_video else {}
             current = load_case_bundle(
                 video.parent,
-                args,
+                bundle_args or args,
                 run_dir,
                 scenario_override=scenario,
                 **native_options,
@@ -1477,8 +1761,15 @@ def _run_review(
     model_retries = max(0, min(int(os.getenv("REVIEW_MODEL_RETRIES", "1") or 1), 2))
     model_keys = _configured_model_keys(requested_model_key)
     primary_config = MODEL_CONFIGS[model_keys[0]] if model_keys else {}
+    if primary_config.get("native_perception_pipeline"):
+        if "REVIEW_MODEL_TIMEOUT_SECONDS" not in os.environ:
+            model_timeout = int(primary_config.get("request_timeout_seconds") or model_timeout)
+        if "REVIEW_CASE_DEADLINE_SECONDS" not in os.environ:
+            deadline_at = time.monotonic() + int(
+                primary_config.get("case_deadline_seconds") or 600
+            )
     case_videos, _ = discover_case_videos(video.parent)
-    native_source = None
+    native_context = nullcontext(None)
     if (
         review_model != "backup"
         and scenario in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}
@@ -1486,74 +1777,107 @@ def _run_review(
         and len(case_videos) == 1
         and case_videos[0].resolve() == video.resolve()
     ):
-        native_source = _native_video_source(video, run_dir / "native_video_proxy")
-    case = prepared_case(native_source)
-    native_result: Dict[str, Any] = {}
-    native_gaps: List[str] = []
-    opening_verification: Dict[str, Any] = {}
-    compliance_verification: Dict[str, Any] = {}
-    if native_source:
-        native_result = call_model(
-            primary_config,
-            case,
-            timeout=model_timeout,
-            retries=model_retries,
-            deadline_at=deadline_at,
+        native_context = _native_video_source_context(
+            video,
+            run_dir / "native_video_proxy",
         )
+
+    def call_native_review(current_case: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        if _native_perception_enabled(primary_config, scenario):
+            return run_native_perception_pipeline(
+                current_case,
+                video,
+                run_dir / "native_candidate_detail",
+                lambda candidate_case: call_model(
+                    primary_config,
+                    candidate_case,
+                    timeout=model_timeout,
+                    retries=model_retries,
+                    deadline_at=deadline_at,
+                ),
+                sampling_fps=primary_config.get("native_video_sampling_fps"),
+            )
+        return (
+            call_model(
+                primary_config,
+                current_case,
+                timeout=model_timeout,
+                retries=model_retries,
+                deadline_at=deadline_at,
+            ),
+            current_case,
+        )
+
+    with native_context as native_source:
+        case = prepared_case(native_source)
+        native_result: Dict[str, Any] = {}
+        native_gaps: List[str] = []
+        opening_verification: Dict[str, Any] = {}
+        compliance_verification: Dict[str, Any] = {}
+        if native_source:
+            native_result, case = call_native_review(case)
+
+    if native_source and _native_transport_requires_proxy_retry(native_result):
+        original_result = native_result
+        original_transport = str(native_source.get("transport") or "")
+        with _native_video_proxy_source_context(
+            video,
+            run_dir / "native_video_proxy_retry",
+        ) as proxy_source:
+            if proxy_source:
+                retry_case = prepared_case(proxy_source)
+                retry_result, retry_case = call_native_review(retry_case)
+                native_result = merge_model_billing(retry_result, [original_result])
+                native_result["native_transport_attempts"] = [
+                    {
+                        "transport": original_transport,
+                        "status": original_result.get("status"),
+                        "status_code": original_result.get("status_code"),
+                        "error_type": original_result.get("error_type"),
+                    },
+                    {
+                        "transport": proxy_source.get("transport"),
+                        "status": retry_result.get("status"),
+                        "status_code": retry_result.get("status_code"),
+                        "error_type": retry_result.get("error_type"),
+                    },
+                ]
+                case = retry_case
+                native_source = dict(proxy_source)
+    if native_source:
         native_gaps = native_dimension_gaps(native_result.get("parsed") or {}, scenario)
-        if (
-            native_result.get("status") == "success"
-            and set(native_gaps).issubset({"opening_start_verification", "opening_video_hard_failure_candidate"})
-        ):
-            opening_verification = call_opening_start_verification(
-                primary_config,
-                case,
-                timeout=model_timeout,
-                retries=model_retries,
-                deadline_at=deadline_at,
-            )
-            native_result = merge_opening_start_verification(
-                native_result,
-                opening_verification,
-                case.get("frames") or [],
-                scenario=scenario,
-            )
-            native_gaps = native_dimension_gaps(native_result.get("parsed") or {}, scenario)
-        if (
-            native_result.get("status") == "success"
-            and not native_gaps
-            and scenario == "product_damage"
-            and (native_result.get("parsed") or {}).get("predicted_label") == "positive"
-        ):
-            compliance_verification = call_opening_compliance_verification(
-                primary_config,
-                case,
-                timeout=model_timeout,
-                retries=model_retries,
-                deadline_at=deadline_at,
-            )
-            native_result = merge_opening_compliance_verification(
-                native_result,
-                compliance_verification,
-                case.get("frames") or [],
-                scenario=scenario,
-            )
-            native_gaps = native_dimension_gaps(native_result.get("parsed") or {}, scenario)
-            if not _native_positive_opening_fully_verified(native_result, scenario):
-                native_gaps = sorted(set(native_gaps) | {"opening_compliance_verification"})
-    if native_source and native_result.get("status") == "success" and not native_gaps:
+    if native_source and native_result.get("status") == "success":
         proxy = native_source.get("proxy") if isinstance(native_source.get("proxy"), dict) else {}
         opening_result = native_result.get("opening_start_verification") or opening_verification
         compliance_result = native_result.get("opening_compliance_verification") or compliance_verification
-        native_incurred = _incurred_model_call(native_result)
+        perception_pipeline = (
+            native_result.get("perception_pipeline")
+            if isinstance(native_result.get("perception_pipeline"), dict)
+            else {}
+        )
+        native_incurred = _native_model_call_count(native_result)
         opening_incurred = _incurred_model_call(opening_result)
         compliance_incurred = _incurred_model_call(compliance_result)
+        perception_channels = (
+            perception_pipeline.get("channels")
+            if isinstance(perception_pipeline.get("channels"), dict)
+            else {}
+        )
         result = dict(native_result)
         result["chunking"] = {
             "total_model_calls": native_incurred + opening_incurred + compliance_incurred,
             "main_review_frames": 0,
             "channels": {
-                "native_video": {"model_calls": native_incurred, "model_images": 1 + len(case.get("frames") or [])},
+                "native_video": {
+                    **(perception_channels.get("native_video") or {}),
+                    "model_calls": native_incurred,
+                    "model_images": 1 + len(case.get("frames") or []),
+                },
+                **{
+                    key: value
+                    for key, value in perception_channels.items()
+                    if key != "native_video" and isinstance(value, dict)
+                },
                 "opening_start_verification": {"model_calls": opening_incurred, "model_images": len(case.get("frames") or [])},
                 "opening_compliance_verification": {
                     "model_calls": compliance_incurred,
@@ -1561,10 +1885,10 @@ def _run_review(
                 },
             },
             "native_video": {
-                "status": "completed",
+                "status": "completed" if not native_gaps else "completed_with_review_gaps",
                 "technical_status": native_result.get("status"),
                 "status_code": native_result.get("status_code"),
-                "dimension_gaps": [],
+                "dimension_gaps": native_gaps,
                 "opening_start_verification_status": (
                     (native_result.get("opening_start_verification") or {}).get("status") or "not_run"
                 ),
@@ -1575,15 +1899,13 @@ def _run_review(
             },
         }
         result["model_latency_seconds_sum"] = round(
-            float(result.get("latency_seconds") or 0)
-            + float((result.get("opening_start_verification") or {}).get("latency_seconds") or 0)
-            + float((result.get("opening_compliance_verification") or {}).get("latency_seconds") or 0),
+            float(result.get("model_latency_seconds_sum") or result.get("latency_seconds") or 0),
             2,
         )
     else:
         if native_source:
             proxy = native_source.get("proxy") if isinstance(native_source.get("proxy"), dict) else {}
-            case = prepared_case()
+            case = prepared_case(bundle_args=_complete_frame_fallback_args(args))
         result = _call_model_chunked_with_fallback(
             requested_model_key,
             case,
@@ -1654,7 +1976,7 @@ def _run_review(
             result = merge_model_billing(result, [native_result])
             chunking = dict(result.get("chunking") or {})
             opening_result = native_result.get("opening_start_verification") or opening_verification
-            native_incurred = _incurred_model_call(native_result)
+            native_incurred = _native_model_call_count(native_result)
             opening_status = opening_result.get("status") if isinstance(opening_result, dict) else None
             opening_incurred = _incurred_model_call(opening_result)
             chunking["total_model_calls"] = int(chunking.get("total_model_calls") or 0) + native_incurred + opening_incurred
@@ -1664,6 +1986,7 @@ def _run_review(
                 "technical_status": native_result.get("status"),
                 "status_code": native_result.get("status_code"),
                 "error_type": native_result.get("error_type"),
+                "error_summary": sanitize_error_text(native_result.get("error"), limit=400),
                 "opening_start_verification_status": opening_status or "not_run",
                 "transport": "file_uri" if native_source.get("file_uri") else "inline_data",
                 "proxy_status": proxy.get("status"),
@@ -1684,13 +2007,13 @@ def _run_review(
     review["sampling"] = {
         "profile": review_model,
         "label": profile["label"],
-        "sampling_mode": effective_sampling_mode,
+        "sampling_mode": case.get("sampling_mode") or effective_sampling_mode,
         "fps": effective_fps,
         "sampled_frames": len(case.get("frames") or []),
         "model_segments": ((review.get("agent_report") or {}).get("inference_estimate") or {}).get("segment_count"),
         "frames_per_segment": api_frame_limit,
     }
-    if native_source and not native_gaps and native_result.get("status") == "success":
+    if native_source and native_result.get("status") == "success":
         review["sampling"]["sampling_mode"] = "native_video"
     return {"ok": (review.get("summary") or {}).get("review_status") == "completed", **review}
 
@@ -2135,7 +2458,7 @@ def health() -> Dict[str, Any]:
             "supplier_file_uri_required": False,
             "accepted_model_media_types": ["video/mp4", "video/quicktime", "video/webm", "image/jpeg", "image/webp"],
             "native_video_max_unique_files": 1,
-            "strategy": "单个有效去重视频优先原生视频审核并用开场锚点复核；多视频或原生结果不完整时保留完整抽帧审核",
+            "strategy": "单个有效去重视频优先单次完整原生视频审核；仅在结构缺失或多视频时按缺失维度回退 1 FPS 独立 WebP 批次",
         },
         "official_product_references": {
             "mode": "per_review_on_demand",
@@ -2178,22 +2501,6 @@ def ppt_asset(name: str) -> FileResponse:
     path = (ROOT / "PPT-一部分" / name).resolve()
     base = (ROOT / "PPT-一部分").resolve()
     if base not in path.parents or not path.exists() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
-        raise HTTPException(status_code=404, detail="素材不存在")
-    return FileResponse(path)
-
-
-@app.get("/media/{rel_path:path}")
-def media_asset(rel_path: str, expires: str = "", sig: str = "") -> FileResponse:
-    try:
-        rel = unquote(rel_path).replace("\\", "/")
-        _require_public_signature("/media/" + quote(rel), expires, sig)
-        path = (ROOT / rel).resolve()
-    except OSError as exc:
-        raise HTTPException(status_code=404, detail="素材不存在") from exc
-    allowed_roots = [WORKBENCH_DIR.resolve(), SAMPLE_MATERIAL_DIR, RUNTIME_MEDIA_DIR]
-    if not any(path == base or base in path.parents for base in allowed_roots):
-        raise HTTPException(status_code=404, detail="素材不存在")
-    if not path.exists() or path.suffix.lower() not in ALLOWED_MEDIA_SUFFIXES:
         raise HTTPException(status_code=404, detail="素材不存在")
     return FileResponse(path)
 
@@ -2258,6 +2565,7 @@ def review_samples_batch(payload: Dict[str, str]) -> JSONResponse:
 
 @app.post("/api/review-folder")
 def review_folder(
+    x_request_id: str = Header("", alias="X-Request-ID"),
     x_mitako_internal_metrics: str = Header("", alias="X-MITAKO-Internal-Metrics"),
     x_mitako_internal_token: str = Header("", alias="X-MITAKO-Internal-Token"),
     scenario: str = Form("video_unboxing"),
@@ -2302,7 +2610,6 @@ def review_folder(
     max_frames = _clamp_int(max_frames, 1, 1800, 24)
     api_frame_limit = _clamp_int(api_frame_limit, 1, 24, 24)
     probe_seconds = _clamp_int(probe_seconds, 5, 60, 12)
-    folder_dir, ingestion = _save_folder_uploads(files)
     internal_request = _internal_request_authorized(x_mitako_internal_token)
     resolved_rule_tenant = _resolve_rule_tenant_id(rule_tenant_id, internal_request)
     evidence_context = {
@@ -2331,22 +2638,36 @@ def review_folder(
         "review_routing_policy": review_routing_policy,
         "minor_refund_policy": minor_refund_policy,
     }
-    response = _run_folder_agent_review(
-        folder_dir,
-        scenario,
-        "auto",
-        evidence_context,
-        sampling_mode,
-        fps,
-        max_frames,
-        api_frame_limit,
-        probe_seconds,
-        include_internal_metrics=internal_request and x_mitako_internal_metrics == "1",
-        include_html_report=include_html_report,
-        defer_postprocess=internal_request and defer_postprocess,
-        rule_tenant_id=resolved_rule_tenant,
+    claim_mode, claim_value = (
+        _claim_internal_review_request(x_request_id, resolved_rule_tenant)
+        if internal_request
+        else ("disabled", None)
     )
-    response["ingestion"] = ingestion
+    if claim_mode == "cached":
+        return JSONResponse(claim_value)
+    claim_key = claim_value if claim_mode == "owner" else None
+    try:
+        folder_dir, ingestion = _save_folder_uploads(files)
+        response = _run_folder_agent_review(
+            folder_dir,
+            scenario,
+            "auto",
+            evidence_context,
+            sampling_mode,
+            fps,
+            max_frames,
+            api_frame_limit,
+            probe_seconds,
+            include_internal_metrics=internal_request and x_mitako_internal_metrics == "1",
+            include_html_report=include_html_report,
+            defer_postprocess=internal_request and defer_postprocess,
+            rule_tenant_id=resolved_rule_tenant,
+        )
+        response["ingestion"] = ingestion
+    except BaseException:
+        _fail_internal_review_request(claim_key)
+        raise
+    _complete_internal_review_request(claim_key, response)
     return JSONResponse(response)
 
 

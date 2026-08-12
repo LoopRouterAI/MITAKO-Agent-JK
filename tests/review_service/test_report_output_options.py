@@ -236,6 +236,48 @@ class ReportOutputOptionsTest(unittest.TestCase):
         self.assertNotIn("review.example.test", html)
         self.assertNotIn("127.0.0.1:7861", html)
 
+    def test_formal_report_video_evidence_keeps_signed_timestamp_preview(self):
+        media_id = "e" * 32
+        job = {
+            "job_id": "RV-VIDEO-PREVIEW",
+            "tenant_id": "mitako",
+            "status": "SUCCEEDED",
+            "completed_at": 1,
+            "result": {"review": {
+                "summary": {"review_status": "completed"},
+                "agent_report": {
+                    "scenario": "product_damage",
+                    "scenario_label": "商品有伤审核",
+                    "parsed": {
+                        "predicted_label": "review",
+                        "adopted_evidence": [{
+                            "source_type": "video_frame",
+                            "video_index": 1,
+                            "timestamp": "00:12.50",
+                            "fact": "该时间点可见争议部位。",
+                        }],
+                    },
+                    "media_gallery": {
+                        "videos": [{
+                            "video_index": 1,
+                            "url": f"/media-item/{media_id}",
+                        }],
+                    },
+                },
+            }},
+        }
+
+        with patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}):
+            html = service.render_job_report(job)
+
+        self.assertRegex(
+            html,
+            rf'data-preview-src="/api/v1/review/jobs/{job["job_id"]}/media/{media_id}\?[^\"]+#t=12\.500"',
+        )
+        self.assertIn('data-preview-seconds="12.500"', html)
+        self.assertIn("video.currentTime = seekSeconds", html)
+        self.assertIn("video.controls = true", html)
+
     def test_formal_media_signature_rejects_expired_url(self):
         with patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}):
             media_url = service.signed_job_media_url(
@@ -425,7 +467,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
             "assets": [],
         }
 
-        def finish(job_id, *, status, result, diagnostics):
+        def finish(job_id, *, status, result, diagnostics, expected_attempts=None):
             return {**job, "status": status, "result": result, "diagnostics": diagnostics}
 
         with patch.object(service.store, "claim_job", return_value=True), patch.object(
@@ -541,7 +583,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
         }
         upstream["review"]["agent_report"]["parsed"]["next_step"] = stale_next_step
 
-        def finish(job_id, *, status, result, diagnostics):
+        def finish(job_id, *, status, result, diagnostics, expected_attempts=None):
             return {**job, "status": status, "completed_at": 1, "result": result, "diagnostics": diagnostics}
 
         with patch.object(service.store, "claim_job", return_value=True), patch.object(
@@ -607,7 +649,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
             "assets": [],
         }
 
-        def finish(job_id, *, status, result, diagnostics):
+        def finish(job_id, *, status, result, diagnostics, expected_attempts=None):
             return {**job, "status": status, "result": result, "diagnostics": diagnostics}
 
         with patch.object(service.store, "claim_job", return_value=True), patch.object(

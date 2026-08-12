@@ -156,17 +156,33 @@ def claim_job(job_id: str, lease_seconds: int) -> bool:
     return cur.rowcount == 1
 
 
-def finish_job(job_id: str, *, status: str, result: Dict[str, Any], diagnostics: Dict[str, Any]) -> Dict[str, Any]:
+def finish_job(
+    job_id: str,
+    *,
+    status: str,
+    result: Dict[str, Any],
+    diagnostics: Dict[str, Any],
+    expected_attempts: int | None = None,
+) -> Dict[str, Any]:
     now = time.time()
     with _connect() as conn:
-        conn.execute(
-            """
+        sql = """
             UPDATE review_jobs
             SET status=?, result=?, diagnostics=?, lease_until=0, completed_at=?, updated_at=?
             WHERE job_id=?
-            """,
-            (status, _json(result), _json(diagnostics), now, now, job_id),
+        """
+        params: tuple[Any, ...] = (
+            status,
+            _json(result),
+            _json(diagnostics),
+            now,
+            now,
+            job_id,
         )
+        if expected_attempts is not None:
+            sql += " AND status='RUNNING' AND attempts=?"
+            params = (*params, int(expected_attempts))
+        conn.execute(sql, params)
     return get_job(job_id) or {}
 
 

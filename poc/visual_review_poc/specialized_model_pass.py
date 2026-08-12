@@ -202,6 +202,27 @@ def run_specialized_frame_pass(
             )
         }
         merged.update(summarize_cost_observability([primary, repair]))
+        merged["http_attempts"] = [
+            dict(attempt)
+            for item in (primary, repair)
+            for attempt in item.get("http_attempts") or []
+            if isinstance(attempt, dict)
+        ]
+        merged["model_http_request_count"] = sum(
+            int(item.get("model_http_request_count") or 0)
+            or len([
+                attempt
+                for attempt in item.get("http_attempts") or []
+                if isinstance(attempt, dict) and attempt.get("request_sent") is True
+            ])
+            or 1
+            for item in (primary, repair)
+            if item.get("cost_status") != "not_incurred"
+        )
+        merged["model_latency_seconds_sum"] = round(sum(
+            float(item.get("model_latency_seconds_sum") or item.get("latency_seconds") or 0)
+            for item in (primary, repair)
+        ), 2)
         merged["latency_seconds"] = round(
             float(primary.get("latency_seconds") or 0) + float(repair.get("latency_seconds") or 0),
             2,
@@ -421,6 +442,9 @@ def run_specialized_frame_pass(
             "cost": (item or {}).get("cost") or {},
             "cost_status": (item or {}).get("cost_status") or "",
             "latency_seconds": (item or {}).get("latency_seconds") or 0,
+            "model_http_request_count": (item or {}).get("model_http_request_count") or 0,
+            "model_latency_seconds_sum": (item or {}).get("model_latency_seconds_sum") or 0,
+            "http_attempts": (item or {}).get("http_attempts") or [],
             "repair_calls": int((item or {}).get("repair_calls") or 0),
             "_channel_route_attempts": (item or {}).get("_channel_route_attempts") or [],
         }

@@ -410,6 +410,11 @@ def _playback_speed_assessment(
         "reason": reasons.get(reason_code, "编码时间轴不可用，恒定加速倍数无法判断。"),
         "method": "ffprobe_encoded_timeline_only",
         "is_model_inference": False,
+        "semantic_speed_status": "not_assessed",
+        "scientific_boundary": (
+            "PTS、帧率和容器时长只能描述编码后的时间轴；光流只能提示运动异常或抽样风险。"
+            "没有原始素材、现场时钟等可信参照时，两者都不能单独证明视频被加速或还原具体倍速。"
+        ),
         "encoded_timeline": encoded_timeline,
     }
 

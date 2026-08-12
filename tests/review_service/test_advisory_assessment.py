@@ -517,6 +517,7 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         stale["agent_report"]["parsed"].update(
             {"human_required": True, "decision": "manual_review", "system_yes_no": "REVIEW"}
         )
+        stale["agent_brief"]["system_yes_no"] = "REVIEW"
 
         result = attach_advisory_assessment(
             stale,
@@ -528,6 +529,8 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertFalse(parsed["human_required"])
         self.assertEqual(parsed["decision"], "continue_by_customer_policy")
         self.assertEqual(parsed["system_yes_no"], "YES")
+        self.assertEqual(result["summary"]["system_yes_no"], "YES")
+        self.assertEqual(result["agent_brief"]["system_yes_no"], "YES")
 
     def test_minor_authoritative_verification_pending_requires_human_review(self):
         result = attach_advisory_assessment(
@@ -692,9 +695,24 @@ class AdvisoryAssessmentTest(unittest.TestCase):
             item for item in advisory["signals"]
             if item["code"] == "minor_under_nine_high_confidence"
         )
-        self.assertEqual(signal["severity"], "critical")
+        self.assertEqual(signal["severity"], "warning")
         self.assertIn("独立支付能力", signal["effect"])
         self.assertEqual(result["agent_report"]["parsed"]["predicted_label"], "positive")
+
+    def test_product_damage_inconclusive_gate_requires_human_review(self):
+        result = attach_advisory_assessment(
+            review_result(label="review", confidence=0.64),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["human_review"]["level"], "required")
+        self.assertEqual(advisory["workflow_recommendation"], "human_review")
+        self.assertIn(
+            "inconclusive_product_damage_gate",
+            advisory["human_review"]["reason_codes"],
+        )
 
     def test_failed_review_does_not_ask_user_for_business_materials(self):
         result = attach_advisory_assessment(

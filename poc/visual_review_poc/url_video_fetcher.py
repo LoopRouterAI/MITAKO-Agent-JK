@@ -172,15 +172,23 @@ def validate_public_video_url(url: str) -> Dict[str, Any]:
     host = (parsed.hostname or "").lower()
     if parsed.scheme not in {"http", "https"} or not host:
         return {"ok": False, "status": "invalid_url", "error": "只支持公开视频链接"}
+    if parsed.scheme != "https":
+        return {"ok": False, "status": "insecure_url", "error": "公开视频仅支持 HTTPS"}
     if _is_private_host(host, resolve_dns=False):
         return {"ok": False, "status": "blocked_private_host", "error": "不支持内网或本机地址"}
     platform_allowed = any(host == suffix or host.endswith(f".{suffix}") for suffix in ALLOWED_HOST_SUFFIXES)
     if not platform_allowed and not _is_direct_video_url(url):
         return {"ok": False, "status": "unsupported_platform", "error": "暂不支持该视频平台"}
-    if not platform_allowed and parsed.scheme != "https":
-        return {"ok": False, "status": "insecure_direct_url", "error": "公开视频直链仅支持 HTTPS"}
+    if platform_allowed and os.getenv("VISUAL_ALLOW_PLATFORM_URL_DOWNLOAD", "0").strip().lower() not in {
+        "1", "true", "yes"
+    }:
+        return {
+            "ok": False,
+            "status": "platform_download_disabled",
+            "error": "当前部署未启用受网络隔离保护的平台视频下载，请改用本地上传或 HTTPS 视频直链",
+        }
     strict_dns = os.getenv("VISUAL_URL_STRICT_DNS_GUARD", "1").strip().lower() in {"1", "true", "yes"}
-    if strict_dns and not platform_allowed and _is_private_host(host):
+    if strict_dns and _is_private_host(host):
         return {"ok": False, "status": "blocked_private_host", "error": "不支持内网或本机地址"}
     return {"ok": True}
 

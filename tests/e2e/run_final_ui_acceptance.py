@@ -44,6 +44,7 @@ def _check_page(
     viewport: tuple[int, int] = (1440, 1000),
     business_rules: bool = False,
     require_preview: bool = False,
+    require_video_preview: bool = False,
 ) -> dict[str, Any]:
     context = browser.new_context(
         viewport={"width": viewport[0], "height": viewport[1]},
@@ -59,7 +60,14 @@ def _check_page(
         )
     page = context.new_page()
     errors: list[str] = []
+    media_statuses: list[int] = []
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on(
+        "response",
+        lambda item: media_statuses.append(item.status)
+        if item.request.resource_type == "media"
+        else None,
+    )
     response = page.goto(url, wait_until="networkidle", timeout=30_000)
     if business_rules:
         page.get_by_role("button", name="业务规则").click()
@@ -69,6 +77,8 @@ def _check_page(
     forbidden_ok = all(item not in body for item in forbidden)
     fits = bool(page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"))
     preview_ok = True
+    video_preview_ok = True
+    video_preview_detail: dict[str, Any] = {}
     preview_count = page.locator(".preview-trigger").count()
     if require_preview:
         preview_ok = preview_count > 0
@@ -76,13 +86,49 @@ def _check_page(
             page.locator(".preview-trigger").first.click()
             preview_ok = page.locator("#mediaLightbox:not([hidden])").count() == 1
             page.keyboard.press("Escape")
+        video_trigger = page.locator('.preview-trigger[data-preview-kind="video"]').first
+        if preview_ok and require_video_preview and video_trigger.count() == 1:
+            expected_seconds = float(video_trigger.get_attribute("data-preview-seconds") or 0)
+            video_trigger.click()
+            video = page.locator("#lightboxBody video")
+            video.wait_for(state="attached", timeout=10_000)
+            page.wait_for_function(
+                "document.querySelector('#lightboxBody video')?.readyState >= 1",
+                timeout=15_000,
+            )
+            page.wait_for_function(
+                "expected => Math.abs((document.querySelector('#lightboxBody video')?.currentTime || 0) - expected) <= 1.5",
+                arg=expected_seconds,
+                timeout=10_000,
+            )
+            video_state = video.evaluate(
+                "node => ({currentTime: node.currentTime, controls: node.controls, "
+                "videoWidth: node.videoWidth, fullscreen: typeof node.requestFullscreen === 'function' "
+                "|| typeof node.webkitEnterFullscreen === 'function'})"
+            )
+            video_preview_ok = bool(
+                video_state["controls"]
+                and video_state["videoWidth"] > 0
+                and video_state["fullscreen"]
+                and abs(float(video_state["currentTime"]) - expected_seconds) <= 1.5
+                and any(status in {200, 206} for status in media_statuses)
+            )
+            video_preview_detail = {
+                **video_state,
+                "expected_seconds": expected_seconds,
+                "media_statuses": media_statuses,
+            }
+            page.keyboard.press("Escape")
+        elif preview_ok and require_video_preview:
+            video_preview_ok = False
+            video_preview_detail = {"reason": "missing_video_preview_trigger"}
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
     screenshot = SCREENSHOT_DIR / f"{name}.png"
     page.screenshot(path=str(screenshot), full_page=False)
     status = response.status if response else 0
     result = {
         "name": name,
-        "ok": status == 200 and marker_ok and forbidden_ok and fits and preview_ok and not errors,
+        "ok": status == 200 and marker_ok and forbidden_ok and fits and preview_ok and video_preview_ok and not errors,
         "detail": {
             "status": status,
             "markers": marker_ok,
@@ -90,6 +136,8 @@ def _check_page(
             "fits": fits,
             "preview": preview_ok,
             "preview_count": preview_count,
+            "video_preview": video_preview_ok,
+            "video_preview_detail": video_preview_detail,
             "errors": errors,
         },
         "screenshot": str(screenshot.relative_to(ROOT)),
@@ -101,7 +149,7 @@ def _check_page(
 def main() -> int:
     session = _login()
     jobs = {
-        "598089": _job_id("review_0809_native_optimized_pd_latest.json"),
+        "598089": _job_id("review_0812_598089_gemini36_native.json"),
         "606669": _job_id("review_0809_pd_r04_final_latest.json"),
         "568689": _job_id("review_0809_missing_568689_final_latest.json"),
     }
@@ -114,19 +162,21 @@ def main() -> int:
                 session,
                 name="598089_desktop",
                 url=f"{BASE_URL}/api/v1/review/jobs/{jobs['598089']}/report",
-                markers=("开箱材料不合规", "伤点在连续开箱中清晰展示", "不符合", "建议抽检"),
+                markers=("现有证据支持用户诉求", "文件夹正面在灯光倾斜下显现表面划痕折痕", "初次开箱视频证据", "通过", "建议抽检"),
                 forbidden=common_forbidden + ("Evidence is robust",),
                 require_preview=True,
+                require_video_preview=True,
             ),
             _check_page(
                 browser,
                 session,
                 name="598089_mobile",
                 url=f"{BASE_URL}/api/v1/review/jobs/{jobs['598089']}/report",
-                markers=("开箱材料不合规", "建议抽检"),
+                markers=("现有证据支持用户诉求", "文件夹正面在灯光倾斜下显现表面划痕折痕", "通过", "建议抽检"),
                 forbidden=common_forbidden,
                 viewport=(390, 844),
                 require_preview=True,
+                require_video_preview=True,
             ),
             _check_page(
                 browser,
@@ -136,6 +186,7 @@ def main() -> int:
                 markers=("开箱材料不合规", "面单可核验", "不符合", "建议抽检"),
                 forbidden=common_forbidden + ("重复补件",),
                 require_preview=True,
+                require_video_preview=True,
             ),
             _check_page(
                 browser,

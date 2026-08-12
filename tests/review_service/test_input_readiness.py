@@ -17,13 +17,15 @@ from review_service.service import _review_fields
 
 
 class InputReadinessTest(unittest.TestCase):
-    def test_contract_declares_supplier_neutral_inline_media_transport(self):
+    def test_contract_declares_native_video_and_individual_webp_transport(self):
         media = contract()["media_processing"]
 
-        self.assertEqual(media["model_request_transport"], "inline_base64_images")
+        self.assertEqual(media["model_request_transport"], "baidu_native_video_inline_or_https_url")
         self.assertIs(media["supplier_file_uri_required"], False)
-        self.assertEqual(media["detail_frame_format"], "image/jpeg")
-        self.assertEqual(media["temporal_sheet_format"], "image/webp")
+        self.assertEqual(media["detail_frame_format"], "image/webp")
+        self.assertEqual(media["temporal_sheet_format"], "not_used")
+        self.assertEqual(media["native_video_defaults"]["sampling_fps"], 1.0)
+        self.assertEqual(media["native_video_defaults"]["media_resolution"], "high")
         self.assertEqual(media["official_product_references"]["mode"], "per_review_on_demand")
         self.assertFalse(media["official_product_references"]["bulk_download_enabled"])
         self.assertIn("fulfillment_baseline", contract()["business_fields"])
@@ -470,7 +472,7 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(one_fps["fps"], 1.0)
         self.assertEqual(two_fps["fps"], 2.0)
 
-    def test_uncertain_speed_impact_recommends_bounded_two_fps_review(self):
+    def test_uncertain_speed_impact_does_not_recommend_a_costly_dense_retry(self):
         escalation = _recommended_escalation(
             {
                 "scenario": "product_damage",
@@ -491,10 +493,10 @@ class InputReadinessTest(unittest.TestCase):
             {},
         )
 
-        action = next(item for item in escalation["actions"] if item["type"] == "increase_sampling_strength")
-        self.assertEqual(action["target_preset"], "forensic")
-        self.assertEqual(action["target_fps"], 2.0)
-        self.assertIn("疑似加速", action["description"])
+        self.assertFalse(any(
+            item.get("type") == "increase_sampling_strength"
+            for item in escalation["actions"]
+        ))
 
     def test_sampling_plan_counts_all_enabled_review_channels(self):
         with patch.dict("os.environ", {"REVIEW_PRODUCT_DAMAGE_MAIN_MAX_FRAMES": "48"}, clear=False):

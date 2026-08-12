@@ -14,6 +14,27 @@ from poc.visual_review_poc import url_video_fetcher
 
 
 class UrlVideoFetcherTest(unittest.TestCase):
+    def test_platform_http_url_is_rejected(self) -> None:
+        result = url_video_fetcher.validate_public_video_url(
+            "http://youtube.com/watch?v=example"
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "insecure_url")
+
+    def test_platform_download_is_disabled_without_network_isolation_opt_in(self) -> None:
+        with patch.dict("os.environ", {}, clear=True), patch.object(
+            url_video_fetcher,
+            "_is_private_host",
+            return_value=False,
+        ):
+            result = url_video_fetcher.validate_public_video_url(
+                "https://youtube.com/watch?v=example"
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "platform_download_disabled")
+
     def test_direct_url_connection_is_pinned_to_the_validated_public_ip(self) -> None:
         connected_addresses = []
 

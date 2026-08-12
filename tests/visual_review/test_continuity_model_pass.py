@@ -39,7 +39,6 @@ class ContinuityModelPassTest(unittest.TestCase):
                 "damage_causality",
                 "frame_findings",
                 "object_continuity",
-                "opening_start_verification",
                 "opening_video_compliance",
                 "overall_audit",
             ],
@@ -59,9 +58,30 @@ class ContinuityModelPassTest(unittest.TestCase):
                     "waybill_visible": True,
                     "single_take_continuity": True,
                     "issue_visible_in_continuous_opening": True,
-                    "evidence_refs": [{"field": "sealed_start", "video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}],
-                    "field_sources": {"sealed_start": "opening_start_verification"},
-                    "validated_fields": ["sealed_start"],
+                    "evidence_refs": [
+                        {"field": field, "video_index": 1, "timestamp": "00:00.00"}
+                        for field in (
+                            "sealed_start",
+                            "waybill_visible",
+                            "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        )
+                    ],
+                    "field_sources": {
+                        field: "native_full_video_perception"
+                        for field in (
+                            "sealed_start",
+                            "waybill_visible",
+                            "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        )
+                    },
+                    "validated_fields": [
+                        "sealed_start",
+                        "waybill_visible",
+                        "single_take_continuity",
+                        "issue_visible_in_continuous_opening",
+                    ],
                     "result": "compliant",
                 },
             },
@@ -91,7 +111,7 @@ class ContinuityModelPassTest(unittest.TestCase):
 
         self.assertIn("opening_video_compliance", native_dimension_gaps(parsed, "video_unboxing"))
 
-    def test_native_dimension_check_requires_start_verification_even_when_model_says_true(self):
+    def test_native_dimension_check_requires_timestamped_opening_evidence(self):
         parsed = {
             "overall_audit": {"conclusion": "面单可见但未从封箱开始"},
             "frame_findings": [{"timestamp": "00:00.00", "visible_facts": "首帧已是泡沫内包"}],
@@ -111,12 +131,9 @@ class ContinuityModelPassTest(unittest.TestCase):
             },
         }
 
-        self.assertIn(
-            "opening_start_verification",
-            native_dimension_gaps(parsed, "video_unboxing"),
-        )
+        self.assertIn("opening_video_compliance", native_dimension_gaps(parsed, "video_unboxing"))
 
-    def test_verified_opening_start_failure_does_not_force_full_frame_fallback(self):
+    def test_timestamped_full_video_opening_failure_does_not_force_frame_fallback(self):
         parsed = {
             "overall_audit": {"conclusion": "可见损伤"},
             "frame_findings": [{"timestamp": "00:08.20", "visible_facts": "边角压痕"}],
@@ -130,16 +147,37 @@ class ContinuityModelPassTest(unittest.TestCase):
                     "waybill_visible": True,
                     "single_take_continuity": True,
                     "issue_visible_in_continuous_opening": True,
-                    "evidence_refs": [{"field": "sealed_start", "video_index": 1, "global_frame_index": 1, "timestamp": "00:00.00"}],
-                    "field_sources": {"sealed_start": "opening_start_verification"},
-                    "validated_fields": ["sealed_start"],
+                    "evidence_refs": [
+                        {"field": field, "video_index": 1, "timestamp": "00:00.00"}
+                        for field in (
+                            "sealed_start",
+                            "waybill_visible",
+                            "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        )
+                    ],
+                    "field_sources": {
+                        field: "native_full_video_perception"
+                        for field in (
+                            "sealed_start",
+                            "waybill_visible",
+                            "single_take_continuity",
+                            "issue_visible_in_continuous_opening",
+                        )
+                    },
+                    "validated_fields": [
+                        "sealed_start",
+                        "waybill_visible",
+                        "single_take_continuity",
+                        "issue_visible_in_continuous_opening",
+                    ],
                     "result": "noncompliant",
                 },
             },
         }
 
         gaps = native_dimension_gaps(parsed, "video_unboxing")
-        self.assertNotIn("opening_start_verification", gaps)
+        self.assertNotIn("opening_video_compliance", gaps)
         self.assertNotIn("opening_video_hard_failure_candidate", gaps)
 
     def test_merge_opening_start_verification_overrides_only_sealed_start(self):
@@ -1772,6 +1810,25 @@ class ContinuityModelPassTest(unittest.TestCase):
         self.assertEqual(continuity["repair_calls"], 1)
         self.assertEqual(continuity["model_calls"], 2)
         self.assertEqual(result["chunking"]["total_model_calls"], 3)
+
+    def test_chunk_aggregate_counts_physical_http_retries(self):
+        row = self._fake_call({}, self.case, 30, 0)
+        row.update({
+            "model_http_request_count": 2,
+            "model_latency_seconds_sum": 1.25,
+            "http_attempts": [
+                {"request_sent": True, "outcome": "http_503", "latency_seconds": 0.4},
+                {"request_sent": True, "outcome": "success", "latency_seconds": 0.85},
+            ],
+        })
+
+        result = _aggregate_chunk_results(self.case, [row])
+
+        self.assertEqual(result["model_http_request_count"], 2)
+        self.assertEqual(result["chunking"]["total_model_calls"], 2)
+        self.assertEqual(result["chunking"]["channels"]["main_review"]["model_calls"], 2)
+        self.assertEqual(result["model_latency_seconds_sum"], 1.25)
+        self.assertEqual(len(result["http_attempts"]), 2)
 
     def test_chunked_review_keeps_partial_continuity_evidence_and_reports_exact_gaps(self):
         case = dict(self.case)

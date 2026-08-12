@@ -80,6 +80,57 @@ def _inventory_result(indices: list[int]) -> dict:
 
 
 class DynamicMaterialCapacityTest(unittest.TestCase):
+    def test_product_damage_frames_keep_1080p_detail_profile(self) -> None:
+        calls: list[dict] = []
+
+        def record_prepare(items, *_args, **kwargs):
+            calls.append(dict(kwargs))
+            return list(items)
+
+        with TemporaryDirectory() as temp_dir:
+            sample_dir = Path(temp_dir) / "case"
+            run_dir = Path(temp_dir) / "run"
+            sample_dir.mkdir()
+            args = SimpleNamespace(
+                fps=1.0,
+                sampling_mode="dense",
+                max_frames_per_video=1200,
+                api_frame_limit=24,
+                probe_seconds=1.0,
+                frame_width=1920,
+                supplemental_image_limit=40,
+            )
+            product_case = {
+                "case_id": "damage-resolution",
+                "scenario": "product_damage",
+                "structured_business_context": {},
+                "supplemental_images": [_image(1)],
+                "frames": [],
+                "videos": [],
+            }
+            with (
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.load_case_from_folder",
+                    return_value=product_case,
+                ),
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.prepare_media",
+                    side_effect=record_prepare,
+                ),
+                patch("poc.visual_review_poc.model_selection_e2e.prepare_official_reference_images"),
+            ):
+                load_case_bundle(
+                    sample_dir,
+                    args,
+                    run_dir,
+                    scenario_override="product_damage",
+                )
+
+        self.assertEqual(
+            calls[0],
+            {"max_edge": 1920, "quality": 88, "lossless_webp": True},
+        )
+
     def test_hidden_files_do_not_consume_folder_capacity(self) -> None:
         png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
         uploads = [

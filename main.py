@@ -778,7 +778,7 @@ class HandoffOfferRequest(BaseModel):
 class AuthLoginRequest(BaseModel):
     username: str
     password: str
-    tenant_id: str = "mitako"
+    tenant_id: str = Field(min_length=1, max_length=128, pattern=r"^\S+$")
 
 
 class CustomerSessionAuthRequest(BaseModel):
@@ -795,11 +795,13 @@ class SsoCallbackBody(BaseModel):
 @app.post("/api/v1/auth/login")
 async def auth_login(req: AuthLoginRequest):
     """管理员/坐席登录 — MITAKO_AUTH_REQUIRED=1 时 desk/admin 变更 API 需 token"""
-    user = verify_user(req.username, req.password, req.tenant_id or "mitako")
+    user = verify_user(req.username, req.password, req.tenant_id)
     if not user:
         return {"ok": False, "error": "invalid_credentials"}
-    user_tenant = user.get("tenant_id") or "mitako"
-    if req.tenant_id and req.tenant_id != user_tenant:
+    user_tenant = str(user.get("tenant_id") or "").strip()
+    if not user_tenant:
+        return {"ok": False, "error": "tenant_missing"}
+    if req.tenant_id != user_tenant:
         return {"ok": False, "error": "tenant_mismatch"}
     token = create_token(
         sub=user["username"],

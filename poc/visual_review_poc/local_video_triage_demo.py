@@ -223,8 +223,8 @@ def sample_video_frames(
             continue
         frame = resize_frame(frame, frame_width)
         timestamp_seconds = round(frame_number / native_fps, 2) if native_fps else 0.0
-        path = frame_dir / f"frame_{len(frames) + 1:03d}_{timestamp_seconds:.2f}s.jpg"
-        cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, 84])
+        path = frame_dir / f"frame_{len(frames) + 1:03d}_{timestamp_seconds:.2f}s.webp"
+        cv2.imwrite(str(path), frame, [cv2.IMWRITE_WEBP_QUALITY, 101])
         frames.append(
             {
                 "frame_index": len(frames) + 1,
@@ -252,9 +252,9 @@ def sample_video_frames(
             4,
         ) if duration > 0 and len(frames) > 1 else 1.0,
         "model_input": {
-            "type": "compressed_jpeg_frames",
+            "type": "individual_lossless_webp_frames",
             "max_width": frame_width,
-            "jpeg_quality": 84,
+            "lossless": True,
         },
         "large_media_recommendation": (
             "object_storage_transcode_proxy"
