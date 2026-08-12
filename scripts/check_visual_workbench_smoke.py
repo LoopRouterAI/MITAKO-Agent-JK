@@ -235,7 +235,8 @@ def test_workbench_api() -> None:
     assert bad_json.status_code == 400
 
     image_path = next((ROOT / "docs" / "三大审核场景的小量样本" / "sample_003").glob("*.jpg"))
-    original_call_model = workbench_server.call_model_chunked
+    original_call_model = workbench_server.call_model
+    original_call_model_chunked = workbench_server.call_model_chunked
 
     def fake_success(cfg, case, timeout, retries, deadline_at=None):
         assert not case.get("videos"), case
@@ -267,6 +268,7 @@ def test_workbench_api() -> None:
         return {"status": "success", "latency_seconds": 0.1, "usage": {}, "cost": {}, "parsed": {"raw_text": "not json"}}
 
     try:
+        workbench_server.call_model = fake_success
         workbench_server.call_model_chunked = fake_success
         image_only = client.post(
             "/api/review-folder",
@@ -282,6 +284,7 @@ def test_workbench_api() -> None:
         assert image_data["review"]["summary"]["successful_reviews"] == 1, image_data
         assert "补充图片 1 张" in image_data["review"]["frame_strategy"], image_data
 
+        workbench_server.call_model = fake_failed
         workbench_server.call_model_chunked = fake_failed
         failed = client.post(
             "/api/review-folder",
@@ -350,6 +353,7 @@ def test_workbench_api() -> None:
         assert hidden_data["review"]["diagnostics"]["videos_received"] == 1, hidden_data
         assert_public_payload_clean(hidden_data["review"])
 
+        workbench_server.call_model = fake_unstructured
         workbench_server.call_model_chunked = fake_unstructured
         unstructured = client.post(
             "/api/review-folder",
@@ -366,7 +370,8 @@ def test_workbench_api() -> None:
         assert unstructured_data["review"]["diagnostics"]["failure_stage"] == "系统复核", unstructured_data
         assert_public_payload_clean(unstructured_data["review"])
     finally:
-        workbench_server.call_model_chunked = original_call_model
+        workbench_server.call_model = original_call_model
+        workbench_server.call_model_chunked = original_call_model_chunked
 
 
 def test_model_transport_contract() -> None:

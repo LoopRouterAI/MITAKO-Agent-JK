@@ -39,13 +39,17 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertNotIn('MITAKO_Agent-customer-delivery.html', package["scripts"]["prebuild"])
         self.assertIn('emptyOutDir: false', vite_config)
 
-    def test_pre_release_refreshes_dynamic_capacity_evidence_for_current_commit(self) -> None:
+    def test_pre_release_reuses_dynamic_capacity_evidence_only_when_related_code_is_unchanged(self) -> None:
         script = (ROOT / "scripts" / "pre_release_internal_validation.ps1").read_text(encoding="utf-8-sig")
 
         self.assertIn("dynamic_material_capacity_http_latest.json", script)
         self.assertIn("check_dynamic_material_capacity_http.py", script)
         self.assertIn("git_commit", script)
         self.assertIn("requested_count", script)
+        self.assertIn("merge-base --is-ancestor", script)
+        self.assertIn("diff --quiet", script)
+        self.assertIn("$DynamicCapacityEvidencePaths", script)
+        self.assertIn("-not $RunModelBatch", script)
 
     def test_customer_package_excludes_previous_release_archives(self) -> None:
         customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")

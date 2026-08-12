@@ -553,13 +553,18 @@ def self_check() -> None:
     assert extract_video_url(sample) == "https://youtu.be/abc_DEF-123"
     assert detect_platform("https://www.bilibili.com/video/BV1xx411c7mD") == "bilibili"
     assert detect_platform("https://v.douyin.com/abc/") == "douyin"
-    assert validate_public_video_url("https://www.youtube.com/watch?v=abc_DEF-123")["ok"]
+    platform_result = validate_public_video_url("https://www.youtube.com/watch?v=abc_DEF-123")
+    if os.getenv("VISUAL_ALLOW_PLATFORM_URL_DOWNLOAD", "0").strip().lower() not in {"1", "true", "yes"}:
+        assert not platform_result["ok"]
+        assert platform_result["status"] == "platform_download_disabled"
     assert not validate_public_video_url("http://127.0.0.1:7861/")["ok"]
-    assert validate_public_video_url("http://127.0.0.1:7861/")["status"] == "blocked_private_host"
-    assert validate_public_video_url("http://localhost:7861/")["status"] == "blocked_private_host"
+    assert validate_public_video_url("http://127.0.0.1:7861/")["status"] == "insecure_url"
+    assert validate_public_video_url("https://127.0.0.1:7861/")["status"] == "blocked_private_host"
+    assert validate_public_video_url("https://localhost:7861/")["status"] == "blocked_private_host"
     assert not validate_public_video_url("https://example.com/video")["ok"]
-    assert validate_public_video_url("https://cdn.example.com/path/sample.mp4")["ok"]
-    assert detect_platform("https://cdn.example.com/path/sample.mp4") == "direct_video"
+    direct_url = "https://1.1.1.1/path/sample.mp4"
+    assert validate_public_video_url(direct_url)["ok"]
+    assert detect_platform(direct_url) == "direct_video"
 
 
 def main() -> int:

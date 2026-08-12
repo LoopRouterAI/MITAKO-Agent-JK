@@ -18,6 +18,17 @@ $Python = $PythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Selec
 if (-not $Python) {
     throw "Internal Python environment not found: expected .venv or venv."
 }
+$DynamicCapacityEvidencePaths = @(
+    ".env.example",
+    "auth",
+    "main.py",
+    "prompts",
+    "review_service",
+    "poc/visual_review_poc/minor_material_pipeline.py",
+    "poc/visual_review_poc/model_selection_e2e.py",
+    "poc/visual_review_poc/workbench_server.py",
+    "scripts/check_dynamic_material_capacity_http.py"
+)
 
 function Invoke-Step([string]$Name, [scriptblock]$Action) {
     Write-Host "[Internal release validation] $Name" -ForegroundColor Cyan
@@ -63,24 +74,36 @@ try {
     Invoke-Step "Order baseline and on-demand official image regression" { & $Python -m unittest tests.visual_review.test_order_info_sync tests.visual_review.test_order_info_reconcile tests.visual_review.test_order_info_adapter tests.visual_review.test_official_reference_images tests.review_service.test_input_readiness }
     Invoke-Step "Model authentication, observability, Celery and advisory routing regression" { & $Python -m unittest tests.visual_review.test_model_auth tests.visual_review.test_observability tests.review_service.test_celery_registration tests.review_service.test_advisory_assessment }
     Invoke-Step "Visual workbench smoke" { & $Python scripts\check_visual_workbench_smoke.py }
-    Invoke-Step "Dynamic 62-image evidence for current commit" {
+    Invoke-Step "Dynamic 62-image evidence for relevant implementation" {
         $dynamicReportPath = Join-Path $Root "tests\reports\dynamic_material_capacity_http_latest.json"
         $currentCommit = (git rev-parse HEAD).Trim()
         $reuseDynamicReport = $false
-        if (Test-Path -LiteralPath $dynamicReportPath -PathType Leaf) {
+        if (-not $RunModelBatch -and (Test-Path -LiteralPath $dynamicReportPath -PathType Leaf)) {
             try {
                 $dynamicReport = Get-Content -LiteralPath $dynamicReportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $evidenceCommit = [string]$dynamicReport.git_commit
+                $evidenceIsAncestor = $false
+                $relatedCodeUnchanged = $false
+                if ($evidenceCommit -match "^[0-9a-fA-F]{40}$") {
+                    & git merge-base --is-ancestor $evidenceCommit $currentCommit
+                    $evidenceIsAncestor = $LASTEXITCODE -eq 0
+                    if ($evidenceIsAncestor) {
+                        & git diff --quiet "$evidenceCommit..$currentCommit" -- $DynamicCapacityEvidencePaths
+                        $relatedCodeUnchanged = $LASTEXITCODE -eq 0
+                    }
+                }
                 $reuseDynamicReport = (
                     $dynamicReport.release_gate_ok -eq $true -and
                     [int]$dynamicReport.requested_count -eq 62 -and
-                    [string]$dynamicReport.git_commit -eq $currentCommit
+                    $evidenceIsAncestor -and
+                    $relatedCodeUnchanged
                 )
             } catch {
                 $reuseDynamicReport = $false
             }
         }
         if ($reuseDynamicReport) {
-            Write-Host "Reusing current 62-image HTTP evidence: $currentCommit"
+            Write-Host "Reusing 62-image HTTP evidence: $evidenceCommit (relevant implementation unchanged at $currentCommit)"
         } else {
             & $Python scripts\check_dynamic_material_capacity_http.py --base-url $BaseUrl --count 62
         }
