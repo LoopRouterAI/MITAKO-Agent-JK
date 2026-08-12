@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 import json
+import subprocess
 from pathlib import Path
+
+from scripts.check_release_packages import _dynamic_capacity_evidence_matches_release
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +53,21 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertIn("diff --quiet", script)
         self.assertIn("$DynamicCapacityEvidencePaths", script)
         self.assertIn("-not $RunModelBatch", script)
+
+    def test_package_verifier_accepts_unchanged_ancestor_dynamic_capacity_evidence(self) -> None:
+        report = json.loads(
+            (ROOT / "tests" / "reports" / "dynamic_material_capacity_http_latest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        current_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip()
+
+        self.assertTrue(
+            _dynamic_capacity_evidence_matches_release(report["git_commit"], current_commit)
+        )
+        self.assertFalse(_dynamic_capacity_evidence_matches_release("not-a-commit", current_commit))
 
     def test_customer_package_excludes_previous_release_archives(self) -> None:
         customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")

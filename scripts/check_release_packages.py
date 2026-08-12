@@ -26,6 +26,17 @@ from urllib.parse import quote, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / "tests" / "reports"
+DYNAMIC_CAPACITY_EVIDENCE_PATHS = (
+    ".env.example",
+    "auth",
+    "main.py",
+    "prompts",
+    "review_service",
+    "poc/visual_review_poc/minor_material_pipeline.py",
+    "poc/visual_review_poc/model_selection_e2e.py",
+    "poc/visual_review_poc/workbench_server.py",
+    "scripts/check_dynamic_material_capacity_http.py",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -39,6 +50,39 @@ def _sha256(path: Path) -> str:
 def _assert(condition: bool, message: str) -> None:
     if not condition:
         raise RuntimeError(message)
+
+
+def _dynamic_capacity_evidence_matches_release(evidence_commit: str, release_commit: str) -> bool:
+    commit_pattern = re.compile(r"^[0-9a-fA-F]{40}$")
+    if not commit_pattern.fullmatch(evidence_commit) or not commit_pattern.fullmatch(release_commit):
+        return False
+    try:
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", evidence_commit, release_commit],
+            cwd=ROOT,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        if ancestor.returncode != 0:
+            return False
+        unchanged = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--quiet",
+                f"{evidence_commit}..{release_commit}",
+                "--",
+                *DYNAMIC_CAPACITY_EVIDENCE_PATHS,
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        return unchanged.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _verify_customer_text_boundary(root: Path) -> None:
@@ -224,7 +268,11 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     )
     _assert(dynamic_report.get("release_gate_ok") is True, "动态素材真实 HTTP 容量与降级证据未通过")
     _assert(dynamic_report.get("requested_count") == 62, "动态素材证据不是 62 份资料")
-    _assert(dynamic_report.get("git_commit") == expected_commit, "动态素材证据未绑定当前验收提交")
+    evidence_commit = str(dynamic_report.get("git_commit") or "")
+    _assert(
+        _dynamic_capacity_evidence_matches_release(evidence_commit, expected_commit),
+        "动态素材证据不是当前验收提交的可信祖先，或相关审核实现已发生变化",
+    )
     _verify_hashes(root, list(manifest.get("evidence") or []))
     return {"entries": len(names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
 
