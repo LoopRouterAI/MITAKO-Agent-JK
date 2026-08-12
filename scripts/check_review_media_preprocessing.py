@@ -30,11 +30,17 @@ def main() -> int:
         sampled = sample_video_frames(video, fps=1.0, max_frames=4, probe_seconds=1.0, frame_width=768, run_dir=Path(workdir))
         frames = sampled.get("frames") or []
         duration = float(sampled.get("duration_seconds") or 0)
+        model_input = sampled.get("model_input") or {}
         checks = {
             "full_timeline_strategy": sampled.get("sampling_strategy") == "full_timeline_adaptive",
             "full_timeline_coverage": float(sampled.get("timeline_coverage_ratio") or 0) >= 0.9,
             "tail_frame_included": bool(frames) and float(frames[-1].get("timestamp_seconds") or 0) >= duration * 0.9,
-            "compressed_frame_input": (sampled.get("model_input") or {}).get("type") == "compressed_jpeg_frames",
+            "compressed_frame_input": (
+                model_input.get("type") == "individual_lossless_webp_frames"
+                and model_input.get("lossless") is True
+                and bool(frames)
+                and all(Path(frame["path"]).suffix.lower() == ".webp" for frame in frames)
+            ),
             "source_size_recorded": sampled.get("source_bytes") == video.stat().st_size,
             "large_video_adaptive_budget": adaptive_frame_budget(452.5, 543_351_335, 24) == 18,
         }
