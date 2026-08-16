@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>虾淘私域 Agent 交叉对抗式验收报告</title>
+  <style>
+    :root {
+      --bg: #f6f7f1;
+      --paper: #fffefa;
+      --ink: #161712;
+      --muted: #656b5a;
+      --line: #dfe4d2;
+      --green: #8fbf2f;
+      --green-soft: #eef7d6;
+      --amber: #f2b84b;
+      --amber-soft: #fff3cf;
+      --red: #d94a3a;
+      --red-soft: #ffe3dd;
+      --blue: #406bb5;
+      --blue-soft: #e6edf9;
+      --gray-soft: #eef0ea;
+      --shadow: 0 18px 42px rgba(31, 36, 20, .08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
+      line-height: 1.65;
+    }
+
+    a { color: inherit; }
+    .page { max-width: 1240px; margin: 0 auto; padding: 32px 20px 56px; }
+    .hero {
+      border: 1px solid var(--line);
+      background: linear-gradient(135deg, #fffefa 0%, #f3f8e5 54%, #edf2f8 100%);
+      border-radius: 8px;
+      padding: 32px;
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: #516312;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; font-size: clamp(30px, 5vw, 58px); line-height: 1.05; letter-spacing: 0; }
+    h2 { margin: 0 0 14px; font-size: 24px; line-height: 1.2; }
+    h3 { margin: 0 0 8px; font-size: 17px; }
+    p { margin: 0; }
+    .lead { max-width: 880px; margin-top: 18px; color: var(--muted); font-size: 17px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .7);
+      font-size: 12px;
+      font-weight: 800;
+      color: #44493c;
+    }
+    .grid { display: grid; gap: 16px; }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    section { margin-top: 22px; }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+    .metric {
+      min-height: 150px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .metric .value { font-size: 42px; line-height: 1; font-weight: 950; }
+    .metric .label { margin-top: 10px; color: var(--muted); font-size: 13px; font-weight: 800; }
+    .metric.red { background: var(--red-soft); border-color: #f0b5aa; }
+    .metric.amber { background: var(--amber-soft); border-color: #edd28b; }
+    .metric.green { background: var(--green-soft); border-color: #c8dfa0; }
+    .metric.blue { background: var(--blue-soft); border-color: #c2d1ea; }
+    .verdict {
+      display: grid;
+      grid-template-columns: .95fr 1.05fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+    .big-status {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 260px;
+      background: #171812;
+      color: #fffef8;
+      border-radius: 8px;
+      padding: 26px;
+    }
+    .big-status .score { font-size: clamp(56px, 9vw, 104px); line-height: .95; font-weight: 950; }
+    .big-status .note { margin-top: 14px; color: #cfd7bd; font-weight: 800; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 74px;
+      min-height: 28px;
+      padding: 3px 9px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .done { background: var(--green-soft); color: #334c05; border: 1px solid #c7df99; }
+    .partial { background: var(--amber-soft); color: #6c4a00; border: 1px solid #efd28d; }
+    .missing { background: var(--red-soft); color: #7c1c12; border: 1px solid #f0b0a5; }
+    .external { background: var(--blue-soft); color: #24487c; border: 1px solid #bdd0ed; }
+    .neutral { background: var(--gray-soft); color: #555b50; border: 1px solid #d7dcd2; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      overflow: hidden;
+      border-radius: 8px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 11px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f0f3e8;
+      color: #3c4433;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    tr:last-child td { border-bottom: 0; }
+    code, .code {
+      font-family: Consolas, "SFMono-Regular", ui-monospace, monospace;
+      font-size: .94em;
+      background: #eef1e7;
+      border: 1px solid #dce3d1;
+      border-radius: 6px;
+      padding: 1px 5px;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 12px 0 0;
+      padding: 14px;
+      border-radius: 8px;
+      background: #171812;
+      color: #e9f1d8;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .callout {
+      border-radius: 8px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      background: #f7f9ef;
+    }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .danger { background: var(--red-soft); border-color: #f1b0a6; }
+    .warn { background: var(--amber-soft); border-color: #ead08a; }
+    .ok { background: var(--green-soft); border-color: #c8dfa0; }
+    .split {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .toc {
+      position: sticky;
+      top: 16px;
+      display: grid;
+      gap: 8px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 254, 250, .92);
+      box-shadow: var(--shadow);
+    }
+    .toc a {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      padding: 6px 9px;
+      border-radius: 8px;
+      color: #42483a;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .toc a:hover { background: var(--green-soft); }
+    .quote {
+      border-left: 4px solid var(--amber);
+      padding: 10px 12px;
+      background: #fff8df;
+      border-radius: 0 8px 8px 0;
+      color: #524021;
+      font-size: 13px;
+    }
+    .route {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcf6;
+      min-height: 112px;
+    }
+    .step b { display: block; font-size: 13px; margin-bottom: 6px; }
+    .step span { color: var(--muted); font-size: 12px; }
+    .footer { margin-top: 28px; color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 960px) {
+      .grid-4, .grid-3, .grid-2, .verdict, .split, .route { grid-template-columns: 1fr; }
+      .toc { position: relative; top: 0; }
+      .hero { padding: 24px; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+      td { white-space: normal; min-width: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Cross-role adversarial review · 2026-07-09</p>
+      <h1>虾淘私域 Agent 交叉对抗式验收报告</h1>
+      <p class="lead">本报告回答一个问题：当前“虾淘私域 Agent P0 运营工作台”到底是落地产品，还是规划展示。结论不会包装：它已经具备本地 POC 规则链路和契约接口，但没有完成企微真实群接入、商品库接入、点击归因、运营复盘和完整演示数据。</p>
+      <div class="meta">
+        <span class="chip">审查对象：docs/甲方需求/0708 私域 Agent MD</span>
+        <span class="chip">运行态：127.0.0.1:8015</span>
+        <span class="chip">审查方式：多角色只读审查 + 主审计归纳</span>
+        <span class="chip">生成时间：2026-07-09 02:10 +08:00</span>
+      </div>
+    </header>
+
+    <section class="grid grid-4">
+      <div class="card metric red">
+        <div class="value">否</div>
+        <div>
+          <h3>不是完整交付</h3>
+          <p class="label">不能说“按质按量完成了全部 MD 需求”。</p>
+        </div>
+      </div>
+      <div class="card metric amber">
+        <div class="value">半</div>
+        <div>
+          <h3>私域 P0 半完成</h3>
+          <p class="label">本地规则、存储、表单、任务链路存在；生产接入缺失。</p>
+        </div>
+      </div>
+      <div class="card metric red">
+        <div class="value">0</div>
+        <div>
+          <h3>当前演示数据为空</h3>
+          <p class="label">8015 运行态私域库 group/event/task 均为 0。</p>
+        </div>
+      </div>
+      <div class="card metric blue">
+        <div class="value">4</div>
+        <div>
+          <h3>关键外部系统未接</h3>
+          <p class="label">企微、商品库、订单系统、点击归因均是待接入。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="split">
+      <nav class="toc">
+        <a href="#verdict">01 总判定</a>
+        <a href="#agents">02 多 Agent 结论</a>
+        <a href="#coverage">03 P0 覆盖矩阵</a>
+        <a href="#runtime">04 运行态证据</a>
+        <a href="#landing">05 落地与规划边界</a>
+        <a href="#integration">06 企微/商品接入</a>
+        <a href="#demo">07 演示数据缺口</a>
+        <a href="#next">08 最小补齐路线</a>
+      </nav>
+
+      <div class="grid">
+        <section id="verdict" class="card verdict">
+          <div class="big-status">
+            <div class="score">42%</div>
+            <div class="note">按“客户 MD 生产级需求”口径的完成度估算。按“本地 POC 可演示骨架”口径约 65%。</div>
+          </div>
+          <div class="grid">
+            <div class="callout danger">
+              <strong>主结论</strong>
+              当前实现不能称为“虾淘 1 万+企微私域 Agent 已落地”。它是本地 POC：有规则引擎、SQLite 追踪、后台表单、材料审核任务和接口契约；没有真实企微群消息采集、群发、商品库、订单/售后、点击归因、复盘中心。
+            </div>
+            <div class="callout warn">
+              <strong>你看到大量规划内容的判断是对的</strong>
+              后台里“商业价值、三档企微权限、模块卡片、60 天路线图”等主要是规划展示。真正可操作的私域功能集中在两个表单：群消息事件流、商品事件流，以及三个列表：群资产、客服任务、材料审核任务。
+            </div>
+            <div class="callout ok">
+              <strong>仍然已经落地的部分</strong>
+              P0 的最小决策链路存在：群消息可生成群画像、风险等级、禁推状态和客服任务；商品事件可生成候选匹配；图片/视频上传可生成审核任务并进入聊天附件校验。
+            </div>
+          </div>
+        </section>
+
+        <section id="agents" class="card">
+          <h2>02 多 Agent 对抗式审查结论</h2>
+          <div class="grid grid-2">
+            <div class="callout danger">
+              <strong>二次元谷子客户视角</strong>
+              没有真实“群成员在企微群里被 Agent 服务”的体验；当前是后台手动表单，不是企微读群、发群、会话存档或群发。吃谷雷达只是候选结果，没有触达、点击、订单归因。
+            </div>
+            <div class="callout warn">
+              <strong>产品经理/验收视角</strong>
+              可作为“POC 演示 + 接口契约 + Mock 准备态”，不能作为“真实甲方系统已接入、1 万群运营已落地、A/B 已上线”验收。
+            </div>
+            <div class="callout warn">
+              <strong>技术集成/合规视角</strong>
+              企微、飞书 CLI、商品库、订单/物流/仓库/财务/售后、CRM/CDP、OneID、真实向量库均未接入。现有接口是本地契约。
+            </div>
+            <div class="callout danger">
+              <strong>主审计补充：客服主管 + CGO</strong>
+              舆情只看单条关键词，没有上下文窗口、多人共振、主管预警闭环；增长闭环只有“商品事件 -> 候选”，没有许愿池、蹲守提醒、点击/下单/退群反馈。
+            </div>
+          </div>
+        </section>
+
+        <section id="coverage" class="card">
+          <h2>03 P0 必须做覆盖矩阵</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>客户 MD P0 需求</th>
+                <th>状态</th>
+                <th>当前证据</th>
+                <th>缺口/验收风险</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>企微群消息 / 群发能力确认</td>
+                <td><span class="status external">需外部接入</span></td>
+                <td><code>interface_status.wechat_group_read/send = contract_pending</code></td>
+                <td>没有企微 SDK/API、会话存档、群成员识别、群发、私聊、点击回传。</td>
+              </tr>
+              <tr>
+                <td>群资产数据模型</td>
+                <td><span class="status partial">半完成</span></td>
+                <td><code>private_groups</code> 表；<code>upsert_group()</code>；风险、健康分、tags、metrics。</td>
+                <td>字段少于 MD 要求；没有来源渠道、群类型、活动关联、活跃/转化历史。</td>
+              </tr>
+              <tr>
+                <td>谷子词典基础问答</td>
+                <td><span class="status partial">半完成</span></td>
+                <td><code>TERM_ANSWERS</code> 固定术语：出荷、再贩、大赏、小赏、吧唧、流麻、隐藏款。</td>
+                <td>没有 RAG、知识版本、未命中池、词典后台、活动规则版本。</td>
+              </tr>
+              <tr>
+                <td>商品事件接口</td>
+                <td><span class="status done">POC 已完成</span></td>
+                <td><code>POST /api/v1/private-domain/product-event</code>，保存到 <code>product_events</code>。</td>
+                <td>不是商品库真实 webhook；缺价格、图片、小程序路径、App Deep Link、活动时间。</td>
+              </tr>
+              <tr>
+                <td>吃谷雷达群匹配</td>
+                <td><span class="status partial">半完成</span></td>
+                <td>根据 IP、角色字符串、库存、风险生成 <code>review/skip/blocked</code> 候选。</td>
+                <td>没有推送任务审核、发送计划、回滚暂停、点击/订单/负面反馈。</td>
+              </tr>
+              <tr>
+                <td>高风险词和舆情分级</td>
+                <td><span class="status partial">半完成</span></td>
+                <td><code>RISK_WORDS</code> + 单条消息风险等级 L0-L4。</td>
+                <td>没有模型判断、10-30 分钟上下文、多用户共振、玩梗误报降级。</td>
+              </tr>
+              <tr>
+                <td>高风险群禁推</td>
+                <td><span class="status partial">半完成</span></td>
+                <td>L2+ 设置 <code>marketing_disabled</code> 和禁推到期时间；商品事件遇风险群 <code>blocked</code>。</td>
+                <td>没有真实群发拦截器，因为真实群发未接；没有解除风险审批。</td>
+              </tr>
+              <tr>
+                <td>客服 Agent 任务联动</td>
+                <td><span class="status partial">半完成</span></td>
+                <td>L2+ 创建 <code>customer_service_tasks</code>，含 user/group/risk/evidence/priority。</td>
+                <td>没有接入现有 handoff 队列或真实工单；没有客服处理状态回写。</td>
+              </tr>
+              <tr>
+                <td>Guardrail 审核</td>
+                <td><span class="status missing">未完成</span></td>
+                <td>客服聊天主链路有安全净化；私域外发内容没有独立 <code>pass/reject/revise</code> 审核流。</td>
+                <td>商品推送文案、群内安抚、营销群发未统一过 Guard。</td>
+              </tr>
+              <tr>
+                <td>后台基础看板</td>
+                <td><span class="status partial">半完成</span></td>
+                <td><code>PrivateDomainAgent.jsx</code> 有 KPI、接口状态、两个表单、三个列表。</td>
+                <td>许愿池、词典、舆情中心、客服协同中心、复盘中心多为文案展示。</td>
+              </tr>
+              <tr>
+                <td>点击归因</td>
+                <td><span class="status missing">未完成</span></td>
+                <td>无 <code>campaign_id/group_id/event_id/click_time/order_id</code> 归因表。</td>
+                <td>无法证明转化提升，CGO 视角无法验收。</td>
+              </tr>
+              <tr>
+                <td>日志和追踪</td>
+                <td><span class="status partial">半完成</span></td>
+                <td><code>private_events</code> 保存 payload/result。</td>
+                <td>没有 trace_id、操作者、外部接口请求 ID、发送记录、审计状态。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="runtime" class="card">
+          <h2>04 当前 8015 运行态证据</h2>
+          <div class="grid grid-2">
+            <div>
+              <h3>Dashboard 快照</h3>
+              <pre>{
+  "group_count": 0,
+  "risky_group_count": 0,
+  "pending_task_count": 0,
+  "review_task_count": 0,
+  "event_count": 0
+}</pre>
+            </div>
+            <div>
+              <h3>外部接口状态</h3>
+              <pre>{
+  "wechat_group_read": "contract_pending",
+  "wechat_group_send": "contract_pending",
+  "product_catalog": "contract_pending",
+  "order_system": "contract_pending",
+  "customer_service_agent": "local_contract_ready",
+  "visual_review_task": "local_contract_ready"
+}</pre>
+            </div>
+          </div>
+          <p class="quote">这证明当前后台不是“已有完美演示数据的私域运营系统”。它是空库 + 本地规则接口。要给甲方演示，必须先准备私域专用种子数据或接入真实测试数据。</p>
+        </section>
+
+        <section id="landing" class="card">
+          <h2>05 哪些是落地，哪些是规划展示</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>页面区域/能力</th>
+                <th>真实落地程度</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>可追踪运行状态 KPI</td>
+                <td><span class="status done">落地</span></td>
+                <td>来自 <code>/dashboard</code> 的 SQLite 统计，当前为空但链路存在。</td>
+              </tr>
+              <tr>
+                <td>群消息事件流</td>
+                <td><span class="status done">落地</span></td>
+                <td>手动输入群消息可触发识别、禁推、客服任务。不是企微实时采集。</td>
+              </tr>
+              <tr>
+                <td>商品事件流</td>
+                <td><span class="status done">落地</span></td>
+                <td>手动提交商品事件可生成候选。不是 App/小程序商品库自动推送。</td>
+              </tr>
+              <tr>
+                <td>群资产池 / 客服任务 / 审核任务列表</td>
+                <td><span class="status partial">半落地</span></td>
+                <td>能显示本地数据；缺批量筛选、处理动作、解除风险、状态回写。</td>
+              </tr>
+              <tr>
+                <td>群资产模型、谷子词典、吃谷雷达、舆情治理、Response Guard、复盘中心卡片</td>
+                <td><span class="status neutral">规划展示</span></td>
+                <td>这些卡片解释能力边界和路线图，不等于对应工作台已经实现。</td>
+              </tr>
+              <tr>
+                <td>图片/视频材料审核任务</td>
+                <td><span class="status partial">半落地</span></td>
+                <td>上传和任务创建已落地；视觉模型准确判定、人工审核工作流、TTL/删除/加密未完。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="integration" class="card">
+          <h2>06 甲方群、商品事件到底如何打通</h2>
+          <h3>当前真实情况</h3>
+          <p>现在的打通方式只有“手动表单或 HTTP 调用本地 POC 接口”。没有企微、飞书、商品中心、订单中心生产连接。要变成甲方可试点系统，需要按下面的最小路径接。</p>
+
+          <div class="route">
+            <div class="step">
+              <b>1. 企微入站</b>
+              <span>企微会话存档 / SCRM webhook / 导出文件，把群消息规范化。</span>
+            </div>
+            <div class="step">
+              <b>2. 调用群消息接口</b>
+              <span><code>POST /private-domain/group-message</code>，字段含 group_id、external_user_id、content、message_id。</span>
+            </div>
+            <div class="step">
+              <b>3. 本地决策</b>
+              <span>规则快筛、风险等级、禁推、客服任务、候选回复。</span>
+            </div>
+            <div class="step">
+              <b>4. 人工审核</b>
+              <span>营销/安抚文案过 Guard 和运营审核，不直接自动群发。</span>
+            </div>
+            <div class="step">
+              <b>5. 企微出站</b>
+              <span>调用企微群发或客服私聊接口，写回 trace_id、send_id。</span>
+            </div>
+          </div>
+
+          <h3 style="margin-top:18px;">商品事件接入最小字段</h3>
+          <pre>{
+  "event_id": "xitao-product-event-20260709-001",
+  "event_type": "restock | new_arrival | lottery_open | rare_drop",
+  "item_id": "SKU-BLUELOCK-BADGE-75",
+  "ip_name": "蓝色监狱",
+  "character_name": "凪诚士郎",
+  "category": "吧唧",
+  "price": 39.9,
+  "stock": 80,
+  "rarity": "hidden | normal | limited",
+  "mini_program_path": "/pages/item/detail?id=SKU-BLUELOCK-BADGE-75",
+  "app_deep_link": "xitao://item/SKU-BLUELOCK-BADGE-75",
+  "risk_flag": "",
+  "starts_at": "2026-07-09T20:00:00+08:00"
+}</pre>
+          <p class="quote">当前代码只使用 event_type、item_id、ip_name、character_name、category、stock、risk_flag。价格、图片、小程序路径、App Deep Link、活动时间都还没有落库和展示。</p>
+
+          <h3 style="margin-top:18px;">飞书 CLI / 飞书任务建议</h3>
+          <p>飞书不应直接做业务执行。最小用途是“人工审核和协同”：把高风险群、客服任务、商品推送候选同步到飞书表格或任务，字段为 <code>task_id、owner、status、trace_id、due_at、result</code>。CLI 只做离线同步和日报生成，所有退款、补发、群发仍回到业务后台审批。</p>
+        </section>
+
+        <section id="demo" class="card">
+          <h2>07 演示数据缺口：现在不够完美</h2>
+          <div class="grid grid-3">
+            <div class="callout danger">
+              <strong>当前私域演示数据</strong>
+              8015 私域库为空。打开后台只能看到 0 个群、0 个事件、0 个客服任务、0 个审核任务。
+            </div>
+            <div class="callout warn">
+              <strong>已有客服演示数据</strong>
+              原有客服 Agent 有用户、订单、队列等 Mock，但不等于私域 1 万群演示数据。
+            </div>
+            <div class="callout ok">
+              <strong>应补的演示包</strong>
+              至少 12 个群、8 个商品事件、6 条舆情、4 条术语问答、3 个材料审核任务、1 条完整归因链。
+            </div>
+          </div>
+          <table style="margin-top:16px;">
+            <thead>
+              <tr>
+                <th>演示场景</th>
+                <th>必须体现</th>
+                <th>当前是否有</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>高活跃高转化 IP 群</td>
+                <td>IP 标签、库存事件匹配、进入待审核推送</td>
+                <td><span class="status missing">无数据</span></td>
+              </tr>
+              <tr>
+                <td>高风险售后群</td>
+                <td>不发货/退款多人共振、禁推、客服任务、主管预警</td>
+                <td><span class="status partial">规则可跑，数据无</span></td>
+              </tr>
+              <tr>
+                <td>谷子词典问答</td>
+                <td>出荷、再贩、隐藏款、吧唧等低风险回复</td>
+                <td><span class="status partial">规则可跑，未沉淀演示集</span></td>
+              </tr>
+              <tr>
+                <td>商品补货事件</td>
+                <td>匹配群、排除风险群、生成推送候选</td>
+                <td><span class="status partial">接口可跑，数据无</span></td>
+              </tr>
+              <tr>
+                <td>点击归因复盘</td>
+                <td>campaign_id、click、order、refund、退群反馈</td>
+                <td><span class="status missing">未实现</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="next" class="card">
+          <h2>08 最小补齐路线</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>优先级</th>
+                <th>要补什么</th>
+                <th>为什么</th>
+                <th>最小做法</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>P0-1</td>
+                <td>私域演示数据种子</td>
+                <td>没有数据，甲方看不到群资产和运营价值。</td>
+                <td>新增私域 seed：12 群、8 商品、6 舆情、3 审核任务、候选推送。</td>
+              </tr>
+              <tr>
+                <td>P0-2</td>
+                <td>企微入站契约</td>
+                <td>回答“甲方群如何打通”。</td>
+                <td>定义 webhook/CSV/SCRM 导入到 <code>group-message</code> 的字段和签名。</td>
+              </tr>
+              <tr>
+                <td>P0-3</td>
+                <td>商品事件契约升级</td>
+                <td>回答“商品事件如何打通”。</td>
+                <td>补 mini_program_path、app_deep_link、price、image、starts_at、trace_id。</td>
+              </tr>
+              <tr>
+                <td>P0-4</td>
+                <td>推送审核和 Guard</td>
+                <td>吃谷雷达不能停在候选 JSON。</td>
+                <td>候选 -> 审核 -> 安全文案 -> 待发送；不自动发群。</td>
+              </tr>
+              <tr>
+                <td>P0-5</td>
+                <td>点击归因最小表</td>
+                <td>没有归因，增长价值无法证明。</td>
+                <td>campaign_id、group_id、event_id、click_time、order_id、source。</td>
+              </tr>
+              <tr>
+                <td>P1</td>
+                <td>上下文窗口和多人共振</td>
+                <td>单条关键词会误报/漏报。</td>
+                <td>按 group_id 维护 30 分钟窗口，统计 involved_users 和 echo_count。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="footer">审计结论：不要把当前版本包装成“生产级私域 Agent 已完成”。正确说法是“P0 本地契约和决策骨架已搭好，下一步必须补演示数据和企微/商品/归因接入”。</p>
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

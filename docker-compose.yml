@@ -1,0 +1,83 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  visual-workbench:
+    build: .
+    command: uvicorn poc.visual_review_poc.workbench_server:app --host 0.0.0.0 --port 7861
+    env_file: .env
+    environment:
+      VISUAL_WORKBENCH_PORT: "7861"
+    expose:
+      - "7861"
+    volumes:
+      - app-data:/app/data
+      - app-tmp:/app/tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7861/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  main:
+    build: .
+    command: uvicorn main:app --host 0.0.0.0 --port 8015
+    env_file: .env
+    environment:
+      APP_PORT: "8015"
+      VISUAL_WORKBENCH_URL: http://visual-workbench:7861
+      REDIS_HOST: redis
+      CELERY_BROKER_URL: redis://redis:6379/1
+      SLA_WORKER_MODE: celery
+    ports:
+      - "8015:8015"
+    depends_on:
+      redis:
+        condition: service_started
+      visual-workbench:
+        condition: service_healthy
+    volumes:
+      - app-data:/app/data
+      - app-logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8015/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  celery-worker:
+    build: .
+    command: celery -A sla_worker.celery_app worker --loglevel=info --pool=solo
+    env_file: .env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      REDIS_HOST: redis
+      SLA_WORKER_MODE: celery
+    depends_on:
+      - redis
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+
+  celery-beat:
+    build: .
+    command: celery -A sla_worker.celery_app beat --loglevel=info
+    env_file: .env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+    depends_on:
+      - redis
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  app-data:
+  app-logs:
+  app-tmp:

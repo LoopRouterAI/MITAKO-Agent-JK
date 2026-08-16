@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>虾淘私域 Agent 交叉对抗式验收报告</title>
+  <style>
+    :root {
+      --ink: #17210f;
+      --muted: #66705c;
+      --line: #dce4d0;
+      --paper: #fbfcf6;
+      --card: #ffffff;
+      --lime: #b7e44a;
+      --olive: #52672d;
+      --amber: #b7791f;
+      --red: #b42318;
+      --green: #267348;
+      --blue: #2457a6;
+      --shadow: 0 18px 42px rgba(23, 33, 15, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      line-height: 1.65;
+    }
+    main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 56px; }
+    .hero {
+      border: 1px solid var(--line);
+      background: linear-gradient(135deg, #ffffff 0%, #f5f9ea 62%, #eef6d8 100%);
+      border-radius: 14px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+    }
+    .eyebrow { color: var(--olive); font-size: 12px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 48px); line-height: 1.1; letter-spacing: 0; }
+    h2 { margin: 0 0 12px; font-size: 22px; line-height: 1.25; }
+    h3 { margin: 0 0 8px; font-size: 16px; }
+    p { margin: 0; }
+    .muted { color: var(--muted); }
+    .grid { display: grid; gap: 16px; }
+    .cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .section { margin-top: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); padding: 22px; box-shadow: 0 10px 28px rgba(23,33,15,.05); }
+    .metric { border: 1px solid var(--line); border-radius: 10px; background: #f8fbef; padding: 16px; }
+    .metric strong { display: block; font-size: 30px; line-height: 1; }
+    .metric span { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .pill { display: inline-flex; align-items: center; min-height: 28px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 900; border: 1px solid transparent; }
+    .pass { background: #e9f8ef; color: var(--green); border-color: #bfe8ce; }
+    .partial { background: #fff7e6; color: var(--amber); border-color: #f0d49a; }
+    .fail { background: #fff0ee; color: var(--red); border-color: #f2c3bd; }
+    .info { background: #eef5ff; color: var(--blue); border-color: #c9daf5; }
+    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 10px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 11px 10px; text-align: left; vertical-align: top; }
+    th { background: #f5f8ee; font-size: 12px; color: var(--olive); }
+    tr:last-child td { border-bottom: 0; }
+    code { border: 1px solid #d7dfca; border-radius: 6px; background: #f7faef; padding: 2px 6px; font-family: Consolas, "Microsoft YaHei", monospace; font-size: .92em; }
+    .callout { border-left: 4px solid var(--lime); background: #f8fbef; padding: 14px 16px; border-radius: 8px; }
+    .risk { border-left-color: var(--red); background: #fff7f6; }
+    .okline { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .okline:last-child { border-bottom: 0; }
+    .role { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: #fff; }
+    .role b { display: block; margin-bottom: 6px; }
+    .footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 860px) {
+      .cols-4, .cols-3, .cols-2 { grid-template-columns: 1fr; }
+      main { padding: 18px 12px 36px; }
+      .hero, .section { padding: 18px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="eyebrow">Adversarial Acceptance · 2026-07-09 06:57 +08:00</div>
+    <h1>虾淘私域 Agent 交叉对抗式验收报告</h1>
+    <p class="muted">结论先行：当前不是完整生产接入版，但已经从“规划/报告”补成可演示 P0。本地后台能展示群入站、商品事件、候选触达、舆情客服任务、图片/视频审核任务，以及企微/商品库/飞书待联调边界。</p>
+    <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+      <span class="pill pass">P0 可演示：通过</span>
+      <span class="pill partial">生产联调：待甲方权限</span>
+      <span class="pill pass">客服 Agent 两项问题：已修 P0</span>
+      <span class="pill info">ENV 新 Key：已看到，不泄露值</span>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>一、验收快照</h2>
+    <div class="grid cols-4">
+      <div class="metric"><strong>9</strong><span>群资产记录</span></div>
+      <div class="metric"><strong>4</strong><span>风险/禁推群</span></div>
+      <div class="metric"><strong>4</strong><span>待处理客服任务</span></div>
+      <div class="metric"><strong>4</strong><span>图片/视频审核任务</span></div>
+      <div class="metric"><strong>14</strong><span>私域处理事件</span></div>
+      <div class="metric"><strong>30</strong><span>吃谷雷达候选触达</span></div>
+      <div class="metric"><strong>5</strong><span>接口契约</span></div>
+      <div class="metric"><strong>0</strong><span>真实 Key 值写入报告</span></div>
+    </div>
+    <p class="footer">数据来自本机 <code>http://127.0.0.1:8015/api/v1/private-domain/dashboard</code> 验收时刻返回。</p>
+  </section>
+
+  <section class="section">
+    <h2>二、交叉对抗角色结论</h2>
+    <div class="grid cols-3">
+      <div class="role"><b>二次元谷子客户</b><span class="pill pass">通过</span><p class="muted">能演示 IP/角色/品类兴趣沉淀、术语问答、许愿/蹲守、图片和视频材料上传。</p></div>
+      <div class="role"><b>风险用户/投诉用户</b><span class="pill pass">通过</span><p class="muted">退款不到账、客服不回、12315 等消息会触发风险等级和客服任务。</p></div>
+      <div class="role"><b>人工客服主管</b><span class="pill pass">通过</span><p class="muted">能看到客服协同任务、证据摘要和主管预警标志；但完整工单仍不在 P0 范围。</p></div>
+      <div class="role"><b>产品经理</b><span class="pill pass">通过</span><p class="muted">后台已从规划卡片变成可点击工作台：加载演示、群消息、商品事件、候选触达、事件追踪。</p></div>
+      <div class="role"><b>CGO/增长负责人</b><span class="pill partial">部分通过</span><p class="muted">能说明“为什么不是 AI 客服”，但真实转化率、点击、下单归因仍需甲方 App/小程序回传。</p></div>
+      <div class="role"><b>集成工程师</b><span class="pill partial">部分通过</span><p class="muted">接口契约清楚；企微读群/发群、商品库、订单、飞书权限仍未真实联调。</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>三、甲方需求覆盖表</h2>
+    <table>
+      <thead><tr><th>需求</th><th>验收状态</th><th>证据</th><th>剩余边界</th></tr></thead>
+      <tbody>
+        <tr><td>1 万+群分群、分层、分时机运营</td><td><span class="pill pass">P0 通过</span></td><td>群资产表含 IP、许愿、风险、健康分、禁推状态。</td><td>万群规模压测、真实群成员画像未做。</td></tr>
+        <tr><td>谷子词典与日常问答 RAG</td><td><span class="pill partial">规则版通过</span></td><td>术语问答已覆盖隐藏款、再贩、大赏、小赏、吧唧等。</td><td>可控 RAG 知识库、版本审批、召回评测待 P1。</td></tr>
+        <tr><td>吃谷雷达接商品/抽赏/库存/稀有掉落</td><td><span class="pill pass">P0 通过</span></td><td><code>/api/v1/private-domain/product-event</code> 可生成候选触达；排球少年事件命中 review。</td><td>真实商品库、库存时效、活动风险字段待联调。</td></tr>
+        <tr><td>IP 话题、许愿池、晒谷、蹲守提醒提升转化</td><td><span class="pill partial">部分通过</span></td><td>已识别 IP、许愿、蹲补货信号并进入群画像。</td><td>晒谷 UGC、蹲守私聊触达、归因回传待 P1。</td></tr>
+        <tr><td>不发货/退款/吞烫/霸王条款舆情监控</td><td><span class="pill pass">P0 通过</span></td><td>退款+客服不回+12315 验收触发风险与客服任务。</td><td>真实企微会话存档和多人共振窗口待接入。</td></tr>
+        <tr><td>企微、Server、商品库、订单、客服 Agent、CRM/CDP 打通</td><td><span class="pill partial">契约通过</span></td><td>后台展示 5 个接口契约和状态。</td><td>企微/飞书/订单/CRM 仍是待真实权限联调。</td></tr>
+        <tr><td>Qwen/DeepSeek/向量库/记忆系统/OpenViking 选型</td><td><span class="pill partial">报告级通过</span></td><td>已有方案说明和边界。</td><td>未做模型 A/B 评测和向量库生产索引。</td></tr>
+        <tr><td>Prompt、Guard、上下文压缩、长期记忆、群记忆、用户记忆</td><td><span class="pill partial">P0 部分通过</span></td><td>Response Guard 边界已在后台说明；群记忆以群画像表承接。</td><td>长期记忆治理、Prompt 版本化、压缩策略未生产化。</td></tr>
+        <tr><td>后台产品模块、运营工作台、监控中心、复盘中心</td><td><span class="pill partial">工作台通过</span></td><td>私域 Agent 页面可演示运行态、契约、候选、事件。</td><td>完整复盘中心和运营审批流待 P1。</td></tr>
+        <tr><td>MVP 到 1 万群路线图、KPI、A/B、风控合规</td><td><span class="pill partial">报告级通过</span></td><td>后台与旧报告均有边界和路线说明。</td><td>真实 KPI 仪表盘、A/B 实验引擎、合规审计日志待后续。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>四、客服 Agent 系统问题是否修了</h2>
+    <div class="okline"><span class="pill pass">已修</span><div><b>照片、拍摄上传</b><p class="muted">用户端已有 <code>input type="file" accept="image/*"</code> 和 <code>capture="environment"</code>；上传后生成 <code>review_task</code>。</p></div></div>
+    <div class="okline"><span class="pill pass">已修</span><div><b>视频上传</b><p class="muted">用户端已有视频入口 <code>accept="video/*"</code>；验收上传返回 <code>video_unboxing</code> 审核任务。</p></div></div>
+    <div class="okline"><span class="pill pass">已修</span><div><b>附件进入客服链路</b><p class="muted"><code>useChatSSE</code> 会先上传图片/视频到 <code>/api/v1/private-domain/review-tasks</code>，再把附件对象带入 <code>/api/v1/chat</code>。</p></div></div>
+    <div class="okline"><span class="pill pass">已修 P0</span><div><b>视频审核 Key / Gemini 多模态 Key</b><p class="muted"><code>.env</code> 已看到 <code>GEMINI_API_KEY</code>、<code>GOOGLE_API_KEY</code>、<code>VISION_REVIEW_API_KEY</code> 等 Key 名；<code>scripts/check_runtime_env.py</code> 验证“视觉审核 / Gemini：通过”。</p></div></div>
+    <div class="okline"><span class="pill pass">已修 P0</span><div><b>视觉审核结果回写</b><p class="muted">上传后已同步调用原视觉审核工作台：图片走 <code>/api/review-folder</code>，视频走 <code>/api/review</code>；结果回写 <code>REVIEW_COMPLETED</code>/<code>REVIEW_FAILED</code>、<code>review_result</code>、<code>reviewed_at</code>，并进入客服 Agent 与人工客服附件链路。2026-07-09 烟测：<code>RV-74A14084348B</code> 图片完成，<code>RV-4A55208E5867</code> 视频完成。</p></div></div>
+    <div class="okline"><span class="pill partial">仍待生产化</span><div><b>真实视觉审核判责</b><p class="muted">当前结果是视觉初筛，不自动最终定责；生产仍需补齐准确率验收、证据留存、报告访问权限、人工处置状态回写和完整工单闭环。</p></div></div>
+  </section>
+
+  <section class="section">
+    <h2>五、ENV 新 Key 核对</h2>
+    <p class="callout">我看到了新增 Key 名，但没有、也不会在报告中输出 Key 值。当前 <code>.env</code> 可见 Key 名包括：</p>
+    <p style="margin-top:12px;"><code>GEMINI_API_KEY</code> <code>GOOGLE_API_KEY</code> <code>VISION_REVIEW_API_KEY</code> <code>GEMINI_MODEL</code> <code>GEMINI_API_BASE_URL</code> <code>VISION_REVIEW_GEMINI_BASE_URL</code> <code>VISUAL_REVIEW_PRIMARY_MODEL</code> <code>VISUAL_REVIEW_FALLBACK_MODELS</code> <code>DASHSCOPE_API_KEY</code> <code>ARK_API_KEY</code></p>
+    <p class="footer">运行时检查仍提示生产必须配置 <code>MITAKO_JWT_SECRET</code>。本地启动脚本会给 POC 用默认值；生产不能使用默认值。</p>
+  </section>
+
+  <section class="section">
+    <h2>六、接口与联调状态</h2>
+    <table>
+      <thead><tr><th>接口/系统</th><th>状态</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>企微群消息读取</td><td><span class="pill partial">待联调</span></td><td>本地接口契约存在，未拿到企微会话存档/群机器人权限。</td></tr>
+        <tr><td>企微群发送</td><td><span class="pill partial">待联调</span></td><td>P0 不自动群发；真实发送必须走频控、审核、禁推。</td></tr>
+        <tr><td>商品事件入站</td><td><span class="pill pass">本地就绪</span></td><td><code>/api/v1/private-domain/product-event</code> 已可生成候选触达。</td></tr>
+        <tr><td>商品库/订单系统</td><td><span class="pill partial">待联调</span></td><td>字段契约已列明，真实库存、订单、履约状态未接。</td></tr>
+        <tr><td>客服 Agent 协同</td><td><span class="pill pass">本地就绪</span></td><td>舆情任务、图片/视频审核任务已可本地创建；视觉审核结果已回写并进入聊天附件与人工客服工作台。</td></tr>
+        <tr><td>飞书任务/群协同</td><td><span class="pill partial">待联调</span></td><td>需要飞书 App/CLI/Bot 权限确认。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>七、私有化部署 API 验收口径</h2>
+    <div class="callout">
+      <b>生产交付边界应切到 FastAPI / OpenAPI 服务，不应依赖我方客服前端或人工客服工作台。</b>
+      <p class="muted">如果甲方使用自己的客服系统，我方应交付可私有化部署的 API 服务、OpenAPI 契约、鉴权方式、事件入站、审核任务、可观测接口和联调说明；前端只作为本地演示与内部调试入口。</p>
+    </div>
+    <table style="margin-top:14px;">
+      <thead><tr><th>服务面</th><th>状态</th><th>证据</th></tr></thead>
+      <tbody>
+        <tr><td>OpenAPI 契约</td><td><span class="pill pass">通过</span></td><td><code>/openapi.json</code> 当前导出 59 个 path，包含私域 Agent 核心接口与 <code>/metrics/prometheus</code>。</td></tr>
+        <tr><td>私域类型 Schema</td><td><span class="pill pass">通过</span></td><td><code>GroupMessageIn</code>、<code>ProductEventIn</code>、<code>ReviewTaskUploadResponse</code> 已进入 OpenAPI components。</td></tr>
+        <tr><td>无前端 API 烟测</td><td><span class="pill pass">10/10 通过</span></td><td><code>scripts/check_private_deployment_api.py</code> 已验证鉴权、私域契约、群消息、商品事件、Ops、JSON Metrics、Prometheus Metrics、客户会话。</td></tr>
+        <tr><td>私域 Agent 服务部署</td><td><span class="pill pass">本地可用</span></td><td><code>/api/v1/private-domain/*</code> 可由甲方系统直接调用。</td></tr>
+        <tr><td>异步视觉审核</td><td><span class="pill pass">POC 已补</span></td><td><code>async_review=true</code> 上传立即返回任务 ID，后台回写审核结果；烟测 <code>RV-C4E23C7B9AD7</code> 已从 <code>MATERIAL_READY</code> 更新为 <code>REVIEW_COMPLETED</code>。</td></tr>
+        <tr><td>客服前端 / 人工客服工作台</td><td><span class="pill partial">不作为生产交付</span></td><td>甲方若使用自有客服系统，应通过 API 获取审核任务和 Agent 结果。</td></tr>
+        <tr><td>生产可观测</td><td><span class="pill partial">核心已补</span></td><td>已有 <code>/api/v1/ops/snapshot</code>、<code>/metrics</code> 和 <code>/metrics/prometheus</code>；正式多实例队列和链路追踪仍待生产化。</td></tr>
+      </tbody>
+    </table>
+    <p class="footer">新增 API 验收报告：<code>docs/private_deployment_api_acceptance_20260709.md</code>；烟测 JSON：<code>tests/reports/private_deployment_api_smoke_20260709_115649.json</code>。</p>
+  </section>
+
+  <section class="section">
+    <h2>八、最终判定</h2>
+    <div class="callout">
+      <b>验收结论：P0 可演示通过，生产全量上线不通过。</b>
+      <p class="muted">它现在不是半成品空壳：后台能点、接口能跑、数据能流转、客服问题有修复证据。但它也不是“已接入甲方企微/飞书/订单/商品库”的版本，这些仍需要甲方授权和联调。</p>
+    </div>
+    <div class="callout risk" style="margin-top:12px;">
+      <b>下一步只建议做三件事：</b>
+      <p class="muted">拿企微会话存档/群发权限；拿商品库与订单事件样例；补视觉审核报告访问代理、人工处置状态回写和生产证据留存。其他大平台化能力先不要扩。</p>
+    </div>
+  </section>
+
+  <p class="footer">报告文件：<code>docs/private_domain_agent_adversarial_acceptance_20260709.html</code>。本报告只引用 Key 名，不包含任何密钥值。</p>
+</main>
+</body>
+</html>

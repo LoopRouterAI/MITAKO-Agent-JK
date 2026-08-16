@@ -1,0 +1,645 @@
+{
+  "generated_at": "2026-07-17 20:22:03",
+  "base_url": "http://127.0.0.1:8015",
+  "blind_input_boundary": "未读取或上传 reply.json、manifest.json、人工标签和退款结论",
+  "result": {
+    "job_id": "RJ-9B10F73C68D04716",
+    "asset_manifest": [
+      {
+        "neutral_name": "asset_001.jpg",
+        "bytes": 425017,
+        "sha256": "47ceaef01f5995002831b884673c5225c1ae3a02a3e7b3c300025ab9ea84a74a",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_002.jpg",
+        "bytes": 4301438,
+        "sha256": "728d223ebe9afe68643aff5fd676bdbdb6c3e947bc009d3371771cbd6fd0495c",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_003.jpg",
+        "bytes": 4940625,
+        "sha256": "02a61a33dd5200755bfd3c763b73f56a20f77d72738e204ff7550859812e765d",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_004.jpg",
+        "bytes": 3080439,
+        "sha256": "3016608cf789186ee246f214d02eeb5a47201dd9a3e0a79a926277e716d2ce9a",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_005.jpg",
+        "bytes": 8530910,
+        "sha256": "57c7f706a7a36c0fbef19aa07647e306dc567317528a61b52dd6c0a318a88333",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_006.jpg",
+        "bytes": 8279731,
+        "sha256": "4ec954f402e19cf80f465f049533b412f378f90e69890c21425c97866e14b2fc",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_007.jpg",
+        "bytes": 10375524,
+        "sha256": "878effb0da7cfcd2e285eeac61c004ccb1fe4bc11871b50229d3f529e29451f2",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_008.jpg",
+        "bytes": 250957,
+        "sha256": "a59350f0226d84c4c5c736a3063b3d5c32907f3b796b877e3e6b2615a092f0c8",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_009.jpg",
+        "bytes": 249762,
+        "sha256": "e5eedcfcbf0168c770129f2621b77158fa1d3a4fa7a84794abce39cf4f7fc0cb",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_010.jpg",
+        "bytes": 249326,
+        "sha256": "90e7d1a6e015b3b9d7842e455afa5d7197e78702e34ccef9c358575a53758e6c",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_011.jpg",
+        "bytes": 249928,
+        "sha256": "05a218c5b1ff6a0efc867f3f8b4115cb91d6a0f13b90638b509fa36ff435e5ac",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_012.jpg",
+        "bytes": 249893,
+        "sha256": "49f90e2ac08e594bc278dddd9949bf87adc190c76f1fc0a4141154c7b2bc5f72",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_013.jpg",
+        "bytes": 249289,
+        "sha256": "140ebf565840c112df55cac87f1ff770b89ad9bc18f92968b2286adce61eeabe",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_014.jpg",
+        "bytes": 249481,
+        "sha256": "eb0b0ba2d8811f0b2e8ff2899ae41830c9badfdc0c87809bf8cc631c88e79549",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_015.jpg",
+        "bytes": 327333,
+        "sha256": "0ba32ab19b3997e5b947161543582d097077af5863f610c35b8e306d850bfc3a",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_016.jpg",
+        "bytes": 161541,
+        "sha256": "4e3980aa8cf4596745ea3b9043dfd04da4dd04d85ffb75198b36545a6a2e74d8",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_017.mp4",
+        "bytes": 13082952,
+        "sha256": "f8b5ed0b4fbe3df66160e63fbbcbb153fed5be3529f7af0d1cc163c4e3a761c2",
+        "mime_type": "video/mp4"
+      },
+      {
+        "neutral_name": "asset_018.jpg",
+        "bytes": 9820371,
+        "sha256": "74763c6ad43a1ea46aabc7c849e454a6fb04ca1d1e88935f302f7e0f570726b2",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_019.jpg",
+        "bytes": 3782173,
+        "sha256": "e7b9fdefd5f8483c852d5d8bc5c178280e89b74d60a30d2fff98386b6cddb0b0",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_020.jpg",
+        "bytes": 5878296,
+        "sha256": "91197cddf5998e9fbb7395b8556826983ad22b402cba32650820d2f37a56aa22",
+        "mime_type": "image/jpeg"
+      },
+      {
+        "neutral_name": "asset_021.jpg",
+        "bytes": 7707934,
+        "sha256": "b9e5969e7fbdcd36b953809304ad612ed960a5902e7e36fe2bcdac479b9d1477",
+        "mime_type": "image/jpeg"
+      }
+    ],
+    "image_count": 20,
+    "video_count": 1,
+    "total_bytes": 82442920,
+    "request_metadata_sha256": "682c93226b9422c2a1846210e3aae3c7e6f94bdb48a5cd18ab87c9306c8b2708",
+    "status": "SUCCEEDED",
+    "predicted_label": "positive",
+    "confidence": 0.93,
+    "conclusion": "五类材料均已在全量图片中识别到，可进入VIP客服人工一审；这不代表自动退款或终审通过。",
+    "material_gaps": [],
+    "minor_material_assessment": {
+      "sop_version": "minor_refund_2_0",
+      "readiness": "ready_for_human_first_review",
+      "declared_image_count": 20,
+      "accepted_image_count": 20,
+      "processed_image_count": 20,
+      "processed_image_indices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "unclassified_image_indices": [],
+      "coverage_ratio": 1.0,
+      "coverage_complete": true,
+      "ingestion_complete": true,
+      "image_batch_failures": [],
+      "video_batch_failures": [],
+      "material_inventory": [
+        {
+          "image_index": 1,
+          "asset_ref": "supplemental_image_1",
+          "document_types": [
+            "identity_card"
+          ],
+          "subject_role": "guardian",
+          "document_side": "front",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 2,
+          "asset_ref": "supplemental_image_2",
+          "document_types": [
+            "identity_card"
+          ],
+          "subject_role": "guardian",
+          "document_side": "back",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 3,
+          "asset_ref": "supplemental_image_3",
+          "document_types": [
+            "identity_card"
+          ],
+          "subject_role": "minor",
+          "document_side": "front",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 4,
+          "asset_ref": "supplemental_image_4",
+          "document_types": [
+            "identity_card"
+          ],
+          "subject_role": "minor",
+          "document_side": "back",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 5,
+          "asset_ref": "supplemental_image_5",
+          "document_types": [
+            "household_register"
+          ],
+          "subject_role": "guardian",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 6,
+          "asset_ref": "supplemental_image_6",
+          "document_types": [
+            "household_register"
+          ],
+          "subject_role": "minor",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 7,
+          "asset_ref": "supplemental_image_7",
+          "document_types": [
+            "signed_commitment"
+          ],
+          "subject_role": "guardian",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": [
+            "other"
+          ]
+        },
+        {
+          "image_index": 8,
+          "asset_ref": "supplemental_image_8",
+          "document_types": [
+            "order_payment_proof"
+          ],
+          "subject_role": "not_applicable",
+          "document_side": "front",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 9,
+          "asset_ref": "supplemental_image_9",
+          "document_types": [
+            "order_payment_proof"
+          ],
+          "subject_role": "unknown",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 10,
+          "asset_ref": "supplemental_image_10",
+          "document_types": [
+            "order_payment_proof"
+          ],
+          "subject_role": "unknown",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 11,
+          "asset_ref": "supplemental_image_11",
+          "document_types": [
+            "order_payment_proof"
+          ],
+          "subject_role": "unknown",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 12,
+          "asset_ref": "supplemental_image_12",
+          "document_types": [
+            "order_payment_proof"
+          ],
+          "subject_role": "unknown",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 13,
+          "asset_ref": "supplemental_image_13",
+          "document_types": [
+            "order_payment_proof"
+          ],
+          "subject_role": "not_applicable",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 14,
+          "asset_ref": "supplemental_image_14",
+          "document_types": [
+            "order_payment_proof"
+          ],
+          "subject_role": "not_applicable",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 15,
+          "asset_ref": "supplemental_image_15",
+          "document_types": [
+            "mobile_realname_proof"
+          ],
+          "subject_role": "unknown",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 16,
+          "asset_ref": "supplemental_image_16",
+          "document_types": [
+            "carrier_invoice"
+          ],
+          "subject_role": "unknown",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": []
+        },
+        {
+          "image_index": 17,
+          "asset_ref": "supplemental_image_17",
+          "document_types": [
+            "birth_certificate"
+          ],
+          "subject_role": "minor",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": [
+            "occlusion"
+          ]
+        },
+        {
+          "image_index": 18,
+          "asset_ref": "supplemental_image_18",
+          "document_types": [
+            "signed_commitment"
+          ],
+          "subject_role": "guardian",
+          "document_side": "page",
+          "readability": "clear",
+          "quality_issues": [
+            "occlusion"
+          ]
+        },
+        {
+          "image_index": 19,
+          "asset_ref": "supplemental_image_19",
+          "document_types": [
+            "identity_card"
+          ],
+          "subject_role": "minor",
+          "document_side": "front",
+          "readability": "clear",
+          "quality_issues": [
+            "occlusion"
+          ]
+        },
+        {
+          "image_index": 20,
+          "asset_ref": "supplemental_image_20",
+          "document_types": [
+            "identity_card"
+          ],
+          "subject_role": "guardian",
+          "document_side": "front",
+          "readability": "clear",
+          "quality_issues": [
+            "occlusion"
+          ]
+        }
+      ],
+      "checklist": [
+        {
+          "requirement_id": "identity",
+          "label": "未成年人及监护人身份证明",
+          "status": "present",
+          "evidence_refs": [
+            "supplemental_image_1",
+            "supplemental_image_2",
+            "supplemental_image_3",
+            "supplemental_image_4",
+            "supplemental_image_19",
+            "supplemental_image_20"
+          ],
+          "evidence_image_indices": [
+            1,
+            2,
+            3,
+            4,
+            19,
+            20
+          ],
+          "rule_note": "未成年人无身份证时可由户口本信息页或出生证明替代；角色和正反面仍需人工核对。",
+          "validation_status": "needs_manual_consistency_check"
+        },
+        {
+          "requirement_id": "relationship",
+          "label": "监护关系证明",
+          "status": "present",
+          "evidence_refs": [
+            "supplemental_image_5",
+            "supplemental_image_6",
+            "supplemental_image_17"
+          ],
+          "evidence_image_indices": [
+            5,
+            6,
+            17
+          ],
+          "rule_note": "户口本相关页或出生证明二选一。",
+          "validation_status": "needs_manual_consistency_check"
+        },
+        {
+          "requirement_id": "commitment",
+          "label": "双方签字退款申请承诺书",
+          "status": "present",
+          "evidence_refs": [
+            "supplemental_image_7",
+            "supplemental_image_18"
+          ],
+          "evidence_image_indices": [
+            7,
+            18
+          ],
+          "rule_note": "签字真实性由人工终审确认。",
+          "validation_status": "needs_manual_consistency_check"
+        },
+        {
+          "requirement_id": "payment",
+          "label": "订单或支付凭证",
+          "status": "present",
+          "evidence_refs": [
+            "supplemental_image_8",
+            "supplemental_image_9",
+            "supplemental_image_10",
+            "supplemental_image_11",
+            "supplemental_image_12",
+            "supplemental_image_13",
+            "supplemental_image_14"
+          ],
+          "evidence_image_indices": [
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14
+          ],
+          "rule_note": "金额、订单范围和付款主体由业务系统复核。",
+          "validation_status": "needs_business_system_check"
+        },
+        {
+          "requirement_id": "mobile_realname",
+          "label": "绑定手机号实名归属证明",
+          "status": "present",
+          "evidence_refs": [
+            "supplemental_image_15",
+            "supplemental_image_16"
+          ],
+          "evidence_image_indices": [
+            15,
+            16
+          ],
+          "rule_note": "运营商话费账单或电子发票视为已提交候选证明；实名主体、购物手机号和备注信息仍需人工核对。",
+          "validation_status": "confirmed_by_visual_category"
+        }
+      ],
+      "process_evidence": [
+        {
+          "video_index": 1,
+          "global_frame_index": 1,
+          "timestamp": "00:00.00",
+          "asset_ref": "video_1_frame_1",
+          "process_type": "other",
+          "evidence_quality": "clear"
+        },
+        {
+          "video_index": 1,
+          "global_frame_index": 2,
+          "timestamp": "00:08.86",
+          "asset_ref": "video_1_frame_2",
+          "process_type": "other",
+          "evidence_quality": "clear"
+        },
+        {
+          "video_index": 1,
+          "global_frame_index": 3,
+          "timestamp": "00:17.74",
+          "asset_ref": "video_1_frame_3",
+          "process_type": "invoice_generation",
+          "evidence_quality": "clear"
+        },
+        {
+          "video_index": 1,
+          "global_frame_index": 4,
+          "timestamp": "00:26.60",
+          "asset_ref": "video_1_frame_4",
+          "process_type": "invoice_generation",
+          "evidence_quality": "clear"
+        },
+        {
+          "video_index": 1,
+          "global_frame_index": 5,
+          "timestamp": "00:35.49",
+          "asset_ref": "video_1_frame_5",
+          "process_type": "invoice_generation",
+          "evidence_quality": "partial"
+        },
+        {
+          "video_index": 1,
+          "global_frame_index": 6,
+          "timestamp": "00:44.35",
+          "asset_ref": "video_1_frame_6",
+          "process_type": "invoice_generation",
+          "evidence_quality": "clear"
+        }
+      ],
+      "privacy_boundary": "报告只保留材料类型、图片编号、清晰度和一致性待核点，不输出姓名、手机号、证件号、住址或OCR原文。",
+      "business_boundary": "资料齐全只表示可进入人工一审、二审和终审；Agent不得自动退款、自动通过或自动拒绝。"
+    },
+    "business_action_allowed": false,
+    "human_required": true,
+    "media_forensics_status": "completed",
+    "workbench_transport": {
+      "attempts": [
+        {
+          "attempt": 1,
+          "status_code": 200,
+          "latency_seconds": 48.719
+        }
+      ],
+      "retry_count": 0
+    },
+    "inference_estimate": {
+      "input_tokens": 37266,
+      "output_tokens": 13778,
+      "total_tokens": 51044,
+      "estimated_usd": 0.179902,
+      "total_model_calls": 6,
+      "segment_count": 6,
+      "channels": {
+        "minor_material_inventory": {
+          "model_calls": 5,
+          "total_tokens": 41347,
+          "estimated_usd": 0.152216
+        },
+        "minor_process_video": {
+          "model_calls": 1,
+          "total_tokens": 9697,
+          "estimated_usd": 0.027686
+        }
+      },
+      "boundary": "估算值用于容量与成本比较，不等同于供应商最终账单。"
+    },
+    "report_status": 200,
+    "report_contains_raw_phone": false,
+    "diagnostics": {}
+  },
+  "checks": [
+    {
+      "name": "job_succeeded",
+      "ok": true
+    },
+    {
+      "name": "all_20_images_processed",
+      "ok": true
+    },
+    {
+      "name": "coverage_complete",
+      "ok": true
+    },
+    {
+      "name": "five_material_groups_present",
+      "ok": true
+    },
+    {
+      "name": "household_or_birth_rule",
+      "ok": true
+    },
+    {
+      "name": "no_false_missing_claim",
+      "ok": true
+    },
+    {
+      "name": "evidence_supports_human_first_review",
+      "ok": true
+    },
+    {
+      "name": "business_boundary_enforced",
+      "ok": true
+    },
+    {
+      "name": "video_forensics_completed",
+      "ok": true
+    },
+    {
+      "name": "report_available",
+      "ok": true
+    },
+    {
+      "name": "pii_not_returned",
+      "ok": true
+    }
+  ],
+  "ok": true
+}

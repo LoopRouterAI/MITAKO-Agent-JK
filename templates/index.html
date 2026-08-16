@@ -1,0 +1,120 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>虾淘客服 Agent</title>
+  <style>
+    :root {
+      --ink: #111411;
+      --lime: #9bc84a;
+      --paper: #ffffff;
+      --muted: #5f665f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(17, 20, 17, 0.05) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(17, 20, 17, 0.05) 1px, transparent 1px),
+        #fff;
+      background-size: 34px 34px;
+    }
+
+    main {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .panel {
+      width: min(980px, 100%);
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 8px 8px 0 var(--ink);
+      padding: clamp(24px, 4vw, 56px);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: var(--lime);
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    h1 {
+      margin: 22px 0 14px;
+      font-size: clamp(30px, 3.6vw, 48px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.8;
+      max-width: 720px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 18px;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 900;
+      box-shadow: 4px 4px 0 var(--ink);
+    }
+
+    a.primary {
+      background: var(--lime);
+    }
+
+    a:hover {
+      transform: translate(-1px, -1px);
+      box-shadow: 5px 5px 0 var(--ink);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel" aria-label="客服 Agent 入口">
+      <span class="badge">客服 Agent 服务台</span>
+      <h1>请访问已构建的正式客服 Agent 界面</h1>
+      <p>
+        当前页面是本地降级入口，仅用于在前端构建产物缺失时提示访问正式界面。
+        页面仅展示业务入口和必要引导，不展示内部实现细节。
+      </p>
+      <div class="actions">
+        <a class="primary" href="/">打开客服前台</a>
+        <a href="/desk">打开VIP客服台</a>
+        <a href="/admin">打开运营后台</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

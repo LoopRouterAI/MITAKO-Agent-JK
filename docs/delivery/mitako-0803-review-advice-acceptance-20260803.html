@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MITAKO 审核建议与人工复核机制更新说明</title>
+  <style>
+    :root { color-scheme: light; --ink:#15181f; --muted:#646b78; --line:#dfe5da; --paper:#f7faf4; --green:#167d45; --lime:#c9ff35; --amber:#df8b00; --red:#c93d45; --cyan:#087f88; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:linear-gradient(180deg,#f5faee,#fff 48%); color:var(--ink); font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif; }
+    main { width:min(1120px,calc(100% - 28px)); margin:0 auto; padding:28px 0 56px; }
+    header { padding:32px; border:1px solid var(--line); border-top:8px solid var(--lime); border-radius:8px; background:#fff; box-shadow:0 18px 48px rgba(27,49,24,.09); }
+    .tag { display:inline-block; padding:6px 10px; border-radius:999px; background:var(--lime); font-size:13px; font-weight:800; }
+    h1 { margin:16px 0 10px; font-size:clamp(30px,5vw,54px); line-height:1.08; letter-spacing:0; }
+    h2 { margin:0 0 16px; font-size:24px; }
+    h3 { margin:0 0 8px; font-size:17px; }
+    p, li { line-height:1.75; }
+    .lead { max-width:850px; color:var(--muted); font-size:18px; }
+    section { margin-top:16px; padding:24px; border:1px solid var(--line); border-radius:8px; background:#fff; box-shadow:0 12px 30px rgba(27,49,24,.06); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+    .card { padding:18px; border:1px solid var(--line); border-left:6px solid var(--cyan); border-radius:6px; background:var(--paper); }
+    .green { border-left-color:var(--green); } .amber { border-left-color:var(--amber); } .red { border-left-color:var(--red); }
+    .big { display:block; margin-top:8px; font-size:28px; font-weight:900; }
+    code { padding:2px 5px; border-radius:4px; background:#edf2e9; font-family:Consolas,monospace; }
+    pre { overflow:auto; padding:18px; border-radius:6px; background:#111820; color:#e9f8e7; line-height:1.6; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:#f0f6e9; }
+    .callout { border-left:8px solid var(--lime); background:#f4ffd7; }
+    @media (max-width:640px) { main { width:calc(100% - 18px); padding-top:10px; } header, section { padding:18px; } h1 { font-size:31px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="tag">0803 反馈闭环</span>
+    <h1>Agent 现在负责给明确建议，不再把“业务动作需甲方执行”误写成“每单必须人工”</h1>
+    <p class="lead">本轮修复的是决策机制，不是单纯改报告文案。证据结论、SOP 处理建议、人工复核等级和业务执行权限已经拆开。</p>
+  </header>
+
+  <section class="callout">
+    <h2>甲方指出的问题是成立的</h2>
+    <p>旧版本一边要求 Agent 判断正负，一边又在核心提示词和结果守卫中强制 <code>human_required=true</code>。因此即使证据已经比较明确，也容易被统一写成“转 VIP 客服复核”。这会让 Agent 失去节省人工的商业价值。</p>
+  </section>
+
+  <section>
+    <h2>现在一份结果分成四层</h2>
+    <div class="grid">
+      <article class="card green"><h3>1. 证据结论</h3><p>支持用户诉求、不支持用户诉求、证据无法判断。</p></article>
+      <article class="card"><h3>2. SOP 处理建议</h3><p>支持、不支持、安慰性补偿、补件或继续评估。</p></article>
+      <article class="card amber"><h3>3. 人工复核等级</h3><p>无需、建议抽检、必须复核。黄色风险不再自动升级为必须人工。</p></article>
+      <article class="card red"><h3>4. 业务执行权限</h3><p>Agent 不直接退款、补发或拒绝。业务动作仍由甲方系统执行，但这不影响 Agent 给出明确建议。</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>本轮具体更新</h2>
+    <table>
+      <thead><tr><th>场景</th><th>旧行为</th><th>新行为</th></tr></thead>
+      <tbody>
+        <tr><td>商品有伤</td><td>开箱条件不完整时倾向统一 review；提示词把“业务动作需人工”与“证据需人工”混在一起。</td><td>按照版本化 SOP 输出支持或不支持倾向；只有证据冲突、关键材料缺失或系统处理未完成才保留 review。</td></tr>
+        <tr><td>安慰性补偿</td><td>“补偿”字样会被守卫统一改写成转人工，事实结论也被冲淡。</td><td>事实仍可明确为“不支持”，同时独立输出“可参考最低档安慰性补偿”，不声称已经执行。</td></tr>
+        <tr><td>未成年人资料</td><td>五类材料齐全但有部分字段看不清时，整单仍显示待确认。</td><td>材料齐全、无明确字段冲突、无阻断性修改风险时通过视觉初审；标黄项只供抽检，不要求逐张人工复核。</td></tr>
+        <tr><td>报告与 API</td><td>“业务边界”容易被理解为 Agent 不敢判断。</td><td>明确写为：Agent 负责证据结论和 SOP 建议；甲方系统负责执行；是否人工复核由独立字段决定。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>API 关键返回示例</h2>
+    <pre>{
+  "assessment": {
+    "conclusion_code": "evidence_does_not_support_claim",
+    "confidence": 0.82
+  },
+  "sop_recommendation": {
+    "code": "comfort_compensation",
+    "recommendation": "当前证据不支持用户诉求；补充证据可供最低档安慰性补偿参考。"
+  },
+  "human_review": {
+    "level": "not_required"
+  },
+  "policy": {
+    "business_action_allowed": false
+  }
+}</pre>
+    <p>这个例子表达的是：Agent 明确认为证据不支持诉求，但按照 SOP 可以给安慰性补偿建议；Agent 不会自行付款，也不要求仅因为付款动作而转人工。</p>
+  </section>
+
+  <section>
+    <h2>验收结果与边界</h2>
+    <div class="grid">
+      <article class="card green"><h3>审核服务测试</h3><span class="big">124 项通过</span></article>
+      <article class="card green"><h3>视觉审核测试</h3><span class="big">214 项通过</span></article>
+      <article class="card green"><h3>项目 tests 全量回归</h3><span class="big">342 项通过</span></article>
+      <article class="card amber"><h3>下一轮业务验收</h3><p>仍需用甲方复核后的黄金样本集统计正负一致率、强制人工率和安慰性补偿建议一致率。</p></article>
+    </div>
+    <p><b>不虚构的边界：</b>本报告证明工程规则和接口行为已经修正，不代表未经黄金样本回归就已经达到生产准确率。</p>
+  </section>
+</main>
+</body>
+</html>

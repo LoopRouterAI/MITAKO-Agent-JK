@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MITAKO Agent 内部工程中心</title>
+  <style>
+    :root{--bg:#10171e;--panel:#17212a;--panel2:#1d2933;--ink:#eef4f7;--muted:#9fb0bc;--line:#32414d;--brand:#5fb3e6;--ok:#55c7a4;--warn:#efb85f;--radius:6px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.65;letter-spacing:0}.shell{width:min(1120px,calc(100% - 32px));margin:auto}a{color:inherit}.header{padding:44px 0 30px;border-bottom:1px solid var(--line)}.header small{color:var(--brand);font-weight:700}.header h1{margin:8px 0 10px;font-size:38px;letter-spacing:0}.header p{max-width:820px;margin:0;color:var(--muted)}.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.meta span{padding:5px 9px;border:1px solid var(--line);border-radius:4px;color:var(--muted);font-size:12px}main{padding:32px 0 56px}.section{margin-top:30px}.section:first-child{margin-top:0}.section h2{font-size:20px;margin:0 0 13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.doc{display:block;min-height:132px;padding:18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);text-decoration:none;transition:.18s ease}.doc:hover{background:var(--panel2);border-color:#537083;transform:translateY(-2px)}.doc:focus-visible{outline:3px solid rgba(95,179,230,.35);outline-offset:2px}.doc .tag{color:var(--brand);font-size:12px;font-weight:700}.doc h3{margin:5px 0 6px;font-size:17px}.doc p{margin:0;color:var(--muted);font-size:14px}.current{border-color:#3f7d72}.current .tag{color:var(--ok)}.history{opacity:.78}.rule{margin-top:30px;padding:17px 19px;border:1px solid #685737;border-radius:var(--radius);background:#211d16;color:#d7c29d}.rule strong{color:var(--warn)}footer{border-top:1px solid var(--line);padding:22px 0;color:var(--muted);font-size:13px}@media(max-width:720px){.shell{width:min(100% - 22px,1120px)}.header{padding-top:32px}.header h1{font-size:30px}.grid{grid-template-columns:1fr}.doc{min-height:0}}
+  </style>
+</head>
+<body>
+  <header class="header"><div class="shell"><small>INTERNAL ENGINEERING · 2026-08-05</small><h1>MITAKO Agent 内部工程中心</h1><p>面向产品、Python/Java 开发、测试、实施和运维。这里记录当前系统边界、代码入口、部署拓扑、升级内容和可执行验收命令。</p><div class="meta"><span>主服务 8000</span><span>视觉服务 7861</span><span>FastAPI / OpenAPI</span><span>客户包不含本目录</span></div></div></header>
+  <main class="shell">
+    <section class="section"><h2>当前必读</h2><div class="grid">
+      <a class="doc current" href="升级日志-2026-08-05-证据语义与客服决策收敛.md"><span class="tag">LATEST · 2026-08-05</span><h3>证据语义与客服决策收敛</h3><p>事实识别、SOP 建议和人工复审分离，未成年人资料有效性修复、精简报告及中立盲测证据。</p></a>
+      <a class="doc current" href="MITAKO售后审核Agent业务认知基线-20260727.md"><span class="tag">CURRENT · BUSINESS BASELINE</span><h3>售后审核 Agent 业务认知基线</h3><p>商业目标、四层结论、场景规则、黄金样本集和验收口径。</p></a>
+      <a class="doc current" href="升级日志-2026-07-23-审核建议契约与可选HTML.md"><span class="tag">CURRENT · ADVISORY API</span><h3>审核建议契约与可选 HTML</h3><p>三级复审、3 秒离框补件、JSON-only、报告路由和兼容策略。</p></a>
+      <a class="doc" href="升级日志-2026-07-22-订单基线与官方商品图按需接入.md"><span class="tag">ORDER / CDN</span><h3>订单基线与官方商品图按需接入</h3><p>新资料映射、最小化适配、CDN 安全、缓存、API/报告调用链和真实回归。</p></a>
+      <a class="doc current" href="升级日志-2026-07-20-独立逐帧审核与资料质量分层.md"><span class="tag">CURRENT · INDIVIDUAL FRAMES</span><h3>独立逐帧与资料质量分层</h3><p>删除拼图输入、统一 24 帧分段、拆分材料存在性和质量状态，并记录最新真实回归。</p></a>
+      <a class="doc current" href="升级日志-2026-07-20-视觉证据安全与SKU基准.md"><span class="tag">CURRENT · EVIDENCE / SKU</span><h3>视觉证据安全与 SKU 基准升级</h3><p>服务端批准策略、证据分权、公开 DTO、失败计费、订单快照同步与最小化输入。</p></a>
+      <a class="doc current" href="升级日志-2026-07-20-未成年人资料字段一致性.md"><span class="tag">CURRENT · MINOR CONSISTENCY</span><h3>未成年人资料字段一致性升级</h3><p>三层能力、五项检查、安全 Schema、门禁、144989 真实盲测和甲方接口边界。</p></a>
+      <a class="doc current" href="README.md"><span class="tag">START HERE</span><h3>内部文档总览</h3><p>阅读顺序、职责划分、发布口径和文档维护规则。</p></a>
+      <a class="doc current" href="系统清单与代码地图.md"><span class="tag">ARCHITECTURE</span><h3>系统清单与代码地图</h3><p>服务边界、模块入口、调用关系、数据与外部适配层。</p></a>
+      <a class="doc current" href="Java开发部署与联调指南.md"><span class="tag">JAVA / OPS</span><h3>Java 开发部署与联调</h3><p>网关职责、部署拓扑、大文件链路、错误处理与联调步骤。</p></a>
+      <a class="doc current" href="升级日志-2026-07-17-四样本审核.md"><span class="tag">CHANGELOG</span><h3>0717 四样本审核工程升级</h3><p>诉求范围、自动分类门槛、全局时间轴、ffprobe、代理绕行、大文件与真实 API 验收。</p></a>
+      <a class="doc current" href="升级日志-2026-07-17.md"><span class="tag">CHANGELOG</span><h3>0717 网页目录上传修复</h3><p>隐藏文件双层过滤、媒体真实性、坏视频隔离、并发安全和客户包边界。</p></a>
+      <a class="doc current" href="升级日志-2026-07-16.md"><span class="tag">CHANGELOG</span><h3>0715 评测与 Strong 审核升级</h3><p>评测边界、全时间轴分段、非 AI 取证、证据报告和升级建议。</p></a>
+      <a class="doc current" href="内部研发包交付说明.md"><span class="tag">INTERNAL PACKAGE</span><h3>内部研发包交付说明</h3><p>源码、环境配置、数据库、样本范围和敏感数据传输要求。</p></a>
+      <a class="doc current" href="工程师入门.md"><span class="tag">ONBOARDING</span><h3>工程师入门</h3><p>环境准备、启动、测试、关键约束和首次提交检查。</p></a>
+      <a class="doc current" href="../docs/delivery/openapi.yaml"><span class="tag">CONTRACT</span><h3>当前 OpenAPI</h3><p>从 FastAPI 生成的接口契约；Java 客户端以此为准。</p></a>
+    </div></section>
+    <section class="section"><h2>设计与质量</h2><div class="grid">
+      <a class="doc" href="客服Agent视觉审核系统设计指南.html"><span class="tag">DESIGN</span><h3>客服与审核系统设计指南</h3><p>产品角色、模块边界、人工协同和演进方向。</p></a>
+      <a class="doc" href="../docs/delivery/testing-guide.md"><span class="tag">QA</span><h3>测试与验收指南</h3><p>自动化回归、盲测、批量任务、页面和私域验收。</p></a>
+      <a class="doc" href="../docs/delivery/deployment-guide.md"><span class="tag">RUNBOOK</span><h3>部署指南</h3><p>双服务、健康检查、生产拓扑、容量和故障定位。</p></a>
+      <a class="doc" href="../docs/delivery/mitako-full-requirement-reaudit-20260711.html"><span class="tag">AUDIT</span><h3>全需求复核报告</h3><p>当前完成度、验证证据、未完成项与外部依赖。</p></a>
+    </div></section>
+    <section class="section"><h2>历史参考</h2><div class="grid">
+      <a class="doc history" href="POC展示与联调开发说明.md"><span class="tag">LEGACY</span><h3>早期 POC 联调说明</h3><p>仅用于追溯，不作为当前接口或部署基线。</p></a>
+      <a class="doc history" href="视觉审核后台配置与模型选型E2E说明.md"><span class="tag">LEGACY</span><h3>早期模型选型说明</h3><p>用于理解验证过程；当前能力以新 OpenAPI 和测试指南为准。</p></a>
+    </div></section>
+    <div class="rule"><strong>内部资料边界：</strong>本目录不得进入甲方客户验证包。真实 Key、客户原始素材、数据库、运行日志和人工标签也不得写入文档或 Git。</div>
+  </main>
+  <footer><div class="shell">MITAKO Agent 内部工程资料 · 发布前必须执行客户包门禁与独立解压验证</div></footer>
+</body>
+</html>

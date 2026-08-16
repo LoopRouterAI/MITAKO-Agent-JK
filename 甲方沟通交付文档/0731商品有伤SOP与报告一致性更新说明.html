@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>0731 商品有伤 SOP 与报告一致性更新说明</title><style>
+:root{--ink:#141820;--muted:#5c6673;--line:#dbe3dd;--green:#3d913f;--lime:#bdf13b;--amber:#df9418;--red:#c54242;--paper:#fff;--soft:#f4f8f3}*{box-sizing:border-box}body{margin:0;background:#f4f7f3;color:var(--ink);font:16px/1.7 Inter,"Microsoft YaHei",sans-serif;letter-spacing:0}.page{width:min(1140px,calc(100% - 28px));margin:auto;padding:28px 0 58px}.hero,.panel{background:var(--paper);border:1px solid var(--line);border-radius:8px}.hero{padding:34px;border-top:8px solid var(--green)}.tag{display:inline-block;padding:4px 10px;background:var(--lime);font-weight:800;border-radius:999px}h1{font-size:42px;line-height:1.15;margin:14px 0;letter-spacing:0}h2{font-size:24px;margin:0 0 14px}h3{font-size:18px;margin:0 0 7px}.muted{color:var(--muted)}.metrics,.grid,.traffic{display:grid;gap:12px}.metrics{grid-template-columns:repeat(4,1fr);margin-top:20px}.metrics div{padding:15px;border:1px solid var(--line);background:var(--soft);border-radius:7px}.metrics b{display:block;font-size:25px}.panel{margin-top:14px;padding:25px}.grid{grid-template-columns:repeat(2,1fr)}.card{padding:16px;border:1px solid var(--line);border-left:6px solid var(--green);border-radius:6px}.card.warn{border-left-color:var(--amber)}.card.red{border-left-color:var(--red)}.traffic{grid-template-columns:repeat(3,1fr)}.traffic article{padding:17px;border:1px solid var(--line);border-top:7px solid var(--green);border-radius:7px}.traffic .a{border-top-color:var(--amber)}.traffic .r{border-top-color:var(--red)}table{width:100%;border-collapse:collapse}th,td{padding:11px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:var(--soft)}code{background:#edf2ee;padding:2px 5px;border-radius:4px}.note,.boundary{padding:15px;border-left:7px solid var(--amber);background:#fff8e8}.boundary{margin-top:14px;border-left-color:var(--red);background:#fff6f6}.footer{color:var(--muted);font-size:14px;margin-top:18px}@media(max-width:760px){.page{width:calc(100% - 20px);padding-top:10px}.hero,.panel{padding:18px}h1{font-size:30px}.metrics,.grid,.traffic{grid-template-columns:1fr}table{display:block;overflow-x:auto;font-size:14px}}
+</style></head><body><main class="page">
+<section class="hero"><span class="tag">MITAKO 售后审核 Agent · 0731</span><h1>模型看到什么、SOP 怎么判断、客服下一步做什么，已经分开表达</h1><p class="muted">本轮没有给 589098、615437、593840、617109 写答案特例，而是修正所有商品有伤案件共用的证据聚合和报告逻辑。目录标签、人工结论和最终退款结果不会进入模型。</p><div class="metrics"><div><span>自动回归</span><b>334 项</b></div><div><span>子测试</span><b>39 项</b></div><div><span>中立目录盲审</span><b>4/4 完成</b></div><div><span>正式 API 冒烟</span><b>14/14</b></div></div></section>
+
+<section class="panel"><h2>这次真正改了什么</h2><div class="grid">
+<article class="card"><h3>删掉容易学偏的旧规则</h3><p>不再根据目录名、人工标签、最终回复、中文损伤关键词、否定词或包装名称推断答案，也不再把每段视频的正负结论简单投票成整案结论。</p></article>
+<article class="card"><h3>主视频和补充图片分开算</h3><p>视频中看到伤、补充图中看到伤、是否是同一件商品、是否覆盖争议部位分别记录。补充图不会再冒充“主视频已经看见损伤”。</p></article>
+<article class="card"><h3>SOP 倾向和经营动作分开</h3><p>报告先给“按照当前 SOP 的审核倾向”，再给进一步评估建议。Agent 不直接决定退款、换货、赔付、拒绝或定责。</p></article>
+<article class="card"><h3>默认提效，严格模式可选</h3><p>默认策略不再要求媒体取证、特写、同物关系等所有非致命项同时通过；完整视频已看完且未见所诉损伤时可以给出明确 SOP 倾向。甲方仍可显式选择更严格的策略版本。</p></article>
+<article class="card"><h3>局部失败不再拖垮整案</h3><p>连续性、损伤成因或媒体取证某个专项失败时，保留其他成功证据并明确标注缺口，不再统一改写为“证据不足，必须转 VIP”。</p></article>
+<article class="card warn"><h3>离镜是风险信号，不是自动定罪</h3><p>报告给出离镜起止时间、估计秒数、采样精度和上下界。是否超过甲方规则由服务端 SOP 产生审核倾向，但不会据此自动执行拒绝。</p></article>
+<article class="card warn"><h3>加速倍数只在可证明时给出</h3><p>系统会检查变速/加速技术信号。只有媒体时间轴存在可信依据时才输出倍速；证据不足时写“未知”，不会让模型猜一个精确倍数。</p></article>
+</div></section>
+
+<section class="panel"><h2>客服报告现在怎么读</h2><div class="traffic"><article><h3>绿色：倾向明确</h3><p>证据链和 SOP 方向一致，可按甲方业务规则继续；仍不是自动退款或自动拒绝。</p></article><article class="a"><h3>黄色：有疑点但可用</h3><p>例如短时遮挡、轻微离镜、补充图片关联待确认。客服只看标记的关键证据，不必从头重审全部素材。</p></article><article class="r"><h3>红色：必须重点复核</h3><p>例如明确证据冲突、关键技术链路失败、材料被截断或同物关系无法建立。</p></article></div><p class="note">报告第一屏固定回答三件事：按照 SOP 的倾向、置信度/证据强度、下一步建议。证据帧、补充图片、离镜区间和模型边界随后展开。</p></section>
+
+<section class="panel"><h2>四个中立目录真实盲审说明</h2><table><thead><tr><th>检查</th><th>结果</th><th>怎么理解</th></tr></thead><tbody>
+<tr><td>模型输入隔离</td><td>4 个案件只使用清洗后的用户诉求、订单上下文与媒体</td><td>没有读取答案目录、annotation、人工最终回复或黄金标签</td></tr>
+<tr><td>任务完成</td><td>4/4 生成结构化结果和 HTML</td><td>证明长视频、多轮专项和报告链路可运行</td></tr>
+<tr><td>专项完整性</td><td>1 个 complete，3 个 partial_specialized</td><td>局部失败会被记录，不会覆盖其他成功证据</td></tr>
+<tr><td>耗时</td><td>案例 001 约 498 秒；其余三案合计约 23 分钟</td><td>高密度逐帧审核仍需按甲方 QPS、成本和黄金集效果继续调优</td></tr>
+<tr><td>准确率</td><td>本轮不计算</td><td>历史目录标签和人工处置存在口径变化；需冻结黄金集后统一计算</td></tr>
+</tbody></table></section>
+
+<section class="panel"><h2>甲方怎么继续测试</h2><ol><li>为每个案件提供用户诉求、订单/SKU/物流信息、全部视频和补充图片；不要把人工答案、目录标签或最终处置放入审核请求。</li><li>先调用正式异步 API 提交单案或批量案件，轮询任务状态；按需选择 JSON 字段或同时生成 HTML。</li><li>在 HTML 中核对：主视频证据、补充图证据、同物关联、离镜时间、媒体取证、SOP 倾向和下一步是否互相一致。</li><li>从四场景冻结黄金集，分别统计正负召回、确定性覆盖率、人工复审率、耗时和成本；不要只用历史文件夹名称做标签。</li><li>网页工作台用于 UAT 和人工抽查；正式对接优先使用 OpenAPI，不要求客服手工录入已存在于甲方后台的订单字段。</li></ol></section>
+
+<section class="panel"><h2>另外两项已纳入同一轮工程</h2><table><thead><tr><th>能力</th><th>当前实现</th><th>边界</th></tr></thead><tbody><tr><td>未成年人证件与关系</td><td>身份证、户口本、出生证明、护照及签发国家/地区；身份、年龄、监护关系跨材料初审</td><td>视觉一致不等于法定真伪；没有甲方权威接口时不会伪装在线验真</td></tr><tr><td>稳定性</td><td>按任务动态并发、可重试错误指数退避、遵守 Retry-After、已配置渠道间受控切换</td><td>认证错误不重试；公开报告不显示渠道、Key、内部地址或 Prompt</td></tr></tbody></table></section>
+
+<section class="boundary"><strong>当前交付结论：</strong>本轮共享机制、正式 API、网页报告和盲审链路具备继续 UAT 的条件；尚不能宣称 120GB 素材生产准确率达标。真实企微、订单、库存、CRM/CDP、身份/运营商验真和生产对象存储仍需甲方环境联调。</section>
+<p class="footer">版本：2026-07-31 · 更新于 2026-08-01 · 面向甲方负责人、客服主管、测试和联调研发</p>
+</main></body></html>

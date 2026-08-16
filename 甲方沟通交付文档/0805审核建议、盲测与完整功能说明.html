@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MITAKO Agent 0805 审核建议、盲测与完整功能说明</title>
+  <style>
+    :root{color-scheme:light;--bg:#f3f6f4;--paper:#fff;--ink:#17201c;--muted:#5e6c65;--line:#d9e2dd;--green:#137348;--green-soft:#e9f7ef;--amber:#a86000;--amber-soft:#fff4df;--red:#b43743;--red-soft:#fff0f1;--blue:#166b87;--blue-soft:#eaf6fa;--lime:#c7ef42;--radius:7px;--shadow:0 14px 34px rgba(27,49,39,.08)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;line-height:1.7;letter-spacing:0}.wrap{width:min(1160px,calc(100% - 30px));margin:auto}.top{background:#15231d;color:#fff}.top .wrap{min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:900}.version{color:#cbd7d1;font-size:13px}.hero{padding:48px 0 36px;background:#fff;border-bottom:1px solid var(--line)}.eyebrow{margin:0 0 8px;color:var(--green);font-size:13px;font-weight:900}.hero h1{max-width:920px;margin:0;font-size:43px;line-height:1.18}.lead{max-width:900px;margin:14px 0 0;color:var(--muted);font-size:18px}.headline-grid,.grid,.traffic,.metrics{display:grid;gap:12px}.headline-grid{grid-template-columns:repeat(3,1fr);margin-top:24px}.headline-grid article,.card,.metric{padding:17px;border:1px solid var(--line);border-radius:var(--radius);background:#fff}.headline-grid b,.metric b{display:block;font-size:18px}.headline-grid .green b{color:var(--green)}.headline-grid .amber b{color:var(--amber)}main{padding:28px 0 62px}.section{margin-top:18px;padding:26px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);box-shadow:var(--shadow)}.section h2{margin:0 0 13px;font-size:24px}.section h3{margin:0 0 6px;font-size:17px}.section p{margin:8px 0}.muted{color:var(--muted)}.callout{border-left:7px solid var(--lime)}.warning{border-left:7px solid #e7a21d;background:#fffcf5}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.three{grid-template-columns:repeat(3,minmax(0,1fr))}.card{background:#fbfdfc}.tag{display:inline-block;padding:3px 8px;border-radius:999px;background:var(--green-soft);color:var(--green);font-size:12px;font-weight:900}.tag.amber{background:var(--amber-soft);color:var(--amber)}.tag.red{background:var(--red-soft);color:var(--red)}.steps{counter-reset:s;padding:0;display:grid;gap:10px;list-style:none}.steps li{position:relative;padding:14px 15px 14px 52px;border:1px solid var(--line);border-radius:var(--radius);background:#fbfdfc}.steps li:before{counter-increment:s;content:counter(s);position:absolute;left:14px;top:13px;width:27px;height:27px;display:grid;place-items:center;border-radius:50%;background:var(--lime);font-weight:900}table{width:100%;border-collapse:collapse}th,td{padding:11px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{background:#edf4f0}.traffic{grid-template-columns:repeat(3,1fr)}.traffic article{padding:17px;border:1px solid var(--line);border-radius:var(--radius)}.traffic .g{border-top:6px solid var(--green)}.traffic .y{border-top:6px solid #e3a21e}.traffic .r{border-top:6px solid var(--red)}.metrics{grid-template-columns:repeat(5,1fr)}.metric{background:#f9fcfa}.metric b{font-size:24px}.result-pass{color:var(--green);font-weight:900}.result-flow{color:var(--blue);font-weight:900}code{padding:2px 5px;border-radius:4px;background:#edf2ef;font-family:Consolas,monospace}.footer{padding:22px 0;border-top:1px solid var(--line);background:#fff;color:var(--muted);font-size:13px}.skip{position:absolute;left:-9999px}.skip:focus{left:12px;top:12px;padding:8px;background:#fff;z-index:10}@media(max-width:860px){.headline-grid,.grid,.three,.traffic,.metrics{grid-template-columns:1fr}.hero h1{font-size:34px}.section{padding:20px}.top .wrap{padding:10px 0;align-items:flex-start;flex-direction:column}}@media(max-width:520px){.wrap{width:calc(100% - 18px)}.hero{padding:33px 0 25px}.hero h1{font-size:29px}.section{padding:17px}th,td{padding:9px;font-size:14px}}
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <header class="top"><div class="wrap"><div class="brand">MITAKO Agent · 甲方测试版</div><div class="version">0805 更新与验收说明</div></div></header>
+  <section class="hero"><div class="wrap">
+    <p class="eyebrow">给项目负责人、客服主管和测试人员</p>
+    <h1>Agent 现在会先给明确建议，再单独说明是否需要人工</h1>
+    <p class="lead">本轮重点不是增加更多限制，而是纠正“看到了证据却仍全部转人工”的根因，并让客服在报告第一页就知道结论、原因、要不要补材料以及下一步。</p>
+    <div class="headline-grid">
+      <article class="green"><b>定向盲测通过</b><span>3 个直接结论 3/3；1 个缺件流程正确</span></article>
+      <article class="green"><b>自动回归通过</b><span>347 项测试、39 个子测试、API 14/14</span></article>
+      <article class="amber"><b>生产指标待黄金集</b><span>本轮证明缺陷闭环，不把四案写成生产准确率</span></article>
+    </div>
+  </div></section>
+
+  <main id="main" class="wrap">
+    <section class="section callout">
+      <h2>先说人话：这次到底改了什么</h2>
+      <p><b>以前：</b>只要媒体取证、可见度、离镜、补图关联或某个分数没有全部达标，商品有伤就容易回到“待确认、补材料、转人工”。</p>
+      <p><b>现在：</b>Agent 先按核心 SOP 回答“当前证据支持还是不支持诉求”，再把离镜、成因不明、轻度图片风险等放到“建议抽检”中。抽检不等于每单转人工。</p>
+      <p><b>业务边界没有取消：</b>Agent 可以明确给审核建议，但不会自己执行退款、换货、补偿或拒绝。最终动作仍由甲方系统和授权人员决定。</p>
+    </section>
+
+    <section class="section">
+      <h2>本轮六项修正</h2>
+      <div class="grid">
+        <article class="card"><span class="tag">商品有伤</span><h3>删除默认“全门槛同时通过”</h3><p>完整视频未见所诉损伤可给不支持倾向；主视频有明确可回链损伤可给支持倾向。其他疑点保留在风险和抽检中。</p></article>
+        <article class="card"><span class="tag">复审分流</span><h3>建议、复审、业务动作真正分开</h3><p><code>optional</code> 只表示抽检，<code>not_required</code> 表示无需人工；不再出现“建议抽检但下一步仍要求 VIP 复核”的矛盾。</p></article>
+        <article class="card"><span class="tag">未成年人</span><h3>模板、截图和真实资料分层</h3><p>空白模板和示例图不算证明；普通运营商账户截图只作辅助；已填写且类型可识别的证件不会因个别字段未知被误报为缺件。</p></article>
+        <article class="card"><span class="tag">风险判断</span><h3>不再泛化“疑似编辑”</h3><p>只有图片级、位置明确的异常或多项独立证据相互印证才升级。缺 EXIF、压缩、扫描和转发本身只提示注意。</p></article>
+        <article class="card"><span class="tag">客服报告</span><h3>首屏只保留真正要看的内容</h3><p>第一屏展示证据结论、SOP 倾向、证据分数、人工复审、具体缺口、客服下一步和关键证据；技术细节默认折叠。</p></article>
+        <article class="card"><span class="tag">测试安全</span><h3>模型推理前看不到答案</h3><p>盲测使用中立 Case 编号，过滤人工标注、客服最终回复、管理员消息、正负目录名和隐藏资源文件，推理完成后才加载期望结果。</p></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>真实盲测结果</h2>
+      <p class="muted">以下结果来自真实审核接口。人工期望只在模型推理完成后用于评分。</p>
+      <table>
+        <thead><tr><th>中立案件</th><th>场景</th><th>Agent 结果</th><th>证据分数</th><th>人工/流程建议</th><th>验收</th></tr></thead>
+        <tbody>
+          <tr><td>CASE-A</td><td>商品有伤</td><td>支持诉求</td><td>0.65</td><td>可抽检，按甲方规则继续</td><td class="result-pass">与复核标签一致</td></tr>
+          <tr><td>CASE-B</td><td>商品有伤</td><td>不支持诉求</td><td>0.55</td><td>可抽检，按甲方规则继续</td><td class="result-pass">与复核标签一致</td></tr>
+          <tr><td>CASE-C</td><td>未成年人资料</td><td>支持诉求</td><td>0.78</td><td>可抽检，按甲方规则继续</td><td class="result-pass">与复核标签一致</td></tr>
+          <tr><td>CASE-D</td><td>未成年人资料缺件</td><td>待补件</td><td>0.66</td><td>无需人工；只补身份证明和订单/支付凭证</td><td class="result-flow">补件流程正确</td></tr>
+        </tbody>
+      </table>
+      <p><b>为什么不是“4/4 准确率”？</b>CASE-D 的正确业务动作是先补具体资料，而不是强行判正或判负，所以它单独按流程验收。前三个可直接比对结论的案件为 3/3。</p>
+    </section>
+
+    <section class="section">
+      <h2>报告现在怎么读</h2>
+      <div class="traffic">
+        <article class="g"><h3>绿色：可以继续</h3><p>证据倾向明确。甲方可按自身规则继续，或按比例抽检；不需要客服把整单重新看一遍。</p></article>
+        <article class="y"><h3>黄色：看重点或补材料</h3><p>轻度疑点不会抹掉结论。报告会直接写明看哪张图、哪一帧，或只补哪一项材料。</p></article>
+        <article class="r"><h3>红色：必须复核</h3><p>仅用于实质证据冲突、明确高风险或技术处理失败；授权人员重点回看原始证据。</p></article>
+      </div>
+      <ol class="steps">
+        <li>先看“按照 SOP 的审核倾向”，确认支持、不支持或待补件。</li>
+        <li>再看“人工复审”，区分必须复审、建议抽检和无需复审。</li>
+        <li>需要补件时直接看具体清单，不必在十几屏技术细节中寻找。</li>
+        <li>只有需要进一步确认时才展开完整技术分析和全部证据画廊。</li>
+      </ol>
+    </section>
+
+    <section class="section">
+      <h2>当前提供的完整功能</h2>
+      <div class="grid three">
+        <article class="card"><span class="tag">可演示</span><h3>用户 AI 客服</h3><p>售后咨询、情绪识别、补件、升级和转人工。</p></article>
+        <article class="card"><span class="tag">可演示</span><h3>VIP 客服工作台</h3><p>查看会话、意图、情绪、转人工原因和上下文摘要。</p></article>
+        <article class="card"><span class="tag">可演示</span><h3>运营后台</h3><p>查看任务、风险、运行状态、私域候选和复盘信息。</p></article>
+        <article class="card"><span class="tag">网页与接口</span><h3>四类售后审核</h3><p>商品有伤、发错货、漏发货、未成年人资料。</p></article>
+        <article class="card"><span class="tag">单案与批量</span><h3>异步任务服务</h3><p>本地文件、地址、单工单文件夹和批量工单，逐案查询结果。</p></article>
+        <article class="card"><span class="tag">结构化与 HTML</span><h3>审核结果</h3><p>调用方可只取 JSON，也可生成给客服阅读的完整报告。</p></article>
+        <article class="card"><span class="tag">可自动化</span><h3>OpenAPI 与 Java 示例</h3><p>任务提交、轮询、批次、幂等、错误响应、健康和可观测接口。</p></article>
+        <article class="card"><span class="tag amber">POC</span><h3>虾淘私域 Agent</h3><p>群消息、用户分层、商品事件候选、风险禁推和客服任务协同。</p></article>
+        <article class="card"><span class="tag red">待联调</span><h3>甲方真实系统</h3><p>企微/飞书、订单库存、CRM/CDP、对象存储和业务执行接口。</p></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>建议这样复测</h2>
+      <ol class="steps">
+        <li>分别选择一个商品有伤支持样本、不支持样本、未成年人完整资料和缺件资料；不要把人工标签、正负目录名或最终客服回复提交给接口。</li>
+        <li>网页端先用“工单文件夹”逐案提交，再用“批量工单”提交多个案件；确认隐藏文件不会变成待审视频。</li>
+        <li>接口端调用 `/api/v1/review/jobs`，轮询任务状态；读取事实结论、SOP 建议、证据分数、人工复审等级和流程建议。</li>
+        <li>确认 `optional` 的下一步只写抽检，`not_required` 不要求 VIP 复核，缺件案件列出具体材料。</li>
+        <li>打开 HTML 报告，确认第一屏信息一致、关键图片可点开、完整技术分析默认折叠。</li>
+        <li>正式准确率请在双方冻结标签的黄金集上统计混淆矩阵、正负召回、确定性覆盖率和人工复审率。</li>
+      </ol>
+    </section>
+
+    <section class="section">
+      <h2>本轮验收证据</h2>
+      <div class="metrics">
+        <article class="metric"><span>全仓测试</span><b>347</b><small>全部通过</small></article>
+        <article class="metric"><span>子测试</span><b>39</b><small>全部通过</small></article>
+        <article class="metric"><span>API smoke</span><b>14/14</b><small>全部通过</small></article>
+        <article class="metric"><span>SOP 场景</span><b>4/4</b><small>全部对齐</small></article>
+        <article class="metric"><span>答案泄露</span><b>0</b><small>盲测清单</small></article>
+      </div>
+      <p class="muted">前端生产构建、Python 编译、视觉工作台 smoke、公开报告脱敏和浏览器页面检查同时通过。</p>
+    </section>
+
+    <section class="section warning">
+      <h2>仍需双方共同完成的部分</h2>
+      <p>当前包可以做 POC 演示、API 自动化测试和网页 UAT，但尚未伪装为已接入甲方生产系统。正式部署还需要甲方提供测试环境中的鉴权、订单/SKU、物流包裹、库存、对象存储、回调地址和企业通信对接条件。</p>
+      <p>四个定向 Case 不能替代 100 个黄金样本或 120GB 素材评测。生产结论需要双方冻结标签后再统计，并根据分场景结果校准阈值。</p>
+    </section>
+  </main>
+  <footer class="footer"><div class="wrap">MITAKO Agent 甲方测试资料 · 2026-08-05 · 真实业务系统以双方联调结果为准。</div></footer>
+</body>
+</html>

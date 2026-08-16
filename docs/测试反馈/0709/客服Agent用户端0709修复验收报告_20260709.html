@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>0709 客服 Agent 用户端修复验收报告</title>
+  <style>
+    :root {
+      --ink: #141713;
+      --muted: #657083;
+      --line: #d9e2d1;
+      --paper: #fbfcf7;
+      --panel: #ffffff;
+      --lime: #d8ff5f;
+      --mint: #c8f1de;
+      --blue: #d9ebff;
+      --orange: #ffd7a8;
+      --rose: #ffd6dc;
+      --shadow: 6px 6px 0 rgba(20, 23, 19, .9);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      line-height: 1.65;
+    }
+    main { max-width: 1180px; margin: 0 auto; padding: 34px 22px 56px; }
+    header {
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: linear-gradient(135deg, #fff 0%, #f7ffe0 46%, #e9f7ff 100%);
+      box-shadow: var(--shadow);
+      padding: 28px;
+    }
+    h1 { margin: 0; font-size: clamp(28px, 4vw, 46px); line-height: 1.08; letter-spacing: 0; }
+    h2 { margin: 34px 0 14px; font-size: 22px; }
+    p { margin: 8px 0; }
+    .meta { color: var(--muted); font-size: 13px; }
+    .grid { display: grid; gap: 14px; }
+    .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 22px; }
+    .card {
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 3px 3px 0 rgba(20,23,19,.18);
+      padding: 16px;
+    }
+    .kpi strong { display: block; font-size: 28px; line-height: 1; }
+    .kpi span { display: block; color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .pass { background: var(--mint); }
+    .warn { background: var(--orange); }
+    .info { background: var(--blue); }
+    .risk { background: var(--rose); }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; border: 1.5px solid var(--ink); border-radius: 8px; background: #fff; }
+    th, td { padding: 12px 13px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; font-size: 13px; }
+    th { background: #eef6e8; font-size: 12px; color: #25311f; }
+    tr:last-child td { border-bottom: 0; }
+    code {
+      background: #f3f6ef;
+      border: 1px solid #dfe8d6;
+      border-radius: 6px;
+      padding: 1px 5px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 12px;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border: 1px solid var(--ink);
+      border-radius: 8px;
+      padding: 1px 8px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .status.done { background: var(--lime); }
+    .status.partial { background: var(--orange); }
+    .status.wait { background: var(--blue); }
+    .note { border-left: 4px solid var(--ink); padding: 10px 14px; background: #fff; border-radius: 0 8px 8px 0; }
+    .cols { grid-template-columns: 1.1fr .9fr; align-items: start; }
+    ul { margin: 8px 0 0; padding-left: 20px; }
+    li { margin: 5px 0; }
+    @media (max-width: 860px) {
+      main { padding: 18px 12px 36px; }
+      header { padding: 20px; }
+      .kpis, .cols { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+      th, td { min-width: 150px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="meta">MITAKO 客服 Agent · 0709 用户端人工测试反馈 · 修复验收</p>
+      <h1>从“看起来能演示”修到“关键链路可回归验证”</h1>
+      <p>结论：本地 POC 的客服 Agent 用户端 P0/P1 问题已完成代码修复并通过脚本、构建、API smoke 和视频上传回写验证。真实企业微信、电话/短信、甲方客服工单、CRM/CDP 仍属于接口联调边界，不能伪装为已接入。</p>
+      <div class="grid kpis">
+        <div class="card kpi pass"><strong>9/9</strong><span>0709 专项回归通过</span></div>
+        <div class="card kpi pass"><strong>10/10</strong><span>私有化部署 API smoke 通过</span></div>
+        <div class="card kpi pass"><strong>1</strong><span>真实上传视频审核任务回写成功</span></div>
+        <div class="card kpi warn"><strong>4</strong><span>外部系统仍待甲方联调</span></div>
+      </div>
+    </header>
+
+    <section class="grid cols">
+      <div>
+        <h2>本轮修复重点</h2>
+        <div class="card">
+          <ul>
+            <li>修复金牌会员订单咨询因补偿建议失败而误强制转人工的问题，改为记录待审批建议并继续由 AI 承接订单进度。</li>
+            <li>补齐 AI 服务与人工接入期间的实时情绪分析，辱骂和短负面句不会降成“闲聊互动”。</li>
+            <li>补齐内部节点泄露防线，拦截“最新节点/处理节点/系统提示/策略说明”等用户不可见字段。</li>
+            <li>补齐电话提醒诉求闭环，识别为“通知渠道/服务建议”，生成 <code>service_feedback</code> 事件。</li>
+            <li>补齐视频审核任务失败/成功态的客服可读 <code>agent_brief</code>，上传材料后可回写任务。</li>
+            <li>补齐未成年人退款演示中间态，不再只有“待补材料/已退款”两端。</li>
+          </ul>
+        </div>
+      </div>
+      <div>
+        <h2>运行中服务</h2>
+        <div class="card info">
+          <p><code>http://127.0.0.1:8015</code> 主服务已用最新代码启动。</p>
+          <p><code>http://127.0.0.1:7861</code> 视觉审核工作台健康检查通过。</p>
+          <p>最新用户端构建产物：<code>dist/assets/main-C8wYDgle.js</code>。</p>
+        </div>
+      </div>
+    </section>
+
+    <h2>13 条反馈闭环状态</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>编号</th>
+          <th>反馈问题</th>
+          <th>状态</th>
+          <th>本轮处理</th>
+          <th>验证证据</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>金牌会员咨询订单直接转人工</td><td><span class="status done">已修</span></td><td>补偿接口语义失败不再设置 <code>should_transfer</code>，只生成待审批建议。</td><td>0709 回归、业务守护 E2E。</td></tr>
+        <tr><td>2</td><td>排队 0 人仍提示坐席繁忙</td><td><span class="status done">已修</span></td><td>前方 0 人时展示“正在分配坐席”，队列默认 <code>ahead=0</code>。</td><td>前端构建通过。</td></tr>
+        <tr><td>3</td><td>人工客服首句未体现历史问题</td><td><span class="status done">已修</span></td><td>人工欢迎语读取 handoff brief 的摘要和订单，不再只要求用户重述。</td><td>既有 handoff 逻辑保留。</td></tr>
+        <tr><td>4</td><td>人工服务期间负面情绪未更新</td><td><span class="status done">已修</span></td><td><code>/api/v1/handoff/user-message</code> 返回实时 <code>analysis</code>，前端复用统一情绪更新。</td><td>0709 回归新增“人工服务期间负面情绪实时更新”。</td></tr>
+        <tr><td>5</td><td>L4 是否直接转人工</td><td><span class="status done">已修</span></td><td>L4 只提示可转人工，不强制入队；L5/投诉/法律词才强制。</td><td>0709 回归。</td></tr>
+        <tr><td>6</td><td>持续负面时等级下降</td><td><span class="status done">已修</span></td><td>短负面句结合最近用户上下文，前端 L4 保持 45 秒。</td><td>0709 回归。</td></tr>
+        <tr><td>7</td><td>电话提醒诉求缺少闭环</td><td><span class="status done">已修</span></td><td>新增“通知渠道/服务建议”分支和 <code>service_feedback</code> 事件；电话/短信实际触达待甲方渠道授权。</td><td>0709 回归。</td></tr>
+        <tr><td>8</td><td>订单记忆与默认询问订单不一致</td><td><span class="status done">已修</span></td><td>切换用户时立即清空旧焦点订单；显式订单继续最高优先级聚焦。</td><td>前端构建通过。</td></tr>
+        <tr><td>9</td><td>内部处理节点泄露</td><td><span class="status done">已修</span></td><td>新增内部节点词拦截；安全审查清洗后继续服务，不再因内部词误转人工。</td><td>0709 回归。</td></tr>
+        <tr><td>10</td><td>辱骂后情绪识别不及时</td><td><span class="status done">已修</span></td><td>“你脑子有病”等攻击性表达保持业务上下文并升至 L4。</td><td>0709 回归。</td></tr>
+        <tr><td>11</td><td>视频审核结果未接客服流程</td><td><span class="status done">已修</span></td><td>审核任务结果写回 <code>review_tasks.result</code>，客服上下文读取 <code>agent_brief</code>。</td><td>上传任务 <code>RV-582F4573D2E0</code>：<code>REVIEW_COMPLETED</code>。</td></tr>
+        <tr><td>12</td><td>未成年人退款场景不完整</td><td><span class="status done">已修</span></td><td>演示数据补齐待审、AI 通过、低置信复查、拒绝可复核等状态。</td><td><code>mock_data.json</code> JSON 校验通过。</td></tr>
+        <tr><td>13</td><td>高情商/懂二次元风格不足</td><td><span class="status partial">持续优化</span></td><td>Prompt 红线、通知诉求、盲盒规则、视觉材料回复已加强；仍建议继续建设对话质量评测集。</td><td>当前回归覆盖风险语句，不替代主观风格评审。</td></tr>
+      </tbody>
+    </table>
+
+    <h2>验证命令与结果</h2>
+    <table>
+      <thead><tr><th>项目</th><th>命令/对象</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>Python 编译</td><td><code>py_compile main.py agent.py business_readiness_service.py scripts/check_customer_agent_0709_regression.py</code></td><td><span class="status done">通过</span></td></tr>
+        <tr><td>前端构建</td><td><code>npm run build</code></td><td><span class="status done">通过</span></td></tr>
+        <tr><td>0709 专项回归</td><td><code>scripts/check_customer_agent_0709_regression.py</code></td><td><span class="status done">9/9 通过</span></td></tr>
+        <tr><td>原有业务守护</td><td><code>tests/e2e/run_mock_business_guard_e2e.py</code></td><td><span class="status done">通过</span></td></tr>
+        <tr><td>接口私有化验收</td><td><code>scripts/check_private_deployment_api.py</code></td><td><span class="status done">10/10 通过</span>，报告 <code>tests/reports/private_deployment_api_smoke_20260709_151234.json</code></td></tr>
+        <tr><td>视觉旧接口</td><td><code>POST /api/review</code></td><td><span class="status done">ok:true</span>，返回 <code>agent_brief</code></td></tr>
+        <tr><td>用户上传审核</td><td><code>POST /api/v1/private-domain/review-tasks</code></td><td><span class="status done">任务 RV-582F4573D2E0 完成</span>，有 <code>agent_brief</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>仍需甲方联调的边界</h2>
+    <div class="grid cols">
+      <div class="card warn">
+        <p><strong>不能宣称已接入：</strong>企业微信/飞书群、电话/短信触达、甲方真实客服系统、CRM/CDP、真实商品/库存/订单写操作。</p>
+        <p>当前完成的是本地 FastAPI/OpenAPI 服务面、演示工作台、审核任务回写、客服上下文读取和可观测 smoke。</p>
+      </div>
+      <div class="card risk">
+        <p><strong>远程服务器要求：</strong>需要部署本轮修改并重启主服务与视觉服务。若远程仍失败，新版 <code>/api/review</code> 会返回 <code>diagnostics</code>，可直接定位 Key、模型、子进程 stderr/stdout 或报告生成问题。</p>
+        <p>本报告未输出任何真实 Key 值，也未修改 <code>.env</code> 中的密钥内容。</p>
+      </div>
+    </div>
+
+    <h2>本轮主要改动文件</h2>
+    <div class="note">
+      <p><code>agent.py</code>、<code>business_readiness_service.py</code>、<code>main.py</code>、<code>src/hooks/useChatSSE.js</code>、<code>src/App.jsx</code>、<code>mock_data.json</code>、<code>scripts/check_customer_agent_0709_regression.py</code>、<code>tests/e2e/run_mock_business_guard_e2e.py</code>。</p>
+    </div>
+  </main>
+</body>
+</html>

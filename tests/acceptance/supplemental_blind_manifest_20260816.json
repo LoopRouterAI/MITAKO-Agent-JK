@@ -1,0 +1,59 @@
+{
+  "manifest_version": "2026-08-16.1",
+  "label_state": "sealed",
+  "purpose": "补充验证商品有伤聚合修复与未成年人证件局部精读，不替代四场景正式发布门禁",
+  "selection_method": "sha256_rank_after_formally_unrun_filter",
+  "selection_seed": "mitako-supplemental-20260816-v1",
+  "unseen_audit": {
+    "version": "formally-unrun-v1",
+    "status": "verified_before_freeze",
+    "audited_at": "2026-08-16 23:58:00 +08:00",
+    "checked_scopes": [
+      "prior_blind_runs",
+      "report_artifacts",
+      "review_service_jobs",
+      "submission_checkpoints"
+    ],
+    "case_ids_sha256": "ef753162b343db03f039367d35b00a4ab3b9e1b076236738ff7f7acefd717b77",
+    "matches": []
+  },
+  "source_hashes": {
+    "business_contract_sha256": "7fa807adb1317521d64c8f05f59bf3e817a857569e2577090d05bfd86715025a",
+    "review_prompt_sha256": "c0e4d992ec67c46eafcaa31daca86f68b84c5d9210c38b68a8ad5f65477d4e23",
+    "response_schema_sha256": "947b3db9d04aaff370e93a723e54c46ae4d09c42c247fdbac47a689e7cc3456a"
+  },
+  "cases": [
+    {
+      "scenario": "product_damage",
+      "case_id": "617205",
+      "selection_rank_sha256": "0113f5b2eaa121611762ea949b186331b28bd87f770e3ccdfaf75526743d239c",
+      "input_file_count": 7,
+      "input_total_bytes": 36364359,
+      "input_bundle_sha256": "8f6a83f6cd0935bce21610ab0914994b46acc741d195a483ae917a4bd77cb8b7"
+    },
+    {
+      "scenario": "product_damage",
+      "case_id": "601671",
+      "selection_rank_sha256": "043cf9c07ac8e88c1903553592770855d42f6b14209ce977e5012c76247ca53b",
+      "input_file_count": 9,
+      "input_total_bytes": 27358378,
+      "input_bundle_sha256": "a8eef3dcb08be12af36452b41a50c784d3e156d7a5feaab33de86df426a6fb69"
+    },
+    {
+      "scenario": "minor_refund",
+      "case_id": "584573",
+      "selection_rank_sha256": "00d28c8edbf9eddc10fb12776b32a754c1981326be1e0347327d928f336f6624",
+      "input_file_count": 14,
+      "input_total_bytes": 50337793,
+      "input_bundle_sha256": "1fdb653e4492dc0a0bbb0a247c9d62abeec1691f052ae43556c45525cfa9f74a"
+    },
+    {
+      "scenario": "minor_refund",
+      "case_id": "584705",
+      "selection_rank_sha256": "00fcc77d385e23ab0d501be47e8924fe2101e6d371702150429c303e460557bc",
+      "input_file_count": 19,
+      "input_total_bytes": 20361062,
+      "input_bundle_sha256": "df8fa0b13a71063a473f1234d8bcf03859e542a50dfa389e9c11bac59b68618b"
+    }
+  ]
+}

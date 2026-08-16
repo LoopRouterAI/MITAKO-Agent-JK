@@ -1,0 +1,83 @@
+{
+  "manifest_version": "2026-08-15.1",
+  "label_state": "sealed",
+  "selection_method": "sha256_rank",
+  "selection_seed_sha256": "298398bfd82f50f5e6e67b4c26558243bae39c6c51b9bf953e540f959ca145ad",
+  "unseen_audit": {
+    "version": "strict-unseen-v1",
+    "status": "not_proven",
+    "reason": "该清单已用于技术链验收，且 Case 已进入项目记录，不能再作为严格未学习商业盲测。"
+  },
+  "source_hashes": {
+    "gold_workbook_sha256": "e4f7481aaf7f5549efcb1f1be07c5040d91dc75acabe1cdd1ca9b1980a7d064f",
+    "business_contract_sha256": "3946a639c0c417c392401f379e71147c9902a283c1e01055940737519cdbb44f",
+    "review_prompt_sha256": "44a0f30d39a45a58d711373e6bf4931544a73dc9f606411dd3ae83396ef57c09",
+    "response_schema_sha256": "9e14afe986ef684fd8bf9b200a2f17fc6cd52733487f6c884bc1e6d1da7a6acf"
+  },
+  "cases": [
+    {
+      "scenario": "product_damage",
+      "case_id": "590108",
+      "selection_rank_sha256": "180618e471ec482605ba9c524a7c5423cc04e17159f9df3b361e69e5424e6b3a",
+      "input_file_count": 12,
+      "input_total_bytes": 841999363,
+      "input_bundle_sha256": "056b2a178be782525c89985437216414979e1ca3f8ddb8a597ab5bd68c919d56"
+    },
+    {
+      "scenario": "product_damage",
+      "case_id": "603703",
+      "selection_rank_sha256": "29bbc22d3bdcb86a69559f62a9acc86bbc36fd2fdf50c141bfcb717408e39a9b",
+      "input_file_count": 3,
+      "input_total_bytes": 176680150,
+      "input_bundle_sha256": "e1de6cea5d3ec2afd9547b007287da1d58fd3ddbe7870a46a36fdbb70fc3d24d"
+    },
+    {
+      "scenario": "wrong_item",
+      "case_id": "72006",
+      "selection_rank_sha256": "3216a5dbfa7d3608a6122a0ba37edc65b221f4b34114d5e14fa1985576607139",
+      "input_file_count": 1,
+      "input_total_bytes": 329420,
+      "input_bundle_sha256": "2ca8a694c3b30ea1578480a8cefeacf58f8d73759d16576b82cee1ce3864412b"
+    },
+    {
+      "scenario": "wrong_item",
+      "case_id": "159686",
+      "selection_rank_sha256": "b15584c59ec1e6ac8eebbc3d0ac913093536f2fe4076b71c8137603949133b2e",
+      "input_file_count": 1,
+      "input_total_bytes": 1779278,
+      "input_bundle_sha256": "d4db19a66a065809f572afae4c1d9ae7fbc91db5fb8954e0091e5558b468f114"
+    },
+    {
+      "scenario": "missing_item",
+      "case_id": "317898",
+      "selection_rank_sha256": "4be7af518d8a27357e9abefa5173f08378df5a4943b55a7189ea90bd639a82ce",
+      "input_file_count": 1,
+      "input_total_bytes": 127988,
+      "input_bundle_sha256": "22b9cb46504dc5785a3a034077e763bc83c7eb05b6c27beff90e68174e393d0b"
+    },
+    {
+      "scenario": "missing_item",
+      "case_id": "572191",
+      "selection_rank_sha256": "ba5267d3211a9fb8da79f7dad77e1d881d15354bb3eb34c738ec1046fbc4f6bf",
+      "input_file_count": 6,
+      "input_total_bytes": 768265490,
+      "input_bundle_sha256": "3f741775224b486ca492d93f506a9597614b6ee4540e4d3fe544a0e8b73412ab"
+    },
+    {
+      "scenario": "minor_refund",
+      "case_id": "141869",
+      "selection_rank_sha256": "00e63e54bb98f06986fd7db5912e6153c117eb2a1ffc455405dc5ca9256c6c80",
+      "input_file_count": 27,
+      "input_total_bytes": 11919862,
+      "input_bundle_sha256": "ce5c772a629c7995bd5aae870a0fc50e7b66acaa5fcb3c3311802d3c52c42f26"
+    },
+    {
+      "scenario": "minor_refund",
+      "case_id": "262009",
+      "selection_rank_sha256": "03fe0331d59d235ba00bb47c71528df7c597ee253937de249f344098822b43ee",
+      "input_file_count": 7,
+      "input_total_bytes": 22758249,
+      "input_bundle_sha256": "3f3f4587c4e4405b4a241cde0c7bd40863348cc092710f3e6b98d736ebdb87d1"
+    }
+  ]
+}

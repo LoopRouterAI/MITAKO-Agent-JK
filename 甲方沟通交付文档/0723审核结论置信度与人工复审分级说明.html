@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>视觉审核结果怎么用｜0723 更新说明</title>
+  <style>
+    :root{color-scheme:light;--ink:#111821;--muted:#5f6b76;--line:#dfe5e8;--paper:#f4f7f5;--white:#fff;--lime:#c8ff24;--green:#167a5b;--orange:#ef7f27;--red:#bb3e3e;--black:#15202a;--radius:6px;--shadow:0 12px 36px rgba(16,28,38,.08);font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);line-height:1.7;letter-spacing:0}.shell{width:min(1120px,calc(100% - 32px));margin:auto}.top{background:var(--black);color:#fff}.top .shell{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{font-weight:800}.date{color:#c4d0d8;font-size:13px}.hero{padding:54px 0 44px;background:var(--white);border-bottom:1px solid var(--line)}.kicker{display:inline-block;margin-bottom:14px;padding:5px 9px;background:var(--lime);color:#15202a;font-weight:800;font-size:12px}.hero h1{max-width:900px;margin:0;font-size:44px;line-height:1.15;text-wrap:pretty;overflow-wrap:anywhere}.hero p{max-width:840px;margin:18px 0 0;color:var(--muted);font-size:18px}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:30px}.summary div{padding:17px;border:1px solid var(--line);border-radius:var(--radius);background:#fff}.summary b{display:block;margin-bottom:5px}.summary span{color:var(--muted);font-size:14px}main{padding:36px 0 64px}.band{margin-top:30px;padding:26px;border:1px solid var(--line);border-radius:var(--radius);background:#fff;box-shadow:var(--shadow)}.band:first-child{margin-top:0}.band h2{margin:0 0 14px;font-size:25px}.lead{font-size:17px}.levels{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.level{padding:20px;border:1px solid var(--line);border-top:6px solid var(--green);border-radius:var(--radius);background:#fff}.level.optional{border-top-color:var(--orange)}.level.required{border-top-color:var(--red)}.level small{color:var(--muted);font-weight:700}.level h3{margin:5px 0 10px;font-size:20px}.level p{margin:0;color:var(--muted)}.rule{display:grid;grid-template-columns:220px 1fr;gap:22px;padding:17px 0;border-top:1px solid var(--line)}.rule:first-of-type{border-top:0}.rule b{font-size:16px}.rule p{margin:0;color:var(--muted)}.callout{padding:18px 20px;background:#f5ffd9;border:1px solid #bddc68;border-radius:var(--radius)}.callout strong{display:block;margin-bottom:5px}.code{padding:18px;overflow:auto;border-radius:var(--radius);background:#17222c;color:#eaf2f5;font:14px/1.7 Consolas,"Courier New",monospace;white-space:pre}.checks{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.check{padding:14px 16px;border:1px solid var(--line);border-radius:var(--radius);background:#f9fbfa}.check b{color:var(--green)}.boundary{background:#fff8ec;border-color:#e7c690}.boundary h2{color:#744512}.footer{padding:24px 0;border-top:1px solid var(--line);color:var(--muted);font-size:13px}@media(max-width:760px){.shell{width:min(100% - 22px,1120px)}.top .shell{padding:10px 0;align-items:flex-start;flex-direction:column;justify-content:center}.hero{padding:36px 0 30px}.hero h1{font-size:32px}.summary,.levels,.checks{grid-template-columns:1fr}.rule{grid-template-columns:1fr;gap:5px}.band{padding:19px}}
+  </style>
+</head>
+<body>
+  <header class="top"><div class="shell"><div class="brand">MITAKO 视觉审核服务</div><div class="date">0723 结果契约更新</div></div></header>
+  <section class="hero"><div class="shell">
+    <span class="kicker">不是只改文档，本轮已修改 API 与报告代码</span>
+    <h1>审核服务现在给出结论和证据分数，再说明是否真的需要人工</h1>
+    <p>旧版容易把“有疑点”直接等同于“必须转 VIP 客服”。新版把事实判断、证据强弱、风险信号和人工建议分开，目标是减少不必要的人工复核，同时保留可追溯的证据链。</p>
+    <div class="summary">
+      <div><b>事实判断</b><span>支持、不支持或证据不足，并说明依据</span></div>
+      <div><b>三级人工建议</b><span>必须复审、建议抽检、无需复审</span></div>
+      <div><b>JSON 或 HTML</b><span>系统自动化可只取字段，网页默认保留人类报告</span></div>
+    </div>
+  </div></section>
+  <main class="shell">
+    <section class="band">
+      <h2>最重要的变化</h2>
+      <p class="lead">审核服务不再把退款、换货、补发或拒绝写成自己的决定。它只回答：看到了什么、证据支持什么、分数是多少、有哪些风险信号、建议甲方下一步怎么处理。</p>
+      <div class="callout"><strong>例如：商品离开镜头 3.2 秒</strong>新版结论是“当前开箱证据不完整，建议用户补充连续原视频”。这不等于用户调包，不等于视频被剪辑，也不等于自动拒绝。</div>
+    </section>
+
+    <section class="band">
+      <h2>三种人工复审建议</h2>
+      <div class="levels">
+        <article class="level required"><small>LEVEL 1</small><h3>必须人工复审</h3><p>服务执行失败、证据之间有实质冲突，或证据分数低于甲方配置的必须复审线。</p></article>
+        <article class="level optional"><small>LEVEL 2</small><h3>建议抽检</h3><p>有短暂遮挡、轻度风险信号或中等证据分数，但不要求每一单都交给人工。</p></article>
+        <article class="level"><small>LEVEL 3</small><h3>无需人工复审</h3><p>证据链达到配置门槛，或当前问题可以直接通过补充材料继续处理。</p></article>
+      </div>
+    </section>
+
+    <section class="band">
+      <h2>离框、遮挡和疑似剪辑怎么处理</h2>
+      <div class="rule"><b>短暂离框或手臂遮挡</b><p>记录持续时间和对应帧，作为橙色风险信号降低证据强度，不单独强制人工，也不判断为调包。</p></div>
+      <div class="rule"><b>连续离框达到 3 秒</b><p>默认建议补充连续原视频。甲方可配置秒数，但该阈值只控制补件建议，不是自动拒绝阈值。</p></div>
+      <div class="rule"><b>怀疑剪辑或篡改</b><p>必须结合码流、时间线、帧率、编辑器元数据、物体前后同一性等多个信号。单一离框时长不能证明剪辑。</p></div>
+      <div class="rule"><b>证据真的冲突</b><p>主视频、补充图片、订单基准或资料字段出现实质冲突时，才进入“必须人工复审”。</p></div>
+    </section>
+
+    <section class="band">
+      <h2>给甲方系统的主要字段</h2>
+      <div class="code">assessment.conclusion       事实结论
+assessment.confidence       未校准的证据强度分
+human_review.level          required / optional / not_required
+workflow_recommendation     human_review / request_more_material / continue_by_customer_policy
+signals[]                   离框、冲突、材料缺口、媒体取证等信号
+policy.business_action_allowed = false</div>
+      <p>“证据强度分”不是客观正确率，也不是退款概率。正式准确率仍应使用冻结输入的独立盲测集评估。</p>
+    </section>
+
+    <section class="band">
+      <h2>API 和网页分别怎么用</h2>
+      <div class="checks">
+        <div class="check"><b>网页单件/单文件夹</b><br>默认生成结构化结果和完整 HTML，客服可查看关键帧、反证和时间点。</div>
+        <div class="check"><b>网页批量父目录</b><br>逐案件独立审核，默认每案生成 HTML，不让一个失败案件污染其他案件。</div>
+        <div class="check"><b>正式异步 API</b><br>默认兼容旧版生成 HTML；甲方可设置只返回 JSON，减少存储和报告生成。</div>
+        <div class="check"><b>Java 批量</b><br>每案一个异步任务，共用 batch_id；每案可独立选择是否要 HTML。</div>
+      </div>
+    </section>
+
+    <section class="band">
+      <h2>本轮已做的代码验收</h2>
+      <div class="checks">
+        <div class="check"><b>审核服务 62/62</b><br>Schema、阈值、JSON-only、报告路由、异常返回、输入就绪和正式任务归一化。</div>
+        <div class="check"><b>视觉工作台 115/115</b><br>离框策略、报告证据、单件/文件夹/批量入口和旧接口兼容。</div>
+        <div class="check"><b>甲方包独立冷启动通过</b><br>从编译运行时启动双服务，实际验证结构化契约、阈值校验和 JSON-only 报告边界。</div>
+        <div class="check"><b>双包用途已隔离</b><br>甲方包不含 Key、数据库、源码、内部文档或盲测标签；内部包仅限我方研发。</div>
+      </div>
+      <p>本轮交付文件为 MITAKO_Agent-customer-preview-20260723.zip；API 使用说明和 OpenAPI 均已随包提供。</p>
+    </section>
+
+    <section class="band boundary">
+      <h2>仍需甲方确认或联调的内容</h2>
+      <p>三级阈值在生产自动化前需要甲方审批风险策略；真实企微、飞书、订单、库存、CRM/CDP、对象存储和回调仍需甲方测试环境与凭证。当前版本没有伪装这些生产系统已经接入。</p>
+    </section>
+  </main>
+  <footer class="footer"><div class="shell">详细字段见交付包内 docs/delivery/review-advisory-api.md 与 openapi.yaml</div></footer>
+</body>
+</html>

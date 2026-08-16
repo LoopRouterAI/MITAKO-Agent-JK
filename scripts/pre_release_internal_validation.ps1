@@ -1,0 +1,166 @@
+﻿[CmdletBinding()]
+param(
+    [string]$BaseUrl = "http://127.0.0.1:8015",
+    [string]$VisualUrl = "http://127.0.0.1:7861",
+    [string]$MinorSampleRoot = "",
+    [switch]$RunModelBatch
+)
+
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+$Root = Split-Path -Parent $PSScriptRoot
+$PythonCandidates = @(
+    (Join-Path $Root ".venv\Scripts\python.exe"),
+    (Join-Path $Root "venv\Scripts\python.exe")
+)
+$Python = $PythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $Python) {
+    throw "Internal Python environment not found: expected .venv or venv."
+}
+$DynamicCapacityEvidencePaths = @(
+    ".env.example",
+    "auth",
+    "main.py",
+    "prompts",
+    "review_service",
+    "poc/visual_review_poc/minor_material_pipeline.py",
+    "poc/visual_review_poc/model_selection_e2e.py",
+    "poc/visual_review_poc/workbench_server.py",
+    "scripts/check_dynamic_material_capacity_http.py"
+)
+
+function Invoke-Step([string]$Name, [scriptblock]$Action) {
+    Write-Host "[Internal release validation] $Name" -ForegroundColor Cyan
+    & $Action
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Name failed. Customer packaging has been stopped."
+    }
+}
+
+function Assert-Health([string]$Name, [string]$Url) {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 8
+        if ($response.StatusCode -ne 200) {
+            throw "HTTP $($response.StatusCode)"
+        }
+    } catch {
+        throw "$Name is not healthy at $Url. Start the internal source deployment before packaging. Detail: $($_.Exception.Message)"
+    }
+}
+
+Push-Location $Root
+try {
+    Assert-Health "Main service" "$($BaseUrl.TrimEnd('/'))/api/v1/auth/status"
+    Assert-Health "Visual review service" "$($VisualUrl.TrimEnd('/'))/api/health"
+
+    $env:E2E_BASE_URL = $BaseUrl.TrimEnd('/')
+    $env:VISUAL_WORKBENCH_BASE_URL = $VisualUrl.TrimEnd('/')
+    $env:PYTHONIOENCODING = "utf-8"
+
+    Invoke-Step "Frontend production build" { npm run build }
+    Invoke-Step "Python core compilation" {
+        & $Python -m py_compile main.py agent.py business_readiness_service.py review_service\service.py review_service\decision_policy.py review_service\advisory_assessment.py review_service\schemas.py private_domain\service.py poc\visual_review_poc\order_info_adapter.py poc\visual_review_poc\official_reference_images.py poc\visual_review_poc\model_auth.py poc\visual_review_poc\observability.py scripts\sync_customer_order_info.py scripts\check_order_reference_integration.py scripts\check_documentation_release.py scripts\check_review_runtime_dependencies.py scripts\run_final_commercial_acceptance.py tests\e2e\run_final_ui_acceptance.py
+    }
+    Invoke-Step "Documentation and OpenAPI" { & $Python scripts\check_documentation_release.py }
+    Invoke-Step "Private deployment API smoke" { & $Python scripts\check_private_deployment_api.py }
+    Invoke-Step "Review label isolation" { & $Python scripts\check_review_input_isolation.py }
+    Invoke-Step "Four-scenario SOP alignment" { & $Python scripts\check_review_sop_alignment.py }
+    Invoke-Step "Media preprocessing and sampling" { & $Python scripts\check_review_media_preprocessing.py }
+    Invoke-Step "Real WebP and FFmpeg media execution" { & $Python -m pytest tests\acceptance\test_media_preflight_real_execution.py -q }
+    Invoke-Step "Media upload safety" { & $Python -m unittest tests.review_service.test_media_upload_safety tests.visual_review.test_workbench_upload_safety }
+    Invoke-Step "Current product-damage decision and timeline regression" { & $Python -m unittest tests.review_service.test_decision_policy_0717 tests.review_service.test_review_strength_and_forensics tests.visual_review.test_global_timeline_aggregation_0717 }
+    Invoke-Step "Current claimed-item, damage evidence and blind-bundle regression" { & $Python -m unittest tests.visual_review.test_damage_causality tests.visual_review.test_object_continuity tests.visual_review.test_continuity_model_pass tests.visual_review.test_blind_review_bundle }
+    Invoke-Step "Minor refund material coverage and privacy regression" { & $Python -m unittest tests.visual_review.test_minor_material_pipeline tests.visual_review.test_model_request_isolation tests.visual_review.test_report_evidence_rendering }
+    Invoke-Step "Order baseline and on-demand official image regression" { & $Python -m unittest tests.visual_review.test_order_info_sync tests.visual_review.test_order_info_reconcile tests.visual_review.test_order_info_adapter tests.visual_review.test_official_reference_images tests.review_service.test_input_readiness }
+    Invoke-Step "Model authentication, observability, Celery and advisory routing regression" { & $Python -m unittest tests.visual_review.test_model_auth tests.visual_review.test_observability tests.review_service.test_celery_registration tests.review_service.test_advisory_assessment }
+    Invoke-Step "Current four-scenario business and UI contracts" { & $Python -m pytest tests\test_final_commercial_acceptance.py tests\test_final_ui_acceptance_contract.py -q }
+    Invoke-Step "Visual workbench smoke" { & $Python scripts\check_visual_workbench_smoke.py }
+    Invoke-Step "Dynamic 62-image evidence for relevant implementation" {
+        $dynamicReportPath = Join-Path $Root "tests\reports\dynamic_material_capacity_http_latest.json"
+        $currentCommit = (git rev-parse HEAD).Trim()
+        $reuseDynamicReport = $false
+        if (-not $RunModelBatch -and (Test-Path -LiteralPath $dynamicReportPath -PathType Leaf)) {
+            try {
+                $dynamicReport = Get-Content -LiteralPath $dynamicReportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $evidenceCommit = [string]$dynamicReport.git_commit
+                $evidenceIsAncestor = $false
+                $relatedCodeUnchanged = $false
+                $relatedWorktreeClean = $false
+                $relatedIndexClean = $false
+                if ($evidenceCommit -match "^[0-9a-fA-F]{40}$") {
+                    & git merge-base --is-ancestor $evidenceCommit $currentCommit
+                    $evidenceIsAncestor = $LASTEXITCODE -eq 0
+                    if ($evidenceIsAncestor) {
+                        & git diff --quiet "$evidenceCommit..$currentCommit" -- $DynamicCapacityEvidencePaths
+                        $relatedCodeUnchanged = $LASTEXITCODE -eq 0
+                        & git diff --quiet -- $DynamicCapacityEvidencePaths
+                        $relatedWorktreeClean = $LASTEXITCODE -eq 0
+                        & git diff --cached --quiet -- $DynamicCapacityEvidencePaths
+                        $relatedIndexClean = $LASTEXITCODE -eq 0
+                    }
+                }
+                $reuseDynamicReport = (
+                    $dynamicReport.release_gate_ok -eq $true -and
+                    [int]$dynamicReport.requested_count -eq 62 -and
+                    $evidenceIsAncestor -and
+                    $relatedCodeUnchanged -and
+                    $relatedWorktreeClean -and
+                    $relatedIndexClean
+                )
+            } catch {
+                $reuseDynamicReport = $false
+            }
+        }
+        if ($reuseDynamicReport) {
+            Write-Host "Reusing 62-image HTTP evidence: $evidenceCommit (relevant implementation unchanged at $currentCommit)"
+        } else {
+            & $Python scripts\check_dynamic_material_capacity_http.py --base-url $BaseUrl --count 62
+        }
+    }
+    Invoke-Step "Customer Agent 0709 regression" { & $Python scripts\check_customer_agent_0709_regression.py }
+    Invoke-Step "Customer Agent 0714 regression" { & $Python scripts\check_customer_agent_0714_regression.py }
+    Invoke-Step "Frontend user isolation" { node tests\frontend\check_0714_user_isolation.mjs }
+    Invoke-Step "Admin UI smoke" { & $Python scripts\check_admin_ui_smoke.py }
+    Invoke-Step "Full API and browser pipeline" { & $Python tests\e2e\run_full_pipeline_e2e.py }
+    Invoke-Step "Private-domain Agent workflow" { & $Python scripts\check_private_domain_agent_e2e.py }
+    Invoke-Step "Private-domain 10k-group scale" { & $Python scripts\check_private_domain_10k_scale.py }
+
+    $isolationDir = Join-Path $Root ("tmp\release-data-isolation-" + [guid]::NewGuid().ToString("N"))
+    $previousDataDir = $env:MITAKO_DATA_DIR
+    try {
+        $env:MITAKO_DATA_DIR = $isolationDir
+        Invoke-Step "Runtime data directory isolation" { & $Python scripts\check_data_isolation.py }
+    } finally {
+        if ($null -eq $previousDataDir) {
+            Remove-Item Env:MITAKO_DATA_DIR -ErrorAction SilentlyContinue
+        } else {
+            $env:MITAKO_DATA_DIR = $previousDataDir
+        }
+    }
+
+    $fourScenarioAcceptance = Join-Path $Root "tests\reports\review_0816_four_scenario_blind_results_latest.json"
+    if ($RunModelBatch) {
+        $blindExecutionId = "internal-release-" + (Get-Date -Format "yyyyMMdd-HHmmss")
+        $blindCheckpoint = Join-Path $Root ("tests\reports\review_0813_four_scenario_blind_checkpoint_" + $blindExecutionId + ".json")
+        Invoke-Step "Live sealed four-scenario review batch" {
+            & $Python scripts\run_final_commercial_acceptance.py --base-url $BaseUrl --execution-id $blindExecutionId --checkpoint $blindCheckpoint
+        }
+    }
+    Invoke-Step "Current sealed four-scenario artifact integrity" {
+        & $Python -c "import pathlib,sys; sys.path.insert(0,sys.argv[2]); from scripts.check_release_packages import _verify_current_four_scenario_acceptance; _verify_current_four_scenario_acceptance(pathlib.Path(sys.argv[1]))" $fourScenarioAcceptance $Root
+    }
+    Invoke-Step "Current API and Web report browser acceptance" { & $Python tests\e2e\run_final_ui_acceptance.py }
+    if ($MinorSampleRoot) {
+        if (-not (Test-Path -LiteralPath $MinorSampleRoot -PathType Container)) {
+            throw "Minor sample root does not exist: $MinorSampleRoot"
+        }
+        Invoke-Step "144989 live minor-refund blind review" {
+            & $Python scripts\check_minor_refund_144989.py --sample-root $MinorSampleRoot --base-url $BaseUrl
+        }
+    }
+
+    Write-Host "[OK] Internal deployment, build, and release validation passed." -ForegroundColor Green
+} finally {
+    Pop-Location
+}
