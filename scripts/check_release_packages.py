@@ -411,6 +411,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(any(name.endswith("observability.pyc") for name in runtime_names), "甲方运行时缺少视觉调用可观测模块")
     _assert(any(name.endswith("native_video_perception.pyc") for name in runtime_names), "甲方运行时缺少原生视频感知模块")
     _assert(any(name.endswith("sampled_video_perception.pyc") for name in runtime_names), "甲方运行时缺少抽帧视频感知模块")
+    _assert(any(name.endswith("video_role_preflight.pyc") for name in runtime_names), "甲方运行时缺少开箱视频角色预检模块")
     _assert(any(name.endswith("media_preflight.pyc") for name in runtime_names), "甲方运行时缺少媒体送审预检模块")
     _assert(any(name.endswith("secure_media_tunnel.pyc") for name in runtime_names), "甲方运行时缺少安全媒体隧道模块")
     _assert(any(name.endswith("report_assets.pyc") for name in runtime_names), "甲方运行时缺少报告静态资源模块")
