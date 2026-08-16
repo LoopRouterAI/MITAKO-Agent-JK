@@ -23,6 +23,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from scripts.run_final_commercial_acceptance import (
     CONTRACT_VERSION,
     REQUIRED_CASES_PER_SCENE,
@@ -32,7 +36,6 @@ from scripts.run_final_commercial_acceptance import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / "tests" / "reports"
 DYNAMIC_CAPACITY_EVIDENCE_PATHS = (
     ".env.example",
@@ -315,7 +318,6 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "tests/reports/dynamic_material_capacity_http_latest.json",
         "tests/reports/dynamic_material_capacity_http_51_20260730.json",
         "tests/reports/dynamic_material_capacity_http_62_20260730.json",
-        "tests/reports/minor_refund_144989_20260730_223430.json",
         "tests/reports/customer_order_info_sync_strict_verify_20260720.json",
         "tests/reports/customer_order_info_reconcile_applied_20260720.json",
         "tests/reports/customer_order_info_integration_strict_final_20260720.json",

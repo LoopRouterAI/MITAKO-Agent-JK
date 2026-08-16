@@ -118,6 +118,24 @@ def _write_current_acceptance(root: Path) -> tuple[Path, dict]:
 
 
 class ReleaseLayoutTest(unittest.TestCase):
+    def test_release_verifier_supports_documented_direct_execution(self) -> None:
+        result = subprocess.run(
+            [
+                str(ROOT / ".venv" / "Scripts" / "python.exe"),
+                str(ROOT / "scripts" / "check_release_packages.py"),
+                "--help",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_release_verifier_rejects_legacy_0812_positive_negative_gate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -264,6 +282,7 @@ class ReleaseLayoutTest(unittest.TestCase):
             "blind_0806_final_product_p1.json",
             "blind_damage_0731_case_001_latest.json",
             "minor_refund_144989_20260717-final.json",
+            "minor_refund_144989_20260730_223430.json",
             "review_617911_individual24_20260720-latest.json",
             "review_submission_modes_20260717-final.json",
         ):
