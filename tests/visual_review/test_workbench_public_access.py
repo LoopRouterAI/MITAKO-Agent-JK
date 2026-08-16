@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import os
 import tempfile
 import time
@@ -14,10 +15,104 @@ from fastapi.testclient import TestClient
 
 from poc.visual_review_poc import workbench_server
 from poc.visual_review_poc.internal_review_ledger import ReviewRequestLedger
+from poc.visual_review_poc.local_video_triage_demo import apply_frontdesk_context
 from poc.visual_review_poc.media_registry import MediaRegistry
 
 
 class WorkbenchPublicAccessTest(unittest.TestCase):
+    def test_workbench_ghost_buttons_keep_mobile_touch_height(self) -> None:
+        source = Path(workbench_server.__file__).with_name("workbench.html").read_text(encoding="utf-8")
+        ghost_rule = source.split(".ghost {", 1)[1].split("}", 1)[0]
+        self.assertIn("min-height: 44px", ghost_rule)
+
+    def test_batch_review_accepts_the_same_business_context_as_single_review(self) -> None:
+        transport_fields = {
+            "x_request_id", "x_mitako_internal_metrics", "x_mitako_internal_token",
+            "rule_tenant_id", "defer_postprocess", "files",
+        }
+        single_fields = set(inspect.signature(workbench_server.review_folder).parameters) - transport_fields
+        batch_fields = set(inspect.signature(workbench_server.review_folders_batch).parameters)
+
+        self.assertEqual(single_fields - batch_fields, set())
+
+    def test_pad_layout_keeps_review_entry_above_the_fold(self) -> None:
+        source = (Path(__file__).resolve().parents[2] / "poc" / "visual_review_poc" / "workbench.html").read_text(encoding="utf-8")
+        media = source.split("@media (max-width: 1080px)", 1)[1].split("@media (max-width: 720px)", 1)[0]
+
+        self.assertIn(".hero-art { display: none; }", media)
+        self.assertIn(".entry-hub { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }", media)
+        self.assertIn(".entry-card > span { display: none; }", media)
+
+    def test_material_source_switch_uses_button_semantics_and_short_help(self) -> None:
+        source = (Path(__file__).resolve().parents[2] / "poc" / "visual_review_poc" / "workbench.html").read_text(encoding="utf-8")
+
+        self.assertIn('class="mode-tabs" role="group"', source)
+        self.assertNotIn('role="tab"', source)
+        self.assertIn("tab.setAttribute('aria-pressed', String(active))", source)
+        self.assertIn("导入人工结果，检查样本字段是否齐全。", source)
+
+    def test_public_agent_report_uses_business_scenario_instead_of_technical_route(self) -> None:
+        payload = workbench_server._public_agent_report_payload(
+            case={
+                "case_id": "wrong-item-1",
+                "scenario": "video_unboxing",
+                "scenario_label": "发错货审核",
+                "structured_business_context": {"business_scenario": "wrong_item"},
+                "videos": [],
+                "frames": [],
+                "supplemental_images": [],
+            },
+            sample_dir=Path("."),
+            parsed={"predicted_label": "review", "confidence": 0.7},
+            result={"status": "success"},
+            quality={},
+            public_conclusion="当前证据待确认。",
+            public_next_step="补充同包裹证据。",
+        )
+
+        self.assertEqual(payload["scenario"], "wrong_item")
+
+    def test_public_projection_keeps_current_fulfillment_contract_fields(self) -> None:
+        projected = workbench_server._project_public_parsed_fields({
+            "fulfillment_reconciliation": {
+                "evidence_route": "compliant_opening_video",
+                "evidence_route": "compliant_opening_video",
+                "warehouse_check": {"state": "not_available", "outcome": None},
+                "observed_items": [{
+                    "item_role": "ordered_item",
+                    "series": "系列A",
+                    "edition": "标准版",
+                    "physical_form": "徽章",
+                    "included_parts": ["徽章本体"],
+                    "visible_identifiers": ["角色图案"],
+                    "descriptive_dimensions": ["圆形"],
+                }],
+            },
+        })
+
+        reconciliation = projected["fulfillment_reconciliation"]
+        self.assertEqual(reconciliation["evidence_route"], "compliant_opening_video")
+        self.assertEqual(reconciliation["warehouse_check"]["state"], "not_available")
+        self.assertIn("item_role", reconciliation["observed_items"][0])
+        self.assertIn("included_parts", reconciliation["observed_items"][0])
+
+    def test_public_projection_uses_effective_display_window_without_legacy_seconds_threshold(self) -> None:
+        projected = workbench_server._project_public_parsed_fields({
+            "object_continuity_assessment": {
+                "out_of_frame_warning_seconds": 3.0,
+                "max_unobserved_seconds": 3.0,
+                "out_of_frame_events": [{
+                    "duration_seconds": 12.0,
+                    "within_required_display_window": False,
+                }],
+            }
+        })
+
+        assessment = projected["object_continuity_assessment"]
+        self.assertNotIn("out_of_frame_warning_seconds", assessment)
+        self.assertNotIn("max_unobserved_seconds", assessment)
+        self.assertFalse(assessment["out_of_frame_events"][0]["within_required_display_window"])
+
     def setUp(self) -> None:
         self.client = TestClient(workbench_server.app)
 
@@ -31,10 +126,11 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
 
         self.assertIn('name="minor_refund_policy"', workbench)
         self.assertIn('"authoritative_verification":"disabled"', workbench)
-        self.assertIn('"independent_payment_min_age":10', workbench)
-        self.assertIn("申请时未满 10 周岁会加强核对支付密码来源和监护人发现消费过程", workbench)
-        self.assertIn("高置信未满 9 周岁时要求人工重点核对独立支付能力", workbench)
-        self.assertIn("年龄本身不决定退款或支持结论", workbench)
+        self.assertNotIn("independent_payment_min_age", workbench)
+        self.assertNotIn("未满 10 周岁会加强核对", workbench)
+        self.assertIn("年龄证据高置信显示未满 9 周岁时", workbench)
+        self.assertIn("年龄本身不构成缺件", workbench)
+        self.assertIn("也不决定退款或支持结论", workbench)
         self.assertIn("开始审核未成年人资料", workbench)
         self.assertNotIn("开始审核资料材料", workbench)
         self.assertIn("标准视觉初审（默认，不依赖外部接口）", workbench)
@@ -51,15 +147,48 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertEqual(self.client.get("/wrong-item").status_code, 200)
         self.assertEqual(self.client.get("/missing-item").status_code, 200)
 
+    def test_workbench_uses_one_component_radius_and_accessible_sample_help(self) -> None:
+        workbench = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
+
+        self.assertIn("--radius: 8px", workbench)
+        self.assertNotIn("border-radius: 999px", workbench)
+        for radius in ("12px", "14px", "16px", "18px", "20px", "22px", "24px"):
+            self.assertNotIn(f"border-radius: {radius}", workbench)
+        self.assertIn('class="sample-help"', workbench)
+        self.assertIn('aria-label="查看样本字段说明"', workbench)
+        self.assertIn('class="sample-help-popover"', workbench)
+        self.assertIn('popovertarget="sampleHelpPopover"', workbench)
+        self.assertIn('id="sampleHelpPopover" popover', workbench)
+        self.assertNotIn('class="upload-desc">字段建议包含：', workbench)
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr))", workbench)
+        self.assertIn("font-size: clamp(30px, 3.6vw, 48px)", workbench)
+        self.assertNotIn("4.6vw, 72px", workbench)
+
     def test_workbench_summary_only_surfaces_high_confidence_visible_severe_damage(self) -> None:
         workbench = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
 
         self.assertIn("严重商品质量问题：", workbench)
-        self.assertIn("severity_assessment", workbench)
-        self.assertIn("['severe', 'extreme']", workbench)
-        self.assertIn("issueVisible === true", workbench)
-        self.assertIn("severityConfidence >= 0.8", workbench)
+        self.assertIn("decisionAudit.severe_alert_eligible === true", workbench)
+        self.assertNotIn("['severe', 'extreme']", workbench)
+        self.assertNotIn("issueVisible === true", workbench)
+        self.assertNotIn("severityConfidence >= 0.8", workbench)
+        self.assertNotIn("fieldConfidences[7]", workbench)
+        self.assertNotIn("fieldConfidences.issue_visible", workbench)
         self.assertNotIn("'严重商品质量问题：' + severeText", workbench)
+
+    def test_workbench_summary_exposes_scene_material_readiness_and_hides_minor_noop_copy(self) -> None:
+        workbench = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
+
+        self.assertIn("当前' + materialSceneLabel + '下的用户材料是否齐全", workbench)
+        self.assertIn("brief.next_step ? '下一步：'", workbench)
+        success_summary = workbench.split("if (review.agent_brief)", 1)[1].split("const summary = review.summary", 1)[0]
+        self.assertIn("整体建议：", success_summary)
+        self.assertIn("整体确定性：", success_summary)
+        self.assertNotIn("...ingestionLines(data)", success_summary)
+        self.assertNotIn("...mediaWarningLines(data)", success_summary)
+        self.assertNotIn("证据分数：", success_summary)
+        self.assertNotIn("人工处理：", success_summary)
+        self.assertNotIn("取证：", success_summary)
 
     def test_workbench_describes_current_complete_video_review_path(self) -> None:
         workbench = workbench_server.INDEX_HTML.read_text(encoding="utf-8")
@@ -100,6 +229,30 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                 self.assertEqual(run_review.call_args.args[1], technical_scenario)
                 self.assertEqual(run_review.call_args.args[3]["business_scenario"], business_scenario)
 
+    def test_batch_review_rejects_case_specific_global_context(self) -> None:
+        response = self.client.post(
+            "/api/review-folders-batch",
+            data={"scenario": "wrong_item", "order_no": "ORDER-A"},
+            files={"files": ("evidence.jpg", b"image", "image/jpeg")},
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_plain_web_review_uses_server_assessment_date(self) -> None:
+        with patch.object(
+            workbench_server, "_save_upload", return_value=Path("case.mp4")
+        ), patch.object(
+            workbench_server, "_run_review", return_value={"ok": True}
+        ) as run_review:
+            response = self.client.post(
+                "/api/review",
+                data={"scenario": "minor_refund"},
+                files={"file": ("case.mp4", b"video", "video/mp4")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertRegex(run_review.call_args.args[7]["assessment_at"], r"^20\d{2}-\d{2}-\d{2}$")
+
     def test_review_scenario_normalization_rejects_conflicting_business_context(self) -> None:
         self.assertEqual(
             workbench_server._normalize_review_scenario("video_unboxing", "wrong_item"),
@@ -121,6 +274,33 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 422)
+
+    def test_frontdesk_context_rejects_malformed_structured_json(self) -> None:
+        with self.assertRaisesRegex(ValueError, "有效 JSON"):
+            apply_frontdesk_context(
+                {"structured_business_context": {}},
+                "product_damage",
+                json.dumps({"order_item": "{bad-json"}, ensure_ascii=False),
+            )
+
+    def test_review_folder_returns_422_for_malformed_structured_json(self) -> None:
+        with patch.object(
+            workbench_server,
+            "_save_folder_uploads",
+            return_value=(Path("case"), {"accepted_count": 1}),
+        ), patch.object(
+            workbench_server,
+            "_run_folder_agent_review",
+            side_effect=ValueError("order_item 不是有效 JSON"),
+        ):
+            response = self.client.post(
+                "/api/review-folder",
+                data={"scenario": "product_damage", "order_item": "{bad-json"},
+                files={"files": ("evidence.jpg", b"image", "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "送审业务字段不是有效 JSON")
 
     def test_internal_review_folder_reuses_completed_response_for_same_request_id(self) -> None:
         request_headers = {
@@ -169,6 +349,42 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertEqual(first.json(), second.json())
         self.assertEqual(save_uploads.call_count, 1)
         self.assertEqual(run_review.call_count, 1)
+
+    def test_internal_review_failure_logs_request_and_error_type_without_payload(self) -> None:
+        request_headers = {
+            "X-MITAKO-Internal-Token": "test-internal-token",
+            "X-Request-ID": "RJ-FAILED-workbench",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"VISUAL_REPORT_SIGNING_SECRET": "test-internal-token"},
+            clear=False,
+        ), patch.object(
+            workbench_server,
+            "INTERNAL_REVIEW_LEDGER",
+            ReviewRequestLedger(Path(temp_dir) / "internal_requests.sqlite3"),
+        ), patch.object(
+            workbench_server,
+            "_save_folder_uploads",
+            return_value=(Path("case"), {"accepted_count": 1}),
+        ), patch.object(
+            workbench_server,
+            "_run_folder_agent_review",
+            side_effect=RuntimeError("sensitive material text"),
+        ), patch.object(workbench_server.LOGGER, "exception") as log_exception:
+            with self.assertRaisesRegex(RuntimeError, "sensitive material text"):
+                self.client.post(
+                    "/api/review-folder",
+                    headers=request_headers,
+                    data={"scenario": "product_damage", "rule_tenant_id": "mitako"},
+                    files={"files": ("evidence.jpg", b"image", "image/jpeg")},
+                )
+
+        log_exception.assert_called_once_with(
+            "folder review failed request_id=%s error_type=%s",
+            "RJ-FAILED-workbench",
+            "RuntimeError",
+        )
 
     def test_sample_api_preserves_business_scenario(self) -> None:
         with patch.object(
@@ -223,7 +439,7 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                     )
                     self.assertEqual(self.client.get(expired_url).status_code, 403)
 
-            legacy_path = "/media/" + first.relative_to(workbench_server.ROOT).as_posix()
+            legacy_path = "/media/runtime_media/first.jpg"
             self.assertEqual(
                 self.client.get(workbench_server._sign_public_url(legacy_path)).status_code,
                 404,
@@ -374,12 +590,14 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertIs(transport["supplier_file_uri_required"], False)
         self.assertIn("image/webp", transport["accepted_model_media_types"])
         self.assertIn("video/mp4", transport["accepted_model_media_types"])
-        self.assertEqual(transport["native_video_max_unique_files"], 1)
-        self.assertIn("单次完整原生视频", transport["strategy"])
+        self.assertEqual(transport["native_video_max_unique_files"], 200)
+        self.assertIn("多个完整视频", transport["strategy"])
+        self.assertNotIn("多视频时", transport["strategy"])
+        self.assertIn("同一次原生视频审核", transport["strategy"])
         self.assertNotIn("开场锚点复核", transport["strategy"])
 
-    def test_technical_processing_incomplete_is_completed_transport_with_system_retry(self) -> None:
-        self.assertTrue(workbench_server._structured_review_ok({
+    def test_technical_processing_incomplete_is_not_a_completed_review(self) -> None:
+        self.assertFalse(workbench_server._structured_review_ok({
             "predicted_label": "review",
             "confidence": None,
             "processing_status": "technical_processing_incomplete",
@@ -389,6 +607,17 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             "predicted_label": "review",
             "confidence": None,
         }))
+
+    def test_general_public_projection_keeps_technical_retry_markers(self) -> None:
+        projected = workbench_server._public_parsed({
+            "predicted_label": "review",
+            "confidence": None,
+            "processing_status": "technical_processing_incomplete",
+            "system_action": "system_retry",
+        }, "product_damage")
+
+        self.assertEqual(projected["processing_status"], "technical_processing_incomplete")
+        self.assertEqual(projected["system_action"], "system_retry")
 
     def test_product_damage_public_projection_preserves_speed_and_opening_review_facts(self) -> None:
         parsed = {
@@ -401,6 +630,11 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             "overall_video_result": "indeterminate",
             "sealed_start": True,
             "waybill_visible": True,
+            "opening_action_assessment": {
+                "present": True,
+                "confidence": 0.94,
+                "reason": "00:07 可见包裹从闭合状态被划开。",
+            },
             "field_confidences": {
                 "sealed_start": 0.95,
                 "issue_visible": 0.92,
@@ -441,9 +675,17 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
             },
             "opening_video_evidence": {
                 "present": False,
+                "sop_compliant": True,
                 "status": "yellow",
                 "confidence": 0.88,
                 "reason": "未形成可信的初次开箱证据。",
+                "validated_requirements": [
+                    "sealed_start",
+                    "waybill_visible",
+                    "continuous",
+                    "claimed_item_presentation",
+                    "issue_assessable",
+                ],
             },
             "internal_prompt": "不得公开",
         }
@@ -452,6 +694,8 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         video = projected["video_audit_conclusion"]
 
         self.assertEqual(projected["overall_video_result"], "indeterminate")
+        self.assertTrue(projected["opening_action_assessment"]["present"])
+        self.assertEqual(projected["opening_action_assessment"]["confidence"], 0.94)
         self.assertFalse(projected["has_edit"])
         self.assertIsNone(projected["has_speed_change"])
         self.assertEqual(video["sampling_fps"], 1.0)
@@ -460,6 +704,17 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertEqual(video["opening_video_compliance"]["validated_fields"], ["waybill_visible"])
         self.assertEqual(projected["opening_video_evidence"]["status"], "yellow")
         self.assertEqual(projected["opening_video_evidence"]["confidence"], 0.88)
+        self.assertTrue(projected["opening_video_evidence"]["sop_compliant"])
+        self.assertEqual(
+            projected["opening_video_evidence"]["validated_requirements"],
+            [
+                "sealed_start",
+                "waybill_visible",
+                "continuous",
+                "claimed_item_presentation",
+                "issue_assessable",
+            ],
+        )
         self.assertEqual(projected["field_confidences"]["issue_visible"], 0.92)
         self.assertEqual(
             projected["damage_causality_assessment"]["severity_assessment"]["level"],
@@ -485,7 +740,18 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                 "atomic_claim_results": [{
                     "claim_id": "CLM-1",
                     "subject_ref": "SKU-1",
+                    "location": "正面",
+                    "damage_type": "断裂",
+                    "main_video_visibility": "visible",
+                    "supplemental_visibility": "visible",
+                    "same_item_linkage": True,
+                    "damage_presence": "confirmed",
+                    "condition_at_unboxing": "supported",
                     "support_status": "supported",
+                    "severity_level": "severe",
+                    "severity_confidence": 0.93,
+                    "structural_failure": True,
+                    "conflicting_evidence": False,
                     "evidence_refs": [{"video_index": 1, "global_frame_index": 8}],
                     "reason": "争议部位可见。",
                     "internal_chain": "不得公开",
@@ -506,9 +772,12 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         }, "product_damage")
 
         claim_facts = projected["claim_fact_assessment"]
-        self.assertEqual(claim_facts["atomic_claim_results"][0]["subject_ref"], "SKU-1")
+        atomic_claim = claim_facts["atomic_claim_results"][0]
+        self.assertEqual(atomic_claim["subject_ref"], "SKU-1")
+        self.assertEqual(atomic_claim["severity_level"], "severe")
+        self.assertTrue(atomic_claim["structural_failure"])
         self.assertEqual(claim_facts["order_linkage"]["status"], "verified")
-        self.assertNotIn("internal_chain", claim_facts["atomic_claim_results"][0])
+        self.assertNotIn("internal_chain", atomic_claim)
 
     def test_product_damage_public_projection_preserves_opening_field_refs(self) -> None:
         projected = workbench_server._public_parsed({
@@ -553,6 +822,51 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertEqual(fulfillment["warehouse_verification"]["status"], "confirmed_not_missing")
         self.assertEqual(fulfillment["warehouse_verification"]["verification_ref"], "WH-CHECK-1")
         self.assertNotIn("internal_note", fulfillment)
+
+    def test_fulfillment_public_projection_preserves_deterministic_route_fields(self) -> None:
+        projected = workbench_server._public_parsed({
+            "fulfillment_reconciliation": {
+                "evidence_route": "not_required",
+                "resolution_basis": "trusted_expected_item_resolution",
+                "user_materials_complete": False,
+                "visual_coverage_verified": False,
+                "package_observations": [{
+                    "package_ref": "ORDER-PACKAGE-001",
+                    "waybill_visible": True,
+                    "waybill_matches_order": True,
+                    "received_group_photo_complete": False,
+                    "green_bag_visible": False,
+                }],
+                "product_composition_resolution": {
+                    "claimed_item": "标题中的附属描述",
+                    "is_expected": False,
+                    "resolution_ref": "PRODUCT-COMPOSITION-1",
+                    "required_received_item_refs": ["ORDER-LINE-001"],
+                    "reason": "不是独立应发商品。",
+                    "internal_note": "不得公开",
+                },
+                "post_decision_reminders": [{
+                    "type": "flat_paper_self_check",
+                    "item_refs": ["ORDER-LINE-002"],
+                    "message": "可检查纸类商品是否夹在包装夹层。",
+                    "affects_verdict": False,
+                }],
+            },
+        }, "missing_item")
+
+        fulfillment = projected["fulfillment_reconciliation"]
+        self.assertEqual(fulfillment["evidence_route"], "not_required")
+        self.assertEqual(fulfillment["resolution_basis"], "trusted_expected_item_resolution")
+        self.assertFalse(fulfillment["user_materials_complete"])
+        self.assertFalse(fulfillment["visual_coverage_verified"])
+        package = fulfillment["package_observations"][0]
+        self.assertTrue(package["waybill_matches_order"])
+        self.assertFalse(package["received_group_photo_complete"])
+        composition = fulfillment["product_composition_resolution"]
+        self.assertFalse(composition["is_expected"])
+        self.assertEqual(composition["required_received_item_refs"], ["ORDER-LINE-001"])
+        self.assertNotIn("internal_note", composition)
+        self.assertFalse(fulfillment["post_decision_reminders"][0]["affects_verdict"])
 
     def test_minor_material_public_parsed_uses_strict_whitelist_and_redacts_identifiers(self) -> None:
         parsed = {
@@ -781,6 +1095,49 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
         self.assertNotIn("上海市浦东新区世纪大道100号", serialized)
         self.assertIn("[已脱敏]", serialized)
 
+    def test_public_free_text_redacts_shipping_tracking_number(self) -> None:
+        public = workbench_server._sanitize_public_report_data({
+            "agent_report": {
+                "scenario": "product_damage",
+                "parsed": {
+                    "supporting_evidence": [{
+                        "fact": "快递面单单号JT0023964811882清晰可见",
+                    }],
+                },
+            },
+        })
+
+        serialized = json.dumps(public, ensure_ascii=False)
+        self.assertNotIn("JT0023964811882", serialized)
+        self.assertIn("面单", serialized)
+        self.assertIn("[已脱敏]", serialized)
+
+    def test_public_free_text_redacts_unlabeled_customer_and_contact_names(self) -> None:
+        cases = (
+            ("客户张三称商品破损", "张三", "称商品破损"),
+            ("客户张三反馈商品破损", "张三", "反馈商品破损"),
+            ("客户张三投诉商品破损", "张三", "投诉商品破损"),
+            ("客户张三反映商品破损", "张三", "反映商品破损"),
+            ("客户张三来电咨询", "张三", "来电咨询"),
+            ("客户张三回复商品破损", "张三", "回复商品破损"),
+            ("客户张三提到商品破损", "张三", "提到商品破损"),
+            ("客户张三告知商品破损", "张三", "告知商品破损"),
+            ("客户张三描述商品破损", "张三", "描述商品破损"),
+            ("客户 张三 反馈商品破损", "张三", "反馈商品破损"),
+            ("客户张三：商品破损", "张三", "：商品破损"),
+            ("张三称商品破损", "张三", "称商品破损"),
+            ("联系人李四，手机号13800138000", "李四", "手机号"),
+        )
+        for source, private_value, public_fact in cases:
+            with self.subTest(source=source):
+                serialized = json.dumps(
+                    workbench_server._sanitize_public_report_data({"fact": source}),
+                    ensure_ascii=False,
+                )
+                self.assertNotIn(private_value, serialized)
+                self.assertIn("[已脱敏]", serialized)
+                self.assertIn(public_fact, serialized)
+
     def test_public_report_does_not_expose_raw_customer_media_urls(self) -> None:
         public = workbench_server._sanitize_public_report_data({
             "agent_report": {
@@ -911,10 +1268,10 @@ class WorkbenchPublicAccessTest(unittest.TestCase):
                 )
 
         projected = response["agent_report"]["parsed"]
-        self.assertEqual(projected["predicted_label"], "negative")
+        self.assertEqual(projected["predicted_label"], "review")
         self.assertEqual(
             projected["decision_policy_audit"]["rule_id"],
-            "PD-N-NONCOMPLIANT-OPENING-VIDEO",
+            "PD-R-NONCOMPLIANT-OPENING-VIDEO",
         )
 
     def test_health_exposes_only_persistent_signing_configuration_state(self) -> None:

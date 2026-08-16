@@ -35,8 +35,10 @@ export default function DeskLogin({ onSuccess }) {
             <p className="text-xs text-slate-500">{t('desk.loginSubtitle')}</p>
           </div>
         </div>
-        <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full border-2 border-[var(--mitako-ink)] rounded-[8px] px-3 py-2 mb-3 text-sm focus:ring-2 focus:ring-[var(--mitako-lime)]/50 outline-none" />
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full border-2 border-[var(--mitako-ink)] rounded-[8px] px-3 py-2 mb-3 text-sm focus:ring-2 focus:ring-[var(--mitako-lime)]/50 outline-none" />
+        <label htmlFor="desk-username" className="mb-1 block text-xs font-bold text-slate-600">{t('admin.username')}</label>
+        <input id="desk-username" type="text" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} className="mb-3 w-full rounded-[8px] border-2 border-[var(--mitako-ink)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--mitako-lime)]/50" />
+        <label htmlFor="desk-password" className="mb-1 block text-xs font-bold text-slate-600">{t('admin.password')}</label>
+        <input id="desk-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} className="mb-3 w-full rounded-[8px] border-2 border-[var(--mitako-ink)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--mitako-lime)]/50" />
         {error && <p className="text-sm text-rose-600 mb-2">{error}</p>}
         <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 bg-[var(--mitako-lime)] text-[var(--mitako-ink)] border-2 border-[var(--mitako-ink)] shadow-[4px_4px_0_rgba(17,20,17,.92)] font-black py-3 rounded-[8px]">
           <LogIn className="w-4 h-4" /> {loading ? t('desk.loggingIn') : t('desk.loginBtn')}

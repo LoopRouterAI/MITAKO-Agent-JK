@@ -58,6 +58,12 @@ function Invoke-InternalValidation {
 Invoke-InternalValidation
 Assert-NoTrackedChanges "Release validation changed tracked files. Review and commit them before packaging."
 Assert-NoUntrackedCode "Release validation created untracked code. Review it before packaging."
+$FourScenarioAcceptanceSource = Join-Path $Root "tests\reports\review_0816_four_scenario_blind_results_latest.json"
+if (-not (Test-Path -LiteralPath $FourScenarioAcceptanceSource -PathType Leaf)) {
+    throw "Four-scenario acceptance evidence is missing: $FourScenarioAcceptanceSource"
+}
+& $Python -c "import pathlib,sys; sys.path.insert(0,sys.argv[2]); from scripts.check_release_packages import _verify_current_four_scenario_acceptance; _verify_current_four_scenario_acceptance(pathlib.Path(sys.argv[1]))" $FourScenarioAcceptanceSource $Root
+if ($LASTEXITCODE -ne 0) { throw "Four-scenario acceptance evidence is invalid." }
 
 function Reset-Stage {
     $fullStage = [System.IO.Path]::GetFullPath($Stage)
@@ -172,44 +178,21 @@ Copy-Path "docs\三大审核场景的小量样本\sample_003"
 Copy-Path "docs\三大审核场景的小量样本\sample_004"
 Copy-SafeSampleLabels
 Copy-Path "poc\visual_review_poc\sample_videos"
-Copy-Path "tests\reports\customer_agent_0714_regression_latest.json"
-Copy-Path "tests\reports\review_service_batch_latest.json"
-Copy-Path "tests\reports\review_media_preprocessing_latest.json"
-Copy-Path "tests\reports\review_0717_four_samples_20260717-final.json"
-Copy-Path "tests\reports\minor_refund_144989_20260717-final.json"
-Copy-LatestReport "minor_refund_144989_20260720_*.json" "tests\reports\minor_refund_144989_20260720-latest.json"
-Copy-LatestReport "minor_refund_144989_20260720_*.html" "tests\reports\minor_refund_144989_20260720-latest.html"
-Copy-LatestReport "review_0717_four_samples_20260720-617911-independent24-*.json" "tests\reports\review_617911_individual24_20260720-latest.json"
-Copy-LatestReport "review_0717_four_samples_20260720-617911-independent24-*.html" "tests\reports\review_617911_individual24_20260720-latest.html"
-Copy-Path "tests\reports\customer_order_info_sync_verify_20260720.json"
-Copy-Path "tests\reports\customer_order_info_integration_20260720.json"
 Copy-Path "tests\reports\customer_order_info_sync_strict_verify_20260720.json"
 Copy-Path "tests\reports\customer_order_info_reconcile_applied_20260720.json"
 Copy-Path "tests\reports\customer_order_info_integration_strict_final_20260720.json"
-Copy-Path "tests\reports\review_submission_modes_20260717-final.json"
-Copy-Path "tests\reports\review_submission_modes_20260717-final.html"
 Copy-Path "tests\reports\dynamic_material_capacity_http_latest.json"
 Copy-Path "tests\reports\dynamic_material_capacity_http_51_20260730.json"
 Copy-Path "tests\reports\dynamic_material_capacity_http_62_20260730.json"
-Copy-Path "tests\reports\minor_refund_144989_20260730_223430.json"
-Copy-Path "tests\reports\blind_damage_0731_case_001_latest.json"
-Copy-Path "tests\reports\blind_damage_0731_cases_002_004_latest.json"
-Copy-Path "tests\reports\review_0804_blind_acceptance_latest.json"
-Copy-Path "tests\reports\blind_product_damage_positive_0804_final.json"
-Copy-Path "tests\reports\blind_product_damage_0804_final.json"
-Copy-Path "tests\reports\blind_minor_material_0804_final.json"
-Copy-Path "tests\reports\blind_0806_final_product_p1.json"
-Copy-Path "tests\reports\blind_0806_final_product_n1.json"
-Copy-Path "tests\reports\blind_0806_final_product_rn.json"
-Copy-Path "tests\reports\blind_0806_final_product_rp.json"
-Copy-Path "tests\reports\blind_0806_final_minor_m1.json"
-Copy-Path "tests\reports\review_0807_random_acceptance_latest.json"
-Copy-Path "tests\reports\review_0807_random_acceptance_latest.html"
-Copy-Path "tests\reports\review_0809_commercial_acceptance_latest.json"
-Copy-Path "tests\reports\0808-four-scenario-validation\PD-612691-final-0809-result.json"
-Copy-Path "tests\reports\0808-four-scenario-validation\WI-76139-final-0809-result.json"
-Copy-Path "tests\reports\0808-four-scenario-validation\MI-589330-final-0809-result.json"
-Copy-Path "tests\reports\0808-four-scenario-validation\MR-547198-final-0809c-result.json"
+Copy-Path "tests\reports\review_0816_four_scenario_blind_results_latest.json"
+$fourScenarioAcceptance = Get-Content -LiteralPath $FourScenarioAcceptanceSource -Raw -Encoding UTF8 | ConvertFrom-Json
+foreach ($case in $fourScenarioAcceptance.cases) {
+    foreach ($propertyName in @("report_json", "report_html")) {
+        $relativePath = [string]$case.$propertyName
+        if (-not $relativePath) { throw "Four-scenario acceptance case is missing $propertyName." }
+        Copy-Path $relativePath.Replace("/", "\")
+    }
+}
 Copy-LatestReport "full_pipeline_*.html" "tests\reports\full_pipeline_latest.html"
 Copy-LatestReport "auth_strict_*.html" "tests\reports\auth_strict_latest.html"
 Copy-LatestReport "private_deployment_api_smoke_*.json" "tests\reports\private_deployment_api_smoke_latest.json"
@@ -218,78 +201,15 @@ $evidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
-    "甲方沟通交付文档\0809四场景业务理解与审核能力验收说明.html",
-    "我方内部开发文档\代码审查与商业验收报告-2026-08-09.md",
-    "tests\reports\review_0809_commercial_acceptance_latest.json",
-    "docs\delivery\mitako-0807-guide-acceptance-20260807.html",
-    "甲方沟通交付文档\0807黄金指南学习与审核能力更新说明.html",
-    "我方内部开发文档\升级日志-2026-08-07-黄金指南与速度影响闭环.md",
-    "tests\reports\review_0807_random_acceptance_latest.json",
-    "tests\reports\0808-four-scenario-validation\PD-612691-final-0809-result.json",
-    "tests\reports\0808-four-scenario-validation\WI-76139-final-0809-result.json",
-    "tests\reports\0808-four-scenario-validation\MI-589330-final-0809-result.json",
-    "tests\reports\0808-four-scenario-validation\MR-547198-final-0809c-result.json",
-    "docs\delivery\mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
-    "甲方沟通交付文档\0806四场景与未成年人五类材料审核说明.html",
-    "我方内部开发文档\升级日志-2026-08-06-四场景与五类材料闭环.md",
-    "docs\delivery\mitako-0805-blind-evidence-acceptance-20260805.html",
-    "甲方沟通交付文档\0805审核建议、盲测与完整功能说明.html",
-    "我方内部开发文档\升级日志-2026-08-05-证据语义与客服决策收敛.md",
-    "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",
-    "甲方沟通交付文档\0731商品有伤SOP与报告一致性更新说明.html",
-    "我方内部开发文档\升级日志-2026-07-31-商品有伤SOP与报告一致性.md",
-    "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
-    "甲方沟通交付文档\0730未成年人资料审核与客服报告升级说明.html",
-    "我方内部开发文档\升级日志-2026-07-30-未成年人策略与客服报告.md",
-    "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
-    "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
-    "我方内部开发文档\升级日志-2026-07-28-事实结论与人工复审闭环.md",
-    "甲方沟通交付文档\0723客诉审核Agent接口联调与商务沟通说明.html",
-    "我方内部开发文档\升级日志-2026-07-23-多源证据与接口联调.md",
-    "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
-    "我方内部开发文档\升级日志-2026-07-23-审核建议契约与可选HTML.md",
-    "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
-    "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",
-    "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
-    "甲方沟通交付文档\订单SKU快照接入与审核安全升级说明-2026-07-20.html",
-    "甲方沟通交付文档\0722订单资料与官方商品图按需接入说明.html",
-    "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
-    "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
-    "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
-    "我方内部开发文档\升级日志-2026-07-17-四样本审核.md",
-    "我方内部开发文档\升级日志-2026-07-17.md",
-    "我方内部开发文档\升级日志-2026-07-17-提交模式与双包.md",
-    "我方内部开发文档\升级日志-2026-07-17-144989未成年人资料审核.md",
-    "我方内部开发文档\升级日志-2026-07-20-未成年人资料字段一致性.md",
-    "我方内部开发文档\升级日志-2026-07-20-视觉证据安全与SKU基准.md",
-    "我方内部开发文档\升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
-    "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
-    "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
-    "我方内部开发文档\升级日志-2026-07-16.md",
-    "tests\reports\customer_agent_0714_regression_latest.json",
-    "tests\reports\review_service_batch_latest.json",
-    "tests\reports\review_media_preprocessing_latest.json",
-    "tests\reports\review_0717_four_samples_20260717-final.json",
-    "tests\reports\minor_refund_144989_20260717-final.json",
-    "tests\reports\minor_refund_144989_20260720-latest.json",
-    "tests\reports\minor_refund_144989_20260720-latest.html",
-    "tests\reports\customer_order_info_sync_verify_20260720.json",
-    "tests\reports\customer_order_info_integration_20260720.json",
+    "docs\product\四场景审核业务决策与报告契约-20260812.md",
+    "甲方沟通交付文档\0814四场景审核业务理解与功能验收说明.html",
+    "tests\reports\review_0816_four_scenario_blind_results_latest.json",
     "tests\reports\customer_order_info_sync_strict_verify_20260720.json",
     "tests\reports\customer_order_info_reconcile_applied_20260720.json",
     "tests\reports\customer_order_info_integration_strict_final_20260720.json",
-    "tests\reports\review_submission_modes_20260717-final.json",
-    "tests\reports\review_submission_modes_20260717-final.html",
     "tests\reports\dynamic_material_capacity_http_latest.json",
     "tests\reports\dynamic_material_capacity_http_51_20260730.json",
     "tests\reports\dynamic_material_capacity_http_62_20260730.json",
-    "tests\reports\minor_refund_144989_20260730_223430.json",
-    "tests\reports\blind_damage_0731_case_001_latest.json",
-    "tests\reports\blind_damage_0731_cases_002_004_latest.json",
-    "tests\reports\review_0804_blind_acceptance_latest.json",
-    "tests\reports\blind_product_damage_positive_0804_final.json",
-    "tests\reports\blind_product_damage_0804_final.json",
-    "tests\reports\blind_minor_material_0804_final.json",
     "tests\reports\full_pipeline_latest.html",
     "tests\reports\auth_strict_latest.html",
     "tests\reports\private_deployment_api_smoke_latest.json"
@@ -322,59 +242,22 @@ Write-Host "[4/5] Validate internal package boundary ..." -ForegroundColor Cyan
 $required = @(
     "main.py",
     "我方内部开发文档\Java开发部署与联调指南.md",
-    "我方内部开发文档\升级日志-2026-07-30-未成年人策略与客服报告.md",
-    "我方内部开发文档\升级日志-2026-07-28-事实结论与人工复审闭环.md",
-    "我方内部开发文档\升级日志-2026-07-23-审核建议契约与可选HTML.md",
     "我方内部开发文档\内部研发包交付说明.md",
-    "我方内部开发文档\升级日志-2026-07-17.md",
-    "我方内部开发文档\升级日志-2026-07-17-提交模式与双包.md",
-    "我方内部开发文档\升级日志-2026-07-17-144989未成年人资料审核.md",
-    "我方内部开发文档\升级日志-2026-07-20-未成年人资料字段一致性.md",
-    "我方内部开发文档\升级日志-2026-07-20-视觉证据安全与SKU基准.md",
-    "我方内部开发文档\升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
-    "我方内部开发文档\升级日志-2026-07-17-四样本审核.md",
-    "我方内部开发文档\升级日志-2026-07-16.md",
-    "我方内部开发文档\升级日志-2026-07-15.md",
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
-    "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",
-    "甲方沟通交付文档\0731商品有伤SOP与报告一致性更新说明.html",
-    "我方内部开发文档\升级日志-2026-07-31-商品有伤SOP与报告一致性.md",
-    "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
     "docs\delivery\java-client-sample.md",
-    "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
-    "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
-    "docs\delivery\客服Agent与私域Agent正式接入前人工UAT指南_20260716.md",
-    "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
-    "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
-    "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
-    "甲方沟通交付文档\0730未成年人资料审核与客服报告升级说明.html",
-    "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
-    "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
-    "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
-    "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
-    "甲方沟通交付文档\订单SKU快照接入与审核安全升级说明-2026-07-20.html",
-    "甲方沟通交付文档\0722订单资料与官方商品图按需接入说明.html",
-    "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
-    "甲方沟通交付文档\0723客诉审核Agent接口联调与商务沟通说明.html",
-    "我方内部开发文档\升级日志-2026-07-23-多源证据与接口联调.md",
+    "docs\product\四场景审核业务决策与报告契约-20260812.md",
+    "甲方沟通交付文档\0814四场景审核业务理解与功能验收说明.html",
     "docs\三大审核场景的小量样本\sample_labels.json",
     "scripts\pre_release_internal_validation.ps1",
-    "tests\reports\review_0717_four_samples_20260717-final.json",
-    "tests\reports\minor_refund_144989_20260717-final.json",
-    "tests\reports\minor_refund_144989_20260720-latest.json",
-    "tests\reports\minor_refund_144989_20260720-latest.html",
-    "tests\reports\customer_order_info_sync_verify_20260720.json",
-    "tests\reports\customer_order_info_integration_20260720.json",
-    "tests\reports\review_submission_modes_20260717-final.json",
-    "tests\reports\review_submission_modes_20260717-final.html",
+    "tests\reports\review_0816_four_scenario_blind_results_latest.json",
     "tests\reports\dynamic_material_capacity_http_latest.json",
     "tests\reports\dynamic_material_capacity_http_51_20260730.json",
     "tests\reports\dynamic_material_capacity_http_62_20260730.json",
-    "tests\reports\minor_refund_144989_20260730_223430.json",
-    "tests\reports\blind_damage_0731_case_001_latest.json",
-    "tests\reports\blind_damage_0731_cases_002_004_latest.json"
+    "tests\reports\customer_order_info_sync_strict_verify_20260720.json",
+    "tests\reports\customer_order_info_reconcile_applied_20260720.json",
+    "tests\reports\customer_order_info_integration_strict_final_20260720.json"
 )
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {

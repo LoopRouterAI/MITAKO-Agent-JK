@@ -4,17 +4,19 @@
 import unittest
 from pathlib import Path
 
+from poc.visual_review_poc.report_assets import LIGHTBOX_HTML, REPORT_CSS
 from poc.visual_review_poc.report_renderer import (
     _decision_policy_panel,
     _evidence_items,
     _h,
+    _public_status,
     _public_verdict,
     _safe_agent_reason,
     render_public_report,
     safe_agent_conclusion,
     safe_agent_next_step,
 )
-from poc.visual_review_poc.report_evidence import _merge_evidence_items, _summary_evidence_items
+from poc.visual_review_poc.report_evidence import _gallery_items, _merge_evidence_items, _summary_evidence_items
 from poc.visual_review_poc.workbench_server import _public_agent_report_payload
 
 
@@ -108,7 +110,6 @@ def _report_data():
                     "failed_conditions": ["claimed_item_absence_within_limit", "supplemental_evidence_resolved"],
                     "evidence_gate": {
                         "claimed_item_longest_out_of_frame_seconds": 10.0,
-                        "max_unobserved_seconds": 2.0,
                         "media_forensics_status": "completed",
                     },
                 },
@@ -212,7 +213,7 @@ def _report_data():
                     "continuity_verdict": "long_absence",
                     "longest_out_of_frame_seconds": 3.5,
                     "total_unobserved_seconds": 3.5,
-                    "policy": {"out_of_frame_warning_seconds": 2.0},
+                    "policy": {"effect": "按必要展示窗口判断，不使用统一秒数阈值"},
                     "tracked_subjects": [
                         {
                             "subject_id": "claimed_item",
@@ -258,6 +259,39 @@ def _report_data():
 
 
 class ReportEvidenceRenderingTest(unittest.TestCase):
+    def test_public_report_uses_plain_customer_facing_title(self) -> None:
+        data = _report_data()
+        data["agent_report"]["scenario_label"] = "漏发货审核"
+        html = render_public_report(data)
+
+        self.assertIn("漏发货审核报告</title>", html)
+        self.assertNotIn("漏发货审核审核报告", html)
+        self.assertNotIn("Agent 报告", html)
+
+    def test_public_report_uses_uniform_radius_and_safe_text_wrapping(self) -> None:
+        self.assertNotIn("border-radius:999px", REPORT_CSS)
+        self.assertNotIn("border-radius:6px", REPORT_CSS)
+        self.assertNotIn("word-break:break-all", REPORT_CSS)
+        self.assertIn("overflow-wrap:anywhere", REPORT_CSS)
+        self.assertIn("max-width:100%", REPORT_CSS)
+        self.assertIn("object-fit:contain", REPORT_CSS)
+        self.assertIn("min-height:44px", REPORT_CSS)
+        self.assertIn("font-size:clamp(30px,3.6vw,42px)", REPORT_CSS)
+        self.assertNotIn("4.4vw,62px", REPORT_CSS)
+
+    def test_media_preview_uses_native_dialog_and_restores_focus(self) -> None:
+        self.assertIn('<dialog class="lightbox" id="mediaLightbox"', LIGHTBOX_HTML)
+        self.assertIn("box.showModal()", LIGHTBOX_HTML)
+        self.assertIn("box.close()", LIGHTBOX_HTML)
+        self.assertIn("opener.focus()", LIGHTBOX_HTML)
+        self.assertNotIn('role="dialog"', LIGHTBOX_HTML)
+
+    def test_continuity_report_explains_effective_window_without_seconds_threshold(self) -> None:
+        html = render_public_report(_report_data())
+
+        self.assertIn("必要展示窗口", html)
+        self.assertNotIn("复核阈值", html)
+
     def test_summary_evidence_prioritizes_issue_and_merges_same_video_moment(self):
         parsed = {
             "adopted_evidence": [
@@ -364,9 +398,11 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
                 "severity_assessment": {
                     "level": "severe",
                     "structural_failure": True,
+                    "confidence": 0.92,
                     "reason": "主体结构断裂，影响正常展示。",
                 }
             },
+            "decision_policy_audit": {"severe_alert_eligible": True},
         })
 
         report_html = render_public_report(data)
@@ -514,7 +550,7 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         report_html = render_public_report(data)
 
         self.assertIn("当前缺少连续开箱材料", report_html)
-        self.assertIn("无需人工复审", report_html)
+        self.assertIn("无需先占用人工审核席位", report_html)
         self.assertIn("补充连续材料", report_html)
         self.assertNotIn("证据不足，需要VIP客服复核", report_html)
 
@@ -558,17 +594,41 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         report_html = render_public_report(data)
 
-        self.assertIn("先看结论和关键证据", report_html)
+        self.assertIn("先看结论、材料状态和下一步", report_html)
         self.assertIn("证据结论", report_html)
         self.assertIn("当前材料倾向支持用户诉求", report_html)
-        self.assertIn("复核重点", report_html)
-        self.assertIn("建议抽检", report_html)
-        self.assertIn("按甲方规则继续", report_html)
+        self.assertIn("存在非阻断风险信号，甲方可按风险偏好抽检", report_html)
+        self.assertNotIn("按 SOP 审核倾向继续处理", report_html)
         self.assertIn("短暂离镜仅降低证据强度", report_html)
         self.assertIn("不是客观正确率", report_html)
         self.assertIn("业务动作由甲方系统执行，是否需要人工复核由单独的复核等级决定", report_html)
-        self.assertIn("不要求逐单", report_html)
+        self.assertEqual(report_html.count("存在非阻断风险信号，甲方可按风险偏好抽检"), 1)
         self.assertNotIn("提交VIP客服复核", report_html)
+
+    def test_severe_structural_follow_up_is_not_rendered_as_claim_support(self):
+        data = _report_data()
+        data["agent_report"]["advisory_assessment"] = {
+            "assessment": {
+                "conclusion_code": "severe_structural_damage_follow_up",
+                "conclusion": "严重结构问题已确认，建议重点跟进；交易归属、成因和责任待确认。",
+                "confidence": 0.93,
+            },
+            "sop_recommendation": {
+                "code": "further_assessment",
+                "recommendation": "严重结构问题已确认，应重点跟进；交易归属、成因和责任仍待确认。",
+                "basis": "送审证据中可见严重结构损坏。",
+            },
+            "human_review": {"level": "optional", "recommendation": ""},
+            "workflow_recommendation": "continue_by_customer_policy",
+            "policy": {},
+        }
+
+        html = render_public_report(data)
+        first_layer = html.split('<details class="summary-review-details">', 1)[0]
+
+        self.assertIn("严重结构问题已确认", first_layer)
+        self.assertIn("交易归属、成因和责任待确认", first_layer)
+        self.assertNotIn("现有证据支持用户诉求", first_layer)
 
     def test_report_prioritizes_customer_evidence_attention(self):
         data = _report_data()
@@ -605,8 +665,12 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("材料缺口", report_html)
         self.assertIn("关键证据存在冲突", report_html)
         self.assertIn("同一商品同一部位", report_html)
+        details_start = report_html.index('<details class="summary-review-details">')
+        details_end = report_html.index("</details>", details_start)
+        self.assertGreater(report_html.index("复核顺序"), details_start)
+        self.assertLess(report_html.index("复核顺序"), details_end)
 
-    def test_minor_payment_process_gap_uses_customer_facing_signal_label(self):
+    def test_retired_minor_payment_process_signal_is_not_rendered(self):
         data = _report_data()
         data["agent_report"]["advisory_assessment"] = {
             "assessment": {"conclusion": "需补充支付过程说明。", "confidence": 0.72},
@@ -622,7 +686,7 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         report_html = render_public_report(data)
 
-        self.assertIn("低龄支付过程待补", report_html)
+        self.assertNotIn("请补充支付密码来源和监护人发现消费过程", report_html)
         self.assertNotIn("minor_payment_process_evidence_gap", report_html)
 
     def test_report_renders_evidence_boundaries_and_links_gallery_media(self):
@@ -634,8 +698,9 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("关键证据", report_html)
         self.assertIn('<details class="panel technical-details">', report_html)
 
-        for heading in ("审核Agent采信的证据", "反证与可疑帧", "问题时间点", "置信度分解与口径", "损伤来源与发生阶段", "主体连续性与离镜时间轴", "应发与视频展示清单对账", "置信度理由", "材料缺口", "模型局限"):
+        for heading in ("审核Agent采信的证据", "反证与可疑帧", "问题时间点", "置信度分解与口径", "损伤来源与发生阶段", "主体连续性与离镜时间轴", "置信度理由", "材料缺口", "模型局限"):
             self.assertIn(heading, report_html)
+        self.assertNotIn("应发与视频展示清单对账", report_html)
 
         self.assertIn("第 11 帧可见表面压痕", report_html)
         self.assertIn("该时间点反光较强", report_html)
@@ -654,8 +719,82 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertNotIn("反光可能影响细微划痕判断", report_html)
         self.assertIn("尚未使用独立留出集校准", report_html)
 
+    def test_report_renders_media_preflight_execution_as_readable_technical_text(self):
+        data = _report_data()
+        data["media_preflight_execution"] = {
+            "status": "completed",
+            "video": {
+                "submitted_source": "quality_proxy",
+                "delivery": "https_url",
+                "native_sampling_fps": 1.0,
+                "codec_profile": "vp9_webm",
+                "source_width": 3840,
+                "source_height": 2160,
+                "submitted_width": 2560,
+                "submitted_height": 1440,
+            },
+            "images": {
+                "representation": "individual_webp",
+                "attempted_count": 4,
+                "prepared_count": 3,
+                "failed_count": 1,
+                "max_long_edge": 1920,
+                "collage_used": False,
+            },
+            "frame_fallback": {"used": False},
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("送审前媒体处理", report_html)
+        self.assertIn("保真代理", report_html)
+        self.assertIn("HTTPS 地址", report_html)
+        self.assertIn("1 帧/秒", report_html)
+        self.assertIn("逐张 WebP", report_html)
+        self.assertIn("另有 1 张未能安全解码", report_html)
+        self.assertNotIn("quality_proxy", report_html)
+        self.assertNotIn("https_url", report_html)
+        self.assertNotIn("vp9_webm", report_html)
+
+    def test_report_renders_every_persisted_review_video_without_mislabeling_url_delivery(self):
+        data = _report_data()
+        data["media_preflight_execution"] = {
+            "status": "completed",
+            "videos": [
+                {
+                    "video_index": 1,
+                    "submitted_source": "quality_proxy",
+                    "delivery": "inline_data",
+                    "source_width": 3840,
+                    "source_height": 2160,
+                    "submitted_width": 2560,
+                    "submitted_height": 1440,
+                },
+                {
+                    "video_index": 2,
+                    "submitted_source": "quality_proxy",
+                    "delivery": "file_uri",
+                    "source_width": 1080,
+                    "source_height": 1920,
+                    "submitted_width": 1080,
+                    "submitted_height": 1920,
+                },
+            ],
+            "frame_fallback": {"used": False},
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("视频 1：使用保真代理，通过内联上传送审", report_html)
+        self.assertIn("视频 2：使用保真代理，通过HTTPS 地址送审", report_html)
+        self.assertIn("3840×2160 保真处理为 2560×1440", report_html)
+        self.assertIn("1080×1920 保真处理为 1080×1920", report_html)
+        self.assertNotIn("file_uri", report_html)
+
     def test_report_identifies_traceable_warehouse_final_as_resolution_basis(self):
         data = _report_data()
+        data["agent_report"]["scenario"] = "missing_item"
+        data["agent_report"]["scenario_label"] = "漏发货审核"
         reconciliation = data["agent_report"]["parsed"]["fulfillment_reconciliation"]
         reconciliation.update(
             {
@@ -674,30 +813,295 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("仓库终核", report_html)
         self.assertIn("确认未漏发", report_html)
         self.assertIn("WH-CHECK-1", report_html)
-        self.assertIn("这些分数不是正确率", report_html)
-        self.assertIn("动作前争议部位被包装遮挡", report_html)
-        self.assertIn("动作后压痕首次可见", report_html)
-        self.assertIn("主视频与补充证据分层", report_html)
-        self.assertIn("主视频损伤存在性", report_html)
-        self.assertNotIn("<small>损伤存在性</small><b>已确认可见损伤</b>", report_html)
-        self.assertIn("补充图片 1 张", report_html)
-        self.assertIn("关键审查帧未见主诉折痕", report_html)
-        self.assertIn("补充特写可见疑似压痕", report_html)
+        self.assertIn("证据分数表示本轮证据充分程度，不是客观正确率", report_html)
+        self.assertNotIn("损伤来源与发生阶段", report_html)
         self.assertIn("抽帧首尾覆盖", report_html)
-        self.assertIn("开箱过程完整性", report_html)
-        self.assertIn("商品证据连续性", report_html)
+        self.assertIn("包裹开启过程完整性", report_html)
+        self.assertIn("包裹与实收展示连续性", report_html)
         self.assertIn("媒体技术取证", report_html)
         self.assertIn(
-            '<p class="fine-print"><b>说明：</b>视频从头拍到尾，不代表争议商品一直在镜头里。',
+            '<p class="fine-print"><b>说明：</b>视频从头拍到尾，不代表应发与实收已经核对完成。',
             report_html,
         )
-        self.assertIn("系统会分别检查开箱过程、商品展示和文件异常", report_html)
+        self.assertIn("系统会分别检查包裹开启过程、实收展示、订单基线和文件异常", report_html)
         self.assertNotIn("抽帧覆盖、媒体技术取证、开箱过程和商品连续性是四个独立维度", report_html)
         self.assertNotIn("requires_media_forensics", report_html)
         self.assertIn("SOP 规则判定说明", report_html)
         self.assertNotIn("MITAKO-PD-20260720@2", report_html)
-        self.assertIn("争议商品离镜时间超过策略阈值", report_html)
+        self.assertIn("有效展示窗口内存在未解决的离镜", report_html)
+        self.assertNotIn("争议商品离镜时间超过策略阈值", report_html)
         self.assertIn("补充证据关联尚未解决", report_html)
+
+    def test_product_report_describes_continuity_without_accusing_customer(self):
+        report_html = render_public_report(_report_data())
+
+        self.assertIn("展示连续性风险", report_html)
+        self.assertIn(">中<", report_html)
+        self.assertNotIn("疑似调包风险", report_html)
+        self.assertNotIn("剪辑/调包风险", report_html)
+        self.assertNotIn(">medium<", report_html)
+
+    def test_wrong_and_missing_reports_use_scene_specific_fulfillment_language(self):
+        for scenario, scene_label, heading in (
+            ("wrong_item", "发错货审核", "发错货应收与实收核对"),
+            ("missing_item", "漏发货审核", "漏发货应发与实收核对"),
+        ):
+            with self.subTest(scenario=scenario):
+                data = _report_data()
+                data["agent_report"]["scenario"] = scenario
+                data["agent_report"]["scenario_label"] = scene_label
+                data["agent_report"]["parsed"].pop("damage_causality_assessment", None)
+                data["agent_report"]["parsed"].pop("claim_fact_assessment", None)
+
+                report_html = render_public_report(data)
+
+                self.assertIn('class="fulfillment-report scene-' + scenario.replace("_", "-") + '"', report_html)
+                self.assertIn(heading, report_html)
+                self.assertNotIn("商品连续性分数", report_html)
+                self.assertNotIn("疑似调包风险", report_html)
+                self.assertNotIn("伤情首次出现", report_html)
+                self.assertNotIn("损伤来源与发生阶段", report_html)
+
+    def test_business_material_scenario_overrides_legacy_technical_scenario(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "video_unboxing"
+        data["agent_report"]["scenario_label"] = "发错货审核"
+        data["material_readiness"] = {
+            "scenario": "wrong_item",
+            "status": "incomplete",
+            "confidence": 0.9,
+            "reason": "同包裹证据尚未闭环。",
+            "checklist": [],
+            "missing_items": ["同包裹证据"],
+            "warnings": [],
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn('class="fulfillment-report scene-wrong-item"', report_html)
+        self.assertIn("发错货应收与实收核对", report_html)
+        self.assertIn("身份定义属性", report_html)
+
+    def test_missing_item_transition_to_wrong_item_uses_wrong_item_public_report(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "missing_item"
+        data["agent_report"]["scenario_label"] = "漏发货审核"
+        data["agent_report"]["parsed"].pop("damage_causality_assessment", None)
+        data["agent_report"]["parsed"].pop("claim_fact_assessment", None)
+        data["agent_report"]["parsed"]["fulfillment_reconciliation"]["scenario_transition"] = "wrong_item"
+
+        report_html = render_public_report(data)
+
+        self.assertIn('class="fulfillment-report scene-wrong-item"', report_html)
+        self.assertIn("发错货应收与实收核对", report_html)
+        self.assertNotIn("漏发货应发与实收核对", report_html)
+
+    def test_fulfillment_observation_refs_are_visible_as_key_evidence(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "wrong_item"
+        data["agent_report"]["scenario_label"] = "发错货审核"
+        parsed = data["agent_report"]["parsed"]
+        parsed["adopted_evidence"] = []
+        parsed["supporting_evidence"] = []
+        parsed["fulfillment_reconciliation"]["observed_items"] = [{
+            "product_name": "实收摆件",
+            "evidence_refs": [{
+                "asset_ref": "native_video_1",
+                "timestamp": "01:41",
+                "field": "observed_item",
+                "fact": "开箱取出并展示第一件实收摆件。",
+            }],
+        }]
+
+        report_html = render_public_report(data)
+
+        self.assertIn("开箱取出并展示第一件实收摆件", report_html)
+        self.assertNotIn("审核Agent没有给出可采信证据", report_html)
+
+    def test_fulfillment_reports_show_package_evidence_from_reconciliation(self):
+        for scenario, scene_label, evidence_heading in (
+            ("wrong_item", "发错货审核", "同包裹证据"),
+            ("missing_item", "漏发货审核", "分包与内容展示证据"),
+        ):
+            with self.subTest(scenario=scenario):
+                data = _report_data()
+                data["agent_report"]["scenario"] = scenario
+                data["agent_report"]["scenario_label"] = scene_label
+                reconciliation = data["agent_report"]["parsed"]["fulfillment_reconciliation"]
+                reconciliation["package_observations"] = [{
+                    "package_ref": "PKG-TRACE-UNIQUE-0813",
+                    "opening_complete": True,
+                    "all_contents_laid_out": True,
+                    "evidence_refs": [{
+                        "asset_ref": "native_video_1",
+                        "timestamp": "00:42.00",
+                        "fact": "该包裹已连续拆开，并完整铺开展示其中全部实收商品。",
+                    }],
+                }]
+
+                report_html = render_public_report(data)
+
+                self.assertIn(evidence_heading, report_html)
+                self.assertIn("PKG-TRACE-UNIQUE-0813", report_html)
+                self.assertIn("该包裹已连续拆开，并完整铺开展示其中全部实收商品", report_html)
+
+    def test_wrong_item_report_separates_identity_and_descriptive_differences(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "wrong_item"
+        data["agent_report"]["scenario_label"] = "发错货审核"
+        reconciliation = data["agent_report"]["parsed"]["fulfillment_reconciliation"]
+        reconciliation["observed_items"] = [{
+            "product_name": "角色圆卡",
+            "item_role": "随商品附带圆卡",
+            "series": "同系列",
+            "edition": "首发版",
+            "physical_form": "圆形卡片",
+            "included_parts": ["圆卡"],
+            "visible_identifiers": ["角色图案"],
+            "descriptive_dimensions": ["页面标注尺寸与肉眼测量存在差异"],
+            "package_ref": "PKG-1",
+            "evidence_refs": [],
+        }]
+
+        report_html = render_public_report(data)
+
+        self.assertIn("身份定义属性", report_html)
+        self.assertIn("圆形卡片", report_html)
+        self.assertIn("描述性差异", report_html)
+        self.assertIn("页面标注尺寸与肉眼测量存在差异", report_html)
+        self.assertNotIn("尺寸差异已确认发错", report_html)
+
+    def test_missing_report_explains_static_three_image_route_without_claiming_missing(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "missing_item"
+        data["agent_report"]["scenario_label"] = "漏发货审核"
+        reconciliation = data["agent_report"]["parsed"]["fulfillment_reconciliation"]
+        reconciliation.update({
+            "evidence_route": "static_three_images",
+            "warehouse_check": {"state": "pending", "outcome": None},
+            "user_materials_complete": True,
+            "evidence_sufficiency": "insufficient",
+            "verdict": "indeterminate",
+            "decision_boundary": "用户静态三类材料已齐全，下一步应由人工客服读取仓库实发明细进行双重核验。",
+        })
+
+        report_html = render_public_report(data)
+
+        self.assertIn("静态三类材料", report_html)
+        self.assertIn("用户材料已齐全", report_html)
+        self.assertIn("读取仓库实发明细", report_html)
+        self.assertNotIn("静态三图已确认漏发", report_html)
+
+    def test_missing_report_explains_trusted_product_composition_resolution(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "missing_item"
+        data["agent_report"]["scenario_label"] = "漏发货审核"
+        reconciliation = data["agent_report"]["parsed"]["fulfillment_reconciliation"]
+        reconciliation.update({
+            "evidence_route": "not_required",
+            "resolution_basis": "trusted_expected_item_resolution",
+            "user_materials_complete": False,
+            "evidence_sufficiency": "sufficient",
+            "verdict": "matched",
+            "product_composition_resolution": {
+                "claimed_item": "标题中的非独立应发描述",
+                "resolution_ref": "PRODUCT-COMPOSITION-568689",
+                "reason": "订单商品本体就是摆件，该描述不是另一件独立商品。",
+            },
+            "decision_boundary": "可信订单和商品构成规则已消歧。",
+        })
+
+        report_html = render_public_report(data)
+
+        self.assertIn("受信订单与商品规则", report_html)
+        self.assertIn("该描述不是另一件独立商品", report_html)
+        self.assertIn("PRODUCT-COMPOSITION-568689", report_html)
+        self.assertNotIn("请补开箱视频", report_html)
+
+    def test_missing_report_separates_user_evidence_route_from_resolution_basis(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "missing_item"
+        data["agent_report"]["scenario_label"] = "漏发货审核"
+        data["agent_report"]["parsed"]["fulfillment_reconciliation"] = {
+            "baseline_version": "ORDER-V1",
+            "evidence_route": "static_three_images",
+            "resolution_basis": "warehouse_verification",
+            "user_materials_complete": True,
+            "warehouse_verification": {
+                "status": "confirmed_not_missing",
+                "verification_ref": "WH-CHECK-1",
+            },
+            "expected_items": [],
+            "observed_items": [],
+            "suspected_missing_items": [],
+            "unconfirmed_items": [],
+        }
+
+        html = render_public_report(data)
+
+        self.assertIn("用户证据路线", html)
+        self.assertIn("静态三类材料", html)
+        self.assertIn("最终事实依据", html)
+        self.assertIn("仓库终核", html)
+
+    def test_missing_report_renders_paper_self_check_only_as_post_decision_reminder(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "missing_item"
+        data["agent_report"]["scenario_label"] = "漏发货审核"
+        reconciliation = data["agent_report"]["parsed"]["fulfillment_reconciliation"]
+        reconciliation["post_decision_reminders"] = [{
+            "code": "paper_item_layer_self_check",
+            "label": "纸类商品补充自查",
+            "message": "请再检查纸类商品是否叠放、藏在背面或夹层中。",
+            "affects_verdict": False,
+        }]
+
+        report_html = render_public_report(data)
+
+        self.assertIn("确认漏发后的补充提醒", report_html)
+        self.assertIn("叠放、藏在背面或夹层", report_html)
+        self.assertIn("不改变本轮证据结论", report_html)
+
+    def test_evidence_json_string_is_rendered_as_readable_fact(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed["adopted_evidence"] = [{
+            "source_type": "video_frame",
+            "video_index": 1,
+            "timestamp": "00:08.00",
+            "fact": '{"field":"issue_visible","fact":"摆件表面可见连续划痕","confidence":0.91}',
+        }]
+
+        report_html = render_public_report(data)
+
+        self.assertIn("摆件表面可见连续划痕", report_html)
+        self.assertNotIn('&quot;field&quot;:&quot;issue_visible&quot;', report_html)
+
+    def test_minor_process_video_does_not_render_fulfillment_video_template(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "minor_refund"
+        data["agent_report"]["scenario_label"] = "未成年人退款资料审核"
+        data["agent_report"]["parsed"]["minor_material_assessment"] = {
+            "process_evidence": [{
+                "video_index": 1,
+                "global_frame_index": 11,
+                "timestamp": "00:04.00",
+                "process_type": "document_capture",
+                "evidence_quality": "clear",
+            }],
+        }
+
+        report_html = render_public_report(data)
+
+        self.assertIn("过程视频证据", report_html)
+        self.assertIn("资料拍摄过程", report_html)
+        for forbidden in (
+            "包裹开启过程完整性",
+            "包裹与实收展示连续性",
+            "应发与实收已经核对完成",
+            "视频查看密度",
+        ):
+            self.assertNotIn(forbidden, report_html)
 
     def test_report_hides_source_breakdown_when_the_model_did_not_return_one(self):
         data = _report_data()
@@ -708,8 +1112,7 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         self.assertNotIn("未完成主视频审查", report_html)
         self.assertNotIn("补充图片 0 张", report_html)
-        self.assertIn("ORDER-1@V1", report_html)
-        self.assertIn("应发 2 / 已识别 1", report_html)
+        self.assertNotIn("应发与视频展示清单对账", report_html)
 
         # 每个地址应分别出现在证据卡和完整画廊的预览属性、图片标签中。
         for media_url in (
@@ -807,6 +1210,11 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         self.assertIn("无法可靠判断视频是否加速", report_html)
         self.assertIn("请客服回看原视频", report_html)
+        self.assertIn("按 4 FPS 通看全片", report_html)
+        self.assertNotIn("按 1 FPS 通看全片", report_html)
+
+    def test_unknown_internal_status_uses_safe_public_label(self):
+        self.assertEqual(_public_status("vendor_internal_pending"), "待确认")
 
     def test_report_lists_each_opening_video_requirement(self):
         data = _report_data()
@@ -994,6 +1402,29 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn('data-preview-seconds="12.500"', html)
         self.assertIn('/media/full-review.mp4#t=12.500', html)
 
+    def test_supplemental_image_preview_names_include_the_image_index(self):
+        gallery = {
+            "images": [
+                {"image_index": 1, "url": "/media/material-1.jpg"},
+                {"image_index": 2, "url": "/media/material-2.jpg"},
+            ]
+        }
+
+        html = _evidence_items(
+            [
+                {"source_type": "supplemental_image", "image_index": 1, "fact": "身份证明正面"},
+                {"source_type": "supplemental_image", "image_index": 2, "fact": "身份证明反面"},
+            ],
+            gallery,
+        )
+
+        self.assertIn('aria-label="预览查看补充图片 1"', html)
+        self.assertIn('aria-label="预览查看补充图片 2"', html)
+
+        gallery_html = _gallery_items(gallery["images"], "补充图片")
+        self.assertIn('aria-label="预览补充图片：补充图片 1"', gallery_html)
+        self.assertIn('aria-label="预览补充图片：补充图片 2"', gallery_html)
+
     def test_report_humanizes_nested_summary_values_without_raw_structures(self):
         data = _report_data()
         parsed = data["agent_report"]["parsed"]
@@ -1078,6 +1509,191 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertNotIn("<h4>材料缺口</h4>", html)
         self.assertNotIn("<h3>判断依据</h3>", html)
 
+    def test_report_shows_scene_material_readiness_in_summary_and_details(self):
+        labels = {
+            "product_damage": "当前商品有伤场景下的用户材料是否齐全",
+            "wrong_item": "当前发错货场景下的用户材料是否齐全",
+            "missing_item": "当前漏发货场景下的用户材料是否齐全",
+            "minor_refund": "当前未成年人退款场景下的用户材料是否齐全",
+        }
+        for scenario, title in labels.items():
+            with self.subTest(scenario=scenario):
+                data = _report_data()
+                data["agent_report"]["scenario"] = scenario
+                data["agent_report"]["scenario_label"] = title.removeprefix("当前").removesuffix("场景下的用户材料是否齐全") + "审核"
+                data["material_readiness"] = {
+                    "scenario": scenario,
+                    "status": "complete",
+                    "confidence": 0.93,
+                    "reason": "本场景必要材料已形成可回看的审核证据。",
+                    "checklist": [{
+                        "label": "场景必要材料",
+                        "required": True,
+                        "status": "present",
+                        "reason": "已核对。",
+                    }],
+                    "missing_items": [],
+                    "warnings": ["材料齐全性不等于事实结论。"],
+                }
+                data["input_readiness"] = {
+                    "review_inventory": {
+                        "received_asset_count": 2,
+                        "media_counts": {"video": 1, "image": 1, "document": 0},
+                    }
+                }
+
+                html = render_public_report(data)
+
+                self.assertIn(title, html)
+                self.assertIn("<b>齐全</b>", html)
+                self.assertIn("场景必要材料", html)
+                self.assertIn("93%", html)
+                self.assertIn("材料状态确定性 93%", html)
+                self.assertIn("系统收到 2 份文件：视频 1、图片 1、文档 0", html)
+
+    def test_first_layer_only_keeps_verdict_material_status_and_next_step(self):
+        data = _report_data()
+        data["material_readiness"] = {
+            "scenario": "product_damage",
+            "status": "incomplete",
+            "confidence": 0.91,
+            "reason": "开箱材料尚未满足普通商品有伤审核门槛。",
+            "checklist": [],
+            "missing_items": ["完整开箱视频"],
+            "warnings": [],
+        }
+        data["agent_report"]["parsed"]["opening_video_evidence"] = {
+            "status": "yellow",
+            "confidence": 0.88,
+            "reason": "已收到视频，但开箱链不完整。",
+        }
+        data["agent_report"]["advisory_assessment"] = {
+            "assessment": {
+                "conclusion_code": "evidence_inconclusive",
+                "conclusion": "现有证据尚不足以判断。",
+                "confidence": 0.82,
+            },
+            "sop_recommendation": {"recommendation": "补充完整开箱证据。"},
+            "human_review": {
+                "level": "not_required",
+                "recommendation": "当前可直接向用户补充收集材料，无需先占用人工审核席位。",
+            },
+            "workflow_recommendation": "request_more_material",
+        }
+
+        html = render_public_report(data)
+        first_layer = html.split('<details class="summary-review-details">', 1)[0]
+
+        self.assertIn("当前商品有伤场景下的用户材料是否齐全", first_layer)
+        self.assertIn("建议下一步", first_layer)
+        self.assertNotIn("<small>证据结论</small>", first_layer)
+        self.assertNotIn("<small>SOP 处理建议</small>", first_layer)
+        self.assertNotIn("<small>证据分数</small>", first_layer)
+        self.assertNotIn("<small>人工复审</small>", first_layer)
+        self.assertNotIn("<small>流程</small>", first_layer)
+        self.assertNotIn("复核重点：", first_layer)
+        self.assertNotIn('<section class="opening-evidence-banner', first_layer)
+        self.assertIn('<section class="opening-evidence-banner', html)
+
+    def test_complete_minor_report_omits_noop_manual_and_flow_cards(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "minor_refund"
+        data["agent_report"]["scenario_label"] = "未成年人退款资料审核"
+        data["agent_report"]["parsed"]["minor_material_assessment"] = {"checklist": []}
+        data["agent_report"]["advisory_assessment"] = {
+            "assessment": {
+                "conclusion_code": "evidence_supports_claim",
+                "conclusion": "五类材料与可见字段初审通过。",
+                "confidence": 0.91,
+            },
+            "human_review": {"level": "not_required"},
+            "workflow_recommendation": "continue_by_customer_policy",
+            "policy": {},
+        }
+        data["material_readiness"] = {
+            "scenario": "minor_refund",
+            "status": "complete",
+            "confidence": 0.91,
+            "reason": "未成年人退款五类必交材料均已识别为可用。",
+            "checklist": [],
+            "missing_items": [],
+            "warnings": [],
+        }
+
+        html = render_public_report(data)
+
+        self.assertNotIn("<small>人工复审</small>", html)
+        self.assertNotIn("<small>流程</small>", html)
+        self.assertNotIn("本轮无需人工复审", html)
+
+    def test_minor_report_header_uses_material_verdict_not_refund_support_verdict(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "minor_refund"
+        data["agent_report"]["scenario_label"] = "未成年人退款资料审核"
+        data["agent_report"]["parsed"]["minor_material_assessment"] = {"checklist": []}
+        data["agent_report"]["advisory_assessment"] = {
+            "assessment": {
+                "conclusion_code": "evidence_does_not_support_claim",
+                "conclusion": "五类材料存在明确缺口或冲突。",
+                "confidence": 0.91,
+            },
+            "human_review": {"level": "not_required"},
+            "workflow_recommendation": "request_more_material",
+            "policy": {},
+        }
+        data["material_readiness"] = {
+            "scenario": "minor_refund",
+            "status": "incomplete",
+            "confidence": 0.91,
+            "reason": "监护关系材料未闭环。",
+            "checklist": [],
+            "missing_items": ["法定监护关系证明"],
+            "warnings": [],
+        }
+
+        html = render_public_report(data)
+        first_layer = html.split('<details class="summary-review-details">', 1)[0]
+
+        self.assertIn("<h1>材料需要补充或更正</h1>", first_layer)
+        self.assertIn("<b>需补资料</b>", first_layer)
+        self.assertNotIn("现有证据暂不支持用户诉求", first_layer)
+        self.assertNotIn("<b>不支持</b>", first_layer)
+
+    def test_minor_detail_is_five_category_checklist_without_product_video_modules(self):
+        data = _report_data()
+        data["agent_report"]["scenario"] = "minor_refund"
+        data["agent_report"]["scenario_label"] = "未成年人退款资料审核"
+        data["agent_report"]["parsed"]["minor_material_assessment"] = {
+            "visual_precheck_status": "needs_review",
+            "checklist": [
+                {"requirement_id": "identity_documents", "label": "身份材料", "status": "present", "quality_status": "usable", "validation_status": "visual_consistency_matched"},
+                {"requirement_id": "guardian_relationship", "label": "法定监护关系", "status": "present", "quality_status": "usable", "validation_status": "visual_relationship_link_unresolved"},
+                {"requirement_id": "refund_commitment", "label": "退款承诺书", "status": "present", "quality_status": "usable", "validation_status": "visual_consistency_matched"},
+                {"requirement_id": "order_payment", "label": "订单与支付", "status": "present", "quality_status": "usable", "validation_status": "visual_consistency_matched"},
+                {"requirement_id": "mobile_realname", "label": "手机号实名", "status": "present", "quality_status": "usable", "validation_status": "visual_consistency_matched"},
+            ],
+            "field_consistency": {"checks": []},
+            "payment_capability_risk": {
+                "under_nine": True,
+                "age_confidence": "high",
+                "requires_review": True,
+                "effect": "需重点核对支付过程。",
+            },
+        }
+
+        html = render_public_report(data)
+
+        for label in ("身份材料", "法定监护关系", "退款承诺书", "订单与支付", "手机号实名"):
+            self.assertIn(label, html)
+        self.assertIn("高置信未满 9 周岁", html)
+        self.assertNotIn("视频审核论证", html)
+        self.assertNotIn("商品证据连续性", html)
+        self.assertNotIn("系统订单基线", html)
+        self.assertNotIn("护照视觉识别", html)
+        self.assertNotIn("外部在线验真", html)
+        self.assertNotIn("申报图片", html)
+        self.assertNotIn("图片处理完成度", html)
+
     def test_report_background_has_no_decorative_gradient_orbs(self):
         html = render_public_report(_report_data())
 
@@ -1104,6 +1720,7 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         parsed["damage_causality_assessment"]["severity_assessment"] = {
             "level": "severe",
             "structural_failure": True,
+            "confidence": 0.62,
             "reason": "主体疑似断裂，但画面证据不足。",
         }
         parsed["field_confidences"] = {"issue_visible": 0.62}
@@ -1113,17 +1730,37 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
 
         parsed["issue_visible"] = True
         parsed["field_confidences"]["issue_visible"] = 0.91
+        parsed["damage_causality_assessment"]["severity_assessment"]["confidence"] = 0.91
+        parsed["decision_policy_audit"] = {"severe_alert_eligible": True}
         high_confidence_html = render_public_report(data)
         self.assertIn('class="severity-flag severity-yes"', high_confidence_html)
 
         parsed["issue_visible"] = False
+        parsed["decision_policy_audit"] = {"severe_alert_eligible": False}
         contradictory_html = render_public_report(data)
         self.assertNotIn('class="severity-flag', contradictory_html)
 
         parsed["issue_visible"] = True
         parsed["damage_causality_assessment"]["severity_assessment"]["level"] = "minor"
+        parsed["decision_policy_audit"] = {"severe_alert_eligible": False}
         non_severe_html = render_public_report(data)
         self.assertNotIn('class="severity-flag', non_severe_html)
+
+    def test_header_never_recomputes_severe_alert_from_partial_model_fields(self):
+        data = _report_data()
+        parsed = data["agent_report"]["parsed"]
+        parsed["issue_visible"] = True
+        parsed["damage_causality_assessment"]["severity_assessment"] = {
+            "level": "severe",
+            "structural_failure": False,
+            "confidence": 0.95,
+            "reason": "局部表面痕迹，不是结构损坏。",
+        }
+        parsed["decision_policy_audit"] = {"severe_alert_eligible": False}
+
+        html = render_public_report(data)
+
+        self.assertNotIn('class="severity-flag', html)
 
     def test_header_uses_short_dynamic_verdict_instead_of_long_business_sentence(self):
         data = _report_data()
@@ -1218,13 +1855,35 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
                 {
                     "claim_id": "CLM-1",
                     "subject_ref": "SKU-1",
+                    "location": "正面",
+                    "damage_type": "划痕",
+                    "main_video_visibility": "visible",
+                    "supplemental_visibility": "visible",
+                    "same_item_linkage": True,
+                    "damage_presence": "confirmed",
+                    "condition_at_unboxing": "supported",
                     "support_status": "supported",
+                    "severity_level": "moderate",
+                    "severity_confidence": 0.92,
+                    "structural_failure": False,
+                    "conflicting_evidence": False,
                     "reason": "划痕可见。",
                 },
                 {
                     "claim_id": "CLM-2",
                     "subject_ref": "SKU-2",
+                    "location": "连接处",
+                    "damage_type": "脱开",
+                    "main_video_visibility": "visible",
+                    "supplemental_visibility": "not_assessed",
+                    "same_item_linkage": True,
+                    "damage_presence": "not_found_after_clear_coverage",
+                    "condition_at_unboxing": "not_supported",
                     "support_status": "not_supported",
+                    "severity_level": "none",
+                    "severity_confidence": 0.88,
+                    "structural_failure": False,
+                    "conflicting_evidence": False,
                     "reason": "复装后恢复正常。",
                 },
             ],
@@ -1243,9 +1902,41 @@ class ReportEvidenceRenderingTest(unittest.TestCase):
         self.assertIn("原子诉求逐项核验", report_html)
         self.assertIn("CLM-1", report_html)
         self.assertIn("SKU-2", report_html)
+        self.assertIn("正面", report_html)
+        self.assertIn("开箱时已支持", report_html)
+        self.assertIn("中度", report_html)
         self.assertIn("复装后恢复正常", report_html)
         self.assertIn("重复视频已跳过", report_html)
         self.assertIn(">1<", report_html)
+
+    def test_report_exposes_original_and_model_submitted_video_for_comparison(self):
+        data = _report_data()
+        data["agent_report"]["media_gallery"]["videos"] = [{
+            "video_index": 1,
+            "url": "/media/review.webm",
+            "review_url": "/media/review.webm",
+            "original_url": "/media/original.mp4",
+            "comparison_available": True,
+            "review_derivative": {
+                "source_bytes": 742_800_000,
+                "review_bytes": 174_500_000,
+                "transformation": {
+                    "proxy_codec": "vp9",
+                    "source_width": 3840,
+                    "source_height": 2160,
+                    "submitted_width": 2560,
+                    "submitted_height": 1440,
+                },
+            },
+        }]
+
+        report_html = render_public_report(data)
+
+        self.assertIn("模型实际送审版", report_html)
+        self.assertIn("查看原片", report_html)
+        self.assertIn("查看模型送审版", report_html)
+        self.assertIn("3840×2160", report_html)
+        self.assertIn("2560×1440", report_html)
 
 
 if __name__ == "__main__":

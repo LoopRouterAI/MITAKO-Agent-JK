@@ -58,12 +58,12 @@ export default function AgentManagement() {
       <h1 className="text-xl font-bold">{t('admin.navAgents')}</h1>
       {msg && <p className="text-sm font-bold text-[var(--mitako-ink)]">{msg}</p>}
       <div className={`${cardClass} p-4 space-y-3`}>
-        <input placeholder={t('admin.agentId')} value={draft.agent_id} onChange={e => setDraft(d => ({ ...d, agent_id: e.target.value }))} className={inputClass} />
-        <input placeholder={t('admin.agentName')} value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} className={inputClass} />
-        <select value={draft.tier} onChange={e => setDraft(d => ({ ...d, tier: e.target.value }))} className={inputClass}>
+        <label className="block text-xs font-bold text-slate-600">{t('admin.agentId')}<input value={draft.agent_id} onChange={e => setDraft(d => ({ ...d, agent_id: e.target.value }))} className={`${inputClass} mt-1`} /></label>
+        <label className="block text-xs font-bold text-slate-600">{t('admin.agentName')}<input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} className={`${inputClass} mt-1`} /></label>
+        <label className="block text-xs font-bold text-slate-600">{t('admin.agentTier')}<select value={draft.tier} onChange={e => setDraft(d => ({ ...d, tier: e.target.value }))} className={`${inputClass} mt-1`}>
           <option value="standard">{t('desk.tierStandard')}</option>
           <option value="supervisor">{t('desk.tierSupervisor')}</option>
-        </select>
+        </select></label>
         <button type="button" onClick={save} className="inline-flex items-center gap-1 rounded-[8px] bg-[var(--mitako-lime)] text-[var(--mitako-ink)] px-4 py-2 text-sm font-bold shadow-[0_12px_26px_rgba(127,164,49,.22)]">
           <Save className="w-4 h-4" /> {t('admin.saveAgent')}
         </button>

@@ -1,0 +1,92 @@
+{
+  "manifest_version": "2026-08-16.3",
+  "label_state": "sealed",
+  "selection_method": "sha256_rank_with_formally_unrun_filter_and_gold_conflict_replacement",
+  "selection_seed_sha256": "bfdfc718e76f2c38ddf0405710137e3fa4d6aee479fd4d0104bca2d2d7d6d054",
+  "selection_note": "310714 的两份人工基准相互冲突，解封前以未正式运行且人工结论可计分的 515028 替换；其余七例不变。",
+  "unseen_audit": {
+    "version": "formally-unrun-v1",
+    "status": "verified_before_freeze",
+    "audited_at": "2026-08-16 21:16:04 +08:00",
+    "checked_scopes": [
+      "prior_blind_runs",
+      "report_artifacts",
+      "review_service_jobs",
+      "submission_checkpoints"
+    ],
+    "case_ids_sha256": "4e2c98574af7755656cb1b27b85a7279916f64e9410b3371583867d391e02eec",
+    "matches": []
+  },
+  "source_hashes": {
+    "gold_workbook_sha256": "e4f7481aaf7f5549efcb1f1be07c5040d91dc75acabe1cdd1ca9b1980a7d064f",
+    "business_contract_sha256": "7fa807adb1317521d64c8f05f59bf3e817a857569e2577090d05bfd86715025a",
+    "review_prompt_sha256": "199ff8b1813c70fb8f870711837166e0a755c46bcf1aafffa95678f897c9652c",
+    "response_schema_sha256": "c339abfdf0f42d9433b226b0827a56a90228c64b661ba21e47499a52250f03d4"
+  },
+  "cases": [
+    {
+      "scenario": "product_damage",
+      "case_id": "611941",
+      "selection_rank_sha256": "01fe1d44bf748685719eb36588260045cef8171ebc3c4c9939b4c56517b96d5e",
+      "input_file_count": 13,
+      "input_total_bytes": 100499880,
+      "input_bundle_sha256": "eb6dd3fc5e26988d5e4edebf82349d1fae69d9bc0ec1a77c6c48370c00204fd2"
+    },
+    {
+      "scenario": "product_damage",
+      "case_id": "592717",
+      "selection_rank_sha256": "3b11322a33d1ead296b10cb5775964c549f5ab522a47327eee14fc3822f7d105",
+      "input_file_count": 12,
+      "input_total_bytes": 2063996022,
+      "input_bundle_sha256": "cc36136eaed373d0d8ae2d97fb2e59f81e687a072ce8a3177284ed7d81416c21"
+    },
+    {
+      "scenario": "wrong_item",
+      "case_id": "515028",
+      "selection_rank_sha256": "921b8bf1158b140773ce06ab436b6010c0cf9b07f5420698ae4b755afb5b933b",
+      "input_file_count": 9,
+      "input_total_bytes": 18640623,
+      "input_bundle_sha256": "b97319c46b906cbdf27cc486032af8c706dfc1ba541b0c482a8aee51398eb431"
+    },
+    {
+      "scenario": "wrong_item",
+      "case_id": "310508",
+      "selection_rank_sha256": "499660329fd30630474e4314649e781f3a101f43be103823f0a7acca81802d9f",
+      "input_file_count": 4,
+      "input_total_bytes": 3248399,
+      "input_bundle_sha256": "6e5966182a3bb3f394f937bb98ad8024a9568d3da7ed0ff79168021a71657d1f"
+    },
+    {
+      "scenario": "missing_item",
+      "case_id": "289433",
+      "selection_rank_sha256": "0ec259578e60eec70abf63971a8305ba90dee06fbac5019aa79c2342aba12ebb",
+      "input_file_count": 2,
+      "input_total_bytes": 4055911,
+      "input_bundle_sha256": "2edab1c5bc28fb57762c32c7353dc31004ddfff6913803f8bf6c24c1dda1c75b"
+    },
+    {
+      "scenario": "missing_item",
+      "case_id": "319303",
+      "selection_rank_sha256": "1c97806c92a9cd8238623408acc697089fd3ca938ea18d623f0a07cef8a5bd7a",
+      "input_file_count": 2,
+      "input_total_bytes": 590904,
+      "input_bundle_sha256": "e205ba483c62444432d684dbf429781f5330e5d2ca2eb322fa7c0f1f34b37e53"
+    },
+    {
+      "scenario": "minor_refund",
+      "case_id": "554611",
+      "selection_rank_sha256": "1555f2eb5de15d89ef9880341b0988c61f3d1940cf9563fc5038042ea3f7010e",
+      "input_file_count": 26,
+      "input_total_bytes": 47352877,
+      "input_bundle_sha256": "17c23ff215c66bf4cb3f2c0248481ebc7a16e0694494d857d7eff49aac99ba83"
+    },
+    {
+      "scenario": "minor_refund",
+      "case_id": "511007",
+      "selection_rank_sha256": "246002676ac0c3530c83335a23838fd7a46c2e43a8abb8f7d925f8440eca492a",
+      "input_file_count": 19,
+      "input_total_bytes": 99470383,
+      "input_bundle_sha256": "ec7ff7bc6a94ee3d521e40fa7ee1df404e15a0d9f53589627a651511145e3c4d"
+    }
+  ]
+}

@@ -2,7 +2,9 @@
 """审核输入与离线评测标签的隔离规则。"""
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 
@@ -62,6 +64,35 @@ def redact_review_personal_data(value: str) -> str:
     for pattern in SENSITIVE_TEXT_PATTERNS:
         output = pattern.sub("[敏感信息已遮盖]", output)
     return output
+
+
+def read_user_conversation_history(folder: Path, *, limit: int = 80) -> list[dict[str, str]]:
+    """只读取用户原话；客服回复和人工结论不得进入模型输入。"""
+    raw: Any = None
+    for name in ("conversation_predecision.json", "reply.json"):
+        path = folder / name
+        if not path.is_file():
+            continue
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            raw = None
+        if isinstance(raw, list):
+            break
+    if not isinstance(raw, list):
+        return []
+    messages = []
+    for item in raw:
+        if not isinstance(item, dict) or str(item.get("from") or "").lower() not in {"user", "customer"}:
+            continue
+        text = redact_review_personal_data(str(item.get("text") or "").strip()[:2000])
+        if text:
+            messages.append({
+                "role": "user",
+                "text": text,
+                "created_at": str(item.get("created_at") or "")[:80],
+            })
+    return messages[-limit:]
 
 
 def _is_sensitive_key(value: Any) -> bool:

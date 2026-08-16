@@ -12,6 +12,16 @@ class InternalInferenceEstimateTest(unittest.TestCase):
                 "cost": {"estimated_usd": 0.0012344},
                 "cost_status": "partial_unknown",
                 "unknown_cost_calls": 1,
+                "request_profile": {
+                    "provider": "gemini_native",
+                    "model": "gemini-3.5-flash-lite",
+                    "thinking_level": "high",
+                    "media_resolution": "high",
+                    "max_output_tokens": "provider_default",
+                    "native_video_count": 1,
+                    "sampling_fps": 1.0,
+                    "transport": "inline_data",
+                },
                 "_channel_route_attempts": [{
                     "channel": "bananarouter",
                     "model": "configured-model",
@@ -25,6 +35,7 @@ class InternalInferenceEstimateTest(unittest.TestCase):
                     "segment_count": 3,
                     "total_frames": 213,
                     "main_review_frames": 48,
+                    "document_detail_crop_count": 4,
                     "total_model_calls": 7,
                     "concurrency": {
                         "configured_workers": 3,
@@ -48,11 +59,16 @@ class InternalInferenceEstimateTest(unittest.TestCase):
         self.assertEqual(estimate["total_model_calls"], 7)
         self.assertEqual(estimate["total_frames"], 213)
         self.assertEqual(estimate["main_review_frames"], 48)
+        self.assertEqual(estimate["document_detail_crop_count"], 4)
         self.assertEqual(estimate["channels"]["main_review"]["model_calls"], 3)
         self.assertEqual(estimate["channels"]["object_continuity"]["repair_calls"], 1)
         self.assertEqual(estimate["estimated_usd"], 0.001234)
         self.assertEqual(estimate["cost_status"], "partial_unknown")
         self.assertEqual(estimate["unknown_cost_calls"], 1)
+        self.assertEqual(estimate["request_profile"]["thinking_level"], "high")
+        self.assertEqual(estimate["request_profile"]["media_resolution"], "high")
+        self.assertEqual(estimate["request_profile"]["max_output_tokens"], "provider_default")
+        self.assertEqual(estimate["request_profile"]["sampling_fps"], 1.0)
         self.assertEqual(estimate["channel_route_attempts"][0]["decision"], "fallback_retryable")
         self.assertNotIn("endpoint", estimate["channel_route_attempts"][0])
         self.assertNotIn("headers", estimate["channel_route_attempts"][0])

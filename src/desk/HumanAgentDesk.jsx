@@ -470,7 +470,7 @@ export default function HumanAgentDesk({ authUser = null }) {
               value={effectiveAgentId}
               onChange={e => setSelectedAgentId(e.target.value)}
               disabled={Boolean(lockedAgentId)}
-              className="rounded-[8px] border border-slate-200 px-2 py-1.5 text-xs bg-white min-w-[180px]"
+              className="min-h-[44px] rounded-[8px] border border-slate-200 px-2 py-1.5 text-xs bg-white min-w-[180px]"
             >
               {(lockedAgentId ? agents.filter(a => a.agent_id === lockedAgentId) : agents).map(a => (
                 <option key={a.agent_id} value={a.agent_id}>
@@ -479,10 +479,10 @@ export default function HumanAgentDesk({ authUser = null }) {
               ))}
             </select>
           </label>
-          <a href="/" target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-[var(--mitako-ink)] border border-slate-200 rounded-[8px] px-3 py-2 hover:bg-[var(--mitako-lime-soft)]">
+          <a href="/" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[44px] items-center text-xs font-bold text-[var(--mitako-ink)] border border-slate-200 rounded-[8px] px-3 py-2 hover:bg-[var(--mitako-lime-soft)]">
             {t('desk.openCustomerApp')}
           </a>
-          <button type="button" onClick={refreshAll} disabled={refreshing} className="inline-flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-[8px] border border-slate-200 bg-white hover:bg-[var(--mitako-lime-soft)] disabled:opacity-60">
+          <button type="button" onClick={refreshAll} disabled={refreshing} className="inline-flex min-h-[44px] items-center gap-1 text-xs font-bold px-3 py-2 rounded-[8px] border border-slate-200 bg-white hover:bg-[var(--mitako-lime-soft)] disabled:opacity-60">
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> {refreshing ? '刷新中…' : t('desk.refresh')}
           </button>
         </div>
@@ -498,6 +498,7 @@ export default function HumanAgentDesk({ authUser = null }) {
             key={id}
             type="button"
             onClick={() => setMobileView(id)}
+            aria-pressed={mobileView === id}
             className={`min-h-[44px] rounded-[8px] text-xs font-bold ${mobileView === id ? 'bg-[var(--mitako-lime)] text-slate-950' : 'bg-slate-50 text-slate-600'}`}
           >
             {label}
@@ -528,12 +529,12 @@ export default function HumanAgentDesk({ authUser = null }) {
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold text-[var(--mitako-ink)]">{s.agent?.name || t('speakers.humanName')}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-[8px] border ${statusClass(s.status)}`}>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-[8px] border ${statusClass(s.status)}`}>
                   {statusLabel(s.status)}
                 </span>
               </div>
-              <p className="text-sm font-semibold mt-1 truncate">{s.summary || t('desk.pickSession')}</p>
-              <p className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap gap-1">
+              <p className="mt-1 line-clamp-2 break-words text-sm font-semibold">{s.summary || t('desk.pickSession')}</p>
+              <p className="text-xs text-slate-500 mt-0.5 flex flex-wrap gap-1">
                 <span>情绪 L{s.emotion_level || '-'}</span>
                 <span>{formatDuration(s.wait_seconds)}</span>
                 {s.required_tier === 'supervisor' ? <span>{t('desk.needSupervisor')}</span> : null}
@@ -583,7 +584,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                 </div>
               )}
 
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 console-scroll">
+              <div className="flex-1 min-h-[280px] md:min-h-0 overflow-y-auto p-4 space-y-3 console-scroll">
                 {loading && <p className="text-xs text-slate-400">{t('desk.loading')}</p>}
                 {((detail?.messages || []).length ? detail.messages : (brief?.conversation_snippet || [])).map((m, i) => (
                   <div key={`desk-${m.id || i}`} className={`max-w-[85%] rounded-[8px] px-3 py-2 text-sm border ${messageBubbleClass(m.role)}`}>
@@ -605,7 +606,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                       <select
                         value={transferTargetId}
                         onChange={e => setTransferTargetId(e.target.value)}
-                        className="w-full rounded-[8px] border border-slate-200 px-2 py-1.5 text-xs bg-white"
+                        className="w-full min-h-[44px] rounded-[8px] border border-slate-200 px-2 py-1.5 text-xs bg-white"
                       >
                         <option value="">{t('desk.transferTarget')}</option>
                         {colleagueOptions.map(a => (
@@ -620,7 +621,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                       value={transferNote}
                       onChange={e => setTransferNote(e.target.value)}
                       placeholder={t('desk.transferNotePlaceholder')}
-                    className="flex-1 min-w-[120px] min-h-[36px] rounded-[8px] border border-slate-200 px-3 text-xs"
+                      className="flex-1 min-w-[120px] min-h-[44px] rounded-[8px] border border-slate-200 px-3 text-xs"
                     />
                     <button
                       type="button"
@@ -651,7 +652,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                       value={escalateNote}
                       onChange={e => setEscalateNote(e.target.value)}
                       placeholder={t('desk.escalatePlaceholder')}
-                      className="flex-1 min-w-[160px] min-h-[36px] rounded-[8px] border border-slate-200 px-3 text-xs outline-none"
+                      className="flex-1 min-w-[160px] min-h-[44px] rounded-[8px] border border-slate-200 px-3 text-xs outline-none"
                     />
                     <button
                       type="button"
@@ -681,7 +682,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                       value={closeNote}
                       onChange={e => setCloseNote(e.target.value)}
                       placeholder="结案说明，例如：已解释物流进度并告知用户后续节点"
-                      className="flex-1 min-w-[180px] min-h-[36px] rounded-[8px] border border-slate-200 px-3 text-xs outline-none"
+                      className="flex-1 min-w-[180px] min-h-[44px] rounded-[8px] border border-slate-200 px-3 text-xs outline-none"
                     />
                     <button
                       type="button"
@@ -702,7 +703,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                           key={`${item}-${index}`}
                           type="button"
                           onClick={() => appendReplyText(item)}
-                          className="rounded-[8px] border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-[var(--mitako-lime-soft)]"
+                          className="min-h-[44px] rounded-[8px] border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-[var(--mitako-lime-soft)]"
                         >
                           {item.length > 24 ? `${item.slice(0, 24)}…` : item}
                         </button>
@@ -718,7 +719,7 @@ export default function HumanAgentDesk({ authUser = null }) {
                         key={item}
                         type="button"
                         onClick={() => appendReplyText(item)}
-                        className="rounded-[8px] bg-[var(--mitako-lime-soft)] px-2.5 py-1.5 font-semibold text-[var(--mitako-ink)] hover:bg-[var(--mitako-lime)]"
+                        className="min-h-[44px] rounded-[8px] bg-[var(--mitako-lime-soft)] px-2.5 py-2 font-semibold text-[var(--mitako-ink)] hover:bg-[var(--mitako-lime)]"
                       >
                         {item}
                       </button>

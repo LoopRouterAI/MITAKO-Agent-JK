@@ -88,6 +88,7 @@ from runtime_paths import app_root, data_dir
 from private_domain.router import router as private_domain_router
 from private_domain import store as private_domain_store
 from review_service.router import router as review_service_router
+from review_service.model_governance_router import router as review_model_governance_router
 from review_service import service as review_service_core
 from prompts.router import router as business_rules_router
 
@@ -113,6 +114,7 @@ if _business_demo_enabled():
 
 app.include_router(private_domain_router)
 app.include_router(review_service_router)
+app.include_router(review_model_governance_router)
 app.include_router(business_rules_router)
 
 
@@ -247,7 +249,7 @@ def _valid_chat_attachments(items: List[ChatAttachment], user_id: str, session_i
     for item in items or []:
         if item.kind == "review_task" or item.url.startswith("/api/v1/private-domain/review-tasks/"):
             task_id = item.review_task_id or Path(item.url.rsplit("/", 1)[-1]).name
-            task = private_domain_store.get_review_task(task_id)
+            task = private_domain_store.get_review_task(task_id, tenant_id=tenant_id)
             if not task or task.get("user_id") != user_id or task.get("session_id") != session_id or task.get("tenant_id") != tenant_id:
                 continue
             valid.append({
@@ -310,7 +312,7 @@ def _recent_review_attachments(user_id: str, session_id: str, tenant_id: str, co
     if not any(k in query for k in ["审核", "材料", "图片", "照片", "视频", "破损", "有伤", "瑕疵", "结果", "置信度", "报告"]):
         return []
     tasks = [
-        task for task in private_domain_store.list_review_tasks(limit=100)
+        task for task in private_domain_store.list_review_tasks(limit=100, tenant_id=tenant_id)
         if task.get("user_id") == user_id
         and task.get("session_id") == session_id
         and (task.get("tenant_id") or "mitako") == tenant_id
@@ -1247,7 +1249,7 @@ async def request_handoff(req: HandoffRequest, request: Request):
         user_orders = matched_orders
     profile = viking_db.read_json(f"viking://user/{req.user_id}/profile")
     recent_reviews = [
-        task for task in private_domain_store.list_review_tasks(limit=100)
+        task for task in private_domain_store.list_review_tasks(limit=100, tenant_id=tenant_id)
         if task.get("user_id") == req.user_id
         and task.get("session_id") == req.session_id
         and (task.get("tenant_id") or "mitako") == tenant_id

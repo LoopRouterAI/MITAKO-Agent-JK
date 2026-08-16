@@ -29,6 +29,14 @@ def png_bytes() -> bytes:
     return encoded.tobytes()
 
 
+def webp_bytes() -> bytes:
+    image = np.full((12, 16, 3), 180, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".webp", image, [cv2.IMWRITE_WEBP_QUALITY, 101])
+    if not ok:
+        raise RuntimeError("test_webp_encode_failed")
+    return encoded.tobytes()
+
+
 def case_with_urls(*urls: str) -> dict:
     return {
         "structured_business_context": {
@@ -82,6 +90,7 @@ class OfficialReferenceImagesTest(unittest.TestCase):
         ):
             first = prepare_official_reference_images(copy.deepcopy(case), Path(directory), client=client, limit=1)
             second = prepare_official_reference_images(copy.deepcopy(case), Path(directory), client=client, limit=1)
+            prepared_bytes = Path(first["official_reference_images"][0]["api_path"]).read_bytes()
 
         self.assertEqual(calls, 1)
         self.assertEqual(len(first["official_reference_images"]), 1)
@@ -90,6 +99,30 @@ class OfficialReferenceImagesTest(unittest.TestCase):
         self.assertEqual(first["official_reference_status"]["requested_count"], 1)
         self.assertEqual(first["official_reference_status"]["available_count"], 1)
         self.assertEqual(first["official_reference_images"][0]["evidence_role"], "official_product_reference")
+        prepared = first["official_reference_images"][0]
+        self.assertEqual(Path(prepared["api_path"]).suffix, ".webp")
+        self.assertEqual(prepared["api_mime_type"], "image/webp")
+        self.assertEqual(prepared_bytes[:4], b"RIFF")
+
+    def test_existing_webp_reference_is_persisted_as_the_shared_webp_cache(self) -> None:
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                headers={"content-type": "image/webp"},
+                content=webp_bytes(),
+            )
+
+        case = case_with_urls("https://cdn-qiniu.danhaotuan.com/reference.webp")
+        with tempfile.TemporaryDirectory() as directory, httpx.Client(
+            transport=httpx.MockTransport(handler)
+        ) as client, patch(
+            "poc.visual_review_poc.official_reference_images.socket.getaddrinfo",
+            return_value=self._public_dns(),
+        ):
+            result = prepare_official_reference_images(case, Path(directory), client=client)
+
+        self.assertEqual(result["official_reference_status"]["status"], "available")
+        self.assertEqual(result["official_reference_images"][0]["api_mime_type"], "image/webp")
 
     def test_rejects_unsafe_or_invalid_resources_without_failing_the_case(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

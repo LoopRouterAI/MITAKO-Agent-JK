@@ -542,64 +542,29 @@ Copy-File "dist\xiaojiao_avatar.png"
 Copy-Dir "dist\assets"
 Copy-Dir "public\memes" "memes"
 Copy-Dir "templates"
-Copy-Dir "docs\delivery"
-$deliveryEngineer = Join-Path $Stage "docs\delivery\engineer-onboarding.md"
-if (Test-Path $deliveryEngineer) { Remove-Item -LiteralPath $deliveryEngineer -Force }
+Copy-File "docs\delivery\openapi.yaml"
+Copy-File "docs\delivery\review-advisory-api.md"
+Copy-File "docs\delivery\after-sales-agent-integration.md"
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
-$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0812视频审核业务理解与模型路线验收说明.html"
+$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0814四场景审核业务理解与功能验收说明.html"
 if (-not (Test-Path -LiteralPath $CustomerHtmlSource -PathType Leaf)) {
     throw "Customer delivery HTML is missing: $CustomerHtmlSource"
 }
+$FourScenarioAcceptanceSource = Join-Path $Root "tests\reports\review_0816_four_scenario_blind_results_latest.json"
+if (-not (Test-Path -LiteralPath $FourScenarioAcceptanceSource -PathType Leaf)) {
+    throw "Four-scenario acceptance evidence is missing: $FourScenarioAcceptanceSource"
+}
+$AcceptancePython = Resolve-PythonRuntime
+& $AcceptancePython -c "import pathlib,sys; sys.path.insert(0,sys.argv[2]); from scripts.check_release_packages import _verify_current_four_scenario_acceptance; _verify_current_four_scenario_acceptance(pathlib.Path(sys.argv[1]))" $FourScenarioAcceptanceSource $Root
+if ($LASTEXITCODE -ne 0) { throw "Four-scenario acceptance evidence is invalid." }
 if (Test-Path (Join-Path $Root $customerDocsName)) {
-    Copy-Dir $customerDocsName $customerDocsName
-
-    # 保留仓库历史资料，但客户包只交付当前有效口径，避免旧“三类审核”等说明造成误解。
-    $obsoleteDoc1 = New-Utf16String @(0x0050,0x004F,0x0043,0x5BA1,0x67E5,0x0044,0x0065,0x006D,0x006F,0x4F7F,0x7528,0x4E0E,0x8FB9,0x754C,0x8BF4,0x660E,0x002D,0x0032,0x0030,0x0032,0x0036,0x002D,0x0030,0x0037,0x002D,0x0030,0x0033,0x002E,0x006D,0x0064)
-    $obsoleteDoc2 = New-Utf16String @(0x4E09,0x7C7B,0x89C6,0x89C9,0x5BA1,0x6838,0x4F18,0x5148,0x8BF4,0x660E,0x002E,0x006D,0x0064)
-    $obsoleteDoc3 = New-Utf16String @(0x77E5,0x8BC6,0x5E93,0x4E0E,0x89C6,0x89C9,0x8BC6,0x522B,0x6269,0x5C55,0x9700,0x6C42,0x002E,0x006D,0x0064)
-    $obsoleteCustomerDocs = @(
-        $obsoleteDoc1,
-        $obsoleteDoc2,
-        $obsoleteDoc3,
-        "0805审核建议、盲测与完整功能说明.html"
-    )
-    foreach ($name in $obsoleteCustomerDocs) {
-        $obsoletePath = Join-Path (Join-Path $Stage $customerDocsName) $name
-        if (Test-Path $obsoletePath) {
-            [System.IO.File]::Delete($obsoletePath)
-        }
-    }
+    Copy-File "$customerDocsName\README.md"
+    Copy-File "$customerDocsName\0814四场景审核业务理解与功能验收说明.html"
 }
 
 Copy-File "config\handoff_routing.json"
 Copy-File "mock_data.json" "sample_data.json"
-
-$visualConfigDir = Join-Path $Stage "config"
-New-Item -ItemType Directory -Path $visualConfigDir -Force | Out-Null
-$visualConfig = @{
-    review_mode = "strict"
-    strict_checks = @{
-        detect_cut = $true
-        object_left_frame = $true
-        six_sides_required = $true
-        shipping_label_visible_before_open = $true
-        damage_visible = $true
-        minor_material_desensitized = $true
-    }
-    report = @{
-        show_backend_config = $false
-        show_route_chain = $false
-        show_frame_strategy = $true
-        show_cost_estimate = $false
-    }
-}
-$visualConfigJson = $visualConfig | ConvertTo-Json -Depth 8
-[System.IO.File]::WriteAllText(
-    (Join-Path $visualConfigDir "visual_review_admin_config.json"),
-    $visualConfigJson,
-    (New-Object System.Text.UTF8Encoding($false))
-)
 
 New-Item -ItemType Directory -Path (Join-Path $Stage "data") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $Stage "runtime") -Force | Out-Null
@@ -607,8 +572,6 @@ New-Item -ItemType Directory -Path (Join-Path $Stage "runtime") -Force | Out-Nul
 Write-Host "[3/6] Prepare visual review workbench ..."
 New-Item -ItemType Directory -Path (Join-Path $Stage "visual_review_workbench\sample_videos") -Force | Out-Null
 Copy-File "poc\visual_review_poc\workbench.html" "visual_review_workbench\workbench.html"
-$internalAcceptance = Join-Path (Join-Path $Stage "docs\delivery") "mitako-0807-guide-acceptance-20260807.html"
-if (Test-Path $internalAcceptance) { Remove-Item -LiteralPath $internalAcceptance -Force }
 $customerDemoVideos = [ordered]@{
     "video_unboxing_fallback_sintel_trailer.mp4" = @{
         destination = "unboxing_sample_01.mp4"
@@ -660,6 +623,7 @@ $RuntimeFiles = @(
     "partner_guard.py",
     "review_input_safety.py",
     "review_media_safety.py",
+    "review_public_safety.py",
     "runtime_paths.py",
     "sla_lock.py",
     "viking_memory.py",
@@ -670,6 +634,7 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\model_auth.py",
     "poc\visual_review_poc\review_response_schema.py",
     "poc\visual_review_poc\media_deduplication.py",
+    "poc\visual_review_poc\media_preflight.py",
     "poc\visual_review_poc\media_registry.py",
     "poc\visual_review_poc\internal_review_ledger.py",
     "poc\visual_review_poc\native_video_proxy.py",
@@ -706,6 +671,7 @@ Copy-RuntimeDir "auth"
 Copy-RuntimeDir "handoff_backend"
 Copy-RuntimeDir "private_domain"
 Copy-RuntimeDir "prompts"
+Copy-RuntimeDir "configs"
 Copy-RuntimeDir "review_service"
 Copy-RuntimeDir "sla_worker"
 Rename-RuntimeSource "viking_memory.py" "service_memory.py"
@@ -751,7 +717,7 @@ cd /d "%~dp0"
 
 if exist venv\Scripts\python.exe (
   venv\Scripts\python.exe -c "import sys; assert sys.version_info[:2] == (3,11); mods=['fastapi','uvicorn','httpx','jwt','multipart','sse_starlette','pydantic','dotenv','cv2','PIL','yt_dlp','imageio_ffmpeg','redis','jinja2','websockets','celery',''.join(('lang','graph')),''.join(('lang','chain_core')),''.join(('lang','chain_','op','en','ai'))]; [__import__(m) for m in mods]" >nul 2>nul
-  if not errorlevel 1 goto CHECK_CLOUDFLARED
+  if not errorlevel 1 goto UPGRADE_INSTALLER
   echo [INFO] Existing runtime is incompatible or incomplete; rebuilding with Python 3.11...
   rmdir /s /q venv
 )
@@ -771,8 +737,9 @@ if not exist venv\Scripts\python.exe (
   exit /b 1
 )
 
+:UPGRADE_INSTALLER
 echo [2/4] Upgrading package installer...
-venv\Scripts\python.exe -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
+venv\Scripts\python.exe -m pip install --upgrade "pip>=26.1.2" "setuptools>=83.0.0" -i https://pypi.tuna.tsinghua.edu.cn/simple
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
 echo [3/4] Installing runtime dependencies...
@@ -781,7 +748,7 @@ set "WG=graph"
 set "LC=langchain"
 set "OC=op"
 set "AI=enai"
-venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple fastapi uvicorn sse-starlette python-multipart pydantic httpx PyJWT python-dotenv %LG%%WG% %LC%-core %LC%-%OC%%AI% pyahocorasick redis jinja2 websockets celery opencv-python Pillow yt-dlp imageio-ffmpeg
+venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple fastapi uvicorn sse-starlette python-multipart pydantic httpx "aiohttp>=3.14.3" PyJWT "cryptography>=50.0.0" python-dotenv %LG%%WG% %LC%-core %LC%-%OC%%AI% pyahocorasick redis jinja2 websockets celery opencv-python Pillow yt-dlp imageio-ffmpeg pypdf==6.15.0
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
 :CHECK_CLOUDFLARED
@@ -965,32 +932,7 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
-    "甲方沟通交付文档\0812视频审核业务理解与模型路线验收说明.html",
-    "甲方沟通交付文档\0809四场景业务理解与审核能力验收说明.html",
-    "甲方沟通交付文档\0807黄金指南学习与审核能力更新说明.html",
-    "docs\delivery\mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
-    "甲方沟通交付文档\0806四场景与未成年人五类材料审核说明.html",
-    "docs\delivery\mitako-0805-blind-evidence-acceptance-20260805.html",
-    "docs\delivery\mitako-0803-review-advice-acceptance-20260803.html",
-    "甲方沟通交付文档\0803完整功能测试与联调说明.html",
-    "docs\delivery\mitako-0731-product-damage-sop-acceptance-20260731.html",
-    "甲方沟通交付文档\0731商品有伤SOP与报告一致性更新说明.html",
-    "docs\delivery\mitako-0730-minor-report-acceptance-20260730.html",
-    "甲方沟通交付文档\0730未成年人资料审核与客服报告升级说明.html",
-    "甲方沟通交付文档\0728事实结论与人工复审闭环更新说明.html",
-    "甲方沟通交付文档\0728动态素材与统一审核链路更新说明.html",
-    "甲方沟通交付文档\0723客诉审核Agent接口联调与商务沟通说明.html",
-    "甲方沟通交付文档\0723审核结论置信度与人工复审分级说明.html",
-    "甲方沟通交付文档\视觉审核逐帧与资料审核整改说明-2026-07-20.html",
-    "甲方沟通交付文档\甲方测试版与本轮更新说明-2026-07-17.html",
-    "甲方沟通交付文档\未成年人资料字段一致性审核升级说明-2026-07-20.html",
-    "甲方沟通交付文档\订单SKU快照接入与审核安全升级说明-2026-07-20.html",
-    "甲方沟通交付文档\0722订单资料与官方商品图按需接入说明.html",
-    "甲方沟通交付文档\144989未成年人资料审核整改与验收报告.html",
-    "甲方沟通交付文档\0717四样本审核工程整改与验收报告.html",
-    "甲方沟通交付文档\0717网页端视频读取问题整改与验收报告.html",
-    "docs\delivery\mitako-visual-evaluation-engineering-acceptance-20260716.html",
-    "docs\delivery\mitako-0714-adversarial-acceptance-20260715.html",
+    "甲方沟通交付文档\0814四场景审核业务理解与功能验收说明.html",
     "runtime\app_runtime.zip",
     "sample_data.json",
     "start-windows.bat"

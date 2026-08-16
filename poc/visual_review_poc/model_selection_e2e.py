@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
-import io
 import json
 import logging
 import math
@@ -15,7 +14,6 @@ import random
 import re
 import sys
 import time
-import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -25,8 +23,6 @@ from urllib.parse import unquote, urlparse
 
 import cv2
 import httpx
-import numpy as np
-from PIL import Image, ImageOps, UnidentifiedImageError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -63,39 +59,46 @@ from poc.visual_review_poc.object_continuity import (
     aggregate_object_continuity,
     apply_object_continuity_guard,
 )
-from poc.visual_review_poc.model_catalog import (
+from configs.model_catalog import (
     MODEL_CONFIGS,
     PRICING_NOTE,
     summarize_cost_observability as _cost_observability,
 )
-from poc.visual_review_poc.review_response_schema import (
-    CLAIM_IDENTITY_RESPONSE_SCHEMA,
-    CLAIMED_ITEM_DETAIL_RESPONSE_SCHEMA,
-    FRAME_RESPONSE_SCHEMA,
-    MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA,
-    MINOR_MATERIAL_INVENTORY_RESPONSE_SCHEMA,
-    MINOR_MATERIAL_VIDEO_RESPONSE_SCHEMA,
-    NATIVE_VIDEO_RESPONSE_SCHEMA,
-    NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA,
-    OPENING_COMPLIANCE_RESPONSE_SCHEMA,
-    OPENING_START_RESPONSE_SCHEMA,
+from prompts.visual_review.scenes import resolve_response_schema
+from prompts.visual_review.response_validation import (
+    ModelResponseValidationError,
+    provider_response_schema,
+    validate_model_response,
 )
 from poc.visual_review_poc.review_model_prompt import (
     build_claim_identity_prompt,
     build_claimed_item_detail_prompt,
+    build_fulfillment_observation_prompt,
     build_opening_compliance_prompt,
     build_opening_start_prompt,
+    build_product_damage_image_prompt,
     build_selection_prompt,
 )
+from prompts.visual_review.review_model_prompt import build_opening_video_role_prompt
 from poc.visual_review_poc.model_result_scoring import score_result
 from poc.visual_review_poc.fulfillment_reconciliation import (
     aggregate_fulfillment_reconciliation,
     apply_fulfillment_guard,
 )
 from poc.visual_review_poc.specialized_model_pass import run_adaptive_tasks, run_specialized_frame_pass
+from poc.visual_review_poc.sampled_video_perception import run_sampled_video_perception
+from poc.visual_review_poc.native_video_perception import normalize_minor_damage_evidence
 from poc.visual_review_poc.minor_material_pipeline import run_minor_material_pipeline
 from poc.visual_review_poc.media_deduplication import deduplicate_media
-from poc.visual_review_poc.unified_model_pass import unified_dimension_gaps
+from poc.visual_review_poc.media_preflight import (
+    compress_image,
+    prepare_image_media as prepare_media,
+)
+from poc.visual_review_poc.unified_model_pass import (
+    claimed_item_evidence_times,
+    claimed_item_identity_window_is_traceable,
+    unified_dimension_gaps,
+)
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
 from poc.visual_review_poc.official_reference_images import prepare_official_reference_images
@@ -106,7 +109,10 @@ from prompts.visual_review.core import (
     CLAIMED_ITEM_DETAIL_SYSTEM_PROMPT,
     OPENING_COMPLIANCE_SYSTEM_PROMPT,
     OPENING_START_SYSTEM_PROMPT,
+    OPENING_VIDEO_ROLE_SYSTEM_PROMPT,
+    build_fulfillment_observation_system_prompt,
     build_native_video_perception_system_prompt,
+    build_product_damage_image_system_prompt,
     freeze_rule_snapshot,
 )
 
@@ -130,7 +136,7 @@ if hasattr(sys.stderr, "reconfigure"):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="三大审核场景模型选型 E2E")
     parser.add_argument("--samples-dir", default=str(SAMPLE_ROOT), help="样本目录")
-    parser.add_argument("--models", default="gemini35,gemini31lite,doubao20lite", help="逗号分隔模型 key")
+    parser.add_argument("--models", default="gemini35lite,gemini37", help="逗号分隔模型 key")
     parser.add_argument("--fps", type=float, default=1.0)
     parser.add_argument("--sampling-mode", choices=["adaptive", "dense"], default="adaptive")
     parser.add_argument("--max-frames-per-video", type=int, default=24)
@@ -152,87 +158,6 @@ def mime_for(path: Path) -> str:
 
 def data_url(path: Path, mime_type: str) -> str:
     return f"data:{mime_type};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
-
-
-def compress_image(
-    src: Path,
-    dest: Path,
-    max_edge: int = 1280,
-    quality: int = 82,
-    *,
-    lossless_webp: bool = False,
-) -> Path:
-    raw = np.fromfile(str(src), dtype=np.uint8)
-    image = cv2.imdecode(raw, cv2.IMREAD_COLOR)
-    if image is None:
-        body = raw.tobytes()
-        if body.startswith(b"\xff\xd8") and not body.endswith(b"\xff\xd9"):
-            body += b"\xff\xd9"
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", Image.DecompressionBombWarning)
-                with Image.open(io.BytesIO(body)) as source:
-                    width, height = source.size
-                    if width <= 0 or height <= 0 or width * height > 40_000_000:
-                        raise ValueError("image_pixel_limit")
-                    source.load()
-                    rgb = ImageOps.exif_transpose(source).convert("RGB")
-                    image = cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2BGR)
-        except (
-            Image.DecompressionBombError,
-            Image.DecompressionBombWarning,
-            UnidentifiedImageError,
-            OSError,
-            ValueError,
-            MemoryError,
-        ) as exc:
-            raise ValueError(f"无法安全解码图片：{src.name}") from exc
-    h0, w0 = image.shape[:2]
-    scale = min(1.0, max_edge / max(h0, w0))
-    if scale < 1.0:
-        image = cv2.resize(image, (int(w0 * scale), int(h0 * scale)), interpolation=cv2.INTER_AREA)
-    extension = ".webp" if lossless_webp else ".jpg"
-    encode_options = (
-        [cv2.IMWRITE_WEBP_QUALITY, 101]
-        if lossless_webp
-        else [cv2.IMWRITE_JPEG_QUALITY, quality]
-    )
-    ok, encoded = cv2.imencode(extension, image, encode_options)
-    if not ok:
-        return src
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    encoded.tofile(str(dest))
-    return dest
-
-
-def prepare_media(
-    items: List[Dict[str, Any]],
-    media_dir: Path,
-    *,
-    max_edge: int = 1280,
-    quality: int = 82,
-    lossless_webp: bool = False,
-) -> List[Dict[str, Any]]:
-    prepared = []
-    for index, item in enumerate(items, start=1):
-        src = Path(item["path"])
-        try:
-            api_path = compress_image(
-                src,
-                media_dir / f"{index:03d}_{src.stem}{'.webp' if lossless_webp else '.jpg'}",
-                max_edge=max_edge,
-                quality=quality,
-                lossless_webp=lossless_webp,
-            )
-        except ValueError:
-            LOGGER.warning("跳过无法安全解码的审核图片：%s", src.name)
-            continue
-        copied = dict(item)
-        copied["api_path"] = str(api_path)
-        copied["api_mime_type"] = mime_for(api_path)
-        copied["api_bytes"] = api_path.stat().st_size if api_path.exists() else None
-        prepared.append(copied)
-    return prepared
 
 
 def extract_video_start_anchors(video: Path, run_dir: Path, frame_width: int) -> List[Dict[str, Any]]:
@@ -283,29 +208,55 @@ def load_case_bundle(
     run_dir: Path,
     scenario_override: str = "",
     native_video: Optional[Dict[str, Any]] = None,
+    native_videos: Optional[List[Dict[str, Any]]] = None,
+    selected_videos: Optional[List[Path]] = None,
 ) -> Dict[str, Any]:
     videos, video_deduplication = discover_case_videos(sample_dir)
+    if selected_videos is not None:
+        discovered = {video.resolve(): video for video in videos}
+        videos = [
+            discovered[Path(item).resolve()]
+            for item in selected_videos
+            if Path(item).resolve() in discovered
+        ]
     case = load_case(videos[0], args.supplemental_image_limit) if videos else load_case_from_folder(sample_dir, args.supplemental_image_limit)
     if scenario_override:
         case["scenario"] = scenario_override
     if not videos and not case.get("supplemental_images"):
         raise SystemExit(f"样本缺少可审核的视频或图片：{sample_dir}")
-    if native_video and len(videos) == 1:
-        source = dict(native_video)
-        if not source.get("file_uri"):
-            if not videos:
-                raise SystemExit(f"样本缺少可用于原生审核的视频：{sample_dir}")
-            source.setdefault("api_path", str(videos[0]))
-            source.setdefault("api_mime_type", mime_for(videos[0]))
-        source.setdefault("video_index", 1)
+    native_sources = [dict(item) for item in native_videos or [] if isinstance(item, dict)]
+    if not native_sources and native_video:
+        native_sources = [dict(native_video)]
+    if native_sources:
+        if len(native_sources) != len(videos):
+            raise SystemExit("原生视频源数量与本次送审视频数量不一致")
         media_dir = run_dir / "api_media"
-        anchors = extract_video_start_anchors(videos[0], run_dir / "native_start_anchors", args.frame_width) if videos else []
-        for frame in anchors:
-            frame["selection_role"] = "opening_anchor"
+        anchors: List[Dict[str, Any]] = []
+        video_summaries: List[Dict[str, Any]] = []
+        for video_index, (video, source) in enumerate(zip(videos, native_sources), start=1):
+            source.setdefault("api_path", str(video))
+            source.setdefault("api_mime_type", mime_for(video))
+            source["video_index"] = video_index
+            video_anchors = extract_video_start_anchors(
+                video,
+                run_dir / f"native_start_anchors_{video_index}",
+                args.frame_width,
+            )
+            for frame in video_anchors:
+                frame["selection_role"] = "opening_anchor"
+                frame["video_index"] = video_index
+                frame["video_file"] = video.name
+                anchors.append(frame)
+            video_summaries.append({
+                "video_index": video_index,
+                "file": video.name,
+                "source_bytes": video.stat().st_size,
+                "duration_seconds": source.get("duration_seconds"),
+                "sampled_frames": len(video_anchors),
+                "model_input": {"type": "native_video"},
+            })
         for index, frame in enumerate(anchors, start=1):
-            frame["video_index"] = 1
             frame["global_frame_index"] = index
-            frame["video_file"] = videos[0].name
         detail_quality = case.get("scenario") == "product_damage"
         case["frames"] = prepare_media(
             anchors,
@@ -314,30 +265,29 @@ def load_case_bundle(
             quality=88 if detail_quality else 82,
             lossless_webp=True,
         )
-        case["videos"] = [{
-            "video_index": 1,
-            "file": videos[0].name if videos else "remote_video",
-            "source_bytes": videos[0].stat().st_size if videos else None,
-            "sampled_frames": len(case["frames"]),
-            "model_input": {"type": "native_video"},
-        }]
+        case["videos"] = video_summaries
         case["video_deduplication"] = video_deduplication
         case["rejected_videos"] = []
         case["model_frames_per_call"] = len(case["frames"])
         case["sampling_mode"] = "native_video"
-        minor_material = case.get("scenario") in {"minor_material", "minor_refund"}
-        high_detail_images = minor_material or case.get("scenario") == "product_damage"
+        image_execution: List[Dict[str, Any]] = []
         case["supplemental_images"] = prepare_media(
             case["supplemental_images"],
             media_dir / "images",
-            max_edge=1920 if high_detail_images else 1280,
-            quality=88 if high_detail_images else 82,
+            diagnostics=image_execution,
         )
+        case["_media_preflight_image_execution"] = image_execution
         prepare_official_reference_images(case)
-        case["native_video"] = source
+        case["native_video"] = native_sources[0]
+        case["native_videos"] = native_sources
+        transports = {
+            "file_uri" if source.get("file_uri") else "inline_data"
+            for source in native_sources
+        }
         case.setdefault("structured_business_context", {})["native_video_review"] = {
             "enabled": True,
-            "transport": "file_uri" if source.get("file_uri") else "inline_data",
+            "transport": transports.pop() if len(transports) == 1 else "mixed",
+            "video_count": len(native_sources),
         }
         return case
     frame_groups: List[List[Dict[str, Any]]] = []
@@ -405,14 +355,13 @@ def load_case_bundle(
         quality=88 if product_damage else 82,
         lossless_webp=True,
     )
-    minor_material = case.get("scenario") in {"minor_material", "minor_refund"}
-    high_detail_images = minor_material or product_damage
+    image_execution: List[Dict[str, Any]] = []
     case["supplemental_images"] = prepare_media(
         case["supplemental_images"],
         media_dir / "images",
-        max_edge=1920 if high_detail_images else 1280,
-        quality=88 if high_detail_images else 82,
+        diagnostics=image_execution,
     )
+    case["_media_preflight_image_execution"] = image_execution
     prepare_official_reference_images(case)
     return case
 
@@ -424,8 +373,13 @@ def gemini_payload(
     cfg: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     parts: List[Dict[str, Any]] = []
-    native_video = case.get("native_video") or {}
-    if native_video:
+    native_videos = [
+        item for item in case.get("native_videos") or []
+        if isinstance(item, dict) and (item.get("file_uri") or item.get("api_path"))
+    ]
+    if not native_videos and case.get("native_video"):
+        native_videos = [case["native_video"]]
+    for native_video in native_videos:
         video_index = native_video.get("video_index") or 1
         mime_type = native_video.get("api_mime_type") or "video/mp4"
         if native_video.get("file_uri"):
@@ -439,14 +393,19 @@ def gemini_payload(
                 "mimeType": mime_type,
                 "data": base64.b64encode(path.read_bytes()).decode("ascii"),
             }}
+        configured_sampling_fps = (cfg or {}).get("native_video_sampling_fps")
         try:
-            sampling_fps = float(native_video.get("sampling_fps"))
+            sampling_fps = float(
+                native_video.get("sampling_fps")
+                if native_video.get("sampling_fps") is not None
+                else configured_sampling_fps
+            )
         except (TypeError, ValueError, OverflowError):
             sampling_fps = 0.0
         if 0.1 <= sampling_fps <= 24.0:
             video_part["videoMetadata"] = {"fps": sampling_fps}
-        parts.append(video_part)
         parts.append({"text": f"原生视频 {video_index} / asset_ref=native_video_{video_index}"})
+        parts.append(video_part)
     for frame in case["frames"]:
         path = Path(frame["api_path"])
         parts.append({"text": f"视频{frame['video_index']} 帧{frame['global_frame_index']} / {frame['timestamp']} / asset_ref=video_{frame['video_index']}_frame_{frame['global_frame_index']}"})
@@ -461,24 +420,34 @@ def gemini_payload(
         parts.append({"inlineData": {"mimeType": image["api_mime_type"], "data": base64.b64encode(path.read_bytes()).decode("ascii")}})
     parts.append({"text": user_prompt})
     analysis_mode = str((case.get("structured_business_context") or {}).get("analysis_mode") or "")
-    response_schemas = {
-        "claim_identity_only": CLAIM_IDENTITY_RESPONSE_SCHEMA,
-        "claimed_item_detail_only": CLAIMED_ITEM_DETAIL_RESPONSE_SCHEMA,
-        "native_video_perception": NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA,
-        "sampled_video_perception": NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA,
-        "sampled_video_batch_observation": NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA,
-        "sampled_video_perception_reduce": NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA,
-        "opening_compliance_only": OPENING_COMPLIANCE_RESPONSE_SCHEMA,
-        "opening_start_only": OPENING_START_RESPONSE_SCHEMA,
-        "minor_material_inventory": MINOR_MATERIAL_INVENTORY_RESPONSE_SCHEMA,
-        "minor_material_process_video": MINOR_MATERIAL_VIDEO_RESPONSE_SCHEMA,
-        "minor_material_consistency": MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA,
-    }
-    default_schema = NATIVE_VIDEO_RESPONSE_SCHEMA if native_video else FRAME_RESPONSE_SCHEMA
-    response_schema = response_schemas.get(analysis_mode, default_schema)
+    business_scenario = str(
+        (case.get("structured_business_context") or {}).get("business_scenario")
+        or case.get("scenario")
+        or ""
+    )
+    if (
+        not analysis_mode
+        and business_scenario == "product_damage"
+        and not native_videos
+        and case.get("frames")
+    ):
+        analysis_mode = "sampled_video_perception"
+    if (
+        not analysis_mode
+        and business_scenario == "product_damage"
+        and not native_videos
+        and not case.get("frames")
+        and case.get("supplemental_images")
+    ):
+        analysis_mode = "product_damage_images"
+    response_schema = resolve_response_schema(
+        business_scenario,
+        analysis_mode,
+        bool(native_videos),
+    )
     generation_config: Dict[str, Any] = {
         "responseMimeType": "application/json",
-        "responseSchema": response_schema,
+        "responseSchema": provider_response_schema(response_schema),
     }
     configured_max_output = (cfg or {}).get("max_output_tokens")
     if configured_max_output is not None:
@@ -502,6 +471,49 @@ def gemini_payload(
     }
 
 
+def model_request_profile(cfg: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """从实际请求体生成内部验收摘要，不保存 Prompt、媒体或凭据。"""
+    generation = payload.get("generationConfig") or {}
+    thinking = (generation.get("thinkingConfig") or {}).get("thinkingLevel")
+    media_resolution = str(generation.get("mediaResolution") or "")
+    video_parts = [
+        part
+        for content in payload.get("contents") or []
+        for part in content.get("parts") or []
+        if isinstance(part, dict)
+        and ("inlineData" in part or "fileData" in part)
+        and str(
+            (part.get("inlineData") or part.get("fileData") or {}).get("mimeType") or ""
+        ).startswith("video/")
+    ]
+    fps_values = [
+        float((part.get("videoMetadata") or {})["fps"])
+        for part in video_parts
+        if (part.get("videoMetadata") or {}).get("fps") is not None
+    ]
+    transports = {
+        "file_uri" if "fileData" in part else "inline_data"
+        for part in video_parts
+    }
+    return {
+        "provider": str(cfg.get("provider") or ""),
+        "model": str(cfg.get("model") or ""),
+        "thinking_level": str(thinking or "provider_default").lower(),
+        "media_resolution": (
+            media_resolution.removeprefix("MEDIA_RESOLUTION_").lower()
+            or "provider_default"
+        ),
+        "max_output_tokens": generation.get("maxOutputTokens", "provider_default"),
+        "native_video_count": len(video_parts),
+        "sampling_fps": fps_values[0] if fps_values and len(set(fps_values)) == 1 else None,
+        "transport": (
+            next(iter(transports))
+            if len(transports) == 1
+            else "mixed" if transports else "none"
+        ),
+    }
+
+
 def openai_messages(system_prompt: str, user_prompt: str, case: Dict[str, Any]) -> List[Dict[str, Any]]:
     content: List[Dict[str, Any]] = [{"type": "text", "text": user_prompt}]
     for frame in case["frames"]:
@@ -520,9 +532,11 @@ def openai_messages(system_prompt: str, user_prompt: str, case: Dict[str, Any]) 
 
 
 def classify_error(status: Optional[int], text: str) -> str:
+    lowered = (text or "").lower()
+    if status == 400 and "upload to gcs failed" in lowered and "internal_error" in lowered:
+        return "soft"
     if status in {408, 409, 425, 429, 500, 502, 503, 504}:
         return "soft"
-    lowered = (text or "").lower()
     return "soft" if any(t in lowered for t in ("timeout", "rate limit", "overloaded", "temporarily")) else "hard"
 
 
@@ -716,9 +730,12 @@ def extract_openai_text(data: Dict[str, Any]) -> str:
 
 def compact_response(data: Dict[str, Any]) -> Dict[str, Any]:
     """保留模型响应里用于复盘的内容，避免把整包重复图像或无关字段塞进报告。"""
+    response_id = data.get("id") or data.get("responseId")
     output = {
-        "id": data.get("id"),
-        "model": data.get("model"),
+        "id": response_id,
+        "response_id": data.get("responseId") or response_id,
+        "task_id": data.get("taskId"),
+        "model": data.get("model") or data.get("modelVersion"),
         "usage": data.get("usage") or data.get("usageMetadata"),
     }
     if data.get("choices") is not None:
@@ -732,7 +749,7 @@ def compact_response(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def derive_native_video_overall_result(parsed: Dict[str, Any]) -> Dict[str, Any]:
     """把模型感知事实归一为甲方九标签，综合结论不交给模型自由发挥。"""
-    normalized = dict(parsed)
+    normalized = normalize_minor_damage_evidence(copy.deepcopy(parsed))
     damage = dict(normalized.get("damage_assessment") or {})
     if (
         damage.get("main_video_detail_sufficient") is False
@@ -747,17 +764,17 @@ def derive_native_video_overall_result(parsed: Dict[str, Any]) -> Dict[str, Any]
         normalized["issue_visible"] = None
 
     claimed_item = dict(normalized.get("claimed_item_assessment") or {})
-    claimed_item_times = [
-        seconds
-        for item in normalized.get("evidence_refs") or []
-        if isinstance(item, dict) and item.get("field") == "claimed_item"
-        for seconds in [_time_seconds(item.get("timestamp"))]
-        if seconds is not None
-    ]
-    if claimed_item.get("appeared") is True and claimed_item_times:
+    claimed_item_times = claimed_item_evidence_times(normalized)
+    if claimed_item.get("appeared") is True and len(claimed_item_times) >= 2:
         claimed_item["first_visible_timestamp"] = format_time(min(claimed_item_times))
         claimed_item["last_visible_timestamp"] = format_time(max(claimed_item_times))
         normalized["claimed_item_assessment"] = claimed_item
+    elif not claimed_item_identity_window_is_traceable(normalized):
+        claimed_item["presentation_complete"] = None
+        claimed_item["offscreen_during_presentation"] = None
+        normalized["claimed_item_assessment"] = claimed_item
+        normalized["all_items_shown"] = None
+        normalized["has_offscreen"] = None
     if isinstance(claimed_item.get("offscreen_during_presentation"), bool):
         normalized["has_offscreen"] = claimed_item["offscreen_during_presentation"]
 
@@ -923,9 +940,30 @@ def call_model(
     retries: int,
     deadline_at: Optional[float] = None,
 ) -> Dict[str, Any]:
-    business_scenario = str((case.get("structured_business_context") or {}).get("business_scenario") or "")
+    business_scenario = str(
+        (case.get("structured_business_context") or {}).get("business_scenario")
+        or case.get("scenario")
+        or ""
+    )
     analysis_mode = str((case.get("structured_business_context") or {}).get("analysis_mode") or "")
-    if analysis_mode == "opening_start_only":
+    if (
+        not analysis_mode
+        and business_scenario == "product_damage"
+        and not (case.get("native_video") or case.get("native_videos"))
+        and case.get("frames")
+    ):
+        analysis_mode = "sampled_video_perception"
+    if (
+        not analysis_mode
+        and business_scenario == "product_damage"
+        and not (case.get("native_video") or case.get("native_videos") or case.get("frames"))
+        and case.get("supplemental_images")
+    ):
+        analysis_mode = "product_damage_images"
+    if analysis_mode == "opening_video_role_preflight":
+        system_prompt = OPENING_VIDEO_ROLE_SYSTEM_PROMPT
+        user_prompt = build_opening_video_role_prompt(case)
+    elif analysis_mode == "opening_start_only":
         system_prompt = OPENING_START_SYSTEM_PROMPT
         user_prompt = build_opening_start_prompt(case)
     elif analysis_mode == "opening_compliance_only":
@@ -955,6 +993,12 @@ def call_model(
             }.get(analysis_mode, "native_video"),
         )
         user_prompt = build_selection_prompt(case)
+    elif analysis_mode == "product_damage_images":
+        system_prompt = build_product_damage_image_system_prompt()
+        user_prompt = build_product_damage_image_prompt(case)
+    elif not analysis_mode and business_scenario in {"wrong_item", "missing_item"}:
+        system_prompt = build_fulfillment_observation_system_prompt(business_scenario)
+        user_prompt = build_fulfillment_observation_prompt(case)
     else:
         freeze_rule_snapshot(case)
         system_prompt = build_system_prompt(
@@ -971,6 +1015,7 @@ def call_model(
         if not options:
             return {"status": "skipped", "error": "missing_api_key", "cost_status": "not_incurred"}
         payload = gemini_payload(system_prompt, user_prompt, case, cfg)
+        request_profile = model_request_profile(cfg, payload)
         response: Dict[str, Any] = {}
         external_file_uri = bool((case.get("native_video") or {}).get("file_uri"))
         attempted_channel = False
@@ -1060,6 +1105,16 @@ def call_model(
             "max_tokens": 4096,
             "response_format": {"type": "json_object"},
         }
+        request_profile = {
+            "provider": str(cfg.get("provider") or ""),
+            "model": str(cfg.get("model") or ""),
+            "thinking_level": "provider_default",
+            "media_resolution": "provider_default",
+            "max_output_tokens": payload.get("max_tokens", "provider_default"),
+            "native_video_count": 0,
+            "sampling_fps": None,
+            "transport": "image_parts",
+        }
         response = post_with_retries(
             cfg["endpoint"],
             {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -1103,29 +1158,73 @@ def call_model(
             "total_tokens": raw_usage.get("total_tokens"),
             "raw": raw_usage,
         }
-    parsed_before_boundary = parse_model_json(text)
+    unknown_cost_calls = sum(
+        1
+        for item in http_attempts
+        if item.get("outcome") == "failed" and item.get("request_sent") is True
+    )
+    cost_status = "partial_unknown" if unknown_cost_calls else "estimated"
+    response_schema = resolve_response_schema(
+        business_scenario or case["scenario"],
+        analysis_mode,
+        bool(case.get("native_video") or case.get("native_videos")),
+    )
+    try:
+        parsed_before_boundary = validate_model_response(
+            parse_model_json(text),
+            response_schema,
+        )
+    except ModelResponseValidationError as exc:
+        return {
+            "status": "invalid_output",
+            "error_type": "response_schema_validation",
+            "error": str(exc),
+            "model": cfg["model"],
+            "display_model": cfg.get("display_model") or cfg["model"],
+            "provider": cfg["provider"],
+            "status_code": response.get("status_code"),
+            "latency_seconds": response.get("latency_seconds"),
+            "usage": usage,
+            "cost": estimate_model_cost(cfg, usage),
+            "cost_status": cost_status,
+            "unknown_cost_calls": unknown_cost_calls,
+            "estimated_cost_calls": 1,
+            "request_profile": request_profile,
+            "http_attempts": http_attempts,
+            **_model_http_metrics(http_attempts),
+            "raw_response": compact_response(response.get("data") or {}),
+        }
     if analysis_mode in {
         "object_continuity_only", "damage_causality_only",
         "opening_start_only", "opening_compliance_only", "native_video_perception",
+        "opening_video_role_preflight",
         "sampled_video_perception",
         "sampled_video_batch_observation", "sampled_video_perception_reduce",
         "claim_identity_only",
-        "claimed_item_detail_only",
+        "claimed_item_detail_only", "product_damage_images",
     }:
-        parsed = (
-            derive_native_video_overall_result(parsed_before_boundary)
-            if analysis_mode in {
-                "native_video_perception",
-                "sampled_video_perception",
-                "sampled_video_perception_reduce",
-            }
-            else parsed_before_boundary
-        )
+        if analysis_mode == "product_damage_images":
+            from prompts.visual_review.product_damage_image_adapter import (
+                expand_product_damage_image_observation,
+            )
+            parsed = expand_product_damage_image_observation(parsed_before_boundary, case)
+        else:
+            parsed = (
+                derive_native_video_overall_result(parsed_before_boundary)
+                if analysis_mode in {
+                    "native_video_perception",
+                    "sampled_video_perception",
+                    "sampled_video_perception_reduce",
+                }
+                else parsed_before_boundary
+            )
     else:
         if (business_scenario or case["scenario"]) in {"wrong_item", "missing_item"}:
-            parsed_before_boundary["fulfillment_reconciliation"] = aggregate_fulfillment_reconciliation(
-                [parsed_before_boundary], case, business_scenario or case["scenario"]
-            )
+            review_chunk = (case.get("structured_business_context") or {}).get("review_chunk")
+            if not review_chunk:
+                parsed_before_boundary["fulfillment_reconciliation"] = aggregate_fulfillment_reconciliation(
+                    [parsed_before_boundary], case, business_scenario or case["scenario"]
+                )
         parsed = apply_damage_causality_guard(
             enforce_boundary(parsed_before_boundary),
             business_scenario or case["scenario"],
@@ -1139,12 +1238,6 @@ def call_model(
         )
         parsed = apply_fulfillment_guard(parsed, business_scenario or case["scenario"])
     label = load_report_label(case["case_id"])
-    unknown_cost_calls = sum(
-        1
-        for item in http_attempts
-        if item.get("outcome") == "failed" and item.get("request_sent") is True
-    )
-    cost_status = "partial_unknown" if unknown_cost_calls else "estimated"
     return {
         "status": "success",
         "model": cfg["model"],
@@ -1159,6 +1252,7 @@ def call_model(
         "cost_status": cost_status,
         "unknown_cost_calls": unknown_cost_calls,
         "estimated_cost_calls": 1,
+        "request_profile": request_profile,
         "attempts": failures,
         "http_attempts": http_attempts,
         **_model_http_metrics(http_attempts),
@@ -2327,6 +2421,14 @@ def _aggregate_chunk_results(
         "calibration_status": "uncalibrated_model_score",
         "interpretation": "各分数分别表示模型自评、成因假设、对账识别和规则降级后的决策强度；在留出集校准前均不等同于真实正确率。",
     }
+    request_profile = next(
+        (
+            copy.deepcopy(item["request_profile"])
+            for item in billed_results
+            if isinstance(item.get("request_profile"), dict) and item["request_profile"]
+        ),
+        {},
+    )
     return {
         "status": "success",
         "latency_seconds": round(sum(_safe_number(item.get("latency_seconds")) for item in billed_results), 2),
@@ -2337,6 +2439,7 @@ def _aggregate_chunk_results(
         "http_attempts": http_attempts,
         "usage": usage,
         "cost": {"estimated_usd": estimated_usd},
+        "request_profile": request_profile,
         **cost_observability,
         "_channel_route_attempts": collect_channel_route_attempts(billed_results),
         "parsed": parsed,
@@ -2473,6 +2576,74 @@ def call_model_chunked(
         output["evaluation"] = evaluate(parsed, load_report_label(case["case_id"]))
         output["policy_decision"] = policy_decision(parsed)
         return output
+    if (
+        scenario == "product_damage"
+        and frames
+        and not str(
+            (case.get("structured_business_context") or {}).get("analysis_mode") or ""
+        )
+    ):
+        result = run_sampled_video_perception(
+            case,
+            invoke_model=invoke_model,
+            merge_billing=merge_model_billing,
+            batch_size=limit,
+            overlap=max(
+                0,
+                min(int(os.getenv("REVIEW_SAMPLED_BATCH_OVERLAP", "2") or 2), limit - 1),
+            ),
+            workers=max(
+                1,
+                min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4),
+            ),
+        )
+        parsed = result.get("parsed") or {}
+        result["evaluation"] = evaluate(parsed, load_report_label(case["case_id"]))
+        result["policy_decision"] = policy_decision(parsed)
+        return result
+    if (
+        scenario in {"wrong_item", "missing_item"}
+        and (case.get("native_video") or case.get("native_videos"))
+        and case.get("supplemental_images")
+    ):
+        video_case = copy.deepcopy(case)
+        video_case["frames"] = []
+        video_case["supplemental_images"] = []
+        video_case["official_reference_images"] = []
+        video_structured = dict(video_case.get("structured_business_context") or {})
+        video_structured["review_chunk"] = {"pass_type": "fulfillment_video"}
+        video_case["structured_business_context"] = video_structured
+
+        supplemental_case = copy.deepcopy(case)
+        supplemental_case["native_video"] = None
+        supplemental_case["native_videos"] = []
+        supplemental_case["videos"] = []
+        supplemental_case["frames"] = []
+        supplemental_structured = dict(supplemental_case.get("structured_business_context") or {})
+        supplemental_structured["review_chunk"] = {"pass_type": "fulfillment_supplemental"}
+        supplemental_case["structured_business_context"] = supplemental_structured
+
+        source_results = []
+        source_failures = []
+        for source_case, representation in (
+            (video_case, "native_video_only"),
+            (supplemental_case, "supplemental_images_only"),
+        ):
+            source_result = invoke_model(source_case)
+            source_result["input_representation"] = representation
+            source_result["model_image_count"] = len(source_case.get("supplemental_images") or [])
+            (source_results if source_result.get("status") == "success" else source_failures).append(source_result)
+        if not source_results:
+            result = merge_model_billing(source_failures[0], source_failures[1:])
+            result["chunking"] = {
+                "pipeline_mode": "source_isolated_fulfillment",
+                "segment_count": len(source_failures),
+                "total_model_calls": sum(_physical_model_call_count(item) for item in source_failures),
+            }
+            return result
+        result = _aggregate_chunk_results(case, source_results, main_failures=source_failures)
+        result.setdefault("chunking", {})["pipeline_mode"] = "source_isolated_fulfillment"
+        return result
     if not frames:
         result = invoke_model(case)
         result["chunking"] = {

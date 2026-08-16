@@ -34,7 +34,7 @@ def action_chain():
     common = {"video_index": 1, "subject": "撕拉片", "location": "右上角", "chain_id": "chain-1"}
     return {
         "before_action_evidence": [{**common, "global_frame_index": 10, "timestamp": "00:09.00", "fact": "动作前完整"}],
-        "action_evidence": [{**common, "global_frame_index": 11, "timestamp": "00:10.00", "fact": "用户撕拉"}],
+        "action_evidence": [{**common, "global_frame_index": 11, "timestamp": "00:10.00", "action_relation": "direct_contact", "fact": "用户撕拉"}],
         "after_action_evidence": [{**common, "global_frame_index": 12, "timestamp": "00:11.00", "fact": "动作后断裂"}],
     }
 
@@ -69,6 +69,13 @@ class DamageCausalityTest(unittest.TestCase):
         self.assertIn("即使损伤成因仍无法确定", prompt)
         self.assertIn("不能只为确认损伤成因要求重交开箱视频", prompt)
         self.assertIn("外箱完成开箱起点证明后离镜", prompt)
+
+    def test_product_damage_prompt_does_not_turn_missing_opening_material_into_negative(self):
+        prompt = build_system_prompt("product_damage")
+
+        self.assertIn("普通损伤缺少开箱硬门槛时只输出补件或复核", prompt)
+        self.assertIn("严重或极严重结构性损伤", prompt)
+        self.assertNotIn("某项不合规会导致诉求不被支持", prompt)
 
     def test_evidence_guard_does_not_rewrite_case_classification(self):
         result = apply_damage_causality_guard(
@@ -232,6 +239,30 @@ class DamageCausalityTest(unittest.TestCase):
         self.assertEqual(without_change["damage_evidence_tendency"], "supports_claim")
         self.assertEqual(with_change["damage_evidence_tendency"], "does_not_support_claim")
         self.assertNotIn("predicted_label", with_change)
+
+    def test_non_contact_action_cannot_form_direct_customer_damage_chain(self):
+        chain = action_chain()
+        chain["action_evidence"][0]["action_relation"] = "no_contact"
+        chain["action_evidence"][0]["fact"] = "手在旁边悬停，未接触商品。"
+        result = apply_damage_causality_guard(
+            {
+                "damage_causality_assessment": assessment(
+                    damage_timing="appears_during_opening",
+                    most_likely_origin="customer_opening_or_handling",
+                    causal_evidence_level="direct",
+                    claim_support="not_supported",
+                    opening_action_visible=True,
+                    damage_change_observed=True,
+                    causal_action_relation="no_contact",
+                    **chain,
+                ),
+            },
+            "product_damage",
+        )
+
+        resolved = result["damage_causality_assessment"]
+        self.assertEqual(resolved["most_likely_origin"], "indeterminate")
+        self.assertNotEqual(result["damage_evidence_tendency"], "does_not_support_claim")
 
     def test_customer_damage_without_structured_frame_chain_keeps_visible_fact_support(self):
         result = apply_damage_causality_guard(

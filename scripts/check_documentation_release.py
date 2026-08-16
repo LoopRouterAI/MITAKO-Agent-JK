@@ -15,6 +15,13 @@ REQUIRED_FILES = (
     "README.md",
     "CHANGELOG.md",
     "docs/README.md",
+    "docs/product/四场景审核业务决策与报告契约-20260812.md",
+    "docs/product/四场景审核主线进度-20260814.md",
+    "docs/product/四场景黄金审核经验/README.md",
+    "docs/product/四场景黄金审核经验/01-商品有伤黄金审核经验.md",
+    "docs/product/四场景黄金审核经验/02-发错货黄金审核经验.md",
+    "docs/product/四场景黄金审核经验/03-漏发货黄金审核经验.md",
+    "docs/product/四场景黄金审核经验/04-未成年人退款资料黄金审核经验.md",
     "docs/api/rest-api-overview.md",
     "docs/delivery/README.md",
     "docs/delivery/deployment-guide.md",
@@ -24,39 +31,15 @@ REQUIRED_FILES = (
     "docs/delivery/review-advisory-api.md",
     "docs/delivery/after-sales-agent-integration.md",
     "docs/delivery/openapi.yaml",
-    "docs/delivery/mitako-full-requirement-reaudit-20260711.html",
-    "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
-    "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
-    "docs/delivery/客服Agent与私域Agent正式接入前人工UAT指南_20260716.md",
     "甲方沟通交付文档/README.md",
     "甲方沟通交付文档/index.html",
-    "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
-    "甲方沟通交付文档/0717四样本审核工程整改与验收报告.html",
-    "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
-    "甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html",
-    "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
-    "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
-    "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
-    "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
-    "甲方沟通交付文档/0728事实结论与人工复审闭环更新说明.html",
-    "甲方沟通交付文档/0728动态素材与统一审核链路更新说明.html",
+    "甲方沟通交付文档/0814四场景审核业务理解与功能验收说明.html",
     "我方内部开发文档/README.md",
     "我方内部开发文档/index.html",
     "我方内部开发文档/工程师入门.md",
     "我方内部开发文档/系统清单与代码地图.md",
     "我方内部开发文档/Java开发部署与联调指南.md",
     "我方内部开发文档/内部研发包交付说明.md",
-    "我方内部开发文档/升级日志-2026-07-11.md",
-    "我方内部开发文档/升级日志-2026-07-15.md",
-    "我方内部开发文档/升级日志-2026-07-16.md",
-    "我方内部开发文档/升级日志-2026-07-17.md",
-    "我方内部开发文档/升级日志-2026-07-17-四样本审核.md",
-    "我方内部开发文档/升级日志-2026-07-20-未成年人资料字段一致性.md",
-    "我方内部开发文档/升级日志-2026-07-20-视觉证据安全与SKU基准.md",
-    "我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
-    "我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md",
-    "我方内部开发文档/升级日志-2026-07-23-多源证据与接口联调.md",
-    "我方内部开发文档/升级日志-2026-07-28-事实结论与人工复审闭环.md",
 )
 REQUIRED_API_PATHS = (
     "/api/v1/review/contracts",
@@ -176,12 +159,13 @@ def main() -> int:
         errors.append("甲方打包脚本没有把验收地址传给内部预发布门禁")
     if "我方内部开发文档" in package_script:
         errors.append("打包脚本出现内部文档明文，请确认未复制到客户包")
-    if "$obsoleteCustomerDocs" not in package_script or "[System.IO.File]::Delete($obsoletePath)" not in package_script:
-        errors.append("打包脚本未启用过时甲方文档排除规则")
-    if "0728事实结论与人工复审闭环更新说明.html" not in package_script:
-        errors.append("甲方打包证据清单缺少 0728 最新非技术更新说明")
-    if "0728动态素材与统一审核链路更新说明.html" not in package_script:
-        errors.append("甲方打包证据清单缺少 0728 动态素材更新说明")
+    for marker in (
+        "0814四场景审核业务理解与功能验收说明.html",
+        "review_0816_four_scenario_blind_results_latest.json",
+        "_verify_current_four_scenario_acceptance",
+    ):
+        if marker not in package_script:
+            errors.append(f"甲方打包脚本缺少当前四场景发布门禁: {marker}")
     for marker in (
         "report-signing-secret.txt",
         "secrets.token_hex(32)",
@@ -195,8 +179,14 @@ def main() -> int:
         errors.append(".env.example 未默认要求持久报告签名密钥")
 
     internal_package_script = (ROOT / "scripts/package_internal_release.ps1").read_text(encoding="utf-8")
-    if "升级日志-2026-07-28-事实结论与人工复审闭环.md" not in internal_package_script:
-        errors.append("内部打包证据清单缺少 0728 最新升级日志")
+    for marker in (
+        "四场景审核业务决策与报告契约-20260812.md",
+        "0814四场景审核业务理解与功能验收说明.html",
+        "review_0816_four_scenario_blind_results_latest.json",
+        "_verify_current_four_scenario_acceptance",
+    ):
+        if marker not in internal_package_script:
+            errors.append(f"内部打包脚本缺少当前四场景发布门禁: {marker}")
 
     if errors:
         print("文档发布校验失败：")

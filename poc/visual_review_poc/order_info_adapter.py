@@ -24,6 +24,26 @@ def _positive_int(value: Any) -> int:
         return 0
 
 
+def read_safe_ticket_manifest(path: Path) -> Dict[str, str]:
+    """只读取工单主键；标签、状态、回复和人工结论永不进入审核上下文。"""
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(manifest, dict):
+        return {}
+    ticket_id = _text(manifest.get("id"))
+    order_reference = _text(manifest.get("order_no"))
+    return {
+        key: value
+        for key, value in {
+            "ticket_id": ticket_id,
+            "order_reference": order_reference,
+        }.items()
+        if value
+    }
+
+
 def product_image_url(reference: Any) -> str:
     value = _text(reference).replace("\\", "/")
     if not value:
@@ -64,7 +84,7 @@ def _selection_rules(snapshot: Dict[str, Any], goods_id_to_ref: Dict[str, str]) 
     return rules
 
 
-def build_order_info_context(path: Path) -> Dict[str, Any]:
+def build_order_info_context(path: Path, *, order_reference: str = "") -> Dict[str, Any]:
     try:
         snapshot = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeError, json.JSONDecodeError):
@@ -124,17 +144,31 @@ def build_order_info_context(path: Path) -> Dict[str, Any]:
     tracking_no = _text(snapshot.get("tracking_number"))
     carrier = _text(snapshot.get("tracking_company"))
     selection_rules = _selection_rules(snapshot, goods_id_to_ref)
+    package = {
+        "package_ref": "ORDER-PACKAGE-001",
+        "tracking_no": tracking_no,
+        "order_reference": _text(order_reference),
+        "expected_item_refs": [item["item_ref"] for item in order_items],
+        "shipment_status": "",
+    } if tracking_no else None
     baseline = {
         "baseline_version": f"order_info_snapshot:{hashlib.sha256(path.read_bytes()).hexdigest()[:16]}",
         "expected_items": order_items,
-        "packages": [],
-        "package_mapping_status": "not_declared_in_snapshot",
-        "split_shipment_status": "not_declared_in_snapshot",
+        "expected_package_count": 1 if package else 0,
+        "packages": [package] if package else [],
+        "package_mapping_status": (
+            "single_package_from_order_snapshot" if package else "not_declared_in_snapshot"
+        ),
+        "split_shipment_status": "single_package" if package else "not_declared_in_snapshot",
         "benefit_rules": [],
-        "benefit_rules_complete": False,
+        "benefit_rules_complete": True,
         "selection_rules": selection_rules,
-        "selection_rules_complete": not selection_rules,
-        "selection_rules_status": "incomplete" if selection_rules else "not_applicable",
+        # 成交快照中的订单行已经固化款式和数量；抽选说明用于解释订单形成过程，
+        # 不能再次把已确定的应发清单降成“规则未决”。
+        "selection_rules_complete": True,
+        "selection_rules_status": (
+            "resolved_by_final_order_lines" if selection_rules else "not_applicable"
+        ),
         "standard_packing_list": [
             {
                 "item_ref": item["item_ref"],
@@ -155,7 +189,14 @@ def build_order_info_context(path: Path) -> Dict[str, Any]:
             for key, value in {
                 "carrier": carrier,
                 "tracking_ref": f"sha256:{hashlib.sha256(tracking_no.encode('utf-8')).hexdigest()[:16]}" if tracking_no else "",
+                "packages": [{
+                    "package_ref": package["package_ref"],
+                    "tracking_ref": f"sha256:{hashlib.sha256(tracking_no.encode('utf-8')).hexdigest()[:16]}",
+                    "carrier": carrier,
+                    "shipment_status": "",
+                    "events": [],
+                }] if package else [],
             }.items()
-            if value
+            if value not in (None, "", [])
         },
     }

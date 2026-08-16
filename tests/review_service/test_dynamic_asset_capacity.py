@@ -260,6 +260,45 @@ class DynamicAssetCapacityTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retried["status"], "RETRYING")
         self.assertIsNone(rejected)
 
+    def test_zero_token_native_technical_failure_can_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            store, "DB_PATH", Path(temp_dir) / "review.sqlite3"
+        ):
+            job = store.create_job({
+                "job_id": "RJ-NATIVE-TECHNICAL-RETRY",
+                "tenant_id": "mitako",
+                "client_case_id": "CASE-NATIVE-TECHNICAL-RETRY",
+                "idempotency_key": "",
+                "scenario": "product_damage",
+                "metadata": {},
+                "assets": [],
+            }, "hash-native-technical-retry")
+            store.finish_job(
+                job["job_id"],
+                status="SUCCEEDED",
+                result={
+                    "review": {
+                        "advisory_assessment": {
+                            "workflow_recommendation": "human_review",
+                        },
+                        "agent_report": {
+                            "inference_estimate": {
+                                "total_tokens": 0,
+                                "native_video": {
+                                    "technical_status": "failed",
+                                    "status_code": 400,
+                                },
+                            }
+                        },
+                    }
+                },
+                diagnostics={},
+            )
+
+            retried = store.queue_retry(job["job_id"])
+
+        self.assertEqual(retried["status"], "RETRYING")
+
     def test_stale_worker_cannot_overwrite_newer_review_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
             store, "DB_PATH", Path(temp_dir) / "review.sqlite3"
@@ -278,6 +317,7 @@ class DynamicAssetCapacityTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(store.claim_job(job["job_id"], 60))
             stale_attempt = int((store.get_job(job["job_id"]) or {})["attempts"])
+            first_request_id = str((store.get_job(job["job_id"]) or {})["workbench_request_id"])
             with store._connect() as conn:
                 conn.execute(
                     "UPDATE review_jobs SET lease_until=0 WHERE job_id=?",
@@ -286,6 +326,7 @@ class DynamicAssetCapacityTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(job["job_id"], store.recover_incomplete())
             self.assertTrue(store.claim_job(job["job_id"], 60))
             current_attempt = int((store.get_job(job["job_id"]) or {})["attempts"])
+            recovered_request_id = str((store.get_job(job["job_id"]) or {})["workbench_request_id"])
 
             stale_result = store.finish_job(
                 job["job_id"],
@@ -304,6 +345,187 @@ class DynamicAssetCapacityTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(stale_result["status"], "RUNNING")
         self.assertEqual(accepted_result["result"], {"worker": "current"})
+        self.assertEqual(first_request_id, "RJ-FENCING-workbench-1")
+        self.assertEqual(recovered_request_id, first_request_id)
+
+    def test_queue_snapshot_includes_failed_model_usage_for_the_same_tenant(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            store, "DB_PATH", Path(temp_dir) / "review.sqlite3"
+        ):
+            def finish(job_id: str, tenant_id: str, status: str, tokens: int, usd: float) -> None:
+                store.create_job(
+                    {
+                        "job_id": job_id,
+                        "tenant_id": tenant_id,
+                        "client_case_id": job_id,
+                        "idempotency_key": "",
+                        "scenario": "product_damage",
+                        "metadata": {},
+                        "assets": [],
+                    },
+                    f"hash-{job_id}",
+                )
+                store.finish_job(
+                    job_id,
+                    status=status,
+                    result={
+                        "review": {
+                            "agent_report": {
+                                "inference_estimate": {
+                                    "total_tokens": tokens,
+                                    "estimated_usd": usd,
+                                }
+                            }
+                        }
+                    },
+                    diagnostics={},
+                )
+
+            finish("RJ-METRIC-OK", "mitako", "SUCCEEDED", 100, 0.10)
+            finish("RJ-METRIC-FAILED", "mitako", "FAILED", 25, 0.02)
+            finish("RJ-METRIC-OTHER", "other-tenant", "FAILED", 900, 9.0)
+            snapshot = store.snapshot("mitako")
+
+        self.assertEqual(snapshot["inference_total_tokens"], 125)
+        self.assertEqual(snapshot["inference_estimated_usd"], 0.12)
+
+    def test_business_retry_preserves_prior_attempt_usage_and_cost(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            store, "DB_PATH", Path(temp_dir) / "review.sqlite3"
+        ):
+            job = store.create_job(
+                {
+                    "job_id": "RJ-RETRY-USAGE",
+                    "tenant_id": "mitako",
+                    "client_case_id": "CASE-RETRY-USAGE",
+                    "idempotency_key": "",
+                    "scenario": "product_damage",
+                    "metadata": {"batch_id": "BATCH-RETRY-USAGE"},
+                    "assets": [],
+                },
+                "hash-retry-usage",
+            )
+            store.finish_job(
+                job["job_id"],
+                status="FAILED",
+                result={
+                    "review": {
+                        "agent_report": {
+                            "inference_estimate": {
+                                "total_tokens": 25,
+                                "estimated_usd": 0.02,
+                            }
+                        }
+                    }
+                },
+                diagnostics={},
+            )
+
+            self.assertIsNotNone(store.queue_retry(job["job_id"]))
+            queued_snapshot = store.snapshot("mitako")
+            self.assertEqual(queued_snapshot["inference_total_tokens"], 25)
+            self.assertEqual(queued_snapshot["inference_estimated_usd"], 0.02)
+            self.assertTrue(store.claim_job(job["job_id"], 60))
+            current_attempt = int((store.get_job(job["job_id"]) or {})["attempts"])
+            store.finish_job(
+                job["job_id"],
+                status="SUCCEEDED",
+                result={
+                    "review": {
+                        "agent_report": {
+                            "inference_estimate": {
+                                "total_tokens": 100,
+                                "estimated_usd": 0.10,
+                            }
+                        }
+                    }
+                },
+                diagnostics={},
+                expected_attempts=current_attempt,
+            )
+
+            snapshot = store.snapshot("mitako")
+            batch = store.batch_snapshot("mitako", "BATCH-RETRY-USAGE")
+
+        self.assertEqual(snapshot["inference_total_tokens"], 125)
+        self.assertEqual(snapshot["inference_estimated_usd"], 0.12)
+        self.assertEqual(batch[0]["total_tokens"], 125)
+        self.assertAlmostEqual(batch[0]["estimated_usd"], 0.12)
+
+    def test_retry_and_lease_recovery_preserve_attempt_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            store, "DB_PATH", Path(temp_dir) / "review.sqlite3"
+        ):
+            job = store.create_job(
+                {
+                    "job_id": "RJ-ATTEMPT-HISTORY",
+                    "tenant_id": "mitako",
+                    "client_case_id": "CASE-ATTEMPT-HISTORY",
+                    "idempotency_key": "",
+                    "scenario": "product_damage",
+                    "metadata": {},
+                    "assets": [],
+                },
+                "hash-attempt-history",
+            )
+            self.assertTrue(store.claim_job(job["job_id"], 60))
+            first_attempt = int((store.get_job(job["job_id"]) or {})["attempts"])
+            store.finish_job(
+                job["job_id"],
+                status="FAILED",
+                result={"review": {"agent_report": {"inference_estimate": {"total_tokens": 7}}}},
+                diagnostics={"error_type": "workbench_http_error", "status_code": 503},
+                expected_attempts=first_attempt,
+            )
+            self.assertIsNotNone(store.queue_retry(job["job_id"]))
+            self.assertTrue(store.claim_job(job["job_id"], 60))
+            with store._connect() as conn:
+                conn.execute(
+                    "UPDATE review_jobs SET lease_until=0 WHERE job_id=?",
+                    (job["job_id"],),
+                )
+            self.assertIn(job["job_id"], store.recover_incomplete())
+
+            history = store.list_attempts(job["job_id"])
+
+        self.assertEqual([item["status"] for item in history], ["FAILED", "LEASE_EXPIRED"])
+        self.assertEqual(history[0]["diagnostics"]["status_code"], 503)
+        self.assertEqual(history[1]["diagnostics"]["error_type"], "lease_expired")
+        self.assertEqual(history[0]["attempt"], 1)
+        self.assertEqual(history[1]["attempt"], 2)
+
+    def test_technical_retry_stops_after_three_execution_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            store, "DB_PATH", Path(temp_dir) / "review.sqlite3"
+        ):
+            job = store.create_job(
+                {
+                    "job_id": "RJ-RETRY-LIMIT",
+                    "tenant_id": "mitako",
+                    "client_case_id": "CASE-RETRY-LIMIT",
+                    "idempotency_key": "",
+                    "scenario": "product_damage",
+                    "metadata": {},
+                    "assets": [],
+                },
+                "hash-retry-limit",
+            )
+            for expected_attempt in range(1, 4):
+                self.assertTrue(store.claim_job(job["job_id"], 60))
+                current = store.get_job(job["job_id"]) or {}
+                self.assertEqual(current["attempts"], expected_attempt)
+                store.finish_job(
+                    job["job_id"],
+                    status="FAILED",
+                    result={},
+                    diagnostics={"error_type": "temporary_failure"},
+                    expected_attempts=expected_attempt,
+                )
+                retry = store.queue_retry(job["job_id"])
+                if expected_attempt < 3:
+                    self.assertIsNotNone(retry)
+                else:
+                    self.assertIsNone(retry)
 
 
 if __name__ == "__main__":

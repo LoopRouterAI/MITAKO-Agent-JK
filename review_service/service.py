@@ -12,6 +12,7 @@ import re
 import shutil
 import sqlite3
 import time
+from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -28,12 +29,28 @@ from poc.visual_review_poc.report_renderer import render_public_report
 from poc.visual_review_poc.local_video_triage_demo import adaptive_frame_budget
 from review_input_safety import assert_review_input_safe
 from review_media_safety import ignored_upload_reason, valid_media_magic
+from review_public_safety import redact_public_review_data
+from prompts.visual_review.contract import (
+    REVIEW_CONTRACT_VERSION,
+    SCENARIO_LABELS,
+    normalize_product_damage_evidence_contract,
+)
 
 from . import store
 from .media_forensics import forensics_timeout_seconds, inspect_job_media, is_video_asset, resolve_ffprobe
 from .input_readiness import assess_input_readiness
+from .material_readiness import build_review_inventory, derive_material_readiness
+from .media_processing import (
+    load_job_review_manifest,
+    media_execution_from_manifest,
+    prepare_job_review_media,
+)
 from .decision_policy import apply_review_decision_policy
-from .advisory_assessment import attach_advisory_assessment, html_report_requested
+from .advisory_assessment import (
+    attach_advisory_assessment,
+    html_report_requested,
+    is_no_action_continuation,
+)
 from .schemas import ReviewCaseMetadata
 
 
@@ -44,15 +61,8 @@ SCENARIO_MAP = {
     "missing_item": "video_unboxing",
     "minor_refund": "minor_material",
 }
-SCENARIO_LABELS = {
-    "product_damage": "商品有伤",
-    "wrong_item": "发错货",
-    "missing_item": "漏发货",
-    "minor_refund": "未成年人退款资料",
-}
 MAX_WORKERS = max(1, min(int(os.getenv("REVIEW_JOB_WORKERS", "2") or 2), 8))
 EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="mitako-review")
-REVIEW_CONTRACT_VERSION = "2026-07-31.1"
 
 
 class WorkbenchRequestError(RuntimeError):
@@ -71,7 +81,10 @@ def _limit_bytes(name: str, default_mb: int) -> int:
 
 
 def upload_root() -> Path:
-    path = data_dir() / "review_jobs"
+    configured = os.getenv("REVIEW_UPLOAD_DIR", "").strip()
+    runtime_root = os.getenv("VISUAL_RUNTIME_MEDIA_DIR", "").strip()
+    path = Path(configured) if configured else Path(runtime_root) / "review_jobs" if runtime_root else data_dir() / "review_jobs"
+    path = path.resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -143,8 +156,8 @@ async def _save_uploads(job_id: str, metadata: ReviewCaseMetadata, uploads: Sequ
             "safe_limit": safe_limit,
         }, ensure_ascii=False))
 
-    max_asset = _limit_bytes("REVIEW_MAX_ASSET_MB", 650)
-    max_case = _limit_bytes("REVIEW_MAX_CASE_MB", 750)
+    max_asset = _limit_bytes("REVIEW_MAX_ASSET_MB", 1024)
+    max_case = _limit_bytes("REVIEW_MAX_CASE_MB", 2048)
     target_dir = upload_root() / job_id
     target_dir.mkdir(parents=True, exist_ok=False)
     assets: List[Dict[str, Any]] = []
@@ -306,6 +319,156 @@ def _job_media_signature(tenant_id: str, job_id: str, media_id: str, expires: in
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
+def job_asset_media_id(job_id: str, asset_id: str) -> str:
+    """为正式工单原始素材生成稳定、不可枚举的媒体标识。"""
+    raw = f"review-job-asset-v1\n{job_id}\n{asset_id}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:32]
+
+
+def resolve_job_media_path(job: Dict[str, Any], media_id: str) -> Optional[Tuple[Path, str]]:
+    """只解析当前工单目录内的持久素材，避免报告依赖 Workbench 临时文件。"""
+    job_id = str(job.get("job_id") or "")
+    if not job_id or not re.fullmatch(r"[0-9a-f]{32}", media_id):
+        return None
+    job_dir = (upload_root() / job_id).resolve()
+    video_assets = [item for item in job.get("assets") or [] if isinstance(item, dict) and is_video_asset(item)]
+    for index, _asset in enumerate(video_assets, start=1):
+        preview = (job_dir / f"browser_preview_{index:03d}.webm").resolve()
+        if job_asset_media_id(job_id, f"browser-preview-{index}") == media_id and preview.is_file() and preview.is_relative_to(job_dir):
+            return preview, "video/webm"
+    for asset in job.get("assets") or []:
+        if not isinstance(asset, dict) or job_asset_media_id(job_id, str(asset.get("asset_id") or "")) != media_id:
+            continue
+        stored_name = str(asset.get("stored_name") or "")
+        path = (job_dir / stored_name).resolve()
+        if path.is_file() and path.is_relative_to(job_dir):
+            return path, str(asset.get("mime_type") or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+    return None
+
+
+def _timestamp_fragment(item: Dict[str, Any]) -> str:
+    raw = item.get("timestamp_seconds")
+    if raw in (None, ""):
+        parts = str(item.get("timestamp") or "").split(":")
+        try:
+            raw = sum(float(part) * (60 ** index) for index, part in enumerate(reversed(parts)))
+        except (TypeError, ValueError):
+            return ""
+    try:
+        return f"{max(0.0, float(raw)):.3f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError, OverflowError):
+        return ""
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _review_derivative_manifest(job_dir: Path) -> Dict[str, Any]:
+    return load_job_review_manifest(job_dir)
+
+
+def _public_review_derivative(value: Dict[str, Any]) -> Dict[str, Any]:
+    allowed = {
+        "video_index", "source_sha256", "review_sha256", "source_bytes", "review_bytes",
+        "model_input_kind", "validation_status", "persisted_at",
+    }
+    output = {key: value[key] for key in allowed if value.get(key) not in (None, "")}
+    transform = value.get("transformation") if isinstance(value.get("transformation"), dict) else {}
+    output["transformation"] = {
+        key: item for key, item in transform.items()
+        if key in {
+            "quality_action", "quality_reasons", "quality_observations", "codec_profile", "cache_hit",
+            "source_width", "source_height", "source_fps", "source_bitrate_bps", "source_duration_seconds",
+            "proxy_width", "proxy_height", "proxy_fps", "proxy_bitrate_bps", "proxy_duration_seconds",
+        }
+    }
+    return output
+
+
+def _durable_job_media(agent_report: Dict[str, Any], job: Dict[str, Any]) -> Dict[str, Any]:
+    report = deepcopy(agent_report)
+    gallery = report.get("media_gallery") if isinstance(report.get("media_gallery"), dict) else {}
+    job_id = str(job.get("job_id") or "")
+    assets = [item for item in job.get("assets") or [] if isinstance(item, dict)]
+    video_assets = [item for item in assets if is_video_asset(item)]
+    image_assets = [
+        item for item in assets
+        if str(item.get("mime_type") or "").lower().startswith("image/")
+        or Path(str(item.get("original_name") or item.get("stored_name") or "")).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+    ]
+    if not job_id or not (video_assets or image_assets):
+        return report
+
+    job_dir = upload_root() / job_id
+    derivative_manifest = _review_derivative_manifest(job_dir)
+    derivatives = {
+        int(item.get("video_index") or 0): item
+        for item in derivative_manifest.get("videos") or []
+        if isinstance(item, dict) and int(item.get("video_index") or 0) > 0
+    }
+
+    def durable_rows(kind: str, index_key: str, source_assets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        existing = {
+            int(item.get(index_key)): item
+            for item in gallery.get(kind) or []
+            if isinstance(item, dict) and str(item.get(index_key) or "").isdigit()
+        }
+        rows = []
+        for index, asset in enumerate(source_assets, start=1):
+            row = deepcopy(existing.get(index) or {})
+            row[index_key] = index
+            original_url = f"/media-item/{job_asset_media_id(job_id, str(asset.get('asset_id') or ''))}"
+            if kind == "videos":
+                preview = job_dir / f"browser_preview_{index:03d}.webm"
+                review_url = (
+                    f"/media-item/{job_asset_media_id(job_id, f'browser-preview-{index}')}"
+                    if preview.is_file()
+                    else original_url
+                )
+                row.update({
+                    "url": review_url,
+                    "review_url": review_url,
+                    "original_url": original_url,
+                    "model_input_kind": "review_derivative" if preview.is_file() else "original",
+                    "comparison_available": preview.is_file(),
+                })
+                if index in derivatives:
+                    row["review_derivative"] = _public_review_derivative(derivatives[index])
+            else:
+                row["url"] = original_url
+            row.setdefault("bytes", asset.get("size"))
+            rows.append(row)
+        return rows
+
+    videos = durable_rows("videos", "video_index", video_assets)
+    images = durable_rows("images", "image_index", image_assets)
+    video_map = {int(item["video_index"]): item for item in videos}
+    frames = []
+    for raw_frame in gallery.get("frames") or []:
+        if not isinstance(raw_frame, dict):
+            continue
+        video = video_map.get(int(raw_frame.get("video_index") or 0))
+        if not video:
+            continue
+        frame = deepcopy(raw_frame)
+        frame.pop("url", None)
+        fragment = _timestamp_fragment(frame)
+        frame["video_url"] = video["url"] + (f"#t={fragment}" if fragment else "")
+        frames.append(frame)
+    report["media_gallery"] = {
+        **gallery,
+        "videos": videos,
+        "frames": frames,
+        "images": images,
+    }
+    return report
+
+
 def signed_job_media_url(
     tenant_id: str,
     job_id: str,
@@ -382,8 +545,10 @@ def _sanitize_public_value(value: Any) -> Any:
         }
     if isinstance(value, list):
         return [_sanitize_public_value(item) for item in value]
-    if isinstance(value, str) and _LOCAL_PATH_PATTERN.search(value):
-        return ""
+    if isinstance(value, str):
+        if _LOCAL_PATH_PATTERN.search(value):
+            return ""
+        return redact_public_review_data(value)
     return value
 
 
@@ -394,13 +559,13 @@ def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
     }
     public_result_fields = {
         "client_case_id", "scenario", "scenario_label", "source_status",
-        "media_forensics", "input_readiness", "boundary", "review",
+        "media_forensics", "input_readiness", "material_readiness", "boundary", "review",
         "recommended_escalation",
     }
     public_review_fields = {
         "review_label", "summary", "frame_strategy", "media_warnings",
         "agent_brief", "agent_report", "media_forensics", "advisory_assessment",
-        "report", "sampling",
+        "material_readiness", "report", "sampling", "media_preflight_execution",
     }
     output = {
         key: deepcopy(job[key])
@@ -431,6 +596,7 @@ def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
         }
         raw_agent_report = output["result"]["review"].get("agent_report")
         if isinstance(raw_agent_report, dict):
+            raw_agent_report = _durable_job_media(raw_agent_report, job)
             output["result"]["review"]["agent_report"] = {
                 key: deepcopy(raw_agent_report[key])
                 for key in _PUBLIC_AGENT_REPORT_FIELDS
@@ -481,7 +647,6 @@ def resolve_job_media_url(job: Dict[str, Any], media_id: str) -> str:
 def _effective_review_policies(metadata: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
     continuity = dict(metadata.get("continuity_policy") or {})
     causality = dict(metadata.get("damage_causality_policy") or {})
-    continuity.setdefault("out_of_frame_warning_seconds", 3.0)
     preset = str((metadata.get("sampling_policy") or {}).get("preset") or "adaptive")
     scenario = str(metadata.get("scenario") or "")
     if preset in {"strong", "strict", "forensic"}:
@@ -509,10 +674,9 @@ def _sampling_fields(metadata: Dict[str, Any]) -> Dict[str, str]:
     scenario = str(metadata.get("scenario") or "")
     continuity, causality = _effective_review_policies(metadata)
     if scenario in {"product_damage", "wrong_item", "missing_item"} and continuity.get("force_dense_scan") is True:
-        warning_seconds = max(0.5, min(float(continuity.get("out_of_frame_warning_seconds") or 3.0), 30.0))
         required_fps = continuity.get("scan_fps")
         if required_fps in (None, ""):
-            required_fps = min(2.0, max(0.2, 2.0 / warning_seconds))
+            required_fps = 1.0
         mode = "dense"
         fps = max(fps if preset != "adaptive" else 0.0, float(required_fps))
         max_frames = max(max_frames, min(int(policy.get("max_frames_per_video") or 1200), 1800))
@@ -538,6 +702,9 @@ def sampling_plan(
     continuity_policy: Optional[Dict[str, Any]] = None,
     damage_causality_policy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    quality_proxy_assessment_reasons = (
+        ["source_at_least_100mb"] if source_bytes >= 100 * 1024 * 1024 else []
+    )
     fields = _sampling_fields({
         "sampling_policy": policy,
         "scenario": scenario or "",
@@ -634,14 +801,25 @@ def sampling_plan(
         },
         "estimated_parallel_waves": math.ceil(estimated_total_calls / chunk_workers),
         "chunk_workers": chunk_workers,
-        "transcode_recommended": source_bytes >= 500 * 1024 * 1024 or duration_seconds >= 600,
-        "large_media_route": "object_storage_transcode_proxy" if source_bytes >= 500 * 1024 * 1024 or duration_seconds >= 600 else "direct_upload_and_frame_sampling",
+        "transcode_recommended": bool(quality_proxy_assessment_reasons),
+        "quality_proxy_assessment_reasons": quality_proxy_assessment_reasons,
+        "large_media_route": (
+            "quality_proxy_assessment"
+            if quality_proxy_assessment_reasons
+            else "direct_upload_and_native_video_review"
+        ),
     }
 
 
 def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
     metadata = job.get("metadata") or {}
     continuity_policy, damage_causality_policy = _effective_review_policies(metadata)
+    created_at = float(job.get("created_at") or 0)
+    assessment_at = (
+        datetime.fromtimestamp(created_at, timezone(timedelta(hours=8))).date().isoformat()
+        if created_at > 0
+        else ""
+    )
     return {
         "rule_tenant_id": str(job.get("tenant_id") or ""),
         "scenario": SCENARIO_MAP[job["scenario"]],
@@ -675,6 +853,7 @@ def _review_fields(job: Dict[str, Any]) -> Dict[str, str]:
         "damage_causality_policy": json.dumps(damage_causality_policy, ensure_ascii=False),
         "review_routing_policy": json.dumps(metadata.get("review_routing_policy") or {}, ensure_ascii=False),
         "minor_refund_policy": json.dumps(metadata.get("minor_refund_policy") or {}, ensure_ascii=False),
+        "assessment_at": assessment_at,
         "defer_postprocess": "true",
         "include_html_report": "false",
         **_sampling_fields(metadata),
@@ -695,7 +874,37 @@ def _validate_workbench_health(
         or capacity.get("soft_limit") != expected_soft_limit
         or capacity.get("safe_limit") != expected_safe_limit
     ):
-        raise ValueError("visual_workbench_contract_mismatch")
+        actual_contract = str(payload.get("review_contract_version") or "missing")
+        actual_soft = capacity.get("soft_limit")
+        actual_safe = capacity.get("safe_limit")
+        raise ValueError(
+            "visual_workbench_contract_mismatch:"
+            f"actual_contract={actual_contract};expected_contract={REVIEW_CONTRACT_VERSION};"
+            f"actual_capacity={actual_soft}/{actual_safe};"
+            f"expected_capacity={expected_soft_limit}/{expected_safe_limit}"
+        )
+
+
+def _check_workbench_health(expected_soft_limit: int, expected_safe_limit: int) -> None:
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
+                health = client.get(f"{_workbench_url()}/api/health")
+            if health.status_code != 200:
+                raise ValueError(f"visual_workbench_health_http_{health.status_code}")
+            _validate_workbench_health(
+                health.json(),
+                expected_soft_limit=expected_soft_limit,
+                expected_safe_limit=expected_safe_limit,
+            )
+            return
+        except (httpx.TransportError, ValueError) as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.25 * (attempt + 1))
+    assert last_error is not None
+    raise last_error
 
 
 def _workbench_request_policy() -> tuple[int, int]:
@@ -721,6 +930,9 @@ def _workbench_lease_seconds(job: Dict[str, Any]) -> int:
 
 
 def _workbench_request_id(job: Dict[str, Any]) -> str:
+    persisted = str(job.get("workbench_request_id") or "").strip()
+    if persisted:
+        return persisted
     try:
         execution_attempt = max(1, int(job.get("attempts") or 1))
     except (TypeError, ValueError, OverflowError):
@@ -728,8 +940,140 @@ def _workbench_request_id(job: Dict[str, Any]) -> str:
     return f"{job['job_id']}-workbench-{execution_attempt}"
 
 
+def _download_workbench_media(source: str, target: Path, max_bytes: int) -> bool:
+    split = urlsplit(str(source or ""))
+    if not re.fullmatch(r"/media-item/[0-9a-f]{32}", split.path):
+        return False
+    query = f"?{split.query}" if split.query else ""
+    url = f"{_workbench_url()}{split.path}{query}"
+    temporary = target.with_suffix(target.suffix + ".part")
+    temporary.unlink(missing_ok=True)
+    try:
+        with httpx.stream("GET", url, timeout=httpx.Timeout(180.0, connect=5.0), trust_env=False) as response:
+            if response.is_error:
+                return False
+            total = 0
+            head = b""
+            with temporary.open("wb") as handle:
+                for chunk in response.iter_bytes(1024 * 1024):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        return False
+                    if len(head) < 32:
+                        head = (head + chunk)[:32]
+                    handle.write(chunk)
+        if total <= 0 or not valid_media_magic(".webm", head):
+            return False
+        temporary.replace(target)
+        return True
+    except (OSError, httpx.HTTPError):
+        return False
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _persist_workbench_video_previews(job: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    review = payload.get("review") if isinstance(payload.get("review"), dict) else {}
+    execution = review.get("media_preflight_execution") if isinstance(review.get("media_preflight_execution"), dict) else {}
+    quality_indices = {
+        int(item.get("video_index") or 0)
+        for item in execution.get("videos") or []
+        if isinstance(item, dict) and item.get("submitted_source") == "quality_proxy"
+    }
+    if (execution.get("video") or {}).get("submitted_source") == "quality_proxy":
+        quality_indices.add(1)
+    gallery = ((review.get("agent_report") or {}).get("media_gallery") or {})
+    if not quality_indices or not isinstance(gallery, dict):
+        return
+    job_dir = upload_root() / str(job.get("job_id") or "")
+    job_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = job_dir / "review_media_derivatives.json"
+    existing_manifest = load_job_review_manifest(job_dir)
+    records = {
+        int(item.get("video_index") or 0): item
+        for item in existing_manifest.get("videos") or []
+        if isinstance(item, dict) and int(item.get("video_index") or 0) > 0
+    }
+    max_bytes = _limit_bytes("REVIEW_BROWSER_PREVIEW_MAX_MB", 512)
+    execution_rows = {
+        int(item.get("video_index") or 0): item
+        for item in execution.get("videos") or []
+        if isinstance(item, dict) and int(item.get("video_index") or 0) > 0
+    }
+    if isinstance(execution.get("video"), dict):
+        execution_rows.setdefault(1, execution["video"])
+    video_assets = [item for item in job.get("assets") or [] if isinstance(item, dict) and is_video_asset(item)]
+    updated = False
+    for item in gallery.get("videos") or []:
+        if not isinstance(item, dict):
+            continue
+        index = int(item.get("video_index") or 0)
+        if index not in quality_indices:
+            continue
+        target = job_dir / f"browser_preview_{index:03d}.webm"
+        if not (target.is_file() and 0 < target.stat().st_size <= max_bytes):
+            _download_workbench_media(str(item.get("url") or ""), target, max_bytes)
+        if not target.is_file() or not (0 < target.stat().st_size <= max_bytes):
+            continue
+        asset = video_assets[index - 1] if 0 < index <= len(video_assets) else {}
+        source = job_dir / str(asset.get("stored_name") or "")
+        source_sha256 = str(asset.get("sha256") or "")
+        if not source_sha256 and source.is_file():
+            source_sha256 = _file_sha256(source)
+        execution_row = execution_rows.get(index) or {}
+        transformation = {
+            key: execution_row[key]
+            for key in (
+                "submitted_source", "delivery", "codec_profile", "proxy_profile", "proxy_codec",
+                "cache_hit", "native_sampling_fps", "source_width", "source_height",
+                "proxy_width", "proxy_height", "submitted_width", "submitted_height",
+                "source_fps", "proxy_fps", "submitted_fps", "source_bitrate",
+                "source_bitrate_bps", "proxy_bitrate_bps", "submitted_bitrate",
+                "source_duration_seconds", "proxy_duration_seconds", "submitted_duration_seconds",
+            )
+            if execution_row.get(key) not in (None, "")
+        }
+        previous = records.get(index) or {}
+        previous_transformation = (
+            previous.get("transformation")
+            if isinstance(previous.get("transformation"), dict)
+            else {}
+        )
+        records[index] = {
+            **previous,
+            "video_index": index,
+            "source_asset_id": str(asset.get("asset_id") or ""),
+            "source_sha256": source_sha256,
+            "review_sha256": _file_sha256(target),
+            "source_bytes": int(source.stat().st_size) if source.is_file() else int(asset.get("size") or 0),
+            "review_bytes": int(target.stat().st_size),
+            "model_input_kind": "review_derivative",
+            "review_stored_name": target.name,
+            "transformation": {**previous_transformation, **transformation},
+            "validation_status": "ready",
+            "persisted_at": int(time.time()),
+        }
+        updated = True
+    if updated:
+        temporary = manifest_path.with_suffix(".json.part")
+        temporary.write_text(
+            json.dumps(
+                {"version": 2, "videos": [records[index] for index in sorted(records)]},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(manifest_path)
+
+
 def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
     job_dir = upload_root() / job["job_id"]
+    prepared = prepare_job_review_media(
+        job_dir,
+        job.get("assets") or [],
+        upload_root().parent / "native_video_proxy_cache",
+    )
     timeout_seconds, retries = _workbench_request_policy()
     retryable = {429, 502, 503, 504}
     attempts: List[Dict[str, Any]] = []
@@ -738,24 +1082,19 @@ def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
     if not internal_token:
         raise ValueError("visual_internal_token_required")
     soft_limit, safe_limit = _review_asset_limits()
-    with httpx.Client(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
-        health = client.get(f"{_workbench_url()}/api/health")
-    if health.status_code != 200:
-        raise ValueError("visual_workbench_contract_mismatch")
-    _validate_workbench_health(
-        health.json(),
-        expected_soft_limit=soft_limit,
-        expected_safe_limit=safe_limit,
-    )
+    _check_workbench_health(soft_limit, safe_limit)
     for attempt in range(1, retries + 2):
         with ExitStack() as stack:
             files = []
             for asset in job.get("assets") or []:
-                path = job_dir / asset["stored_name"]
+                asset_id = str(asset.get("asset_id") or "")
+                path = Path(prepared["files"].get(asset_id) or job_dir / asset["stored_name"])
                 if not path.exists():
                     raise FileNotFoundError(f"审核素材不存在：{asset['asset_id']}")
                 handle = stack.enter_context(path.open("rb"))
-                files.append(("files", (asset["original_name"], handle, asset["mime_type"])))
+                submitted_name = path.name if path.name != asset["stored_name"] else asset["original_name"]
+                submitted_mime = prepared["mime_types"].get(asset_id) or asset["mime_type"]
+                files.append(("files", (submitted_name, handle, submitted_mime)))
             timeout = httpx.Timeout(timeout_seconds, connect=10, write=timeout_seconds, read=timeout_seconds)
             started = time.time()
             with httpx.Client(timeout=timeout, trust_env=False) as client:
@@ -785,6 +1124,8 @@ def _call_workbench(job: Dict[str, Any]) -> Dict[str, Any]:
         break
     if not isinstance(payload, dict):
         raise ValueError("invalid_visual_review_response")
+    _persist_workbench_video_previews(job, payload)
+    payload["_review_media_processing"] = prepared["manifest"]
     payload["_workbench_transport"] = {"attempts": attempts, "retry_count": max(0, len(attempts) - 1)}
     return payload
 
@@ -866,7 +1207,7 @@ def _recommended_escalation(
             "description": "甲方可按风险偏好抽检，不要求每单人工复审。",
         })
 
-    visual_signal_codes = {"short_out_of_frame", "identity_reestablishment_unresolved", "media_forensic_risk"}
+    visual_signal_codes = {"offscreen_review_signal", "identity_reestablishment_unresolved", "media_forensic_risk"}
     if workflow != "request_more_material" and any(str(item.get("code") or "") in visual_signal_codes for item in signals):
         target_preset, target_fps = ("strong", 1.0) if preset == "adaptive" else ("forensic", 2.0)
         if target_fps > current_fps or preset == "adaptive":
@@ -938,6 +1279,44 @@ def _apply_input_readiness_guard(review: Dict[str, Any], readiness: Dict[str, An
     return output
 
 
+def normalize_frame_strategy(review: Dict[str, Any]) -> Dict[str, Any]:
+    """按真实媒体执行方式生成人类可读摘要，避免把证据锚点写成模型输入帧。"""
+    output = dict(review)
+    execution = output.get("media_preflight_execution")
+    if not isinstance(execution, dict) or not execution:
+        return output
+    report = output.get("agent_report") if isinstance(output.get("agent_report"), dict) else {}
+    gallery = report.get("media_gallery") if isinstance(report.get("media_gallery"), dict) else {}
+    videos = gallery.get("videos") if isinstance(gallery.get("videos"), list) else []
+    anchors = gallery.get("frames") if isinstance(gallery.get("frames"), list) else []
+    images = execution.get("images") if isinstance(execution.get("images"), dict) else {}
+    video_count = len(videos)
+    image_count = max(0, int(images.get("prepared_count") or 0))
+    fallback = execution.get("frame_fallback") if isinstance(execution.get("frame_fallback"), dict) else {}
+    fallback_used = fallback.get("used") is True
+    sampling = output.get("sampling") if isinstance(output.get("sampling"), dict) else {}
+    sampling_mode = str(sampling.get("sampling_mode") or "")
+    native_used = bool(video_count and (sampling_mode.startswith("native") or execution.get("video") or execution.get("videos")))
+    fps = float(sampling.get("fps") or 1.0)
+    fps_text = f"{fps:g} FPS"
+
+    if native_used and fallback_used:
+        frame_count = max(0, int(fallback.get("frame_count") or 0))
+        text = f"{video_count} 个完整视频先按 {fps_text} 原生解析，再以独立 WebP 帧补充复核 {frame_count} 帧"
+    elif native_used:
+        text = f"{video_count} 个完整视频按 {fps_text} 原生解析送审"
+    elif video_count and fallback_used:
+        frame_count = max(0, int(fallback.get("frame_count") or 0))
+        text = f"{video_count} 个视频以独立 WebP 帧送审 {frame_count} 帧"
+    else:
+        text = "未提交视频"
+    if anchors:
+        text += f"；报告保留 {len(anchors)} 个可回看的视频锚点"
+    text += f"，另含 {image_count} 张补充图片。" if image_count else "。"
+    output["frame_strategy"] = text
+    return output
+
+
 def postprocess_review(
     job: Dict[str, Any],
     review: Dict[str, Any],
@@ -951,15 +1330,25 @@ def postprocess_review(
     resolved_readiness = readiness if readiness is not None else assess_input_readiness(metadata)
     output = dict(review)
     if succeeded:
+        agent_report = dict(output.get("agent_report") or {})
+        parsed = dict(agent_report.get("parsed") or {})
+        if str(job.get("scenario") or metadata.get("scenario") or "") == "product_damage":
+            parsed = normalize_product_damage_evidence_contract(parsed)
+        material_readiness = derive_material_readiness(job, parsed, resolved_readiness)
+        parsed["material_readiness"] = material_readiness
+        agent_report["parsed"] = parsed
+        output["agent_report"] = agent_report
+        output["material_readiness"] = material_readiness
         output = _apply_input_readiness_guard(output, resolved_readiness)
         output = apply_review_decision_policy(job, output, media_forensics=media_forensics)
-    return attach_advisory_assessment(
+    output = attach_advisory_assessment(
         output,
         metadata,
         readiness=resolved_readiness,
         media_forensics=media_forensics,
         succeeded=succeeded,
     )
+    return normalize_frame_strategy(output)
 
 
 def _sync_final_advisory_brief(review: Dict[str, Any]) -> Dict[str, Any]:
@@ -969,13 +1358,16 @@ def _sync_final_advisory_brief(review: Dict[str, Any]) -> Dict[str, Any]:
     human_review = advisory.get("human_review") if isinstance(advisory.get("human_review"), dict) else {}
     conclusion = str(assessment.get("conclusion") or "").strip()
     next_step = str(human_review.get("recommendation") or "").strip()
-    if not conclusion and not next_step:
+    omit_no_action = is_no_action_continuation(output, advisory)
+    if not conclusion and not next_step and not omit_no_action:
         return output
 
     brief = dict(output.get("agent_brief") or {})
     if conclusion:
         brief["conclusion"] = conclusion
-    if next_step:
+    if omit_no_action:
+        brief.pop("next_step", None)
+    elif next_step:
         brief["next_step"] = next_step
     output["agent_brief"] = brief
 
@@ -983,11 +1375,15 @@ def _sync_final_advisory_brief(review: Dict[str, Any]) -> Dict[str, Any]:
     public_brief = dict(agent_report.get("public_brief") or {})
     if conclusion:
         public_brief["conclusion"] = conclusion
-    if next_step:
+    if omit_no_action:
+        public_brief.pop("next_step", None)
+    elif next_step:
         public_brief["next_step"] = next_step
     agent_report["public_brief"] = public_brief
     parsed = dict(agent_report.get("parsed") or {})
-    if next_step:
+    if omit_no_action:
+        parsed.pop("next_step", None)
+    elif next_step:
         parsed["next_step"] = next_step
     agent_report["parsed"] = parsed
     output["agent_report"] = agent_report
@@ -1002,23 +1398,34 @@ def run_job(job_id: str) -> Dict[str, Any]:
     execution_attempt = max(1, int(job.get("attempts") or 1))
     forensics = _media_forensics(job)
     readiness = assess_input_readiness(job.get("metadata") or {})
+    review_inventory = build_review_inventory(
+        job,
+        media_forensics=forensics,
+        job_dir=upload_root() / job["job_id"],
+    )
+    resolved_readiness = {**readiness, "review_inventory": review_inventory}
     base_result = {
         "trace_id": job_id,
         "client_case_id": job.get("client_case_id"),
         "scenario": job.get("scenario"),
         "scenario_label": SCENARIO_LABELS.get(job.get("scenario"), job.get("scenario")),
         "media_forensics": forensics,
-        "input_readiness": readiness,
+        "input_readiness": resolved_readiness,
         "boundary": "审核服务只输出证据、置信度和流程建议；退款、补发、换货、拒绝及最终定责由甲方系统和授权人员执行。",
     }
     try:
         payload = _call_workbench(job)
         workbench_transport = payload.pop("_workbench_transport", {})
+        media_processing = payload.pop("_review_media_processing", {})
         review = dict(payload.get("review")) if isinstance(payload.get("review"), dict) else {}
+        review["media_preflight_execution"] = media_execution_from_manifest(
+            media_processing,
+            review.get("media_preflight_execution") if isinstance(review.get("media_preflight_execution"), dict) else {},
+        )
         review = postprocess_review(
             job,
             review,
-            readiness=readiness,
+            readiness=resolved_readiness,
             media_forensics=forensics,
             succeeded=payload.get("ok") is True,
         )
@@ -1037,6 +1444,7 @@ def run_job(job_id: str) -> Dict[str, Any]:
             **base_result,
             "source_status": payload.get("source_status"),
             "review": review,
+            "material_readiness": review.get("material_readiness"),
             "recommended_escalation": _recommended_escalation(job, review, forensics),
             "workbench_transport": workbench_transport,
         }
@@ -1064,7 +1472,7 @@ def run_job(job_id: str) -> Dict[str, Any]:
             "diagnostics": diagnostics,
         },
         job.get("metadata") or {},
-        readiness=readiness,
+        readiness=resolved_readiness,
         media_forensics=forensics,
         succeeded=False,
     )
@@ -1072,6 +1480,9 @@ def run_job(job_id: str) -> Dict[str, Any]:
         failed_review["report"] = {"requested": True, "status": "unavailable", "html_url": None}
     else:
         failed_review["report"] = {"requested": False, "status": "not_requested", "html_url": None}
+    failed_review["media_preflight_execution"] = media_execution_from_manifest(
+        load_job_review_manifest(upload_root() / job_id)
+    )
     base_result["review"] = failed_review
     base_result["recommended_escalation"] = _recommended_escalation(job, failed_review, forensics)
     return store.finish_job(
@@ -1088,6 +1499,7 @@ def render_job_report(job: Dict[str, Any]) -> str:
     review = _sync_final_advisory_brief(result.get("review") or {})
     agent_report = deepcopy(review.get("agent_report") or {})
     agent_report.pop("inference_estimate", None)
+    agent_report = _durable_job_media(agent_report, job)
     agent_report = _signed_job_media_urls(
         agent_report,
         str(job.get("tenant_id") or "mitako"),
@@ -1102,10 +1514,13 @@ def render_job_report(job: Dict[str, Any]) -> str:
         "advisory_assessment": review.get("advisory_assessment") or {},
         "conclusion": brief.get("conclusion") or "本轮审核尚未形成可复核结论。",
         "agent_report": agent_report,
+        "material_readiness": result.get("material_readiness") or review.get("material_readiness") or {},
+        "input_readiness": result.get("input_readiness") or {},
         "media_forensics": result.get("media_forensics") or {},
+        "media_preflight_execution": review.get("media_preflight_execution") or {},
         "diagnostics": job.get("diagnostics") or review.get("diagnostics") or {},
     }
-    return render_public_report(data)
+    return render_public_report(redact_public_review_data(data))
 
 
 def enqueue(job_id: str) -> None:
@@ -1242,8 +1657,11 @@ def contract() -> Dict[str, Any]:
             "field": "fulfillment_baseline.warehouse_verification",
             "source": "customer_warehouse",
             "terminal_statuses": ["confirmed_missing", "confirmed_not_missing"],
-            "required_fields": ["status", "source", "verification_ref"],
-            "trust_boundary": "仅甲方提供且可追溯的仓库终核可覆盖历史待核实备注；模型推断和 pending 状态均不得覆盖证据门禁。",
+            "required_fields": [
+                "status", "source", "verification_ref", "baseline_version",
+                "verified_at", "snapshot_ref", "packages",
+            ],
+            "trust_boundary": "仅甲方提供、可追溯且能按基线逐包裹核对实发商品与数量的仓库快照可覆盖历史待核实备注；模型推断、裸状态和 pending 状态均不得覆盖证据门禁。",
         },
         "asset_types": sorted(ALLOWED_SUFFIXES),
         "input_isolation": "人工结论、标准答案和评测标签不得进入 metadata 或素材文件。",
@@ -1278,22 +1696,18 @@ def contract() -> Dict[str, Any]:
         },
         "sampling_policy_fields": {
             "auto_escalate": "仅生成有界的推荐升级计划，不自动重复调用模型。",
-            "confidence_threshold": "0-1 的升级建议置信度阈值，默认 0.75。",
             "forensic_checks": "可选的容器完整性、流一致性、帧率、包时间轴和编辑器元数据检查列表。",
         },
         "continuity_policy_fields": {
-            "out_of_frame_warning_seconds": "0.5-30 秒，默认 3 秒；达到后建议补充连续原视频，不自动拒绝，也不单独强制人工复核。",
             "require_identity_reestablishment": "主体重新入镜后要求核验是否仍为同一物件。",
-            "force_dense_scan": "开启时按离镜阈值反推最低时间分辨率，避免稀疏抽帧声称全程连续。",
-            "scan_fps": "可选 0.2-2 FPS；为空时自动使用 min(2, max(0.2, 2/离镜阈值秒数))。",
+            "force_dense_scan": "开启时使用受控逐帧取证；只提高证据密度，不改变业务结论门槛。",
+            "scan_fps": "可选 0.2-2 FPS；为空时使用 1 FPS。",
         },
         "output_options": {
             "include_html_report": "默认 true；设为 false 时只返回结构化 JSON，报告路由返回 review_report_not_requested。",
         },
         "review_routing_policy": {
-            "required_below_confidence": "低于该证据分数时建议必须人工复审，默认 0.5。",
-            "optional_below_confidence": "低于该证据分数时建议抽检，默认 0.8。",
-            "out_of_frame_resubmit_seconds": "连续离镜达到该秒数时建议补充材料，默认 3 秒；离镜本身不等于剪辑、调包或欺诈。",
+            "policy_ref": "选择服务端已批准的路由策略；普通工单不能改写人工复核阈值。",
         },
         "minor_refund_policy": {
             "review_mode": "standard 为 SOP 五类材料和视觉一致性初审；strict 保留更严格的人工抽检策略。",

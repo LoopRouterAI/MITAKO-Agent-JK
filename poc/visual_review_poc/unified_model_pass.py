@@ -1,9 +1,49 @@
 from __future__ import annotations
 
+import math
+import re
+
 from typing import Any, Dict, Iterable, List
 
 
 CONTINUITY_SUBJECTS = {"shipping_package", "product_package", "claimed_item"}
+
+
+def _timestamp_seconds(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parts = [float(item) for item in text.split(":")]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if len(parts) == 2:
+        seconds = parts[0] * 60 + parts[1]
+    elif len(parts) == 3:
+        seconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
+    else:
+        return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
+
+
+def claimed_item_evidence_times(parsed: Dict[str, Any]) -> List[float]:
+    """返回原片中可回链的争议商品时间点，补图和单点声明不算展示窗口。"""
+    timestamps = []
+    for item in parsed.get("evidence_refs") or []:
+        if not isinstance(item, dict) or item.get("field") != "claimed_item":
+            continue
+        asset_ref = str(item.get("asset_ref") or "").strip()
+        if not re.fullmatch(r"native_video_\d+|video_\d+_frame_\d+", asset_ref):
+            continue
+        seconds = _timestamp_seconds(item.get("timestamp"))
+        if seconds is not None:
+            timestamps.append(seconds)
+    return sorted(set(timestamps))
+
+
+def claimed_item_identity_window_is_traceable(parsed: Dict[str, Any]) -> bool:
+    claimed = parsed.get("claimed_item_assessment") or {}
+    return claimed.get("appeared") is True and len(claimed_item_evidence_times(parsed)) >= 2
 
 
 def native_dimension_gaps(parsed: Dict[str, Any], scenario: str) -> List[str]:
@@ -68,6 +108,8 @@ def native_dimension_gaps(parsed: Dict[str, Any], scenario: str) -> List[str]:
     if not resolved_atomic_fields.issubset(validated_atomic_fields):
         gaps.append("atomic_video_field_evidence")
     if scenario == "product_damage":
+        if not claimed_item_identity_window_is_traceable(parsed):
+            gaps.append("claimed_item_identity_window")
         damage = parsed.get("damage_causality_assessment")
         if not isinstance(damage, dict) or not damage.get("damage_presence") or not damage.get("claim_support"):
             gaps.append("damage_causality")

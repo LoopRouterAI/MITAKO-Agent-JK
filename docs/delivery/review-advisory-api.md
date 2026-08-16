@@ -1,6 +1,6 @@
 # 审核建议结果 API 使用说明
 
-版本：2026-08-05
+版本：2026-08-15
 
 ## 1. 使用目的
 
@@ -20,9 +20,7 @@
     "include_html_report": false
   },
   "review_routing_policy": {
-    "required_below_confidence": 0.5,
-    "optional_below_confidence": 0.8,
-    "out_of_frame_resubmit_seconds": 3.0
+    "policy_ref": "MITAKO-ROUTING@20260815.1"
   }
 }
 ```
@@ -50,15 +48,11 @@
 | 字段 | 默认值 | 作用 |
 |---|---:|---|
 | `output_options.include_html_report` | `true` | `true` 返回结构化 JSON 并开放 HTML；`false` 只返回 JSON |
-| `review_routing_policy.required_below_confidence` | `0.5` | 低于该证据分数时建议必须人工复审 |
-| `review_routing_policy.optional_below_confidence` | `0.8` | 低于该分数但未达到必须复审条件时建议抽检 |
-| `review_routing_policy.out_of_frame_resubmit_seconds` | `3.0` | 连续离镜达到该秒数时建议补充连续原视频 |
+| `review_routing_policy.policy_ref` | `MITAKO-ROUTING@20260815.1` | 选择服务端已批准的复审策略；调用方不能改写业务阈值 |
 | `minor_refund_policy.review_mode` | `standard` | 未成年人资料视觉初审；`strict` 仅供甲方显式启用 |
 | `minor_refund_policy.authoritative_verification` | `disabled` | `disabled/advisory/required`；默认不依赖外部验真接口 |
 
-三个阈值只控制建议分级，不授权服务执行任何售后动作。离镜本身不等于剪辑、调包或欺诈。
-
-`required_below_confidence` 必须小于或等于 `optional_below_confidence`；逆序配置返回 HTTP 422，不会被服务静默改写。
+复审阈值由服务端批准策略统一管理，不授权服务执行任何售后动作。离镜时长只作证据描述；是否影响证据强度取决于必要展示窗口和重新入镜同物关系，离镜本身不等于剪辑、调包或欺诈。调用方传入旧阈值字段会返回 HTTP 422，不会被静默忽略。
 
 ## 3. 主要响应
 
@@ -122,7 +116,7 @@
 | `continue_by_customer_policy` | 甲方系统按自身已审批规则继续处理 |
 | `system_retry` | 当前请求内结构修复与逐张恢复后仍未完整处理；调用方可受控重跑整案，可能重复模型成本，不要求用户补件 |
 
-连续离镜达到默认 3 秒时，系统输出 `request_more_material + not_required`。这是“当前开箱证据不完整”，不是“自动拒绝”，也不是“已证明用户调包”。
+离镜时长只作为黄色证据说明。只有离镜发生在争议商品的必要展示窗口内，且重新入镜后无法确认仍为同一物件时，系统才降低连续性证据强度；不会按统一秒数自动补件、拒绝，也不会据此声称用户调包。
 
 ## 6. HTML 报告
 

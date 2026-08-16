@@ -36,23 +36,27 @@ def _validate_optional_iso_timestamp(value: str) -> str:
 
 
 class ReviewSamplingPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     preset: ReviewStrength = "adaptive"
     fps: float = Field(default=1.0, ge=0.1, le=2.0)
     max_frames_per_video: Optional[int] = Field(default=None, ge=1, le=1800)
     frames_per_model_call: int = Field(default=24, ge=1, le=24)
     auto_escalate: Optional[bool] = False
-    confidence_threshold: Optional[float] = Field(default=0.75, ge=0.0, le=1.0)
     forensic_checks: Optional[Union[bool, List[ForensicCheck]]] = None
 
 
 class ReviewContinuityPolicy(BaseModel):
-    out_of_frame_warning_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
+    model_config = ConfigDict(extra="forbid")
+
     require_identity_reestablishment: bool = True
     force_dense_scan: bool = False
     scan_fps: Optional[float] = Field(default=None, ge=0.2, le=2.0)
 
 
 class ReviewDamageCausalityPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     force_action_scan: bool = False
     dedicated_chunk_frames: int = Field(default=20, ge=8, le=24)
     context_frames: int = Field(default=6, ge=2, le=8)
@@ -63,15 +67,10 @@ class ReviewOutputOptions(BaseModel):
 
 
 class ReviewRoutingPolicy(BaseModel):
-    required_below_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
-    optional_below_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
-    out_of_frame_resubmit_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
+    """工单只能选择已批准的服务端路由策略，不能自行改写阈值。"""
 
-    @model_validator(mode="after")
-    def validate_threshold_order(self) -> "ReviewRoutingPolicy":
-        if self.required_below_confidence > self.optional_below_confidence:
-            raise ValueError("required_below_confidence must be <= optional_below_confidence")
-        return self
+    model_config = ConfigDict(extra="forbid")
+    policy_ref: Literal["MITAKO-ROUTING@20260815.1"] = "MITAKO-ROUTING@20260815.1"
 
 
 class ReviewMinorRefundPolicy(BaseModel):
@@ -79,7 +78,6 @@ class ReviewMinorRefundPolicy(BaseModel):
 
     review_mode: Literal["standard", "strict"] = "standard"
     authoritative_verification: Literal["disabled", "advisory", "required"] = "disabled"
-    independent_payment_min_age: int = Field(default=10, ge=0, le=18)
 
 
 MinorDocumentType = Literal[
@@ -99,6 +97,8 @@ MinorDocumentSide = Literal["front", "back", "page", "multiple", "unknown"]
 MinorDocumentReadability = Literal["clear", "partial", "unknown"]
 MinorDocumentState = Literal["filled", "blank_template", "example", "unknown"]
 MinorDocumentSopEligibility = Literal["valid", "supporting_only", "invalid", "unknown"]
+MinorOrderPaymentEvidenceType = Literal["order", "payment", "combined", "unknown"]
+MinorApplicationScopeCoverage = Literal["complete", "partial", "unknown"]
 MinorDocumentQualityIssue = Literal[
     "blur",
     "glare",
@@ -132,6 +132,9 @@ class ReviewMinorMaterialObservation(BaseModel):
     readability: MinorDocumentReadability = "unknown"
     document_state: MinorDocumentState = "unknown"
     sop_eligibility: MinorDocumentSopEligibility = "unknown"
+    order_payment_evidence_type: MinorOrderPaymentEvidenceType = "unknown"
+    application_scope_coverage: MinorApplicationScopeCoverage = "unknown"
+    document_box_2d: List[int] = Field(default_factory=list, max_length=4)
     quality_issues: List[MinorDocumentQualityIssue] = Field(default_factory=list, max_length=8)
     editing_evidence_codes: List[MinorEditingEvidenceCode] = Field(default_factory=list, max_length=8)
 
@@ -144,6 +147,18 @@ class ReviewMinorMaterialObservation(BaseModel):
         if re.search(r"\d", text) or not re.fullmatch(r"[A-Za-z\u3400-\u9fff .,'()\-/]{1,80}", text):
             return "unknown"
         return text
+
+    @field_validator("document_box_2d")
+    @classmethod
+    def validate_document_box_2d(cls, value: List[int]) -> List[int]:
+        if not value:
+            return []
+        if len(value) != 4 or any(not 0 <= coordinate <= 1000 for coordinate in value):
+            raise ValueError("document_box_2d 必须是 0 到 1000 的四个整数")
+        ymin, xmin, ymax, xmax = value
+        if ymin >= ymax or xmin >= xmax:
+            raise ValueError("document_box_2d 必须形成有效矩形")
+        return value
 
     @model_validator(mode="after")
     def enforce_passport_country_boundary(self) -> "ReviewMinorMaterialObservation":
@@ -183,6 +198,8 @@ class ReviewClaimScope(BaseModel):
 class ReviewDecisionPolicy(BaseModel):
     """甲方可选的规则判定策略；默认不把证据不足自动判为不支持。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     mode: Literal["conservative_review", "classification_recommendation"] = "classification_recommendation"
     recommendation_gate_mode: Literal["strict", "core_sop"] = "strict"
     policy_ref: str = Field(default=DEFAULT_PRODUCT_DAMAGE_POLICY_REF, max_length=160)
@@ -200,7 +217,6 @@ class ReviewDecisionPolicy(BaseModel):
     require_same_item_linkage: bool = True
     require_media_forensics: bool = True
     maximum_forensic_risk: Literal["none", "low", "medium"] = "low"
-    max_unobserved_seconds: float = Field(default=0.0, ge=0.0, le=30.0)
 
 
 class ReviewSamplingPlanRequest(BaseModel):
@@ -227,6 +243,7 @@ class ReviewExpectedItem(BaseModel):
     specification: str = ""
     expected_quantity: int = Field(ge=1, le=10000)
     item_type: Literal["paid_item", "bundle_component", "gift", "bonus", "insert", "other"] = "paid_item"
+    item_form: Literal["flat_paper", "other", "unknown"] = "unknown"
     master_image_urls: List[str] = Field(default_factory=list)
     packaging_identifiers: List[str] = Field(default_factory=list)
 
@@ -238,6 +255,54 @@ class ReviewExpectedPackage(BaseModel):
     tracking_no: str = ""
     expected_item_refs: List[str] = Field(default_factory=list)
     shipment_status: str = ""
+
+
+class ReviewWarehouseShippedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_ref: str = Field(min_length=1, max_length=160)
+    shipped_quantity: int = Field(ge=0, le=10000)
+
+
+class ReviewWarehouseVerifiedPackage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    package_ref: str = Field(min_length=1, max_length=160)
+    tracking_no: str = Field(default="", max_length=160)
+    actual_shipped_items: List[ReviewWarehouseShippedItem] = Field(min_length=1, max_length=1000)
+
+
+class ReviewWarehouseVerification(BaseModel):
+    """甲方仓库系统提供的可追溯实发快照；视觉模型不得生成。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["confirmed_missing", "confirmed_not_missing"]
+    source: Literal["customer_warehouse"]
+    verification_ref: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
+    baseline_version: str = Field(min_length=1, max_length=160)
+    verified_at: str = Field(min_length=1, max_length=64)
+    snapshot_ref: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
+    packages: List[ReviewWarehouseVerifiedPackage] = Field(min_length=1, max_length=100)
+
+    @field_validator("verified_at")
+    @classmethod
+    def validate_verified_at(cls, value: str) -> str:
+        return _validate_optional_iso_timestamp(value)
+
+
+class ReviewClaimExpectedItemResolution(BaseModel):
+    """可信业务系统对用户主张项是否属于应发项的版本化解析。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claimed_item: str = Field(min_length=1, max_length=500)
+    is_expected: bool
+    baseline_version: str = Field(min_length=1, max_length=160)
+    source: Literal["order_system", "product_master", "versioned_activity_rule"]
+    resolution_ref: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
+    reason: str = Field(min_length=1, max_length=1000)
+    required_received_item_refs: List[str] = Field(min_length=1, max_length=100)
 
 
 class ReviewFulfillmentBaseline(BaseModel):
@@ -253,7 +318,8 @@ class ReviewFulfillmentBaseline(BaseModel):
     selection_rules: List[Dict[str, Any]] = Field(default_factory=list)
     selection_rules_complete: bool = False
     standard_packing_list: List[Dict[str, Any]] = Field(default_factory=list)
-    warehouse_verification: Dict[str, Any] = Field(default_factory=dict)
+    warehouse_verification: Optional[ReviewWarehouseVerification] = None
+    claim_expected_item_resolution: Optional[ReviewClaimExpectedItemResolution] = None
 
 
 class ReviewEvidenceCoverage(BaseModel):
@@ -411,6 +477,7 @@ class ReviewAssessmentDetails(BaseModel):
         "evidence_supports_claim",
         "evidence_does_not_support_claim",
         "evidence_inconclusive",
+        "severe_structural_damage_follow_up",
         "technical_processing_incomplete",
     ]
     conclusion: str
@@ -432,7 +499,6 @@ class ReviewSopRecommendation(BaseModel):
     code: Literal[
         "support_claim",
         "not_support_claim",
-        "comfort_compensation",
         "request_more_material",
         "further_assessment",
         "system_retry",
@@ -489,6 +555,31 @@ class ReviewReportReference(BaseModel):
     html_url: Optional[str] = None
 
 
+class ReviewMaterialCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requirement_id: str
+    label: str
+    required: bool = True
+    status: Literal["present", "missing", "invalid", "unknown", "not_applicable"]
+    source: Literal["metadata", "model", "trusted_system"]
+    confidence: Optional[float] = Field(ge=0.0, le=1.0)
+    evidence_refs: List[Dict[str, Any]]
+    reason: str = Field(min_length=1)
+
+
+class ReviewMaterialReadiness(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario: ReviewScenario
+    status: Literal["complete", "incomplete", "indeterminate", "not_required"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str = Field(min_length=1)
+    checklist: List[ReviewMaterialCheck] = Field(min_length=1)
+    missing_items: List[str]
+    warnings: List[str]
+
+
 class ReviewPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -499,9 +590,11 @@ class ReviewPayload(BaseModel):
     agent_brief: Dict[str, Any] = Field(default_factory=dict)
     agent_report: Dict[str, Any] = Field(default_factory=dict)
     media_forensics: Optional[Dict[str, Any]] = None
+    material_readiness: Optional[ReviewMaterialReadiness] = None
     advisory_assessment: Optional[ReviewAdvisoryAssessment] = None
     report: Optional[ReviewReportReference] = None
     sampling: Dict[str, Any] = Field(default_factory=dict)
+    media_preflight_execution: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ReviewJobResult(BaseModel):
@@ -513,6 +606,7 @@ class ReviewJobResult(BaseModel):
     source_status: str = ""
     media_forensics: Dict[str, Any] = Field(default_factory=dict)
     input_readiness: Dict[str, Any] = Field(default_factory=dict)
+    material_readiness: Optional[ReviewMaterialReadiness] = None
     boundary: str = ""
     review: Optional[ReviewPayload] = None
     recommended_escalation: Dict[str, Any] = Field(default_factory=dict)

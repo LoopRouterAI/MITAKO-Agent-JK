@@ -238,7 +238,17 @@ def render_object_continuity_panel(
             f'<ul class="boundary-list">{"".join(events) or "<li>未记录离镜事件。</li>"}</ul></article>'
             f'{evidence_html}'
         )
-    policy = assessment.get("policy") or {}
+    required_window_events = [
+        event
+        for subject in assessment.get("tracked_subjects") or []
+        if isinstance(subject, dict)
+        for event in subject.get("out_of_frame_events") or []
+        if isinstance(event, dict) and event.get("within_required_display_window") is True
+    ]
+    unresolved_required_window = sum(
+        event.get("identity_reestablished") is not True
+        for event in required_window_events
+    )
     return f"""
   <section class="panel continuity-panel">
     <div class="section-head"><h2>主体连续性与离镜时间轴</h2><p>快递包装、商品包装和争议商品分别跟踪；尚未拆出不算离镜。</p></div>
@@ -246,14 +256,20 @@ def render_object_continuity_panel(
       <article><small>连续性结论</small><b>{escape(_label(assessment.get("continuity_verdict")))}</b></article>
       <article><small>最长连续离镜估计</small><b>{escape(assessment.get("longest_out_of_frame_seconds") or 0)} 秒</b></article>
       <article><small>累计不可观察估计</small><b>{escape(assessment.get("total_unobserved_seconds") or 0)} 秒</b></article>
-      <article><small>复核阈值</small><b>{escape(policy.get("out_of_frame_warning_seconds") or "-")} 秒</b></article>
+      <article><small>必要展示窗口异常</small><b>{escape(unresolved_required_window)} 处</b></article>
     </div>
-    <p>离镜秒数来自送审帧源时间戳，是采样边界估计，不是逐毫秒精确时长。</p>
+    <p>离镜秒数来自送审帧源时间戳，只作证据描述；是否影响结论取决于它是否发生在争议商品的必要展示窗口，以及重新入镜后能否确认仍为同一物件。</p>
     <div class="boundary-grid">{"".join(subjects) or '<p class="muted">本轮没有定义可跟踪主体，不能声称全程未离镜。</p>'}</div>
   </section>"""
 
 
-def render_fulfillment_reconciliation_panel(value: Any, escape: Callable[[Any], str]) -> str:
+def render_fulfillment_reconciliation_panel(
+    value: Any,
+    escape: Callable[[Any], str],
+    scenario: str = "",
+    media_gallery: Dict[str, Any] | None = None,
+    evidence_renderer: Callable[..., str] | None = None,
+) -> str:
     if not isinstance(value, dict):
         return ""
 
@@ -269,8 +285,14 @@ def render_fulfillment_reconciliation_panel(value: Any, escape: Callable[[Any], 
             quantity = ""
             if expected is not None or observed is not None:
                 quantity = f"，应发 {escape(expected if expected is not None else '-')} / 已识别 {escape(observed if observed is not None else '-')}"
-            evidence = item.get("evidence_timestamp") or item.get("timestamp") or ""
-            evidence_text = f"，证据 {escape(evidence)}" if evidence else ""
+            evidence_values = []
+            for ref in item.get("evidence_refs") or []:
+                if not isinstance(ref, dict):
+                    continue
+                point = ref.get("timestamp") or ref.get("asset_ref")
+                if point and point not in evidence_values:
+                    evidence_values.append(point)
+            evidence_text = f"，证据 {escape('、'.join(str(point) for point in evidence_values[:4]))}" if evidence_values else ""
             rows.append(f"<li>{escape(name)}{quantity}{evidence_text}</li>")
         return "".join(rows) or f"<li>{escape(empty)}</li>"
 
@@ -285,25 +307,172 @@ def render_fulfillment_reconciliation_panel(value: Any, escape: Callable[[Any], 
       <article><small>判断依据</small><b>仓库终核</b></article>
       <article><small>仓库结论</small><b>{escape(warehouse_status)}</b></article>
       <article><small>核实编号</small><b>{escape(warehouse.get("verification_ref") or "未提供")}</b></article>"""
+    composition = value.get("product_composition_resolution") or {}
+    composition_cards = ""
+    if value.get("resolution_basis") == "trusted_expected_item_resolution" and composition:
+        composition_cards = f"""
+      <article><small>用户主张项</small><b>{escape(composition.get("claimed_item") or "未提供")}</b></article>
+      <article><small>商品构成核验</small><b>不是独立应发项</b></article>
+      <article><small>规则引用</small><b>{escape(composition.get("resolution_ref") or "未提供")}</b></article>"""
 
+    route = value.get("evidence_route")
+    route_label = {
+        "compliant_opening_video": "合规开箱视频",
+        "static_three_images": "静态三类材料",
+        "not_required": "本单无需用户举证",
+        "insufficient": "证据路径未齐",
+    }.get(route, "未确认")
+    basis_label = {
+        "warehouse_verification": "仓库终核",
+        "visual_reconciliation": "实收证据对账",
+        "trusted_expected_item_resolution": "受信订单与商品规则",
+        "none": "尚未形成",
+    }.get(value.get("resolution_basis"), "尚未形成")
+    user_material_label = (
+        "用户材料已齐全" if value.get("user_materials_complete") is True else "用户材料未齐或未确认"
+    )
+
+    def fact_status(observation: dict, key: str) -> str:
+        return {True: "是", False: "否"}.get(observation.get(key), "未确认")
+
+    panel_heading = "发错货应收与实收核对" if scenario == "wrong_item" else "漏发货应发与实收核对"
+    observed_heading = "实收商品" if scenario == "wrong_item" else "实收清单"
+    difference_heading = "身份或规格差异" if scenario == "wrong_item" else "数量差异"
+    difference_key = "unexpected_items" if scenario == "wrong_item" else "suspected_missing_items"
+    package_evidence_heading = "同包裹证据" if scenario == "wrong_item" else "分包与内容展示证据"
+    wrong_identity_html = ""
+    if scenario == "wrong_item":
+        identity_rows = []
+        descriptive_rows = []
+        for item in (value.get("observed_items") or [])[:20]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("product_name") or item.get("name") or "未命名实收商品"
+            identity_parts = [
+                str(item.get(key) or "").strip()
+                for key in ("item_role", "series", "edition", "physical_form")
+                if str(item.get(key) or "").strip()
+            ]
+            identity_parts.extend(
+                str(part).strip()
+                for part in item.get("included_parts") or []
+                if str(part).strip()
+            )
+            if identity_parts:
+                identity_rows.append(
+                    f"<li><b>{escape(name)}：</b>{escape('、'.join(dict.fromkeys(identity_parts)))}</li>"
+                )
+            dimensions = [str(part).strip() for part in item.get("descriptive_dimensions") or [] if str(part).strip()]
+            if dimensions:
+                descriptive_rows.append(
+                    f"<li><b>{escape(name)}：</b>{escape('、'.join(dict.fromkeys(dimensions)))}</li>"
+                )
+        wrong_identity_html = (
+            '<div class="boundary-grid">'
+            '<article class="boundary-card"><h3>身份定义属性</h3><ul class="boundary-list">'
+            + ("".join(identity_rows) or "<li>本轮未形成可确认的角色、系列、版本或形态属性。</li>")
+            + '</ul></article><article class="boundary-card"><h3>描述性差异</h3><ul class="boundary-list">'
+            + ("".join(descriptive_rows) or "<li>本轮未记录页面尺寸或普通描述差异。</li>")
+            + '</ul><p class="fine-print">描述性差异不能单独证明发错货。</p></article></div>'
+        )
+    package_sections = []
+    for observation in (value.get("package_observations") or [])[:50]:
+        if not isinstance(observation, dict):
+            continue
+        evidence_refs = [
+            {
+                **reference,
+                "source_type": "video_frame" if reference.get("timestamp") else "supplementary_image",
+                "why_it_matters": (
+                    "用于复核实收商品是否来自同一受信包裹。"
+                    if scenario == "wrong_item"
+                    else "用于复核分包是否完成开箱并铺开展示全部内容。"
+                ),
+            }
+            for reference in observation.get("evidence_refs") or []
+            if isinstance(reference, dict) and str(reference.get("fact") or "").strip()
+        ]
+        evidence_html = (
+            evidence_renderer(evidence_refs, media_gallery or {}, "包裹证据")
+            if evidence_refs and evidence_renderer
+            else '<p class="muted">本包裹没有可回看的证据引用。</p>'
+        )
+        if scenario == "missing_item":
+            fact_text = (
+                f'<p><b>视频路径：</b>封箱起始 {escape(fact_status(observation, "sealed_start"))}；'
+                f'视频内面单 {escape(fact_status(observation, "waybill_visible"))}；'
+                f'面单匹配订单 {escape(fact_status(observation, "waybill_matches_order"))}；'
+                f'一镜到底 {escape(fact_status(observation, "single_take_continuity"))}；'
+                f'开箱完成 {escape(fact_status(observation, "opening_complete"))}；'
+                f'内容全部展示 {escape(fact_status(observation, "all_contents_laid_out"))}</p>'
+                f'<p><b>静态路径：</b>实物全家福 {escape(fact_status(observation, "received_group_photo_complete"))}；'
+                f'绿色自封袋 {escape(fact_status(observation, "green_bag_visible"))}；'
+                f'清晰面单 {escape(fact_status(observation, "waybill_visible"))}</p>'
+            )
+        else:
+            opening_text = {True: "完整", False: "不完整"}.get(observation.get("opening_complete"), "未确认")
+            contents_text = {True: "已全部铺开", False: "未全部铺开"}.get(
+                observation.get("all_contents_laid_out"), "未确认"
+            )
+            fact_text = f'<p><b>开箱过程：</b>{escape(opening_text)}；<b>内容展示：</b>{escape(contents_text)}</p>'
+        package_sections.append(
+            '<section class="package-observation">'
+            f'<h4>{escape(observation.get("package_ref") or "未编号包裹")}</h4>'
+            f'{fact_text}'
+            f'<div class="evidence-grid">{evidence_html}</div>'
+            '</section>'
+        )
+    package_evidence_html = (
+        f'<h3>{package_evidence_heading}</h3>{"".join(package_sections)}'
+        if package_sections
+        else f'<h3>{package_evidence_heading}</h3><p class="muted">本轮没有形成可回看的逐包裹证据。</p>'
+    )
+    reminders = []
+    if scenario == "missing_item":
+        for reminder in (value.get("post_decision_reminders") or [])[:10]:
+            if not isinstance(reminder, dict):
+                continue
+            message = str(reminder.get("message") or "").strip()
+            if not message:
+                continue
+            reminders.append(
+                f'<li><b>{escape(reminder.get("label") or "补充提醒")}：</b>'
+                f'{escape(message)}</li>'
+            )
+    reminder_html = (
+        '<aside class="post-decision-reminder status-card status-amber">'
+        '<h3>确认漏发后的补充提醒</h3>'
+        f'<ul class="boundary-list">{"".join(reminders)}</ul>'
+        '<p class="fine-print">这是给用户的后续自查提醒，不是漏发判断的前置条件，'
+        '也不改变本轮证据结论。</p></aside>'
+        if reminders else ""
+    )
     return f"""
   <section class="panel fulfillment-panel">
-    <div class="section-head"><h2>应发与视频展示清单对账</h2><p>订单基准、实际识别和未确认项分开表达；证据不完整不直接认定发错或漏发。</p></div>
+    <div class="section-head"><h2>{panel_heading}</h2><p>订单基准、实际识别和未确认项分开表达；证据不完整不直接下结论。</p></div>
     <div class="causality-grid">
       <article><small>基准版本</small><b>{escape(value.get("baseline_version") or "未提供")}</b></article>
       <article><small>包裹是否全部提交</small><b>{escape("是" if value.get("all_packages_uploaded") else "否/未确认")}</b></article>
       <article><small>物品是否全部展示</small><b>{escape("是" if value.get("all_items_displayed") else "否/未确认")}</b></article>
       <article><small>物品观察自评分</small><b>{escape(value.get("observation_confidence") if value.get("observation_confidence") is not None else "-")}</b></article>
       <article><small>对账置信度</small><b>{escape(value.get("confidence") if value.get("confidence") is not None else "-")}</b></article>
+      <article><small>{escape("用户证据路线" if scenario == "missing_item" else "实收证据路线")}</small><b>{escape(route_label)}</b></article>
+      <article><small>最终事实依据</small><b>{escape(basis_label)}</b></article>
+      <article><small>用户材料</small><b>{escape(user_material_label)}</b></article>
       {warehouse_cards}
+      {composition_cards}
     </div>
     <div class="boundary-grid">
       <article class="boundary-card"><h3>应发清单</h3><ul class="boundary-list">{items("expected_items", "未提供应发清单。")}</ul></article>
-      <article class="boundary-card"><h3>视频已识别</h3><ul class="boundary-list">{items("observed_items", "视频中未形成可确认清单。")}</ul></article>
-      <article class="boundary-card"><h3>疑似缺失</h3><ul class="boundary-list">{items("suspected_missing_items", "未形成疑似缺失项。")}</ul></article>
+      <article class="boundary-card"><h3>{observed_heading}</h3><ul class="boundary-list">{items("observed_items", "送审证据未形成可确认实收清单。")}</ul></article>
+      <article class="boundary-card"><h3>{difference_heading}</h3><ul class="boundary-list">{items(difference_key, "未形成确定差异项。")}</ul></article>
       <article class="boundary-card"><h3>未确认项</h3><ul class="boundary-list">{items("unconfirmed_items", "无额外未确认项。")}</ul></article>
     </div>
+    {wrong_identity_html}
+    {package_evidence_html}
+    {reminder_html}
     <p><b>包裹覆盖：</b>{escape(value.get("package_coverage") or "未提供")}</p>
+    {f'<p><b>商品构成说明：</b>{escape(composition.get("reason"))}</p>' if composition else ''}
     <p><b>判断边界：</b>{escape(value.get("decision_boundary") or "最终业务动作仍由甲方规则执行。")}</p>
   </section>"""
 
@@ -325,6 +494,30 @@ def render_claim_fact_panel(value: Any, escape: Callable[[Any], str]) -> str:
         "successful": "复装成功",
         "not_tested": "未复装测试",
     }
+    visibility_labels = {
+        "visible": "清楚可见",
+        "clearly_not_visible": "清楚覆盖后未见",
+        "uncertain": "看不清",
+        "not_assessed": "未核验",
+    }
+    presence_labels = {
+        "confirmed": "已确认存在",
+        "not_found_after_clear_coverage": "清楚覆盖后未见",
+        "insufficient": "证据不足",
+    }
+    unboxing_labels = {
+        "supported": "开箱时已支持",
+        "not_supported": "开箱时不支持",
+        "insufficient": "开箱时态不明",
+    }
+    severity_labels = {
+        "none": "未见损伤",
+        "minor": "轻微",
+        "moderate": "中度",
+        "severe": "严重",
+        "extreme": "极严重",
+        "unknown": "待确认",
+    }
     atomic_cards = []
     for item in (value.get("atomic_claim_results") or [])[:20]:
         if not isinstance(item, dict):
@@ -333,6 +526,12 @@ def render_claim_fact_panel(value: Any, escape: Callable[[Any], str]) -> str:
             '<article class="boundary-card">'
             f'<h3>{escape(item.get("claim_id") or "未编号诉求")}</h3>'
             f'<p><b>争议对象：</b>{escape(item.get("subject_ref") or "未绑定")}</p>'
+            f'<p><b>部位与类型：</b>{escape(item.get("location") or "待确认")} · {escape(item.get("damage_type") or "待确认")}</p>'
+            f'<p><b>主视频：</b>{escape(visibility_labels.get(item.get("main_video_visibility"), "待确认"))}；'
+            f'<b>补充素材：</b>{escape(visibility_labels.get(item.get("supplemental_visibility"), "待确认"))}</p>'
+            f'<p><b>损伤事实：</b>{escape(presence_labels.get(item.get("damage_presence"), "待确认"))}；'
+            f'<b>开箱时态：</b>{escape(unboxing_labels.get(item.get("condition_at_unboxing"), "待确认"))}</p>'
+            f'<p><b>严重程度：</b>{escape(severity_labels.get(item.get("severity_level"), "待确认"))}</p>'
             f'<p><b>事实结论：</b>{escape(status_labels.get(item.get("support_status"), item.get("support_status") or "未给出"))}</p>'
             f'<p>{escape(item.get("reason") or "本轮未给出单项理由。")}</p></article>'
         )
@@ -457,32 +656,22 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
             f'<p>{escape(item.get("rule_note") or "")}</p></article>'
         )
     passport_cards = []
-    passport_role_labels = {
-        "guardian": "监护人",
-        "minor": "未成年人",
-        "unknown": "角色未知",
-        "not_applicable": "不适用",
-    }
-    passport_readability_labels = {
-        "clear": "清晰",
-        "partial": "部分可读",
-        "unknown": "未知",
-    }
     for item in (value.get("material_inventory") or [])[:50]:
         if not isinstance(item, dict) or item.get("document_type") != "passport":
             continue
-        country_or_region = str(item.get("issuing_country_or_region") or "unknown")
-        readability = str(item.get("readability") or "unknown")
         passport_cards.append(
-            '<article class="boundary-card status-card status-amber">'
-            '<h3>护照</h3>'
-            f'<p><b>材料角色：</b>{escape(passport_role_labels.get(str(item.get("subject_role") or "unknown"), "角色未知"))}</p>'
-            f'<p><b>签发国家/地区：</b>{escape("未知" if country_or_region == "unknown" else country_or_region)}</p>'
-            f'<p><b>可读性：</b>{escape(passport_readability_labels.get(readability, "未知"))}</p>'
+            '<article class="boundary-card status-card status-amber"><h3>护照</h3>'
+            f'<p><b>材料角色：</b>{escape({"guardian": "监护人", "minor": "未成年人"}.get(str(item.get("subject_role") or ""), "角色未知"))}</p>'
+            f'<p><b>签发国家/地区：</b>{escape(item.get("issuing_country_or_region") or "未知")}</p>'
+            f'<p><b>可读性：</b>{escape({"clear": "清晰", "partial": "部分可读"}.get(str(item.get("readability") or ""), "未知"))}</p>'
             f'<p><b>点击回看：</b>{evidence_links([item.get("image_index")])}</p>'
-            '<p>仅作视觉/OCR 初审并参与身份、年龄和监护关系一致性比较；不替代身份证必交项，不代表权威验真。</p>'
-            '</article>'
+            '<p>仅参与身份、年龄与关系的一致性初审；不替代身份证必交项，不代表权威验真。</p></article>'
         )
+    passport_panel = (
+        '<div class="section-head"><h2>补充证件</h2><p>只展示证件类型、角色、签发地区、可读性和图片编号。</p></div>'
+        f'<div class="boundary-grid">{"".join(passport_cards)}</div>'
+        if passport_cards else ""
+    )
     process_items = []
     process_type_labels = {
         "invoice_generation": "发票或凭证生成过程",
@@ -500,7 +689,6 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
             f'{escape(item.get("timestamp") or "-")}：{escape(process_type_labels.get(item.get("process_type"), "过程待确认"))}，'
             f'画面{escape(quality_labels.get(item.get("evidence_quality"), "待确认"))}</li>'
         )
-    unclassified = "、".join(str(index) for index in value.get("unclassified_image_indices") or []) or "无"
     check_labels = {
         "identity_age": "身份与年龄是否对得上",
         "guardian_relationship": "监护关系是否对得上",
@@ -535,15 +723,19 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         )
     authoritative = value.get("authoritative_verification") or {}
     authoritative_status = str(authoritative.get("status") or "")
-    if authoritative_status == "customer_integration_required":
-        authoritative_text = "本单已启用严格在线验真，尚待甲方核验能力"
-        authoritative_tone = "status-red"
-    elif authoritative_status == "not_configured_advisory":
-        authoritative_text = "在线验真未配置，仅作非阻断提醒"
-        authoritative_tone = "status-amber"
-    else:
-        authoritative_text = "在线验真默认关闭，不影响本轮视觉初审"
-        authoritative_tone = "status-green"
+    authoritative_panel = ""
+    if authoritative_status:
+        authoritative_text = {
+            "customer_integration_required": "本单已启用严格在线验真，尚待甲方核验能力",
+            "not_configured_advisory": "在线验真未配置，仅作非阻断提醒",
+            "not_configured_optional": "在线验真默认关闭，不影响本轮视觉初审",
+        }.get(authoritative_status, "在线验真状态待确认")
+        authoritative_tone = "status-red" if authoritative_status == "customer_integration_required" else "status-amber"
+        authoritative_panel = (
+            f'<article class="boundary-card status-card {authoritative_tone}"><h3>外部在线验真</h3>'
+            f'<p><b>{escape(authoritative_text)}</b></p>'
+            f'<p>{escape(authoritative.get("boundary") or "视觉一致性不等于法定真实性；本项只在已配置时参与流程。")}</p></article>'
+        )
     precheck_text = {
         "passed": "视觉初审通过",
         "failed": "视觉初审不通过",
@@ -558,15 +750,19 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
         "clear": "status-green",
     }.get(str(authenticity.get("severity") or ""), "status-amber")
     payment_capability = value.get("payment_capability_risk") or {}
-    under_nine_review = payment_capability.get("requires_review") is True
-    show_payment_card = any((
-        payment_capability.get("low_age") is True,
-        payment_capability.get("under_nine") is True,
-        under_nine_review,
-        payment_capability.get("requires_more_material") is True,
-    ))
-    payment_tone = "status-red" if under_nine_review else "status-amber" if payment_capability.get("requires_more_material") else "status-green" if payment_capability.get("process_evidence_status") == "matched" else "status-amber"
-    payment_label = "未满 9 周岁，需人工关注支付能力" if under_nine_review else "需补支付过程说明" if payment_capability.get("requires_more_material") else "支付过程说明已核对" if payment_capability.get("process_evidence_status") == "matched" else "支付过程信息待确认"
+    under_nine_review = (
+        payment_capability.get("under_nine") is True
+        and payment_capability.get("age_confidence") == "high"
+        and payment_capability.get("requires_review") is True
+    )
+    under_ten_review = payment_capability.get("low_age") is True
+    show_payment_card = under_ten_review or under_nine_review
+    payment_tone = "status-red" if under_nine_review else "status-amber"
+    payment_label = (
+        "高置信未满 9 周岁，需人工关注支付能力"
+        if under_nine_review
+        else "未满 10 周岁，需核对支付密码来源和监护发现过程"
+    )
     payment_card = (
         f'<article class="boundary-card status-card {payment_tone}"><h3>低龄支付过程核验</h3>'
         f'<p><b>{escape(payment_label)}</b></p><p>{escape(payment_capability.get("effect") or "该信号只用于核对支付密码来源和监护人发现消费过程，不自动决定退款结果。")}</p>'
@@ -591,25 +787,16 @@ def render_minor_material_panel(value: Any, escape: Callable[[Any], str]) -> str
     return f"""
   <section class="panel minor-material-panel">
     <div class="section-head"><h2>未成年人退款五类材料核对</h2><p>绿色可继续，黄色只看存疑项，红色优先复核；报告不展示姓名、号码或 OCR 原文。</p></div>
-    <div class="causality-grid">
-      <article><small>申报图片</small><b>{escape(value.get("declared_image_count") or 0)}</b></article>
-      <article><small>接收图片</small><b>{escape(value.get("accepted_image_count") or 0)}</b></article>
-      <article><small>已处理图片</small><b>{escape(value.get("processed_image_count") or 0)}</b></article>
-      <article><small>图片处理完成度</small><b>{escape(round(float(value.get("coverage_ratio") or 0) * 100, 1))}%</b></article>
-      <article><small>覆盖是否完整</small><b>{escape("是" if value.get("coverage_complete") else "否")}</b></article>
-      <article><small>视觉初审结论</small><b>{escape(precheck_text)}</b></article>
-    </div>
-    <p><b>未分类图片编号：</b>{escape(unclassified)}</p>
+    <p><b>视觉初审结论：</b>{escape(precheck_text)}</p>
     <div class="boundary-grid">{"".join(checklist_cards) or '<p class="muted">本轮未形成材料清单。</p>'}</div>
-    <div class="section-head"><h2>护照视觉识别</h2><p>仅展示证件类型、签发国家/地区、可读性和图片编号。</p></div>
-    <div class="boundary-grid">{"".join(passport_cards) or '<p class="muted">本轮未识别到护照材料。</p>'}</div>
+    {passport_panel}
     <div class="section-head"><h2>视觉字段一致性初审</h2><p>五项内容是否互相对得上；只比较图片中能看清的内容，不冒充政府、运营商或支付系统验真。</p></div>
     <p><b>总体状态：</b>{escape(status_labels.get(consistency.get("verdict"), consistency.get("verdict") or "未完成"))}</p>
     <div class="boundary-grid">{"".join(consistency_cards) or '<p class="muted">本轮未完成字段一致性初审。</p>'}</div>
     <div class="boundary-grid">
       <article class="boundary-card status-card {authenticity_tone}"><h3>图片真实性风险</h3><p><b>{escape(f'疑似修改风险 {authenticity["risk_percent"]}%' if authenticity.get("risk_percent") is not None else "本轮未形成可用风险分数")}</b></p><p>{escape(authenticity.get("conclusion") or "本轮没有可用的图片风险结果。")}</p><p><b>需优先回看：</b>{evidence_links(authenticity.get("evidence_image_indices"))}</p><p><b>编辑软件信息：</b>{evidence_links((authenticity.get("editor_metadata_image_indices") or [])[:20])}</p><p><b>缺少拍摄信息：</b>{evidence_links((authenticity.get("missing_exif_image_indices") or [])[:20])}</p><p>{escape(authenticity.get("boundary") or "缺少拍摄信息不等于图片造假。")}</p></article>
       {payment_card}
-      <article class="boundary-card status-card {authoritative_tone}"><h3>外部在线验真</h3><p><b>{escape(authoritative_text)}</b></p><p>{escape(authoritative.get("boundary") or "视觉一致性不等于法定真实性，但未配置的接口不会阻断本轮初审。")}</p></article>
+      {authoritative_panel}
     </div>
     <h3>过程视频证据</h3><ul class="boundary-list">{"".join(process_items) or '<li>本轮没有形成可回链的过程视频证据。</li>'}</ul>
     <div class="boundary-grid">

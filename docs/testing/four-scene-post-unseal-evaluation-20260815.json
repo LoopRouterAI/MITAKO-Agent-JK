@@ -1,0 +1,96 @@
+{
+  "evaluation_version": "2026-08-15.1",
+  "generated_at": "2026-08-15 02:35:00 +08:00",
+  "contract_version": "MITAKO-FOUR-SCENE@20260814.1",
+  "label_state": "unsealed_after_inference",
+  "source_manifest_sha256": "14DE79FD85F3BFB1A342CCFC6F46E5C945ECDA94F5502F5B300C677AFD2E4F98",
+  "model_profile": "baidu-gemini-3.5-flash-lite-high-high-native-video-fps1-provider-default-output",
+  "summary": {
+    "case_count": 8,
+    "comparable_case_count": 7,
+    "aligned_case_count": 1,
+    "partially_aligned_case_count": 4,
+    "not_aligned_case_count": 2,
+    "not_comparable_case_count": 1,
+    "unsafe_automatic_business_action_count": 0,
+    "autonomous_case_resolution_count": 0,
+    "verified_full_manual_review_reduction_count": 0,
+    "production_accuracy_claim_allowed": false
+  },
+  "cases": [
+    {
+      "case_id": "602271",
+      "scenario": "product_damage",
+      "alignment": "partial",
+      "matched": ["damage_confirmed", "damage_visible"],
+      "missed": ["damage_severity"],
+      "workflow_comparable": false,
+      "verified_work_reduction": false
+    },
+    {
+      "case_id": "617695",
+      "scenario": "product_damage",
+      "alignment": "aligned",
+      "matched": ["damage_confirmed", "evidence_enough_for_damage_fact", "mixed_media", "damage_visible"],
+      "missed": [],
+      "workflow_comparable": false,
+      "verified_work_reduction": false
+    },
+    {
+      "case_id": "517066",
+      "scenario": "wrong_item",
+      "alignment": "partial",
+      "matched": ["evidence_insufficient", "request_more_material"],
+      "missed": ["video_waybill_not_visible", "video_waybill_match_unknown"],
+      "workflow_comparable": true,
+      "verified_work_reduction": false
+    },
+    {
+      "case_id": "81463",
+      "scenario": "wrong_item",
+      "alignment": "not_comparable",
+      "matched": [],
+      "missed": [],
+      "workflow_comparable": false,
+      "verified_work_reduction": false,
+      "reason": "The gold source contains the final exchange action but no same-stage initial evidence verdict."
+    },
+    {
+      "case_id": "316353",
+      "scenario": "missing_item",
+      "alignment": "not_aligned",
+      "matched": ["query_internal_order_shipment_and_warehouse"],
+      "missed": ["not_missing", "split_shipment_present"],
+      "workflow_comparable": true,
+      "verified_work_reduction": false
+    },
+    {
+      "case_id": "542305",
+      "scenario": "missing_item",
+      "alignment": "not_aligned",
+      "matched": ["safe_human_review"],
+      "missed": ["confirmed_missing"],
+      "workflow_comparable": true,
+      "verified_work_reduction": false
+    },
+    {
+      "case_id": "546361",
+      "scenario": "minor_refund",
+      "alignment": "partial",
+      "matched": ["materials_incomplete", "order_or_payment_gap", "mobile_ownership_gap"],
+      "missed": ["commitment_payment_account_gap", "secondary_sim_proof_full_number_gap"],
+      "workflow_comparable": true,
+      "verified_work_reduction": false
+    },
+    {
+      "case_id": "608267",
+      "scenario": "minor_refund",
+      "alignment": "partial",
+      "matched": ["materials_incomplete", "guardianship_gap", "commitment_gap", "order_or_payment_gap", "mobile_ownership_gap"],
+      "missed": ["household_register_cover_gap", "guardian_contact_gap"],
+      "workflow_comparable": true,
+      "verified_work_reduction": false
+    }
+  ],
+  "boundary": "This eight-case post-unseal audit is not production accuracy, automation rate, or SLA evidence."
+}

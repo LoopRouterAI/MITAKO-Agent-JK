@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, Route, ListOrdered, FileText, Shield, LogOut, ClipboardCheck, BarChart3, Monitor,
-  Network, BookOpenCheck,
+  Network, BookOpenCheck, Cpu,
 } from 'lucide-react';
 import t from '../i18n/index.js';
 import { authFetch, clearAuthSession } from '../lib/authClient.js';
@@ -16,6 +16,7 @@ import Reports from './pages/Reports.jsx';
 import OpsMonitor from './pages/OpsMonitor.jsx';
 import PrivateDomainAgent from './pages/PrivateDomainAgent.jsx';
 import BusinessRules from './pages/BusinessRules.jsx';
+import ReviewModels from './pages/ReviewModels.jsx';
 
 const NAV = [
   { id: 'dashboard', icon: LayoutDashboard, labelKey: 'admin.navDashboard', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
@@ -26,6 +27,7 @@ const NAV = [
   { id: 'qc', icon: Shield, labelKey: 'admin.navQc', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'approvals', icon: ClipboardCheck, labelKey: 'admin.navApprovals', roles: ['super_admin', 'supervisor'] },
   { id: 'businessRules', icon: BookOpenCheck, labelKey: 'admin.navBusinessRules', roles: ['super_admin', 'supervisor'] },
+  { id: 'reviewModels', icon: Cpu, labelKey: 'admin.navReviewModels', roles: ['super_admin'] },
   { id: 'reports', icon: BarChart3, labelKey: 'admin.navReports', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'privateDomain', icon: Network, labelKey: 'admin.navPrivateDomain', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'ops', icon: Monitor, labelKey: 'admin.navOps', roles: ['super_admin'] },
@@ -74,19 +76,30 @@ export default function AdminShell({ user, legacyRouting }) {
 
   return (
     <div className="min-h-[100dvh] flex flex-col md:flex-row text-slate-800 bg-[#fbfff4]">
-      <aside className="md:w-60 border-b md:border-b-0 md:border-r border-slate-200 bg-white/95 backdrop-blur p-4 flex flex-wrap md:flex-col md:flex-nowrap gap-1">
+      <aside className="md:w-60 border-b md:border-b-0 md:border-r border-slate-200 bg-white/95 backdrop-blur p-3 md:p-4 flex flex-wrap md:flex-col gap-1">
         <div className="hidden md:block mb-4 px-2">
           <p className="inline-flex px-2 py-1 rounded-full bg-[var(--mitako-lime-soft)] border border-slate-200 text-xs font-black text-[var(--mitako-ink)] uppercase tracking-wider">{t('admin.badge')}</p>
           <p className="text-base font-black mt-3">{t('admin.shellTitle')}</p>
           <p className="text-[11px] text-slate-500 mt-1">{user?.display_name || user?.username}</p>
         </div>
+        <label className="md:hidden flex-1 min-w-[180px]">
+          <span className="sr-only">{t('admin.navSelect')}</span>
+          <select
+            aria-label={t('admin.navSelect')}
+            value={tab}
+            onChange={event => setTab(event.target.value)}
+            className="w-full min-h-[44px] rounded-[8px] border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800"
+          >
+            {visibleNav.map(({ id, labelKey }) => <option key={id} value={id}>{t(labelKey)}</option>)}
+          </select>
+        </label>
         {visibleNav.map(({ id, icon: Icon, labelKey }) => (
           <button
             key={id}
             type="button"
             onClick={() => setTab(id)}
             aria-current={tab === id ? 'page' : undefined}
-            className={`flex items-center gap-2 px-3 py-2.5 rounded-[8px] text-sm font-bold whitespace-nowrap transition-colors border ${
+            className={`hidden md:flex min-h-[44px] shrink-0 items-center gap-2 px-3 py-2.5 rounded-[8px] text-sm font-bold whitespace-nowrap transition-colors border ${
               tab === id ? 'bg-[var(--mitako-lime)] text-[var(--mitako-ink)] border-transparent shadow-[0_10px_24px_rgba(127,164,49,.18)]' : 'text-slate-600 border-transparent hover:bg-slate-100'
             }`}
           >
@@ -94,9 +107,9 @@ export default function AdminShell({ user, legacyRouting }) {
             {t(labelKey)}
           </button>
         ))}
-        <div className="flex-1" />
-        <a href="/desk" target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--mitako-ink)] bg-white border border-slate-200 rounded-[8px] font-bold px-3 py-2 hover:bg-[var(--mitako-lime-soft)]">{t('admin.openDesk')}</a>
-        <button type="button" onClick={logout} className="flex items-center gap-2 px-3 py-2 text-xs text-slate-500 hover:text-rose-600">
+        <div className="hidden md:block md:flex-1" />
+        <a href="/desk" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[44px] shrink-0 items-center text-xs text-[var(--mitako-ink)] bg-white border border-slate-200 rounded-[8px] font-bold px-3 py-2 hover:bg-[var(--mitako-lime-soft)]">{t('admin.openDesk')}</a>
+        <button type="button" onClick={logout} className="flex min-h-[44px] shrink-0 items-center gap-2 px-3 py-2 text-xs text-slate-500 hover:text-rose-600">
           <LogOut className="w-3.5 h-3.5" /> {t('admin.logout')}
         </button>
       </aside>
@@ -112,7 +125,7 @@ export default function AdminShell({ user, legacyRouting }) {
             </span>
             {isSuperAdmin && (
               <>
-                <button type="button" disabled={demoBusy} onClick={() => runDemoAction('load')} className="min-h-[36px] rounded-[8px] bg-[var(--mitako-lime)] px-3 text-xs font-bold text-slate-950 disabled:opacity-60">
+                <button type="button" disabled={demoBusy} onClick={() => runDemoAction('load')} className="min-h-[44px] rounded-[8px] bg-[var(--mitako-lime)] px-3 text-xs font-bold text-slate-950 disabled:opacity-60">
                   {t('admin.loadDemoData')}
                 </button>
                 <button
@@ -121,7 +134,7 @@ export default function AdminShell({ user, legacyRouting }) {
                   onClick={() => {
                     if (window.confirm(t('admin.clearDemoConfirm'))) runDemoAction('clear');
                   }}
-                  className="min-h-[36px] rounded-[8px] bg-white border border-slate-200 px-3 text-xs font-bold text-slate-700 disabled:opacity-60"
+                  className="min-h-[44px] rounded-[8px] bg-white border border-slate-200 px-3 text-xs font-bold text-slate-700 disabled:opacity-60"
                 >
                   {t('admin.clearDemoData')}
                 </button>
@@ -137,6 +150,7 @@ export default function AdminShell({ user, legacyRouting }) {
         {tab === 'qc' && <ObserverQC />}
         {tab === 'approvals' && <Approvals user={user} />}
         {tab === 'businessRules' && <BusinessRules />}
+        {tab === 'reviewModels' && <ReviewModels />}
         {tab === 'reports' && <Reports />}
         {tab === 'privateDomain' && <PrivateDomainAgent />}
         {tab === 'ops' && <OpsMonitor />}

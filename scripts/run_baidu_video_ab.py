@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""在标签隔离条件下比较百度 Gemini 的三种视频审核链路。"""
+"""在标签隔离条件下比较百度 Gemini Lite 与高质量候选链路。"""
 from __future__ import annotations
 
 import argparse
@@ -19,9 +19,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from poc.visual_review_poc.local_video_triage_demo import format_time, load_env
+from poc.visual_review_poc.media_preflight import resolve_runtime_temp_dir
 from poc.visual_review_poc.model_auth import gemini_channel_options
-from poc.visual_review_poc.model_catalog import MODEL_CONFIGS
+from configs.model_catalog import MODEL_CONFIGS
 from poc.visual_review_poc.native_video_proxy import prepare_native_video_proxy
+from poc.visual_review_poc.sampled_video_perception import (
+    is_claimed_item_evidence_field,
+)
 from poc.visual_review_poc.secure_media_tunnel import open_secure_media_tunnel
 from poc.visual_review_poc.model_selection_e2e import (
     call_model,
@@ -48,8 +52,7 @@ PROFILE_DEFINITIONS = {
     "lite-default": ("gemini35lite", None, None),
     "lite-medium": ("gemini35lite", "medium", "high"),
     "lite-high": ("gemini35lite", "high", "high"),
-    "flash36-medium": ("gemini36", "medium", "high"),
-    "flash36-high": ("gemini36", "high", "high"),
+    "flash37-high": ("gemini37", "high", "high"),
 }
 
 
@@ -214,6 +217,66 @@ def resolved_claim_identity(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def bind_claim_identity_result(
+    case: Dict[str, Any],
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """把图片身份匹配结果绑定到受信参考图，不猜第一张图片。"""
+    identity = resolved_claim_identity(result)
+    if not identity:
+        return {}
+    identity_refs = {
+        str(identity.get(key) or "").strip()
+        for key in ("item_ref", "sku")
+        if str(identity.get(key) or "").strip()
+    }
+    anchor_ref = ""
+    for image in case.get("official_reference_images") or []:
+        image_refs = {
+            str(image.get(key) or "").strip()
+            for key in ("item_ref", "sku")
+            if str(image.get(key) or "").strip()
+        }
+        image_refs.update(
+            str(value or "").strip()
+            for key in ("item_refs", "skus")
+            for value in image.get(key) or []
+            if str(value or "").strip()
+        )
+        if identity_refs.intersection(image_refs):
+            anchor_ref = f"official_product_reference_{image.get('reference_index')}"
+            break
+    if not anchor_ref:
+        available = {
+            f"supplemental_image_{image.get('image_index')}"
+            for image in case.get("supplemental_images") or []
+        }
+        available.update(
+            f"official_product_reference_{image.get('reference_index')}"
+            for image in case.get("official_reference_images") or []
+        )
+        evidence_refs = [
+            str(item.get("asset_ref") or "").strip()
+            for item in (result.get("parsed") or {}).get("evidence_refs") or []
+            if isinstance(item, dict)
+        ]
+        anchor_ref = next((ref for ref in evidence_refs if ref in available), "")
+    if not anchor_ref:
+        return {}
+    parsed = result.get("parsed") or {}
+    identity.update({
+        "identity_anchor_asset_ref": anchor_ref,
+        "identity_confidence": float(parsed.get("confidence") or 0.0),
+        "identity_resolution": "image_only_matched",
+    })
+    target = case.setdefault("structured_business_context", {}).setdefault(
+        "continuity_claim_identity",
+        {},
+    )
+    target.update(copy.deepcopy(identity))
+    return copy.deepcopy(identity)
+
+
 def claim_identity_summary(result: Dict[str, Any]) -> Dict[str, Any]:
     parsed = result.get("parsed") or {}
     return {
@@ -261,7 +324,7 @@ def prepare_benchmark_native_source(
     *,
     file_uri: str = "",
     force_proxy: bool = False,
-    proxy_profiles: tuple[str, ...] = ("hevc_mp4", "vp9_webm"),
+    proxy_profiles: tuple[str, ...] = ("vp9_webm", "hevc_mp4"),
 ) -> Dict[str, Any]:
     mime_type = VIDEO_MIME_TYPES.get(video.suffix.lower(), "video/mp4")
     if file_uri:
@@ -447,7 +510,8 @@ def prepare_sampled_reduce_case(
         refs.extend(
             item.get("asset_ref")
             for item in parsed.get("evidence_refs") or []
-            if isinstance(item, dict) and item.get("field") == "claimed_item"
+            if isinstance(item, dict)
+            and is_claimed_item_evidence_field(item.get("field"))
         )
         candidate_refs.extend(
             str(ref)
@@ -592,6 +656,83 @@ def run_sampled_perception_batched(
         "reducer_media_parts": native_media_part_count(reduce_case),
     }
     return merged
+
+
+def run_sampled_perception_batched_with_identity(
+    cfg: Dict[str, Any],
+    case: Dict[str, Any],
+    *,
+    timeout: int,
+    retries: int,
+    batch_size: int = 16,
+    overlap: int = 2,
+    workers: int = 4,
+) -> Dict[str, Any]:
+    """先用图片锁定订单目标，再进行分批时间轴观察。"""
+    wall_started = time.time()
+    prepared = copy.deepcopy(case)
+    identity_result: Dict[str, Any] | None = None
+    identity_case: Dict[str, Any] | None = None
+    if _resolved_identity_anchor(prepared) is None:
+        identity_case = build_claim_identity_case(prepared)
+        identity_result = call_model(
+            cfg,
+            identity_case,
+            timeout=timeout,
+            retries=retries,
+        )
+        if not bind_claim_identity_result(prepared, identity_result):
+            failed = copy.deepcopy(identity_result)
+            identity_calls = int(
+                identity_result.get("model_http_request_count")
+                or (0 if identity_result.get("cost_status") == "not_incurred" else 1)
+            )
+            failed.update({
+                "status": "failed",
+                "error": "claim_identity_not_resolved",
+                "latency_seconds": round(time.time() - wall_started, 2),
+                "identity_preflight": claim_identity_summary(identity_result),
+                "batching": {
+                    "segment_count": 0,
+                    "completed_segments": 0,
+                    "total_model_calls": identity_calls,
+                    "identity_preflight_model_calls": identity_calls,
+                    "identity_anchor_model_sends": 0,
+                    "input_representation": "individual_1080p_frames",
+                },
+            })
+            return failed
+    result = run_sampled_perception_batched(
+        cfg,
+        prepared,
+        timeout=timeout,
+        retries=retries,
+        batch_size=batch_size,
+        overlap=overlap,
+        workers=workers,
+    )
+    batching = dict(result.get("batching") or {})
+    if identity_result is not None:
+        identity_calls = int(
+            identity_result.get("model_http_request_count")
+            or (0 if identity_result.get("cost_status") == "not_incurred" else 1)
+        )
+        result = merge_model_billing(result, [identity_result])
+        batching["identity_preflight_model_calls"] = identity_calls
+        batching["total_model_calls"] = int(
+            batching.get("total_model_calls") or 0
+        ) + identity_calls
+        identity_media_parts = native_media_part_count(identity_case or {})
+        batching["identity_preflight_media_parts"] = identity_media_parts
+        batching["model_media_parts"] = int(
+            batching.get("model_media_parts") or 0
+        ) + identity_media_parts
+        result["identity_preflight"] = claim_identity_summary(identity_result)
+    else:
+        batching["identity_preflight_model_calls"] = 0
+    result["batching"] = batching
+    result["latency_seconds"] = round(time.time() - wall_started, 2)
+    return result
 
 
 def native_media_part_count(case: Dict[str, Any]) -> int:
@@ -799,7 +940,7 @@ def main() -> int:
     parser.add_argument(
         "--profiles",
         default="lite-default",
-        help="逗号分隔：lite-default,lite-medium,lite-high,flash36-medium,flash36-high",
+        help="逗号分隔：lite-default,lite-medium,lite-high,flash37-high",
     )
     parser.add_argument(
         "--transport",
@@ -810,8 +951,8 @@ def main() -> int:
     parser.add_argument("--cloudflared", default="", help="cloudflared 可执行文件路径")
     parser.add_argument(
         "--proxy-profiles",
-        default="hevc_mp4,vp9_webm",
-        help="显式 proxy 模式编码顺序：hevc_mp4,vp9_webm",
+        default="vp9_webm",
+        help="显式 proxy 模式默认使用 VP9 WebM；HEVC 仅在渠道确认兼容时显式指定",
     )
     parser.add_argument("--request-timeout", type=int, default=1800)
     parser.add_argument("--sampled-batch-size", type=int, default=23)
@@ -897,7 +1038,7 @@ def main() -> int:
     if args.resume and args.output.exists():
         report = json.loads(args.output.read_text(encoding="utf-8"))
 
-    run_parent = ROOT / "tmp" / "baidu_video_ab"
+    run_parent = resolve_runtime_temp_dir(ROOT) / "baidu_video_ab"
     run_parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=run_parent) as temp_dir, ExitStack() as transport_stack:
         bundle_args = SimpleNamespace(
@@ -1011,7 +1152,6 @@ def main() -> int:
         structured.update({
             "business_scenario": "product_damage",
             "continuity_policy": {
-                "out_of_frame_warning_seconds": 2.0,
                 "force_dense_scan": True,
                 "scan_fps": 1.0,
                 "require_identity_reestablishment": True,
@@ -1109,7 +1249,7 @@ def main() -> int:
                     } else 0
                     summary["pipeline_mode"] = "single_full_timeline_1fps_frame_call"
                 elif mode == "sampled-batched":
-                    result = run_sampled_perception_batched(
+                    result = run_sampled_perception_batched_with_identity(
                         cfg,
                         current,
                         timeout=request_timeout,

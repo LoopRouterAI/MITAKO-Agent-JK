@@ -1,26 +1,105 @@
-# MITAKO Agent 客服与视觉审核 POC
+# MITAKO Agent 客服与售后审核 POC
 
-MITAKO Agent 是一个面向甲方技术可行性验证的客服系统 POC，当前交付范围包括：
+MITAKO Agent 是供甲方客服、产品和 Java 后端研发验证的售后审核 POC。当前核心不是“让大模型直接决定退款”，而是把用户素材、订单/SKU、包裹物流和可选仓库事实整理为可追溯证据，再输出客服可执行的审核建议。
 
-- 用户端 AI客服：专业、同理、有边界的服务型助手。
-- VIP客服工作台：接单、阅读服务记录、回复、转交、升级处理。
-- 运营后台：队列、坐席、服务记录、质检、补偿审批、运营与运维指标。
-- 独立审核服务与视觉审核工作台：商品有伤、发错货、漏发货、未成年人退款材料核验四类优先场景，支持异步任务、批次、抽帧计划、置信度、成本估算和 HTML 报告。
-- 私域 Agent P0：群事件/商品事件接入契约、用户与群分层、受控运营动作、舆情预警和转人工协同。
-- 甲方与我方两套文档系统：对接物料、接口说明、POC 测试说明、内部设计指南。
+> 当前状态：四场景源码、自动回归、百度云 Lite/3.7 鉴权、API/Web 技术链和 JKAdmin 模型治理已经收口。甲方授权的 0816 四场景各 2 案已完成密封运行、解封比对和正式报告浏览器验收；当前正在生成终版双 ZIP 并推送私人/公司双仓。该八案只能证明受控样本与工程链，不代表生产准确率。进度以 [四场景审核主线进度](docs/product/四场景审核主线进度-20260814.md) 为准。
 
-旧版 Companion、陪伴、角色扮演、文字冒险能力已从当前产品入口中剥离。当前系统不提供恋爱、陪伴、角色扮演或持续情感依赖能力，只保留客服场景需要的专业同理表达。
+## 核心能力
 
-## 快速启动
+- 四个独立审核场景：商品有伤、发错货、漏发货、未成年人退款资料。
+- 异步审核 API：创建工单、查询状态、批次汇总、JSON 结果、签名 HTML 报告和签名媒体。
+- 视觉审核工作台：目录/多文件提交、媒体预检、模型事实抽取、场景后处理和报告查看。
+- 双层客服报告：首层只显示结论、确定性、材料状态和下一步；详情层显示场景专属证据和原片时间点。
+- 客服系统 POC：用户端、VIP 坐席台、运营后台和私域 Agent 演示链。
 
-### Windows
+真实甲方订单、仓库、CRM、企微、飞书和退款执行接口目前只有契约或 Mock，不伪装为已接入。
+
+## 一次审核如何完成
+
+```text
+Java/API 或本地工单目录
+  -> 程序盘点文件、业务字段、SHA-256、重复项和可解码状态
+  -> 图片独立 WebP；超阈值视频评估全时长 VP9 代理
+  -> 场景专属 Prompt + 严格 JSON Schema 请求多模态模型
+  -> 模型只返回可见原子事实、置信度、理由和证据引用
+  -> 程序计算材料齐全性、订单/包裹对账和 SOP 规则
+  -> 程序生成客服建议、人工路由和公开安全 DTO
+  -> API 与 Web 共用同一 DTO 渲染双层报告
+```
+
+项目不调用生图模型，也不让模型自由生成最终业务动作。退款、补发、换货、赔偿、拒绝和最终定责由甲方系统或有权限人员执行。
+
+## 四场景差异
+
+| 场景 | 模型主要提取 | 程序主要判断 | 报告详情 |
+|---|---|---|---|
+| 商品有伤 | 初次拆包、开箱八字段、伤点、严重度、离镜、速度/剪辑语义 | 开箱门槛、严重结构伤窄例外、三段人为致损链 | 开箱九项、逐伤点、严重度、成因、原片证据 |
+| 发错货 | 同包裹实收商品身份、数量、角色/系列/版本/形态/附件 | 订单 SKU 与实收身份对账、发错/漏发场景切换 | 应收、实收、同包裹证据、身份属性差异 |
+| 漏发货 | 逐包裹实收、视频六项或静态三类事实 | 应发减实收、分包/赠品规则、商品构成、仓库终核 | 证据路线、仓库状态、逐包裹差异和未确认项 |
+| 未成年人退款资料 | 五类材料分类、字段可读性和跨材料一致性 | 五类齐全性、可纠正补件、非标准人工、低龄条件 | 五类交通灯、具体缺口、冲突、风险和证据 |
+
+唯一业务真源是 [四场景审核业务决策与报告契约](docs/product/四场景审核业务决策与报告契约-20260812.md)，场景细节位于 [四场景黄金审核经验](docs/product/四场景黄金审核经验/README.md)。
+
+## 模型与渠道
+
+模型配置集中在 [`configs/model_catalog.py`](configs/model_catalog.py)，Prompt 和 Schema 集中在 [`prompts/visual_review/`](prompts/visual_review/)。
+
+- 试点默认：百度云渠道 `gemini-3.5-flash-lite`，`thinkingLevel=HIGH`，`mediaResolution=HIGH`，完整原生视频 `fps=1`，默认不发送 `maxOutputTokens`。
+- `gemini-3.7-flash`：百度云最小请求已通过的显式高质量候选，视觉能力更强、成本更高；仅允许管理员显式启用，不进入自动兜底。
+- 当前审核模型目录仅保留上述两个模型；其他历史模型不得出现在运行时选择列表或自动兜底中。
+
+模型只接收当前任务必要的脱敏业务上下文。人工标签、样本正负目录、预告时间点、完整个人信息、内部 Prompt 和渠道密钥不得进入公开结果。
+
+## 媒体预处理
+
+- 图片逐张生成 WebP，不拼成长图；最长边超过 3840 像素时缩至不超过 2560，先无损，必要时质量 90。
+- 视频满足任一条件时评估代理：不小于 100 MB、任一边超过 2K、超过 24 FPS、平均码率超过 6 Mbps，或供应商拒绝原片。
+- 视频代理默认 VP9 WebM，保留完整时长，最长边不超过 2560、帧率不超过 24、码率不超过 6 Mbps；HEVC 只允许显式选择。
+- 原始文件保留并记录哈希。D 盘空间不足时，运行媒体优先进入 `VISUAL_RUNTIME_MEDIA_DIR`，当前 Windows 环境可自动选择 `E:\MITAKO_Agent_Runtime`。
+- 全片 1 FPS WebP 回退默认关闭；原生审核失败时返回系统重试，不自动触发高成本抽帧。
+
+## Java 接入
+
+Java 网关应调用 `/api/v1/review/*`，不要直接依赖视觉工作台内部路由。建议顺序：
+
+1. `POST /api/v1/review/metadata/validate` 校验场景和业务字段。
+2. `POST /api/v1/review/jobs` 提交 metadata 与附件。
+3. 轮询 `GET /api/v1/review/jobs/{job_id}`，或按 `batch_id` 查询批次。
+4. 读取公开 JSON；需要 HTML 时访问报告端点，媒体使用任务级签名 URL。
+5. 根据 `material_readiness`、`advisory_assessment` 和场景详情决定客服下一步。
+
+完整契约见 [`docs/delivery/openapi.yaml`](docs/delivery/openapi.yaml)、[REST API 总览](docs/api/rest-api-overview.md) 和 [Java 联调指南](我方内部开发文档/Java开发部署与联调指南.md)。生产重写时应保留租户、幂等、追加式人工裁决、公开脱敏和证据版本，不要把开放字典直接映射为最终业务动作。
+
+## 前端职责
+
+- 用户端只负责上传、显示处理状态和接收甲方允许公开的补件/处理结果。
+- 坐席端先显示简洁结论，再按需展开场景详情和原视频时间点。
+- JKAdmin 已支持租户级模型启停、默认切换、真实冒烟、强制修改理由、版本历史和回档；当前运行目录仅允许 Lite 与 3.7，变更会记录账号、时间、角色、理由和版本。
+- 人工同意、否决、补件、重审与聊天状态同步尚未实现正式事件状态机，不能把现有技术重试当人工重审。
+
+## 目录
+
+| 路径 | 职责 |
+|---|---|
+| `review_service/` | 正式审核 API、任务、材料状态、决策、报告与存储 |
+| `prompts/visual_review/scenes/` | 四场景稳定 Prompt 规则入口 |
+| `prompts/visual_review/schemas.py` | 结构化响应 Schema 唯一维护区 |
+| `configs/model_catalog.py` | 模型能力、渠道类型、超时与成本估算 |
+| `poc/visual_review_poc/` | 媒体处理、模型调用、事实聚合与 HTML 渲染 |
+| `src/` | 用户端、坐席台和管理后台 |
+| `docs/product/` | 当前业务契约、主线进度和黄金经验 |
+| `docs/delivery/` | OpenAPI、部署、测试和 Java 对接资料 |
+
+## 启动
+
+Windows 11：
 
 ```bat
 setup_venv.bat
 一键启动-Windows.bat
 ```
 
-### Ubuntu
+Ubuntu：
 
 ```bash
 python3 -m venv venv
@@ -31,102 +110,23 @@ npm run build
 ./一键启动-Ubuntu.sh
 ```
 
-## 本地入口
+默认入口：用户端 `http://127.0.0.1:8000/`、坐席台 `/desk`、管理后台 `/admin`、视觉工作台 `http://127.0.0.1:7861/`。
 
-| 能力 | 地址 |
-|---|---|
-| 用户端 AI客服 | `http://127.0.0.1:8000/` |
-| VIP客服工作台 | `http://127.0.0.1:8000/desk` |
-| 运营后台 | `http://127.0.0.1:8000/admin` |
-| 视觉审核工作台 | `http://127.0.0.1:7861/` |
-| 甲方交付文档 | `http://127.0.0.1:8790/甲方沟通交付文档/index.html` |
-| 我方内部文档 | `http://127.0.0.1:8790/我方内部开发文档/index.html` |
-
-## 常用命令
-
-```bash
-npm run build
-npm run test:e2e
-npm run accept:cs-agent
-python scripts/dual_system_smoke_test.py
-python scripts/check_review_service_batch.py
-python scripts/check_review_sop_alignment.py
-python scripts/check_private_domain_agent_e2e.py
-python scripts/check_admin_ui_smoke.py
-python scripts/check_visual_workbench_smoke.py
-python scripts/check_review_runtime_dependencies.py --media D:\approved-samples\sample.mp4
-python scripts/check_order_reference_integration.py --snapshot D:\approved-samples\case\order_info_snapshot.json --report tests\reports\order-reference.json --limit 2
-python -m playwright install chromium
-python tests/e2e/run_desk_admin_screenshot_report.py
-```
-
-## 关键文档
-
-| 文档 | 用途 |
-|---|---|
-| `甲方沟通交付文档/0805审核建议、盲测与完整功能说明.html` | 本轮审核建议、关键证据、盲测方法、完整功能和联调边界的人话版说明 |
-| `docs/delivery/mitako-0805-blind-evidence-acceptance-20260805.html` | 商品有伤与未成年人正负样本中立盲测、真实 API、报告和标签隔离验收 |
-| `我方内部开发文档/升级日志-2026-08-05-证据语义与客服决策收敛.md` | 事实识别、SOP 建议、人工复审分离及本轮回归证据 |
-| `甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html` | 审核结论、三级复审、离框补件与 JSON/HTML 选择的人话版说明 |
-| `docs/delivery/review-advisory-api.md` | Java/API 对接的统一审核建议字段说明 |
-| `我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md` | 本轮代码、调用链、兼容和回归记录 |
-| `甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html` | 1,422 个资料目录盘点、1,127 份快照同步、官方图按任务读取和仍待甲方确认项 |
-| `我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md` | 路径映射、最小化适配、CDN 安全、缓存、API/报告链路和回归命令 |
-| `甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html` | 禁止拼图判定、617911 独立帧、144989 资料质量分层和 API/网页提交模式实测 |
-| `我方内部开发文档/升级日志-2026-07-20-独立逐帧审核与资料质量分层.md` | 独立 JPEG 传输、24 帧分段、公开 DTO、测试命令与真实任务证据 |
-| `甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html` | 订单快照匹配结果、API/网页接入、数据缺口、隐私边界与审核安全升级 |
-| `我方内部开发文档/升级日志-2026-07-20-视觉证据安全与SKU基准.md` | SKU 适配调用链、策略注册表、签名媒体、失败计费和回归命令 |
-| `甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html` | 0718 反馈整改、五项字段一致性、144989 真实盲测和权威接口边界 |
-| `我方内部开发文档/升级日志-2026-07-20-未成年人资料字段一致性.md` | 内部调用链、Schema、门禁、配置、回归与剩余风险 |
-| `甲方沟通交付文档/index.html` | 给甲方 CEO、客服负责人、Java 开发、项目经理浏览 |
-| `我方内部开发文档/index.html` | 给我方研发、测试、实施、产品浏览 |
-| `我方内部开发文档/系统清单与代码地图.md` | 系统边界、模块清单和代码入口 |
-| `我方内部开发文档/Java开发部署与联调指南.md` | Java 网关、私有化部署和联调方法 |
-| `我方内部开发文档/客服Agent视觉审核系统设计指南.md` | 内部系统设计、模块边界与正式开发指南 |
-| `docs/delivery/openapi.yaml` | 面向 Java 技术栈的接口契约参考 |
-| `docs/delivery/mitako-full-requirement-reaudit-20260711.html` | 全需求复核与未完成边界报告 |
-| `docs/delivery/mitako-0714-adversarial-acceptance-20260715.html` | 0714 反馈整改、真实样本与对抗式验收报告 |
-| `docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html` | 0715 评测复核、三通道审核、损伤因果、履约对账与边界报告 |
-| `甲方沟通交付文档/0717四样本审核工程整改与验收报告.html` | 四样本复测、Strong 2 FPS、全局时间轴、ffprobe、判负策略与真实 API 回归 |
-| `docs/delivery/deployment-guide.md` | 部署与上线说明 |
-| `Codex接续开发交接说明.md` | 迁移到另一台设备和 Codex 接续开发的上下文 |
-| `tests/reports/customer_chat_acceptance_20260706.html` | 用户端客服交互最后一轮验收报告 |
-
-## POC 边界
-
-- 当前真实甲方业务接口只做 Mock 和契约说明，不伪装为已接入生产系统。
-- 本地 `mock_data.json` 只用于演示订单、物流、售后、商品、地址等流程。
-- 生产联调前必须由甲方提供测试环境、接口契约、鉴权方式、脱敏样本、人工结论和上线审批。
-- 真实 `.env`、数据库、运行时记忆、日志、测试截图、视频样本、模型文件和超大原始资料不得 Git 提交。内部研发 ZIP 可在打包时安全加入当前 `.env` 与数据库快照，但不得转发甲方。
-
-## 打包交付
-
-先启动内部源码版主服务与视觉审核服务。打包命令会强制执行内部部署健康检查、构建、文档校验和关键回归；任一失败都会停止生成 ZIP。
+## 验证与发布
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package_release.ps1
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe scripts\check_documentation_release.py
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pre_release_internal_validation.ps1 -RunModelBatch
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_internal_release.ps1
 ```
 
-我方 Java/Python/测试人员使用包含源码、内部文档、当前 `.env` 和数据库快照的内部研发包：
+真实模型、正式 API/Web、桌面/移动报告和签名视频未全部通过时，发布脚本必须停止。客户包不包含源码、内部文档、模型渠道、Key、Prompt、数据库、日志或原始样本；内部研发包不得外发。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package_internal_release.ps1
-```
+## 安全边界
 
-内部包含敏感配置和业务数据，不得转发甲方或上传公开位置。详见 `我方内部开发文档/内部研发包交付说明.md`。
-
-所有可发送产物只允许位于 `dist/`：
-
-- `dist/MITAKO_Agent-customer-preview-YYYYMMDD.zip`：发送甲方的测试包。
-- `dist/MITAKO_Agent-customer-delivery.html`：可单独发送甲方的当前说明。
-- `dist/MITAKO_Agent-internal-dev-YYYYMMDD.zip`：仅限我方研发，禁止外发。
-
-项目父目录、`release/` 和其他目录中的同名 ZIP 均视为旧副本，不得继续交付。
-
-涉及审核提示词、抽帧或模型路由的正式候选版，还应额外执行真实多模态批次：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pre_release_internal_validation.ps1 -RunModelBatch
-```
-
-打包脚本会按交付规则过滤本地密钥、数据库、日志、运行时缓存和大文件。不要手工压缩整个仓库，也不要把发布物复制到 `dist/` 之外。
+- `.env`、数据库、用户上传、原始样本、运行媒体、日志和发布 ZIP 不进入 Git。
+- 对外 API、Workbench 和 HTML 必须使用同一公开投影与脱敏规则。
+- 订单、物流、仓库、身份、运营商等未接入的权威事实只能标记未提供或待核验。
+- 旧 Companion、陪伴、角色扮演和文字冒险能力保持封存。

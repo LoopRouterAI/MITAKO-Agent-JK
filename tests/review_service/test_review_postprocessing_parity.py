@@ -6,10 +6,204 @@ from unittest.mock import patch
 from poc.visual_review_poc import workbench_server
 from review_service.schemas import ReviewCaseMetadata
 from review_service import service
-from review_service.service import postprocess_review
+from review_service.service import normalize_frame_strategy, postprocess_review
 
 
 class ReviewPostprocessingParityTest(unittest.TestCase):
+    def test_native_video_summary_does_not_describe_evidence_anchors_as_submitted_frames(self) -> None:
+        review = {
+            "frame_strategy": "2 个视频合并为同一证据包，送审 4 帧，补充图片 10 张。",
+            "sampling": {"sampling_mode": "native_video", "fps": 1.0},
+            "agent_report": {
+                "media_gallery": {
+                    "videos": [{"video_index": 1}, {"video_index": 2}],
+                    "frames": [{}, {}, {}, {}],
+                    "images": [{} for _ in range(10)],
+                }
+            },
+            "media_preflight_execution": {
+                "videos": [
+                    {"video_index": 1, "preparation_status": "ready"},
+                    {"video_index": 2, "preparation_status": "ready"},
+                ],
+                "images": {"prepared_count": 10},
+                "frame_fallback": {"used": False, "frame_count": 0},
+            },
+        }
+
+        result = normalize_frame_strategy(review)
+
+        self.assertEqual(
+            result["frame_strategy"],
+            "2 个完整视频按 1 FPS 原生解析送审；报告保留 4 个可回看的视频锚点，另含 10 张补充图片。",
+        )
+        self.assertNotIn("送审 4 帧", result["frame_strategy"])
+
+    def test_technical_processing_failure_remains_system_retry_after_postprocessing(self) -> None:
+        review = {
+            "summary": {"review_status": "completed", "predicted_label": "review"},
+            "agent_brief": {},
+            "agent_report": {
+                "parsed": {
+                    "predicted_label": "review",
+                    "system_yes_no": "REVIEW",
+                    "confidence": None,
+                    "processing_status": "technical_processing_incomplete",
+                    "system_action": "system_retry",
+                    "overall_audit": {
+                        "conclusion": "本轮媒体处理未完成，不能形成事实判断。",
+                    },
+                    "evidence_refs": [],
+                    "material_gaps": [],
+                }
+            },
+        }
+
+        result = postprocess_review(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": {"scenario": "product_damage"},
+                "assets": [{"mime_type": "video/mp4"}],
+            },
+            review,
+            readiness={
+                "full_review_ready": True,
+                "missing_required": [],
+                "review_inventory": {"media_counts": {"video": 1, "image": 0}},
+            },
+            media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
+        )
+
+        parsed = result["agent_report"]["parsed"]
+        self.assertEqual(parsed["processing_status"], "technical_processing_incomplete")
+        self.assertEqual(parsed["system_action"], "system_retry")
+        self.assertEqual(
+            result["advisory_assessment"]["workflow_recommendation"],
+            "system_retry",
+        )
+
+    def test_legacy_public_projection_recovers_typed_opening_action_without_fake_score(self) -> None:
+        fields = {
+            "opening_action": True,
+            "sealed_start": True,
+            "waybill_visible": True,
+            "continuous": True,
+            "has_edit": False,
+            "has_offscreen": False,
+            "all_items_shown": True,
+            "issue_visible": True,
+        }
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.9,
+            "sealed_start": True,
+            "waybill_visible": True,
+            "continuous": True,
+            "has_edit": False,
+            "has_offscreen": False,
+            "all_items_shown": True,
+            "issue_visible": True,
+            "opening_video_evidence": {
+                "present": False,
+                "sop_compliant": False,
+                "status": "yellow",
+                "confidence": 1.0,
+                "reason": "未直接观察到首次拆包动作。",
+                "evidence_refs": [],
+                "validated_requirements": [],
+            },
+            "video_audit_conclusion": {
+                "speed_review_impact": {
+                    "status": "uncertain",
+                    "critical_evidence_observable": True,
+                    "affected_review_items": [],
+                },
+                "opening_video_compliance": {
+                    "opening_action_visible": True,
+                    "sealed_start": True,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "result": "indeterminate",
+                    "evidence_refs": [],
+                    "validated_fields": [],
+                },
+            },
+            "damage_causality_assessment": {
+                "damage_presence": "confirmed",
+                "claim_support": "insufficient",
+                "evidence_source_summary": {
+                    "primary_video": {
+                        "damage_presence": "confirmed",
+                        "claim_support": "insufficient",
+                        "referenced_count": 0,
+                        "evidence_refs": [],
+                    },
+                },
+            },
+            "damage_observability": {
+                "status": "fully_observable",
+                "same_item_linkage": True,
+                "conflicting_evidence": False,
+            },
+            "evidence_refs": [
+                {
+                    "field": field,
+                    "asset_ref": "native_video_1",
+                    "timestamp": f"00:0{index}",
+                    "fact": f"{field} 的原片事实",
+                }
+                for index, field in enumerate(fields, start=1)
+            ],
+        }
+        review = {
+            "summary": {"predicted_label": "review", "confidence": 0.9},
+            "agent_brief": {},
+            "agent_report": {"parsed": parsed},
+        }
+
+        result = postprocess_review(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": {"scenario": "product_damage", "customer_claim": "商品存在划痕"},
+                "assets": [{"mime_type": "video/mp4"}],
+            },
+            review,
+            readiness={
+                "full_review_ready": True,
+                "missing_required": [],
+                "review_inventory": {"media_counts": {"video": 1, "image": 0}},
+            },
+            media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
+        )
+
+        normalized = result["agent_report"]["parsed"]
+        opening = normalized["opening_video_evidence"]
+        self.assertTrue(opening["present"])
+        self.assertTrue(opening["sop_compliant"])
+        self.assertIsNone(opening["confidence"])
+        self.assertEqual(
+            set(opening["validated_requirements"]),
+            {
+                "opening_action",
+                "sealed_start",
+                "waybill_visible",
+                "continuous",
+                "claimed_item_presentation",
+                "issue_assessable",
+            },
+        )
+        compliance = normalized["video_audit_conclusion"]["opening_video_compliance"]
+        self.assertEqual(compliance["result"], "compliant")
+        self.assertIn("opening_action_visible", compliance["validated_fields"])
+        self.assertEqual(normalized["overall_video_result"], "compliant")
+        self.assertEqual(
+            normalized["damage_causality_assessment"]["claim_support"],
+            "supported",
+        )
+
     def test_formal_api_requests_raw_workbench_result_for_single_postprocess(self) -> None:
         fields = service._review_fields({
             "job_id": "RJ-RAW",
@@ -91,6 +285,24 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
             normalized = {
                 "summary": {"review_status": "completed", "predicted_label": "review", "confidence": 0.72},
                 "agent_report": {"parsed": model_result["parsed"]},
+                "material_readiness": {
+                    "scenario": "product_damage",
+                    "status": "incomplete",
+                    "confidence": 0.91,
+                    "reason": "缺少可确认初次拆包动作的证据。",
+                    "checklist": [{
+                        "requirement_id": "opening_action_evidence",
+                        "label": "初次拆包动作",
+                        "required": True,
+                        "status": "missing",
+                        "source": "model",
+                        "confidence": 0.91,
+                        "evidence_refs": [],
+                        "reason": "未发现可回看的初次拆包动作。",
+                    }],
+                    "missing_items": ["初次拆包动作"],
+                    "warnings": [],
+                },
                 "advisory_assessment": {},
                 "agent_brief": {"conclusion": "模型原始结论"},
             }
@@ -112,8 +324,14 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
         self.assertEqual(inspected_assets[0]["stored_name"], "evidence.mp4")
         self.assertEqual(postprocess.call_args.kwargs["media_forensics"], forensics)
         self.assertEqual(response["media_forensics"], forensics)
+        self.assertEqual(response["material_readiness"], normalized["material_readiness"])
+        self.assertEqual(
+            response["agent_report"]["parsed"]["material_readiness"],
+            normalized["material_readiness"],
+        )
+        self.assertNotIn("next_step", response["agent_report"]["public_brief"])
 
-    def test_product_damage_default_can_recommend_negative_when_full_evidence_sees_no_damage(self) -> None:
+    def test_product_damage_negative_requires_true_opening_action_when_no_damage_is_visible(self) -> None:
         metadata = ReviewCaseMetadata(
             client_case_id="CASE-NO-DAMAGE",
             scenario="product_damage",
@@ -196,6 +414,31 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
             }},
         }
 
+        incomplete_result = postprocess_review(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "video/mp4"}],
+            },
+            review,
+            media_forensics={"status": "not_available", "summary": {"risk_level": "unknown"}},
+        )
+
+        self.assertEqual(
+            incomplete_result["agent_report"]["parsed"]["predicted_label"],
+            "review",
+        )
+
+        opening = review["agent_report"]["parsed"]["video_audit_conclusion"]["opening_video_compliance"]
+        opening["opening_action_visible"] = True
+        opening["validated_fields"].append("opening_action_visible")
+        opening["evidence_refs"].append({
+            "field": "opening_action_visible",
+            "video_index": 1,
+            "global_frame_index": 5,
+            "timestamp": "00:05.00",
+        })
         result = postprocess_review(
             {
                 "tenant_id": "mitako",
@@ -252,15 +495,18 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
         guard = parsed.get("input_readiness_guard") or {}
         self.assertTrue(guard.get("applied"), parsed)
         self.assertEqual(parsed["predicted_label"], "review")
-        self.assertEqual(parsed["decision"], "request_more_material")
-        self.assertLessEqual(parsed["confidence"], 0.69)
+        self.assertEqual(parsed["decision"], "human_review")
+        self.assertIsNone(parsed["confidence"])
         self.assertIn("order_item_baseline", guard.get("missing_required") or [])
         self.assertEqual(
             response["advisory_assessment"]["workflow_recommendation"],
-            "request_more_material",
+            "human_review",
         )
+        recommendation = response["advisory_assessment"]["human_review"]["recommendation"]
+        self.assertIn("甲方订单", recommendation)
+        self.assertIn("不要要求用户重复补交", recommendation)
 
-    def test_workbench_preserves_minor_required_materials_and_payment_risk_before_postprocess(self) -> None:
+    def test_workbench_requests_under_ten_payment_process_material_without_forcing_human_review(self) -> None:
         case = {
             "case_id": "CASE-MINOR-RISK",
             "scenario": "minor_material",
@@ -277,9 +523,9 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
         model_result = {
             "status": "success",
             "parsed": {
-                "predicted_label": "review",
+                "predicted_label": "positive",
                 "confidence": 0.82,
-                "overall_audit": {"conclusion": "低龄支付过程需要重点核验。"},
+                "overall_audit": {"conclusion": "五类材料已齐全，继续按材料事实审核。"},
                 "minor_material_assessment": {
                     "declared_image_count": 5,
                     "accepted_image_count": 5,
@@ -312,7 +558,6 @@ class ReviewPostprocessingParityTest(unittest.TestCase):
         advisory = response["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "not_required")
         self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
-        self.assertEqual(advisory["evidence_attention"]["level"], "orange")
         self.assertIn(
             "请补充说明未成年人如何获得或得知支付密码。",
             advisory["evidence_attention"]["missing_evidence"],

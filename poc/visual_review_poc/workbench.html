@@ -13,7 +13,7 @@
       --line: #e8ecdf;
       --paper: #fbfff1;
       --card: #ffffff;
-      --lime: #b9f24a;
+      --lime: #c8ec5f;
       --green: #6fae16;
       --lime-soft: #f4ffd9;
       --paper-lime: #f7ffe6;
@@ -35,12 +35,7 @@
       margin: 0;
       min-height: 100vh;
       color: var(--ink);
-      background:
-        radial-gradient(circle at 92% 2%, rgba(200, 255, 26, .72) 0 120px, transparent 121px),
-        radial-gradient(circle at 8% 0%, rgba(200, 255, 26, .55) 0 92px, transparent 93px),
-        radial-gradient(circle at 78% 28%, rgba(255, 117, 168, .12), transparent 240px),
-        radial-gradient(circle at 12% 76%, rgba(18, 214, 199, .10), transparent 260px),
-        linear-gradient(180deg, #ffffff 0%, #fbfff4 48%, #fff 100%);
+      background: #f7f9f5;
       overflow-x: hidden;
       -webkit-tap-highlight-color: rgba(200, 255, 26, .28);
     }
@@ -56,6 +51,14 @@
 
     button:active { transform: translateY(1px); }
     button:disabled { cursor: wait; opacity: .62; transform: none; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+    }
 
     a { color: inherit; }
 
@@ -86,7 +89,7 @@
       display: grid;
       place-items: center;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 14px;
+      border-radius: var(--radius);
       background: linear-gradient(135deg, var(--lime), var(--cyan));
       box-shadow: 0 12px 28px rgba(139, 214, 0, .26);
       font-weight: 950;
@@ -114,7 +117,7 @@
       gap: 24px;
       align-items: stretch;
       overflow: hidden;
-      min-height: 260px;
+      min-height: 220px;
       border: 1px solid rgba(16, 19, 31, .08);
       border-radius: var(--radius);
       background:
@@ -134,7 +137,7 @@
     .hero-copy {
       position: relative;
       z-index: 1;
-      padding: 38px 38px 44px;
+      padding: 28px 30px 32px;
     }
 
     .eyebrow {
@@ -144,7 +147,7 @@
       margin: 0 0 16px;
       padding: 7px 11px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: linear-gradient(90deg, var(--lime), #efffb2);
       box-shadow: 0 10px 24px rgba(139, 214, 0, .18);
       font-size: 12px;
@@ -154,8 +157,8 @@
     h1 {
       max-width: 780px;
       margin: 0;
-      font-size: clamp(38px, 4.6vw, 72px);
-      line-height: .96;
+      font-size: clamp(30px, 3.6vw, 48px);
+      line-height: 1.08;
       letter-spacing: 0;
       text-wrap: pretty;
     }
@@ -186,7 +189,7 @@
       min-height: 62px;
       padding: 12px 14px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 18px;
+      border-radius: var(--radius);
       background: rgba(255, 255, 255, .88);
       box-shadow: 0 12px 32px rgba(16, 19, 31, .08);
     }
@@ -209,8 +212,8 @@
       position: relative;
       display: grid;
       align-items: center;
-      min-height: 292px;
-      padding: 28px;
+      min-height: 230px;
+      padding: 22px;
       border-left: 1px solid rgba(16, 19, 31, .08);
       background:
         radial-gradient(circle at 80% 12%, rgba(255, 255, 255, .72) 0 46px, transparent 47px),
@@ -291,7 +294,7 @@
       min-height: 102px;
       padding: 12px;
       border: 1px solid rgba(16, 19, 31, .10);
-      border-radius: 20px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: 0 14px 30px rgba(16, 19, 31, .10);
     }
@@ -303,7 +306,7 @@
       height: 30px;
       margin-bottom: 9px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 12px;
+      border-radius: var(--radius);
       background: linear-gradient(135deg, var(--lime), var(--gold));
       font-size: 12px;
     }
@@ -324,7 +327,7 @@
     }
 
     .entry-card {
-      min-height: 174px;
+      min-height: 148px;
       display: grid;
       grid-template-rows: auto auto 1fr auto;
       gap: 8px;
@@ -355,14 +358,14 @@
       width: max-content;
       padding: 4px 8px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: #fff;
       font-size: 11px;
       font-weight: 950;
     }
 
     .entry-card strong {
-      font-size: 22px;
+      font-size: 19px;
       line-height: 1.15;
     }
 
@@ -379,7 +382,7 @@
       align-items: center;
       padding: 5px 9px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: linear-gradient(90deg, var(--lime), var(--gold));
       font-size: 12px;
     }
@@ -390,7 +393,7 @@
 
     .panel {
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 24px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: var(--shadow);
       overflow: hidden;
@@ -432,7 +435,7 @@
     .mode-tabs button {
       min-height: 46px;
       border: 1px solid rgba(16, 19, 31, .10);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: #fff;
       font-weight: 900;
       color: var(--ink);
@@ -455,7 +458,7 @@
       width: 100%;
       min-height: 44px;
       border: 1px solid rgba(16, 19, 31, .14);
-      border-radius: 14px;
+      border-radius: var(--radius);
       background: #fff;
       color: var(--ink);
       padding: 10px 11px;
@@ -548,7 +551,7 @@
       display: grid;
       place-items: center;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 16px;
+      border-radius: var(--radius);
       background: linear-gradient(135deg, #fff, var(--lime-soft));
       font-size: 24px;
       font-weight: 950;
@@ -581,7 +584,7 @@
       justify-content: center;
       padding: 8px 12px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: 0 8px 18px rgba(16, 19, 31, .08);
       font-size: 12px;
@@ -614,7 +617,7 @@
       margin-top: 10px;
       padding: 10px 11px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 16px;
+      border-radius: var(--radius);
       background: #fff;
       color: var(--ink-2);
       font-size: 12px;
@@ -624,7 +627,7 @@
     details.advanced-settings {
       margin-top: 12px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 18px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: 0 12px 28px rgba(16, 19, 31, .08);
       overflow: hidden;
@@ -653,7 +656,7 @@
       width: 24px;
       height: 24px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: #fff;
       line-height: 1;
       font-weight: 950;
@@ -670,7 +673,7 @@
       margin: 10px 0 16px;
       padding: 14px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 22px;
+      border-radius: var(--radius);
       background: linear-gradient(135deg, var(--paper-lime), #fff);
       box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
     }
@@ -695,7 +698,7 @@
       justify-content: center;
       padding: 5px 9px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: #fff;
       font-size: 12px;
       font-weight: 950;
@@ -723,7 +726,7 @@
       min-height: 34px;
       padding: 8px 9px;
       border: 1px solid rgba(16, 19, 31, .10);
-      border-radius: 14px;
+      border-radius: var(--radius);
       background: #fff;
       color: var(--ink-2);
       font-size: 12px;
@@ -737,7 +740,7 @@
       height: 18px;
       flex: 0 0 18px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: var(--lime);
       color: var(--ink);
       font-size: 10px;
@@ -750,7 +753,7 @@
       margin: 14px 0 4px;
       padding: 14px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 22px;
+      border-radius: var(--radius);
       background: linear-gradient(135deg, #fff, #fbfff0);
       box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
     }
@@ -779,10 +782,10 @@
     }
 
     .console-toggle {
-      min-height: 36px;
+      min-height: 44px;
       padding: 7px 10px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: 0 8px 18px rgba(16, 19, 31, .08);
       font-size: 12px;
@@ -792,11 +795,11 @@
 
     .ghost {
       width: auto;
-      min-height: 38px;
+      min-height: 44px;
       margin-top: 10px;
       padding: 8px 12px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: #fff;
       font-weight: 900;
       box-shadow: 0 8px 18px rgba(16, 19, 31, .08);
@@ -807,7 +810,7 @@
       min-height: 52px;
       margin-top: 16px;
       border: 1px solid rgba(16, 19, 31, .14);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: linear-gradient(90deg, var(--lime), var(--gold), var(--orange));
       color: var(--ink);
       font-weight: 950;
@@ -822,7 +825,7 @@
       margin-top: 14px;
       padding: 12px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 18px;
+      border-radius: var(--radius);
       background: linear-gradient(90deg, var(--lime-soft), #fff);
       color: var(--ink);
       font-size: 12px;
@@ -834,7 +837,7 @@
       margin-top: 16px;
       padding: 14px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 22px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
     }
@@ -843,8 +846,64 @@
 
     .sample-eval-head h3 {
       margin: 0;
-      font-size: 17px;
+      font-size: 16px;
       line-height: 1.25;
+    }
+
+    .sample-eval-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sample-help { flex: 0 0 auto; }
+
+    .sample-help-trigger {
+      display: grid;
+      width: 44px;
+      height: 44px;
+      place-items: center;
+      border: 1px solid rgba(16, 19, 31, .16);
+      border-radius: var(--radius);
+      background: var(--paper-lime);
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .sample-help-popover {
+      z-index: 20;
+      width: min(340px, calc(100vw - 32px));
+      margin: auto;
+      padding: 10px 11px;
+      border: 1px solid rgba(16, 19, 31, .14);
+      border-radius: var(--radius);
+      background: #fff;
+      box-shadow: var(--shadow);
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .sample-help-popover::backdrop { background: rgba(16, 19, 31, .26); }
+
+    .sample-help-popover-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
+
+    .sample-help-close {
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border: 1px solid rgba(16, 19, 31, .14);
+      border-radius: var(--radius);
+      background: #fff;
+      font-size: 18px;
+      font-weight: 900;
+      line-height: 1;
     }
 
     .sample-eval-head p {
@@ -868,16 +927,27 @@
     }
 
     .sample-actions {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
       margin-top: 10px;
     }
 
     .sample-actions .ghost {
+      width: 100%;
+      min-width: 0;
       margin-top: 0;
-      min-height: 42px;
+      min-height: 44px;
+      padding: 7px 8px;
+      font-size: 12px;
+      line-height: 1.3;
+      white-space: normal;
+    }
+
+    .sample-actions .hint {
+      grid-column: 1 / -1;
+      margin-top: 0;
+      font-size: 11px;
     }
 
     .sample-eval-log {
@@ -887,7 +957,7 @@
       padding: 12px;
       overflow: auto;
       border: 1px solid rgba(16, 19, 31, .10);
-      border-radius: 16px;
+      border-radius: var(--radius);
       background: #fbfff0;
       color: var(--ink);
       white-space: pre-wrap;
@@ -907,7 +977,7 @@
       min-height: 126px;
       padding: 14px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 22px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
     }
@@ -923,7 +993,7 @@
       height: 34px;
       margin-bottom: 12px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 14px;
+      border-radius: var(--radius);
       background: #fff;
       font-size: 13px;
       font-weight: 950;
@@ -953,7 +1023,7 @@
       min-height: 78px;
       padding: 11px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 18px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: 0 12px 28px rgba(16, 19, 31, .08);
     }
@@ -981,7 +1051,7 @@
       min-height: 98px;
       padding: 14px;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 22px;
+      border-radius: var(--radius);
       background: #fff;
       color: var(--ink);
       box-shadow: 0 14px 34px rgba(16, 19, 31, .08);
@@ -1012,7 +1082,7 @@
       margin-bottom: 12px;
       padding: 13px 14px;
       border: 1px solid rgba(16, 19, 31, .14);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: linear-gradient(90deg, var(--lime), var(--gold));
       box-shadow: 0 12px 28px rgba(139, 214, 0, .22), 0 3px 0 rgba(16, 19, 31, .86);
       text-decoration: none;
@@ -1033,7 +1103,7 @@
       min-height: 46px;
       padding: 10px 12px;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 16px;
+      border-radius: var(--radius);
       background: #fff;
       text-decoration: none;
       box-shadow: 0 10px 24px rgba(16, 19, 31, .07);
@@ -1052,7 +1122,7 @@
       margin-top: 12px;
       padding: 12px;
       border: 1px solid rgba(16, 19, 31, .10);
-      border-radius: 18px;
+      border-radius: var(--radius);
       background: #fff;
       box-shadow: 0 12px 28px rgba(16, 19, 31, .08);
     }
@@ -1064,7 +1134,7 @@
       height: 82px;
       object-fit: cover;
       border: 1px solid rgba(16, 19, 31, .12);
-      border-radius: 14px;
+      border-radius: var(--radius);
       background: #f4f7f0;
     }
 
@@ -1089,7 +1159,7 @@
       padding: 16px;
       overflow: auto;
       border: 1px solid rgba(16, 19, 31, .08);
-      border-radius: 22px;
+      border-radius: var(--radius);
       background: #fff;
       color: var(--ink);
       white-space: pre-wrap;
@@ -1105,7 +1175,7 @@
       margin-bottom: 10px;
       padding: 5px 9px;
       border: 1px solid rgba(16, 19, 31, .10);
-      border-radius: 999px;
+      border-radius: var(--radius);
       background: linear-gradient(90deg, var(--lime), #f2ff8f);
       color: var(--ink);
       font-size: 12px;
@@ -1121,13 +1191,12 @@
     }
 
     @media (max-width: 1080px) {
-      .hero, .layout { grid-template-columns: 1fr; }
-      .entry-hub { grid-template-columns: 1fr; }
-      .hero-art {
-        min-height: 220px;
-        border-left: 0;
-        border-top: 1px solid rgba(16, 19, 31, .08);
-      }
+      .hero { display: none; }
+      .hero-art { display: none; }
+      .layout { grid-template-columns: 1fr; }
+      .entry-hub { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+      .entry-card { min-height: 112px; padding: 12px; }
+      .entry-card > span { display: none; }
       .scenario-grid, .flow { grid-template-columns: 1fr; }
     }
 
@@ -1137,6 +1206,8 @@
       .hero-copy, .panel-head, .panel-body { padding: 14px; }
       .hero { display: none; min-height: 0; }
       .hero-art { display: none; }
+      .entry-hub { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .entry-card { min-height: 96px; }
       .proof-pills { grid-template-columns: 1fr; }
       .lead { font-size: 14px; line-height: 1.6; }
       .layout { gap: 12px; }
@@ -1148,11 +1219,14 @@
       .upload-card { min-height: 164px; text-align: left; }
       .upload-card.sample-upload { min-height: 126px; grid-template-columns: 1fr; }
       .upload-action { width: 100%; min-height: 44px; }
-      .sample-actions { align-items: stretch; flex-direction: column; }
       .primary { position: sticky; bottom: 10px; z-index: 7; min-height: 56px; }
       .scenario-grid, .flow { display: none; }
       .review-summary { min-height: 180px; max-height: 320px; }
       h1 { font-size: clamp(30px, 10vw, 42px); }
+    }
+
+    @media (max-width: 460px) {
+      .sample-actions { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1237,11 +1311,11 @@
           </div>
         </div>
         <div class="panel-body">
-	          <div class="mode-tabs" role="tablist" aria-label="素材来源">
-	            <button type="button" id="uploadTab" class="active" role="tab" aria-selected="true" data-mode="upload" data-i18n="uploadTab">本地上传</button>
-	            <button type="button" id="urlTab" role="tab" aria-selected="false" data-mode="url" data-i18n="urlTab">视频 URL</button>
-	            <button type="button" id="folderTab" role="tab" aria-selected="false" data-mode="folder">工单文件夹</button>
-	            <button type="button" id="batchFolderTab" role="tab" aria-selected="false" data-mode="batch_folder">批量工单</button>
+	          <div class="mode-tabs" role="group" aria-label="素材来源">
+	            <button type="button" id="uploadTab" class="active" aria-pressed="true" data-mode="upload" data-i18n="uploadTab">本地上传</button>
+	            <button type="button" id="urlTab" aria-pressed="false" data-mode="url" data-i18n="urlTab">视频 URL</button>
+	            <button type="button" id="folderTab" aria-pressed="false" data-mode="folder">工单文件夹</button>
+	            <button type="button" id="batchFolderTab" aria-pressed="false" data-mode="batch_folder">批量工单</button>
 	          </div>
 
           <form id="reviewForm">
@@ -1375,25 +1449,14 @@
                   </div>
                 </div>
 
-                <div class="row">
-                  <div>
-                    <label for="continuityPolicy">离镜补件提示阈值</label>
-                    <select name="continuity_policy" id="continuityPolicy">
-                      <option value='{"out_of_frame_warning_seconds":1}'>1 秒</option>
-                      <option value='{"out_of_frame_warning_seconds":3}' selected>3 秒</option>
-                      <option value='{"out_of_frame_warning_seconds":4}'>4 秒</option>
-                    </select>
-                  </div>
-                </div>
-
                 <div id="minorRefundPolicyGroup" hidden>
                   <label for="minorRefundPolicy">未成年人资料审核方式</label>
                   <select name="minor_refund_policy" id="minorRefundPolicy">
-                    <option value='{"review_mode":"standard","authoritative_verification":"disabled","independent_payment_min_age":10}' selected>标准视觉初审（默认，不依赖外部接口）</option>
-                    <option value='{"review_mode":"standard","authoritative_verification":"advisory","independent_payment_min_age":10}'>视觉初审 + 在线验真提醒（不阻断）</option>
-                    <option value='{"review_mode":"strict","authoritative_verification":"required","independent_payment_min_age":10}'>严格模式（必须完成甲方在线验真）</option>
+                    <option value='{"review_mode":"standard","authoritative_verification":"disabled"}' selected>标准视觉初审（默认，不依赖外部接口）</option>
+                    <option value='{"review_mode":"standard","authoritative_verification":"advisory"}'>视觉初审 + 在线验真提醒（不阻断）</option>
+                    <option value='{"review_mode":"strict","authoritative_verification":"required"}'>严格模式（必须完成甲方在线验真）</option>
                   </select>
-                  <div class="hint">标准模式核对五类材料和图片中可见信息；申请时未满 10 周岁会加强核对支付密码来源和监护人发现消费过程，缺口可直接补充。高置信未满 9 周岁时要求人工重点核对独立支付能力，但年龄本身不决定退款或支持结论。只有甲方未来接入身份、运营商或订单验真能力后，才启用严格模式。</div>
+                  <div class="hint">标准模式核对五类材料和图片中可见信息。仅当年龄证据高置信显示未满 9 周岁时，提示授权人员重点关注独立支付能力；年龄本身不构成缺件，也不决定退款或支持结论。只有甲方未来接入身份、运营商或订单验真能力后，才启用严格模式。</div>
                 </div>
 
                 <div class="row">
@@ -1419,8 +1482,20 @@
           </div>
           <section class="sample-eval-card" aria-label="人工结论样本评测">
             <div class="sample-eval-head">
-              <h3>人工结论样本评测</h3>
-              <p>导入推理完成后关联的 CSV/JSON 人工结果。没有辅助结论时只检查样本完备性；包含辅助结论时统计探索性指标。样本规模、标签口径和正式阈值由双方评测方案确认，不是审核 API 的运行时门槛。</p>
+              <div class="sample-eval-title-row">
+                <h3>人工结论样本评测</h3>
+                <span class="sample-help">
+                  <button class="sample-help-trigger" type="button" popovertarget="sampleHelpPopover" aria-label="查看样本字段说明">!</button>
+                </span>
+                <div class="sample-help-popover" id="sampleHelpPopover" popover>
+                  <div class="sample-help-popover-head">
+                    <strong>样本字段说明</strong>
+                    <button class="sample-help-close" type="button" popovertarget="sampleHelpPopover" popovertargetaction="hide" aria-label="关闭样本字段说明">×</button>
+                  </div>
+                  建议字段包含场景、人工结论、辅助结论、用户诉求、素材、商品与规格信息、人工原因。CSV/JSON 只用于离线样本核对；探索性指标、标签口径和正式阈值由双方评测方案确认，不作为审核任务的运行门槛。
+                </div>
+              </div>
+              <p>导入人工结果，检查样本字段是否齐全。</p>
             </div>
             <form id="sampleEvalForm">
               <input name="file" id="sampleFile" type="file" accept=".csv,.json,text/csv,application/json" />
@@ -1428,7 +1503,6 @@
                 <span class="upload-icon">表</span>
                 <span>
                   <span class="upload-title">拖放或选择样本表</span>
-                  <span class="upload-desc">字段建议包含：场景、人工结论、辅助结论、用户诉求、素材、商品信息、规格信息、人工原因。</span>
                   <span class="file-state strong" id="sampleFileState">尚未选择样本表</span>
                 </span>
                 <span class="upload-action">选择样本表</span>
@@ -1705,7 +1779,7 @@
 	          [uploadTab, urlTab, folderTab, batchFolderTab].forEach((tab) => {
 	            const active = tab.dataset.mode === mode;
 	            tab.classList.toggle('active', active);
-	            tab.setAttribute('aria-selected', String(active));
+	            tab.setAttribute('aria-pressed', String(active));
 	          });
 	          const batchMode = mode === 'batch_folder';
 	          folderUploadTitle.textContent = batchMode ? '选择包含多个工单的父目录' : '选择一个工单素材文件夹';
@@ -1839,36 +1913,40 @@
             const parsed = review.agent_report && review.agent_report.parsed || {};
             const damage = parsed.damage_causality_assessment || {};
             const severity = damage.severity_assessment || null;
-            const severeLevels = ['severe', 'extreme'];
-            const issueVisible = parsed.issue_visible;
-            const fieldConfidences = parsed.field_confidences || {};
-            const severityConfidence = Number(
-              severity && severity.confidence != null
-                ? severity.confidence
-                : Array.isArray(fieldConfidences) ? fieldConfidences[7] : fieldConfidences.issue_visible
-            );
+            const decisionAudit = parsed.decision_policy_audit || {};
+            const materialReadiness = review.material_readiness || data.material_readiness || parsed.material_readiness || {};
+            const materialScenario = materialReadiness.scenario || businessScenarioInput.value;
+            const materialSceneLabel = {
+              product_damage: '商品有伤场景',
+              wrong_item: '发错货场景',
+              missing_item: '漏发货场景',
+              minor_refund: '未成年人退款场景',
+              minor_material: '未成年人退款场景'
+            }[materialScenario] || '当前场景';
+            const materialStatusText = {
+              complete: '齐全',
+              incomplete: '不齐全',
+              indeterminate: '待确认',
+              not_required: '无需用户补充'
+            }[materialReadiness.status];
+            const materialConfidence = Number(materialReadiness.confidence);
+            const materialLine = materialStatusText
+              ? '材料：当前' + materialSceneLabel + '下的用户材料是否齐全：' + materialStatusText
+                + (Number.isFinite(materialConfidence) ? '（' + Math.round(materialConfidence * 100) + '%）' : '')
+              : '';
             const severeText = businessScenarioInput.value === 'product_damage'
               && severity
-              && severeLevels.includes(severity.level)
-              && issueVisible === true
-              && Number.isFinite(severityConfidence)
-              && severityConfidence >= 0.8
+              && decisionAudit.severe_alert_eligible === true
                 ? '严重商品质量问题：是'
                 : '';
             const confidence = Number(brief.confidence);
             const confidenceText = Number.isFinite(confidence) ? Math.round(confidence * 100) + '%' : '暂不计算';
-            const verdictText = { YES: '证据支持', NO: '证据不支持', REVIEW: '待确认' }[brief.system_yes_no] || safeText(brief.system_yes_no);
-            const reviewLevel = { required: '必须人工复核', optional: '建议抽检', not_required: '无需逐单人工复核' }[brief.human_review_level];
             return [
-              ...ingestionLines(data),
-              ...mediaWarningLines(data),
-              '结论：' + safeText(brief.conclusion),
+              '整体建议：' + safeText(brief.conclusion),
+              '整体确定性：' + confidenceText,
               severeText,
-              '证据分数：' + confidenceText + ' / 审核建议：' + verdictText,
-              reviewLevel ? '人工处理：' + reviewLevel : '',
-              '下一步：' + safeText(brief.next_step),
-              '取证：' + safeText(review.frame_strategy),
-              '报告：点击下方按钮查看完整 Agent 报告。'
+              materialLine,
+              brief.next_step ? '下一步：' + safeText(brief.next_step) : ''
             ].filter(Boolean).join('\n\n');
           }
           const summary = review.summary || {};

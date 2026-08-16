@@ -553,6 +553,10 @@ paths:
               schema:
                 type: string
                 format: binary
+            video/webm:
+              schema:
+                type: string
+                format: binary
             application/octet-stream:
               schema:
                 type: string
@@ -572,6 +576,10 @@ paths:
                 type: string
                 format: binary
             video/mp4:
+              schema:
+                type: string
+                format: binary
+            video/webm:
               schema:
                 type: string
                 format: binary
@@ -1456,6 +1464,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/handoff/offer:
     post:
       summary: Create Handoff Offer
@@ -1968,12 +1978,15 @@ components:
           title: Password
         tenant_id:
           type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^\S+$
           title: Tenant Id
-          default: mitako
       type: object
       required:
       - username
       - password
+      - tenant_id
       title: AuthLoginRequest
     Body_create_job_api_v1_review_jobs_post:
       properties:
@@ -2848,6 +2861,7 @@ components:
           - evidence_supports_claim
           - evidence_does_not_support_claim
           - evidence_inconclusive
+          - severe_structural_damage_follow_up
           - technical_processing_incomplete
           title: Conclusion Code
         conclusion:
@@ -3142,6 +3156,58 @@ components:
       - client_case_id
       - scenario
       title: ReviewCaseMetadata
+    ReviewClaimExpectedItemResolution:
+      properties:
+        claimed_item:
+          type: string
+          maxLength: 500
+          minLength: 1
+          title: Claimed Item
+        is_expected:
+          type: boolean
+          title: Is Expected
+        baseline_version:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Baseline Version
+        source:
+          type: string
+          enum:
+          - order_system
+          - product_master
+          - versioned_activity_rule
+          title: Source
+        resolution_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          pattern: ^[A-Za-z0-9_.:-]+$
+          title: Resolution Ref
+        reason:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Reason
+        required_received_item_refs:
+          items:
+            type: string
+          type: array
+          maxItems: 100
+          minItems: 1
+          title: Required Received Item Refs
+      additionalProperties: false
+      type: object
+      required:
+      - claimed_item
+      - is_expected
+      - baseline_version
+      - source
+      - resolution_ref
+      - reason
+      - required_received_item_refs
+      title: ReviewClaimExpectedItemResolution
+      description: 可信业务系统对用户主张项是否属于应发项的版本化解析。
     ReviewClaimScope:
       properties:
         claim_id:
@@ -3218,12 +3284,6 @@ components:
       description: 本次审核实际覆盖的诉求，避免把后续追加问题混入当前结论。
     ReviewContinuityPolicy:
       properties:
-        out_of_frame_warning_seconds:
-          type: number
-          maximum: 30.0
-          minimum: 0.5
-          title: Out Of Frame Warning Seconds
-          default: 3.0
         require_identity_reestablishment:
           type: boolean
           title: Require Identity Reestablishment
@@ -3239,6 +3299,7 @@ components:
             minimum: 0.2
           - type: 'null'
           title: Scan Fps
+      additionalProperties: false
       type: object
       title: ReviewContinuityPolicy
     ReviewContractResponse:
@@ -3334,6 +3395,7 @@ components:
           minimum: 2.0
           title: Context Frames
           default: 6
+      additionalProperties: false
       type: object
       title: ReviewDamageCausalityPolicy
     ReviewDecisionPolicy:
@@ -3356,7 +3418,7 @@ components:
           type: string
           maxLength: 160
           title: Policy Ref
-          default: MITAKO-PD-ADVISORY@20260806.1
+          default: MITAKO-FOUR-SCENE@20260814.1
         opening_video_required:
           type: boolean
           title: Opening Video Required
@@ -3432,12 +3494,7 @@ components:
           - medium
           title: Maximum Forensic Risk
           default: low
-        max_unobserved_seconds:
-          type: number
-          maximum: 30.0
-          minimum: 0.0
-          title: Max Unobserved Seconds
-          default: 0.0
+      additionalProperties: false
       type: object
       title: ReviewDecisionPolicy
       description: 甲方可选的规则判定策略；默认不把证据不足自动判为不支持。
@@ -3544,6 +3601,14 @@ components:
           - other
           title: Item Type
           default: paid_item
+        item_form:
+          type: string
+          enum:
+          - flat_paper
+          - other
+          - unknown
+          title: Item Form
+          default: unknown
         master_image_urls:
           items:
             type: string
@@ -3639,9 +3704,13 @@ components:
           type: array
           title: Standard Packing List
         warehouse_verification:
-          additionalProperties: true
-          type: object
-          title: Warehouse Verification
+          anyOf:
+          - $ref: '#/components/schemas/ReviewWarehouseVerification'
+          - type: 'null'
+        claim_expected_item_resolution:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewClaimExpectedItemResolution'
+          - type: 'null'
       additionalProperties: true
       type: object
       required:
@@ -3781,6 +3850,10 @@ components:
           additionalProperties: true
           type: object
           title: Input Readiness
+        material_readiness:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewMaterialReadiness'
+          - type: 'null'
         boundary:
           type: string
           title: Boundary
@@ -3877,6 +3950,116 @@ components:
       required:
       - package_ref
       title: ReviewLogisticsPackage
+    ReviewMaterialCheck:
+      properties:
+        requirement_id:
+          type: string
+          title: Requirement Id
+        label:
+          type: string
+          title: Label
+        required:
+          type: boolean
+          title: Required
+          default: true
+        status:
+          type: string
+          enum:
+          - present
+          - missing
+          - invalid
+          - unknown
+          - not_applicable
+          title: Status
+        source:
+          type: string
+          enum:
+          - metadata
+          - model
+          - trusted_system
+          title: Source
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+        evidence_refs:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Evidence Refs
+        reason:
+          type: string
+          minLength: 1
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - requirement_id
+      - label
+      - status
+      - source
+      - confidence
+      - evidence_refs
+      - reason
+      title: ReviewMaterialCheck
+    ReviewMaterialReadiness:
+      properties:
+        scenario:
+          type: string
+          enum:
+          - product_damage
+          - wrong_item
+          - missing_item
+          - minor_refund
+          title: Scenario
+        status:
+          type: string
+          enum:
+          - complete
+          - incomplete
+          - indeterminate
+          - not_required
+          title: Status
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+        reason:
+          type: string
+          minLength: 1
+          title: Reason
+        checklist:
+          items:
+            $ref: '#/components/schemas/ReviewMaterialCheck'
+          type: array
+          minItems: 1
+          title: Checklist
+        missing_items:
+          items:
+            type: string
+          type: array
+          title: Missing Items
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+      additionalProperties: false
+      type: object
+      required:
+      - scenario
+      - status
+      - confidence
+      - reason
+      - checklist
+      - missing_items
+      - warnings
+      title: ReviewMaterialReadiness
     ReviewMetadataValidationResponse:
       properties:
         ok:
@@ -3925,12 +4108,6 @@ components:
           - required
           title: Authoritative Verification
           default: disabled
-        independent_payment_min_age:
-          type: integer
-          maximum: 18.0
-          minimum: 0.0
-          title: Independent Payment Min Age
-          default: 10
       type: object
       title: ReviewMinorRefundPolicy
       description: 未成年人资料视觉初审策略；权威验真未接入时默认不阻断。
@@ -3974,6 +4151,10 @@ components:
             type: object
           - type: 'null'
           title: Media Forensics
+        material_readiness:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewMaterialReadiness'
+          - type: 'null'
         advisory_assessment:
           anyOf:
           - $ref: '#/components/schemas/ReviewAdvisoryAssessment'
@@ -3986,6 +4167,10 @@ components:
           additionalProperties: true
           type: object
           title: Sampling
+        media_preflight_execution:
+          additionalProperties: true
+          type: object
+          title: Media Preflight Execution
       additionalProperties: false
       type: object
       title: ReviewPayload
@@ -4036,26 +4221,15 @@ components:
       title: ReviewReportReference
     ReviewRoutingPolicy:
       properties:
-        required_below_confidence:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Required Below Confidence
-          default: 0.5
-        optional_below_confidence:
-          type: number
-          maximum: 1.0
-          minimum: 0.0
-          title: Optional Below Confidence
-          default: 0.8
-        out_of_frame_resubmit_seconds:
-          type: number
-          maximum: 30.0
-          minimum: 0.5
-          title: Out Of Frame Resubmit Seconds
-          default: 3.0
+        policy_ref:
+          type: string
+          const: MITAKO-ROUTING@20260815.1
+          title: Policy Ref
+          default: MITAKO-ROUTING@20260815.1
+      additionalProperties: false
       type: object
       title: ReviewRoutingPolicy
+      description: 工单只能选择已批准的服务端路由策略，不能自行改写阈值。
     ReviewSamplingPlanRequest:
       properties:
         duration_seconds:
@@ -4145,14 +4319,6 @@ components:
           - type: 'null'
           title: Auto Escalate
           default: false
-        confidence_threshold:
-          anyOf:
-          - type: number
-            maximum: 1.0
-            minimum: 0.0
-          - type: 'null'
-          title: Confidence Threshold
-          default: 0.75
         forensic_checks:
           anyOf:
           - type: boolean
@@ -4168,6 +4334,7 @@ components:
             type: array
           - type: 'null'
           title: Forensic Checks
+      additionalProperties: false
       type: object
       title: ReviewSamplingPolicy
     ReviewSopRecommendation:
@@ -4177,7 +4344,6 @@ components:
           enum:
           - support_claim
           - not_support_claim
-          - comfort_compensation
           - request_more_material
           - further_assessment
           - system_retry
@@ -4302,6 +4468,102 @@ components:
       - review_task
       - attachment
       title: ReviewTaskUploadResponse
+    ReviewWarehouseShippedItem:
+      properties:
+        item_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Item Ref
+        shipped_quantity:
+          type: integer
+          maximum: 10000.0
+          minimum: 0.0
+          title: Shipped Quantity
+      additionalProperties: false
+      type: object
+      required:
+      - item_ref
+      - shipped_quantity
+      title: ReviewWarehouseShippedItem
+    ReviewWarehouseVerification:
+      properties:
+        status:
+          type: string
+          enum:
+          - confirmed_missing
+          - confirmed_not_missing
+          title: Status
+        source:
+          type: string
+          const: customer_warehouse
+          title: Source
+        verification_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          pattern: ^[A-Za-z0-9_.:-]+$
+          title: Verification Ref
+        baseline_version:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Baseline Version
+        verified_at:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Verified At
+        snapshot_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          pattern: ^[A-Za-z0-9_.:-]+$
+          title: Snapshot Ref
+        packages:
+          items:
+            $ref: '#/components/schemas/ReviewWarehouseVerifiedPackage'
+          type: array
+          maxItems: 100
+          minItems: 1
+          title: Packages
+      additionalProperties: false
+      type: object
+      required:
+      - status
+      - source
+      - verification_ref
+      - baseline_version
+      - verified_at
+      - snapshot_ref
+      - packages
+      title: ReviewWarehouseVerification
+      description: 甲方仓库系统提供的可追溯实发快照；视觉模型不得生成。
+    ReviewWarehouseVerifiedPackage:
+      properties:
+        package_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Package Ref
+        tracking_no:
+          type: string
+          maxLength: 160
+          title: Tracking No
+          default: ''
+        actual_shipped_items:
+          items:
+            $ref: '#/components/schemas/ReviewWarehouseShippedItem'
+          type: array
+          maxItems: 1000
+          minItems: 1
+          title: Actual Shipped Items
+      additionalProperties: false
+      type: object
+      required:
+      - package_ref
+      - actual_shipped_items
+      title: ReviewWarehouseVerifiedPackage
     RollbackBody:
       properties:
         target_version:

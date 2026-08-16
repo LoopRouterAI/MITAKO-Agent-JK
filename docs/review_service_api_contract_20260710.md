@@ -49,7 +49,7 @@
 - `conversation_history`、`sop_context`。
 - `asset_fields`：按原文件名声明素材来自 `images`、`reply`、`werehouse_message` 等字段。
 - `source_record`：原样保留甲方 manifest 的 `id/tag/status/admin_status/created_at/updated_at/resources` 等全部 JSON 字段。
-- `sampling_policy`：配置 `adaptive`、`strong`、`strict`、`forensic` 或 `custom` 抽帧策略；可选 `auto_escalate`、`confidence_threshold` 和 `forensic_checks`。
+- `sampling_policy`：配置 `adaptive`、`strong`、`strict`、`forensic` 或 `custom` 抽帧策略；可选 `auto_escalate` 和 `forensic_checks`。人工复核阈值由服务端版本化策略统一控制，调用方不能改写。
 - `continuity_policy`：离镜复核阈值、是否强制主体连续性专项扫描和专项分段大小。
 - `damage_causality_policy`：商品有伤场景是否强制执行动作前、动作中、动作后三段因果扫描。
 - `fulfillment_baseline`：版本化应发清单、每项数量、赠品/特典/随机规则、包裹数、物流单号和包裹到商品行的映射。

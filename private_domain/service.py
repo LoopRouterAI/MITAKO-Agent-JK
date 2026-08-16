@@ -166,17 +166,24 @@ def _run_visual_review(task: Dict[str, Any], raw: bytes) -> Dict[str, Any]:
     payload = _with_agent_brief(task, payload, ok)
     status = "REVIEW_COMPLETED" if ok else "REVIEW_FAILED"
     boundary = "视觉审核已完成初筛，仍需VIP客服结合订单与售后规则确认。" if ok else "视觉审核未完成，需VIP客服人工复核或稍后重试。"
-    return store.update_review_task_result(task["task_id"], status=status, result=payload, boundary=boundary)
+    return store.update_review_task_result(
+        task["task_id"],
+        tenant_id=str(task["tenant_id"]),
+        status=status,
+        result=payload,
+        boundary=boundary,
+    )
 
 
-def run_visual_review_for_task(task_id: str) -> Dict[str, Any]:
-    task = store.get_review_task(task_id)
+def run_visual_review_for_task(task_id: str, tenant_id: str) -> Dict[str, Any]:
+    task = store.get_review_task(task_id, tenant_id=tenant_id)
     if not task:
         return {}
     path = store.upload_dir() / str(task.get("stored_name") or "")
     if not path.exists():
         return store.update_review_task_result(
             task_id,
+            tenant_id=tenant_id,
             status="REVIEW_FAILED",
             result=_review_failure("material_file_missing", "stored material file not found"),
             boundary="视觉审核未完成，需VIP客服人工复核或重新上传材料。",
@@ -481,7 +488,7 @@ def _qa_reply(text: str, risk_level: int) -> str:
     return ""
 
 
-def process_group_message(payload: Dict[str, Any], tenant_id: str = "mitako") -> Dict[str, Any]:
+def process_group_message(payload: Dict[str, Any], *, tenant_id: str) -> Dict[str, Any]:
     group_id = (payload.get("group_id") or "").strip()
     if not group_id:
         raise ValueError("group_id_required")
@@ -510,7 +517,7 @@ def process_group_message(payload: Dict[str, Any], tenant_id: str = "mitako") ->
             "last_negative": risk_level > 0,
             "last_wish": bool(tags["wish"]),
         },
-    })
+    }, tenant_id=tenant_id)
 
     issue_type = _risk_type(content)
     task = None
@@ -527,7 +534,7 @@ def process_group_message(payload: Dict[str, Any], tenant_id: str = "mitako") ->
             "evidence_messages": [content],
             "priority": "urgent" if risk_level >= 3 else "high",
             "required_action": "群内极简安抚，暂停营销，并转 1 对 1 客服核实。",
-        })
+        }, tenant_id=tenant_id)
 
     result = {
         "group": group,
@@ -552,7 +559,7 @@ def process_group_message(payload: Dict[str, Any], tenant_id: str = "mitako") ->
     return result
 
 
-def process_product_event(payload: Dict[str, Any], tenant_id: str = "mitako") -> Dict[str, Any]:
+def process_product_event(payload: Dict[str, Any], *, tenant_id: str) -> Dict[str, Any]:
     event_id = (payload.get("event_id") or f"PD-EVT-{uuid4().hex[:8].upper()}").strip()
     event = {**payload, "event_id": event_id}
     store.save_product_event(event, tenant_id=tenant_id)
@@ -642,11 +649,11 @@ def create_review_task_from_upload(
         "status": "MATERIAL_READY",
         "context": context or {},
         "boundary": "材料已接收并生成审核任务；当前不自动定责，需视觉审核工作台或人工客服继续处理。",
-    })
+    }, tenant_id=tenant_id)
     return _run_visual_review(task, raw) if run_review else task
 
 
-def clear_demo_data(tenant_id: str = "mitako") -> Dict[str, Any]:
+def clear_demo_data(*, tenant_id: str) -> Dict[str, Any]:
     removed = store.clear_all_private_domain_data(tenant_id=tenant_id)
     return {
         "removed": removed,
@@ -655,7 +662,7 @@ def clear_demo_data(tenant_id: str = "mitako") -> Dict[str, Any]:
     }
 
 
-def load_demo_data(tenant_id: str = "mitako") -> Dict[str, Any]:
+def load_demo_data(*, tenant_id: str) -> Dict[str, Any]:
     clear_demo_data(tenant_id=tenant_id)
     group_results = [
         process_group_message(payload, tenant_id=tenant_id)
@@ -666,7 +673,9 @@ def load_demo_data(tenant_id: str = "mitako") -> Dict[str, Any]:
         for payload in DEMO_PRODUCT_EVENTS
     ]
     review_tasks = [
-        store.create_review_task({**task, "tenant_id": tenant_id})
+        store.create_review_task(
+            {**task, "tenant_id": tenant_id}, tenant_id=tenant_id
+        )
         for task in DEMO_REVIEW_TASKS
     ]
     snapshot = store.snapshot(tenant_id=tenant_id)
@@ -687,7 +696,7 @@ def load_demo_data(tenant_id: str = "mitako") -> Dict[str, Any]:
     }
 
 
-def dashboard_payload(tenant_id: str = "mitako") -> Dict[str, Any]:
+def dashboard_payload(*, tenant_id: str) -> Dict[str, Any]:
     snapshot = store.snapshot(tenant_id=tenant_id)
     return {
         "snapshot": snapshot,

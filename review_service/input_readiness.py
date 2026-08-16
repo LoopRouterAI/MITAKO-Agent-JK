@@ -161,9 +161,7 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
             missing_required.append("fulfillment_baseline.baseline_version")
         if not fulfillment["package_baseline_complete"]:
             missing_required.append("package_item_mapping")
-        if not fulfillment["submitted_package_mapping_complete"]:
-            missing_required.append("submitted_package_mapping")
-        if not fulfillment["selection_rules_complete"]:
+        if (metadata.get("fulfillment_baseline") or {}).get("selection_rules") and not fulfillment["selection_rules_complete"]:
             field = "fulfillment_baseline.selection_rules_complete" if (metadata.get("fulfillment_baseline") or {}).get("selection_rules") else "selection_rules_declaration"
             missing_required.append(field)
         alternatives.append("SKU/条码/包装编码任一唯一标识，或商品名+规格/款式/角色/数量的可唯一组合")
@@ -180,14 +178,8 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
                 missing_required.append("package_item_mapping")
             if not fulfillment["benefit_rules_complete"]:
                 missing_required.append("benefit_rules_declaration")
-            if not fulfillment["selection_rules_complete"]:
+            if (metadata.get("fulfillment_baseline") or {}).get("selection_rules") and not fulfillment["selection_rules_complete"]:
                 missing_required.append("selection_rules_declaration")
-            if not fulfillment["submitted_package_mapping_complete"]:
-                missing_required.append("submitted_package_mapping")
-            if not fulfillment["all_packages_uploaded"] or not fulfillment["all_items_displayed"]:
-                missing_required.append("complete_evidence_coverage")
-            if not fulfillment["all_expected_packages_delivered"]:
-                missing_required.append("all_expected_packages_delivered")
             if not has_product_master:
                 missing_recommended.append("product_master_data_or_standard_packing_list")
             alternatives.append("SKU/条码/包装编码或可唯一商品组合 + 每项应发数量 + 版本化规则 + 包裹关联")
@@ -202,22 +194,34 @@ def assess_input_readiness(metadata: Dict[str, Any]) -> Dict[str, Any]:
     elif scenario == "minor_refund":
         if not metadata.get("sop_context"):
             missing_recommended.append("sop_context")
-        warnings.append("材料完整仅表示可进入人工审核，不代表自动通过退款。")
 
-    full_review_ready = not missing_required
+    ready_for_visual_analysis = not missing_required
+    pending_semantic_checks = {
+        "product_damage": ["initial_opening_video", "opening_video_sop_compliance", "damage_visibility"],
+        "wrong_item": ["received_item_identity", "same_package_linkage", "fulfillment_difference"],
+        "missing_item": ["missing_item_user_evidence_route", "received_item_inventory", "fulfillment_difference"],
+        "minor_refund": ["five_material_categories", "field_consistency", "document_quality"],
+    }.get(scenario, [])
+    decision_ready = bool(
+        scenario == "missing_item" and warehouse_verification
+    )
     capabilities = {
         "opening_continuity": True,
         "video_edit_risk": True,
         "visible_damage_detection": scenario == "product_damage",
         "damage_origin_assessment": scenario == "product_damage",
-        "wrong_item_decision": scenario == "wrong_item" and full_review_ready,
-        "missing_item_decision": scenario == "missing_item" and full_review_ready,
+        "wrong_item_decision": False,
+        "missing_item_decision": decision_ready,
         "minor_material_review": scenario == "minor_refund",
     }
     return {
         "scenario": scenario,
-        "status": "ready_for_full_review" if full_review_ready else "degraded_review",
-        "full_review_ready": full_review_ready,
+        "status": "ready_for_visual_analysis" if ready_for_visual_analysis else "degraded_visual_analysis",
+        "ready_for_visual_analysis": ready_for_visual_analysis,
+        "decision_ready": decision_ready,
+        "pending_semantic_checks": pending_semantic_checks,
+        # 兼容旧调用方；该字段只表示前置输入足以开始分析，不再表示可直接下业务结论。
+        "full_review_ready": ready_for_visual_analysis,
         "missing_required": missing_required,
         "missing_recommended": missing_recommended,
         "accepted_alternatives": alternatives,

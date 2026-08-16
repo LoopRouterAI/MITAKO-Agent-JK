@@ -20,6 +20,8 @@ VALID_CLAIM_SUPPORT = {"supported", "not_supported", "insufficient"}
 VALID_APPEARANCE_DIFFERENCE = {"visible", "not_visible", "uncertain"}
 VALID_DEFECT_QUALIFICATION = {"confirmed", "not_qualified", "indeterminate"}
 VALID_SPECIAL_PRODUCT_RULE = {"not_required", "satisfied", "required_but_not_quantified"}
+VALID_ACTION_RELATIONS = {"direct_contact", "indirect_force", "no_contact", "uncertain", "not_applicable"}
+DIRECT_ACTION_RELATIONS = {"direct_contact", "indirect_force"}
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -122,6 +124,8 @@ def _reference_allowed(reference: Dict[str, Any], valid_frames: set[tuple[int, i
 def _has_structured_action_chain(item: Dict[str, Any], valid_frames: set[tuple[int, int]] | None = None) -> bool:
     return any(
         _same_chain(before, action, after)
+        and item.get("causal_action_relation") in DIRECT_ACTION_RELATIONS
+        and action.get("action_relation") in DIRECT_ACTION_RELATIONS
         and all(_reference_allowed(reference, valid_frames) for reference in (before, action, after))
         for before in item.get("before_action_evidence") or []
         for action in item.get("action_evidence") or []
@@ -181,6 +185,12 @@ def _has_linked_supplemental_damage(evidence: Any) -> bool:
 
 def normalize_damage_causality(value: Any) -> Dict[str, Any]:
     source = value if isinstance(value, dict) else {}
+    action_evidence = _evidence_list(source.get("action_evidence"))
+    action_relations = {
+        _enum(item.get("action_relation"), VALID_ACTION_RELATIONS, "uncertain")
+        for item in action_evidence
+    }
+    inferred_action_relation = next(iter(action_relations)) if len(action_relations) == 1 else "uncertain"
     possible_origins: List[Dict[str, Any]] = []
     for raw in source.get("possible_origins") or []:
         if not isinstance(raw, dict):
@@ -203,6 +213,9 @@ def normalize_damage_causality(value: Any) -> Dict[str, Any]:
         "most_likely_origin": _enum(source.get("most_likely_origin"), VALID_ORIGINS, "indeterminate"),
         "origin_confidence": _float(source.get("origin_confidence")),
         "causal_evidence_level": _enum(source.get("causal_evidence_level"), VALID_EVIDENCE_LEVELS, "insufficient"),
+        "causal_action_relation": _enum(
+            source.get("causal_action_relation"), VALID_ACTION_RELATIONS, inferred_action_relation
+        ),
         "claim_support": _enum(source.get("claim_support"), VALID_CLAIM_SUPPORT, "insufficient"),
         "appearance_difference": _enum(
             source.get("appearance_difference"), VALID_APPEARANCE_DIFFERENCE, "uncertain"
@@ -216,7 +229,7 @@ def normalize_damage_causality(value: Any) -> Dict[str, Any]:
         "possible_origins": possible_origins,
         "alternative_explanations": _text_list(source.get("alternative_explanations")),
         "before_action_evidence": _evidence_list(source.get("before_action_evidence")),
-        "action_evidence": _evidence_list(source.get("action_evidence")),
+        "action_evidence": action_evidence,
         "after_action_evidence": _evidence_list(source.get("after_action_evidence")),
     }
 

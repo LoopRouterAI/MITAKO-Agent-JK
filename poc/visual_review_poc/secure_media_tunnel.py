@@ -7,6 +7,7 @@ import os
 import queue
 import re
 import secrets
+import ssl
 import shutil
 import socket
 import subprocess
@@ -234,7 +235,7 @@ def _wait_public_media_ready(
     process: Any,
     timeout: float,
     probe: Callable[[str, float], None],
-) -> tuple[int, float]:
+) -> tuple[int, float, str]:
     started_at = time.monotonic()
     deadline = started_at + timeout
     attempts = 0
@@ -246,9 +247,12 @@ def _wait_public_media_ready(
         remaining = max(0.2, deadline - time.monotonic())
         try:
             probe(url, min(5.0, remaining))
-            return attempts, round(time.monotonic() - started_at, 3)
+            return attempts, round(time.monotonic() - started_at, 3), "ready"
         except (OSError, TimeoutError, urllib.error.URLError, RuntimeError) as exc:
             last_error = exc
+            reason = getattr(exc, "reason", None)
+            if attempts >= 3 and isinstance(reason, ssl.SSLEOFError):
+                return attempts, round(time.monotonic() - started_at, 3), "local_tls_unavailable"
         time.sleep(min(1.0, 0.2 * attempts))
     error_type = type(last_error).__name__ if last_error else "startup_timeout"
     raise RuntimeError(f"等待临时媒体公网地址可达超时：{error_type}")
@@ -288,7 +292,7 @@ def open_secure_media_tunnel(
         )
         public_origin = _read_public_origin(process, timeout)
         public_url = f"{public_origin}{route_path}"
-        probe_attempts, probe_seconds = _wait_public_media_ready(
+        probe_attempts, probe_seconds, probe_status = _wait_public_media_ready(
             public_url,
             process,
             timeout,
@@ -305,6 +309,7 @@ def open_secure_media_tunnel(
             "public_origin": "https://***.trycloudflare.com",
             "public_probe_attempts": probe_attempts,
             "public_probe_seconds": probe_seconds,
+            "public_probe_status": probe_status,
             "route_token_sha256": hashlib.sha256(token.encode("ascii")).hexdigest()[:12],
             "media_bytes": source.stat().st_size,
             "media_sha256": _sha256_file(source),

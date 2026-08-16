@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from poc.visual_review_poc.local_video_triage_demo import load_case_from_folder, order_info_context
+from poc.visual_review_poc.order_info_adapter import read_safe_ticket_manifest
 
 
 class OrderInfoAdapterTest(unittest.TestCase):
@@ -86,7 +87,7 @@ class OrderInfoAdapterTest(unittest.TestCase):
             with patch.dict("os.environ", {
                 "REVIEW_PRODUCT_IMAGE_BASE_URL": "https://product.example.test/base/",
             }):
-                context = order_info_context(path)
+                context = order_info_context(path, order_reference="ORDER-1")
                 case = load_case_from_folder(folder, supplemental_limit=10)
             serialized = json.dumps(case["structured_business_context"], ensure_ascii=False)
 
@@ -97,17 +98,21 @@ class OrderInfoAdapterTest(unittest.TestCase):
             context["order_items"][0]["master_image_urls"],
             ["https://product.example.test/base/images/products/sku-001.png"],
         )
-        self.assertEqual(context["logistics"], {
-            "carrier": "测试快递",
-            "tracking_ref": "sha256:015d9db4c0d91759",
-        })
-        self.assertNotIn("TRACK-001", serialized)
+        self.assertEqual(context["logistics"]["carrier"], "测试快递")
+        self.assertEqual(context["logistics"]["tracking_ref"], "sha256:015d9db4c0d91759")
         baseline = context["fulfillment_baseline"]
-        self.assertEqual(baseline["packages"], [])
-        self.assertEqual(baseline["package_mapping_status"], "not_declared_in_snapshot")
-        self.assertEqual(baseline["split_shipment_status"], "not_declared_in_snapshot")
+        self.assertEqual(len(baseline["packages"]), 1)
+        self.assertEqual(baseline["expected_package_count"], 1)
+        self.assertEqual(baseline["packages"][0]["package_ref"], "ORDER-PACKAGE-001")
+        self.assertEqual(baseline["packages"][0]["tracking_no"], "TRACK-001")
+        self.assertEqual(baseline["packages"][0]["order_reference"], "ORDER-1")
+        self.assertEqual(baseline["packages"][0]["expected_item_refs"], ["ORDER-LINE-001"])
+        self.assertEqual(baseline["package_mapping_status"], "single_package_from_order_snapshot")
+        self.assertEqual(baseline["split_shipment_status"], "single_package")
+        self.assertTrue(baseline["benefit_rules_complete"])
         self.assertEqual(baseline["selection_rules"][0]["rule_text"], "随机款式，端盒保配。")
-        self.assertFalse(baseline["selection_rules_complete"])
+        self.assertTrue(baseline["selection_rules_complete"])
+        self.assertEqual(baseline["selection_rules_status"], "resolved_by_final_order_lines")
         self.assertEqual(
             case["structured_business_context"]["fulfillment_baseline"]["source"],
             "customer_order_info_snapshot",
@@ -131,6 +136,32 @@ class OrderInfoAdapterTest(unittest.TestCase):
             "explicit_predecision_user_messages_only",
         )
         self.assertNotIn("reply.json", serialized)
+
+    def test_ticket_manifest_reader_only_returns_whitelisted_identifiers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            path.write_text(
+                json.dumps({
+                    "id": 319912,
+                    "order_no": "PT_202503159907401_6",
+                    "tag": "含开箱视频",
+                    "status": "已完成",
+                    "human_conclusion": "确认漏发",
+                    "resources": [{"local_file": "evidence.mp4"}],
+                }, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            result = read_safe_ticket_manifest(path)
+
+        self.assertEqual(result, {
+            "ticket_id": "319912",
+            "order_reference": "PT_202503159907401_6",
+        })
+        serialized = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("确认漏发", serialized)
+        self.assertNotIn("含开箱视频", serialized)
+        self.assertNotIn("已完成", serialized)
 
 
 if __name__ == "__main__":

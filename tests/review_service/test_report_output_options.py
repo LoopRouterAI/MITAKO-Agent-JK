@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html as html_module
+import json
 import re
 import tempfile
 import time
@@ -67,6 +69,35 @@ class ReportOutputOptionsTest(unittest.TestCase):
             rendered_data = service.render_job_report(job)
 
         self.assertEqual(rendered_data["media_forensics"], forensics)
+
+    def test_formal_report_receives_media_preflight_execution(self):
+        execution = {
+            "status": "completed",
+            "video": {
+                "submitted_source": "quality_proxy",
+                "delivery": "https_url",
+                "native_sampling_fps": 1.0,
+            },
+            "images": {"representation": "individual_webp", "collage_used": False},
+            "frame_fallback": {"used": False},
+        }
+        job = {
+            "job_id": "RJ-PREFLIGHT-REPORT",
+            "tenant_id": "mitako",
+            "status": "SUCCEEDED",
+            "result": {
+                "review": {
+                    "summary": {"review_status": "completed"},
+                    "agent_report": {"parsed": {"predicted_label": "review"}},
+                    "media_preflight_execution": execution,
+                },
+            },
+        }
+
+        with patch.object(service, "render_public_report", side_effect=lambda data: data):
+            rendered_data = service.render_job_report(job)
+
+        self.assertEqual(rendered_data["media_preflight_execution"], execution)
 
     def test_job_json_rewrites_media_to_authenticated_job_route(self):
         media_id = "d" * 32
@@ -278,6 +309,275 @@ class ReportOutputOptionsTest(unittest.TestCase):
         self.assertIn("video.currentTime = seekSeconds", html)
         self.assertIn("video.controls = true", html)
 
+    def test_formal_report_replaces_transient_workbench_media_with_durable_job_assets(self):
+        job_id = "RV-DURABLE-MEDIA"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_dir = root / job_id
+            job_dir.mkdir()
+            (job_dir / "001_video.mp4").write_bytes(b"video")
+            (job_dir / "002_image.jpg").write_bytes(b"image")
+            job = {
+                "job_id": job_id,
+                "tenant_id": "mitako",
+                "status": "SUCCEEDED",
+                "completed_at": 1,
+                "assets": [
+                    {
+                        "asset_id": "RA-VIDEO",
+                        "stored_name": "001_video.mp4",
+                        "original_name": "video.mp4",
+                        "mime_type": "video/mp4",
+                    },
+                    {
+                        "asset_id": "RA-IMAGE",
+                        "stored_name": "002_image.jpg",
+                        "original_name": "image.jpg",
+                        "mime_type": "image/jpeg",
+                    },
+                ],
+                "result": {"review": {
+                    "summary": {"review_status": "completed"},
+                    "agent_report": {
+                        "scenario": "product_damage",
+                        "parsed": {"predicted_label": "review"},
+                        "media_gallery": {
+                            "videos": [{"video_index": 1, "url": f"/media-item/{'a' * 32}"}],
+                            "frames": [{
+                                "video_index": 1,
+                                "timestamp": "00:12.50",
+                                "url": f"/media-item/{'b' * 32}",
+                            }],
+                            "images": [{"image_index": 1, "url": f"/media-item/{'c' * 32}"}],
+                        },
+                    },
+                }},
+            }
+
+            with patch.object(service, "upload_root", return_value=root), patch.object(
+                service, "render_public_report", side_effect=lambda data: data
+            ), patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}):
+                rendered = service.render_job_report(job)
+                public = service.public_job(job)
+
+            gallery = rendered["agent_report"]["media_gallery"]
+            video_url = gallery["videos"][0]["url"]
+            image_url = gallery["images"][0]["url"]
+            self.assertIn(f"/api/v1/review/jobs/{job_id}/media/", video_url)
+            self.assertIn(f"/api/v1/review/jobs/{job_id}/media/", image_url)
+            self.assertNotIn("url", gallery["frames"][0])
+            self.assertEqual(gallery["frames"][0]["video_url"].split("#", 1)[1], "t=12.5")
+            self.assertNotIn("/media/" + "a" * 32, str(rendered))
+            self.assertIn(f"/api/v1/review/jobs/{job_id}/media/", str(public))
+
+    def test_formal_media_route_streams_durable_job_asset_with_range(self):
+        job_id = "RV-DURABLE-RANGE"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_dir = root / job_id
+            job_dir.mkdir()
+            (job_dir / "001_video.mp4").write_bytes(b"0123456789")
+            job = {
+                "job_id": job_id,
+                "tenant_id": "mitako",
+                "assets": [{
+                    "asset_id": "RA-VIDEO",
+                    "stored_name": "001_video.mp4",
+                    "original_name": "video.mp4",
+                    "mime_type": "video/mp4",
+                }],
+                "result": {"review": {"agent_report": {}}},
+            }
+            media_id = service.job_asset_media_id(job_id, "RA-VIDEO")
+            app = FastAPI()
+            app.include_router(router.router)
+            with patch.dict("os.environ", {
+                "MITAKO_PROTECTED_API_AUTH_REQUIRED": "1",
+                "VISUAL_REPORT_SIGNING_SECRET": "shared-secret",
+            }), patch.object(service, "upload_root", return_value=root), patch.object(
+                router.store, "get_job", return_value=job
+            ):
+                signed_url = service.signed_job_media_url("mitako", job_id, media_id)
+                response = TestClient(app).get(signed_url, headers={"Range": "bytes=2-5"})
+
+            self.assertEqual(response.status_code, 206)
+            self.assertEqual(response.content, b"2345")
+            self.assertEqual(response.headers["content-range"], "bytes 2-5/10")
+            self.assertEqual(response.headers["content-type"], "video/mp4")
+            self.assertEqual(response.headers["cache-control"], "private, no-store")
+
+    def test_formal_report_prefers_persisted_browser_compatible_video_proxy(self):
+        job_id = "RV-BROWSER-PREVIEW"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_dir = root / job_id
+            job_dir.mkdir()
+            (job_dir / "001_video.mp4").write_bytes(b"original-hevc")
+            (job_dir / "browser_preview_001.webm").write_bytes(b"webm-vp9")
+            job = {
+                "job_id": job_id,
+                "tenant_id": "mitako",
+                "status": "SUCCEEDED",
+                "assets": [{
+                    "asset_id": "RA-VIDEO",
+                    "stored_name": "001_video.mp4",
+                    "original_name": "video.mp4",
+                    "mime_type": "video/mp4",
+                }],
+                "result": {"review": {"agent_report": {
+                    "media_gallery": {"videos": [{"video_index": 1, "url": f"/media-item/{'a' * 32}"}]},
+                }}},
+            }
+
+            with patch.object(service, "upload_root", return_value=root), patch.object(
+                service, "render_public_report", side_effect=lambda data: data
+            ), patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}):
+                rendered = service.render_job_report(job)
+                video = rendered["agent_report"]["media_gallery"]["videos"][0]
+                review_media_id = urlsplit(video["review_url"]).path.rsplit("/", 1)[-1]
+                original_media_id = urlsplit(video["original_url"]).path.rsplit("/", 1)[-1]
+                resolved = service.resolve_job_media_path(job, review_media_id)
+                original = service.resolve_job_media_path(job, original_media_id)
+
+            self.assertIsNotNone(resolved)
+            self.assertEqual(resolved[0].name, "browser_preview_001.webm")
+            self.assertEqual(resolved[1], "video/webm")
+            self.assertEqual(original[0].name, "001_video.mp4")
+            self.assertEqual(video["url"], video["review_url"])
+            self.assertTrue(video["comparison_available"])
+
+            with patch.object(service, "upload_root", return_value=root), patch.dict(
+                "os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}
+            ):
+                report_html = service.render_job_report(job)
+
+            self.assertIn("原片与模型送审版对照", report_html)
+            self.assertIn("查看原片", report_html)
+            self.assertIn("查看模型送审版", report_html)
+
+    def test_workbench_quality_proxy_is_persisted_for_formal_report(self):
+        job_id = "RV-PERSIST-PREVIEW"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / job_id).mkdir()
+            source = root / job_id / "001_video.mp4"
+            source.write_bytes(b"original-video")
+            source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+            job = {"job_id": job_id, "assets": [{
+                "asset_id": "RA-VIDEO",
+                "stored_name": source.name,
+                "mime_type": "video/mp4",
+                "size": source.stat().st_size,
+                "sha256": source_sha256,
+            }]}
+            payload = {"review": {
+                "media_preflight_execution": {"video": {
+                    "submitted_source": "quality_proxy",
+                    "proxy_codec": "vp9",
+                    "source_width": 3840,
+                    "source_height": 2160,
+                    "submitted_width": 2560,
+                    "submitted_height": 1440,
+                    "native_sampling_fps": 1.0,
+                }},
+                "agent_report": {"media_gallery": {"videos": [{
+                    "video_index": 1,
+                    "url": f"/media-item/{'a' * 32}?expires=99&sig=signed",
+                }]}},
+            }}
+
+            def write_preview(_url, target, _max_bytes):
+                target.write_bytes(b"webm-vp9")
+                return True
+
+            with patch.object(service, "upload_root", return_value=root), patch.object(
+                service, "_download_workbench_media", side_effect=write_preview
+            ) as download:
+                service._persist_workbench_video_previews(job, payload)
+
+            self.assertEqual((root / job_id / "browser_preview_001.webm").read_bytes(), b"webm-vp9")
+            self.assertEqual(download.call_count, 1)
+            manifest = json.loads((root / job_id / "review_media_derivatives.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["version"], 2)
+            derivative = manifest["videos"][0]
+            self.assertEqual(derivative["source_asset_id"], "RA-VIDEO")
+            self.assertEqual(derivative["source_sha256"], source_sha256)
+            self.assertEqual(
+                derivative["review_sha256"],
+                hashlib.sha256(b"webm-vp9").hexdigest(),
+            )
+            self.assertEqual(derivative["model_input_kind"], "review_derivative")
+            self.assertEqual(derivative["transformation"]["proxy_codec"], "vp9")
+            self.assertEqual(derivative["validation_status"], "ready")
+
+    def test_workbench_receives_the_persisted_review_derivative(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_dir = root / "RV-PREPARED-BEFORE-MODEL"
+            job_dir.mkdir()
+            source = job_dir / "001_video.mp4"
+            source.write_bytes(b"original-video")
+            derivative = job_dir / "browser_preview_001.webm"
+            derivative.write_bytes(b"review-video")
+            captured = {}
+
+            class Response:
+                status_code = 200
+                is_error = False
+
+                @staticmethod
+                def json():
+                    return {"ok": False, "review": {}}
+
+            class Client:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+                def post(self, _url, **kwargs):
+                    captured["filename"] = kwargs["files"][0][1][0]
+                    captured["mime_type"] = kwargs["files"][0][1][2]
+                    captured["content"] = kwargs["files"][0][1][1].read()
+                    return Response()
+
+            manifest = {"version": 2, "videos": [{"video_index": 1, "validation_status": "ready"}]}
+            job = {
+                "job_id": job_dir.name,
+                "client_case_id": "CASE-PREPARED",
+                "scenario": "product_damage",
+                "tenant_id": "mitako",
+                "attempts": 1,
+                "assets": [{
+                    "asset_id": "RA-VIDEO",
+                    "stored_name": source.name,
+                    "original_name": "customer.mp4",
+                    "mime_type": "video/mp4",
+                }],
+                "metadata": {},
+            }
+            prepared = {
+                "files": {"RA-VIDEO": str(derivative)},
+                "mime_types": {"RA-VIDEO": "video/webm"},
+                "manifest": manifest,
+            }
+
+            with patch.object(service, "upload_root", return_value=root), patch.object(
+                service, "prepare_job_review_media", return_value=prepared
+            ), patch.object(service, "_check_workbench_health"), patch.object(
+                service.httpx, "Client", Client
+            ), patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "internal-secret"}):
+                payload = service._call_workbench(job)
+
+            self.assertEqual(captured["filename"], derivative.name)
+            self.assertEqual(captured["mime_type"], "video/webm")
+            self.assertEqual(captured["content"], b"review-video")
+            self.assertEqual(payload["_review_media_processing"], manifest)
+
     def test_formal_media_signature_rejects_expired_url(self):
         with patch.dict("os.environ", {"VISUAL_REPORT_SIGNING_SECRET": "shared-secret"}):
             media_url = service.signed_job_media_url(
@@ -347,6 +647,9 @@ class ReportOutputOptionsTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"image")
         self.assertEqual(tampered.status_code, 403)
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        self.assertEqual(response.headers["referrer-policy"], "no-referrer")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
 
     def test_formal_report_hides_internal_inference_costs(self):
         job = {
@@ -424,7 +727,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
                 "supplemental_images": [],
                 "structured_business_context": {
                     "business_scenario": "product_damage",
-                    "review_routing_policy": {"out_of_frame_resubmit_seconds": 3.0},
+                    "review_routing_policy": {"policy_ref": "MITAKO-ROUTING@20260815.1"},
                 },
             }
             result = {
@@ -482,6 +785,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
         review = completed["result"]["review"]
         self.assertEqual(review["report"]["status"], "not_requested")
         self.assertIsNone(review["report"]["html_url"])
+        self.assertEqual(review["advisory_assessment"]["workflow_recommendation"], "request_more_material")
         self.assertEqual(review["advisory_assessment"]["human_review"]["level"], "not_required")
 
     def test_public_job_drops_nested_review_diagnostics(self):
@@ -500,6 +804,7 @@ class ReportOutputOptionsTest(unittest.TestCase):
                 "review": {
                     "review_label": "positive",
                     "sampling": {"strategy": "native_video"},
+                    "media_preflight_execution": {"status": "completed"},
                     "diagnostics": {"provider": "internal-provider"},
                     "unexpected_internal": "secret",
                 }
@@ -509,6 +814,10 @@ class ReportOutputOptionsTest(unittest.TestCase):
         public = service.public_job(job)
 
         self.assertEqual(public["result"]["review"]["sampling"], {"strategy": "native_video"})
+        self.assertEqual(
+            public["result"]["review"]["media_preflight_execution"],
+            {"status": "completed"},
+        )
         self.assertNotIn("diagnostics", public["result"]["review"])
         self.assertNotIn("unexpected_internal", public["result"]["review"])
 
@@ -560,6 +869,88 @@ class ReportOutputOptionsTest(unittest.TestCase):
         ):
             self.assertNotIn(secret, serialized)
 
+    def test_public_job_redacts_shipping_tracking_number_from_model_text(self):
+        job = {
+            "job_id": "RV-PUBLIC-SHIPPING-ID",
+            "client_case_id": "CASE-PUBLIC-SHIPPING-ID",
+            "scenario": "product_damage",
+            "status": "SUCCEEDED",
+            "assets": [],
+            "result": {
+                "review": {
+                    "agent_report": {
+                        "parsed": {
+                            "supporting_evidence": [{
+                                "fact": "运单号：JT0023964811882，面单清晰可见",
+                            }],
+                        },
+                    },
+                },
+            },
+        }
+
+        serialized = str(service.public_job(job))
+        self.assertNotIn("JT0023964811882", serialized)
+        self.assertIn("[已脱敏]", serialized)
+
+    def test_public_json_and_html_share_sensitive_text_redaction(self):
+        sensitive_values = (
+            "张三",
+            "李晓明",
+            "李四",
+            "北京市朝阳区幸福路1号",
+            "上海市浦东新区世纪大道88号",
+            "13800138000",
+            "Alice.Service+vip@example.com",
+            "6222020202020202020",
+            "pay_account_9988",
+            "wx_demo_20260812",
+            "JT0023964811882",
+        )
+        sensitive_fact = (
+            "张三本人提交，住在北京市朝阳区幸福路1号；"
+            "材料由李晓明提交，客户称收货地点为上海市浦东新区世纪大道88号，联系人李四；"
+            "手机号：13800138000；邮箱：Alice.Service+vip@example.com；"
+            "银行卡号：6222020202020202020；支付账号：pay_account_9988；"
+            "微信号：wx_demo_20260812；运单号：JT0023964811882。"
+        )
+        job = {
+            "job_id": "RV-PUBLIC-REDACTION-PARITY",
+            "tenant_id": "mitako",
+            "client_case_id": "CASE-PUBLIC-REDACTION-PARITY",
+            "scenario": "product_damage",
+            "status": "SUCCEEDED",
+            "completed_at": 1,
+            "metadata": {"output_options": {"include_html_report": True}},
+            "assets": [],
+            "result": {
+                "review": {
+                    "summary": {"predicted_label": "review", "confidence": 0.8},
+                    "agent_brief": {"conclusion": sensitive_fact},
+                    "agent_report": {
+                        "scenario": "product_damage",
+                        "scenario_label": "商品有伤审核",
+                        "public_brief": {"conclusion": sensitive_fact},
+                        "parsed": {
+                            "predicted_label": "review",
+                            "confidence": 0.8,
+                            "overall_audit": {"conclusion": sensitive_fact},
+                            "supporting_evidence": [{"fact": sensitive_fact}],
+                        },
+                    },
+                },
+            },
+        }
+
+        public_json = str(service.public_job(job))
+        report_html = service.render_job_report(job)
+
+        for secret in sensitive_values:
+            self.assertNotIn(secret, public_json)
+            self.assertNotIn(secret, report_html)
+        self.assertIn("[已脱敏]", public_json)
+        self.assertIn("[已脱敏]", report_html)
+
     def test_formal_deferred_postprocess_replaces_stale_next_step_with_final_advisory(self):
         stale_next_step = "必须进入VIP人工复核。"
         job = {
@@ -599,12 +990,35 @@ class ReportOutputOptionsTest(unittest.TestCase):
         recommendation = review["advisory_assessment"]["human_review"]["recommendation"]
         self.assertEqual(review["advisory_assessment"]["human_review"]["level"], "not_required")
         self.assertEqual(review["advisory_assessment"]["workflow_recommendation"], "continue_by_customer_policy")
-        self.assertEqual(review["agent_brief"]["next_step"], recommendation)
-        self.assertEqual(review["agent_report"]["public_brief"]["next_step"], recommendation)
-        self.assertEqual(review["agent_report"]["parsed"]["next_step"], recommendation)
+        self.assertEqual(recommendation, "")
+        self.assertNotIn("next_step", review["agent_brief"])
+        self.assertNotIn("next_step", review["agent_report"]["public_brief"])
+        self.assertNotIn("next_step", review["agent_report"]["parsed"])
         report_html = service.render_job_report(completed)
-        self.assertIn(recommendation, report_html)
+        self.assertNotIn("建议下一步", report_html)
         self.assertNotIn(stale_next_step, report_html)
+
+    def test_final_sync_removes_stale_minor_noop_next_step(self):
+        review = {
+            "material_readiness": {"scenario": "minor_refund", "status": "complete"},
+            "advisory_assessment": {
+                "scenario": "minor_refund",
+                "assessment": {"conclusion": "五类材料的事实审核已完成。"},
+                "human_review": {"level": "not_required", "recommendation": ""},
+                "workflow_recommendation": "continue_by_customer_policy",
+            },
+            "agent_brief": {"next_step": "旧逻辑要求进入人工审核。"},
+            "agent_report": {
+                "parsed": {"next_step": "旧逻辑要求进入人工审核。"},
+                "public_brief": {"next_step": "旧逻辑要求进入人工审核。"},
+            },
+        }
+
+        synced = service._sync_final_advisory_brief(review)
+
+        self.assertNotIn("next_step", synced["agent_brief"])
+        self.assertNotIn("next_step", synced["agent_report"]["parsed"])
+        self.assertNotIn("next_step", synced["agent_report"]["public_brief"])
 
     def test_report_route_rejects_job_that_did_not_request_html(self):
         job = {
@@ -635,6 +1049,23 @@ class ReportOutputOptionsTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(raised.exception.detail, "review_report_not_ready")
+
+    def test_report_route_sets_private_no_store_security_headers(self):
+        job = {
+            "job_id": "RV-SECURE-REPORT-HEADERS",
+            "tenant_id": "mitako",
+            "status": "SUCCEEDED",
+            "metadata": {"output_options": {"include_html_report": True}},
+            "result": {},
+        }
+        with patch.object(router.store, "get_job", return_value=job), patch.object(
+            router.service, "render_job_report", return_value="<html></html>"
+        ):
+            response = asyncio.run(router.job_report(job["job_id"], user={"tenant_id": "mitako"}))
+
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        self.assertEqual(response.headers["referrer-policy"], "no-referrer")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
 
     def test_formal_job_failure_still_returns_primary_advisory_contract(self):
         job = {

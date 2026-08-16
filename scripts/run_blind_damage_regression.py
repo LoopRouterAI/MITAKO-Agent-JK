@@ -86,7 +86,6 @@ def run_case(
     scenario: str,
     fps: float,
     max_frames: int,
-    threshold: float,
 ) -> dict:
     audit = json.loads((bundle / "blind_bundle_audit.json").read_text(encoding="utf-8"))
     validate_label_isolation(audit)
@@ -119,7 +118,6 @@ def run_case(
             "probe_seconds": "12",
             "continuity_policy": json.dumps(
                 {
-                    "out_of_frame_warning_seconds": threshold,
                     "force_dense_scan": True,
                     "scan_fps": fps,
                     "require_identity_reestablishment": True,
@@ -163,7 +161,6 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:7864")
     parser.add_argument("--fps", type=float, default=1.0)
     parser.add_argument("--max-frames", type=int, default=1200)
-    parser.add_argument("--out-of-frame-threshold", type=float, default=2.0)
     parser.add_argument("--output", type=Path, default=Path("tests/reports/blind_damage_regression_latest.json"))
     args = parser.parse_args()
     results = []
@@ -174,7 +171,6 @@ def main() -> int:
             args.scenario,
             args.fps,
             args.max_frames,
-            args.out_of_frame_threshold,
         )
         parsed = (((payload.get("review") or {}).get("agent_report") or {}).get("parsed") or {})
         advisory = (
@@ -228,7 +224,6 @@ def main() -> int:
         "base_url": args.base_url,
         "scenario": args.scenario,
         "fps": args.fps,
-        "out_of_frame_threshold_seconds": args.out_of_frame_threshold,
         "results": results,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

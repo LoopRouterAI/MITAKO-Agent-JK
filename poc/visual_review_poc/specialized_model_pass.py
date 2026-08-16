@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from poc.visual_review_poc.model_catalog import summarize_cost_observability
+from configs.model_catalog import summarize_cost_observability
 from poc.visual_review_poc.observability import sanitize_error_text
 
 

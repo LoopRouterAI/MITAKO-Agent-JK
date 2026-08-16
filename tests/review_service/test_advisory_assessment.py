@@ -33,6 +33,170 @@ def review_result(
 
 
 class AdvisoryAssessmentTest(unittest.TestCase):
+    def test_missing_item_trusted_system_gap_routes_to_internal_query_not_customer_resubmission(self):
+        review = review_result(label="review", confidence=0.69, parsed_extra={
+            "fulfillment_reconciliation": {
+                "evidence_route": "insufficient",
+                "evidence_sufficiency": "insufficient",
+                "verdict": "indeterminate",
+                "warehouse_check": {"state": "not_available", "outcome": None},
+            },
+        })
+        review["material_readiness"] = {
+            "scenario": "missing_item",
+            "status": "incomplete",
+            "confidence": 0.0,
+            "reason": "仍缺少甲方系统侧的分包与签收事实。",
+            "checklist": [
+                {
+                    "requirement_id": "missing_item_user_evidence_route",
+                    "label": "合规开箱视频或静态三类材料路径",
+                    "required": True,
+                    "status": "invalid",
+                    "source": "model",
+                    "confidence": 0.0,
+                    "evidence_refs": [],
+                    "reason": "用户证据尚未形成完整路线。",
+                },
+                {
+                    "requirement_id": "all_expected_packages_delivered",
+                    "label": "全部应到包裹已有可核验签收状态",
+                    "required": True,
+                    "status": "missing",
+                    "source": "trusted_system",
+                    "confidence": 1.0,
+                    "evidence_refs": [],
+                    "reason": "甲方物流快照尚未覆盖全部应发包裹。",
+                },
+            ],
+            "missing_items": [
+                "合规开箱视频或静态三类材料路径",
+                "全部应到包裹已有可核验签收状态",
+            ],
+            "warnings": [],
+        }
+
+        result = attach_advisory_assessment(
+            review,
+            {"scenario": "missing_item"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["workflow_recommendation"], "human_review")
+        self.assertEqual(advisory["human_review"]["level"], "required")
+        self.assertIn("trusted_system_data_required", advisory["human_review"]["reason_codes"])
+        self.assertIn("物流", advisory["human_review"]["recommendation"])
+        self.assertIn("甲方内部", advisory["assessment"]["conclusion"])
+        self.assertNotIn("补充所列材料", advisory["assessment"]["conclusion"])
+        self.assertIn("仓库", result["agent_brief"]["next_step"])
+        self.assertNotIn("用户补充", result["agent_brief"]["next_step"])
+
+    def test_missing_item_visual_shortage_does_not_stay_positive_without_delivery_snapshot(self):
+        review = review_result(label="positive", confidence=1.0, parsed_extra={
+            "fulfillment_reconciliation": {
+                "evidence_route": "compliant_opening_video",
+                "evidence_sufficiency": "sufficient",
+                "verdict": "mismatched",
+                "resolution_basis": "visual_reconciliation",
+                "warehouse_check": {"state": "not_available", "outcome": None},
+            },
+        })
+        review["material_readiness"] = {
+            "scenario": "missing_item",
+            "status": "complete",
+            "confidence": 1.0,
+            "reason": "用户开箱证据已完成视觉对账。",
+            "checklist": [
+                {
+                    "requirement_id": "all_expected_packages_delivered",
+                    "label": "全部应到包裹已有可核验签收状态",
+                    "required": False,
+                    "status": "missing",
+                    "source": "trusted_system",
+                    "confidence": 1.0,
+                    "evidence_refs": [],
+                    "reason": "甲方物流快照尚未覆盖全部应发包裹。",
+                },
+            ],
+            "missing_items": [],
+            "warnings": [],
+        }
+
+        result = attach_advisory_assessment(
+            review,
+            {"scenario": "missing_item"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        parsed = result["agent_report"]["parsed"]
+        advisory = result["advisory_assessment"]
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["system_yes_no"], "REVIEW")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["summary"]["system_yes_no"], "REVIEW")
+        self.assertEqual(result["agent_brief"]["system_yes_no"], "REVIEW")
+        self.assertIsNone(parsed["confidence"])
+        self.assertIsNone(result["summary"]["confidence"])
+        self.assertIsNone(advisory["assessment"]["confidence"])
+        self.assertEqual(advisory["assessment"]["confidence_level"], "unavailable")
+        self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_inconclusive")
+        self.assertEqual(advisory["sop_recommendation"]["code"], "further_assessment")
+        self.assertIn("暂不形成漏发", advisory["assessment"]["conclusion"])
+
+    def test_missing_item_static_material_route_requires_warehouse_detail_review(self):
+        review = review_result(label="review", confidence=0.68, parsed_extra={
+            "fulfillment_reconciliation": {
+                "evidence_route": "static_three_images",
+                "warehouse_check": {"state": "pending", "outcome": None},
+                "user_materials_complete": True,
+                "evidence_sufficiency": "insufficient",
+                "verdict": "indeterminate",
+                "decision_boundary": "用户静态三类材料已齐全，下一步应读取仓库实发明细。",
+            },
+        })
+
+        result = attach_advisory_assessment(
+            review,
+            {"scenario": "missing_item"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["workflow_recommendation"], "human_review")
+        self.assertEqual(advisory["human_review"]["level"], "required")
+        self.assertIn(
+            "warehouse_fulfillment_detail_required",
+            advisory["human_review"]["reason_codes"],
+        )
+        self.assertIn("仓库实发明细", advisory["human_review"]["recommendation"])
+        self.assertIn("仓库实发明细", result["agent_brief"]["next_step"])
+        self.assertNotIn("不要求逐单人工", advisory["human_review"]["recommendation"])
+
+    def test_wrong_item_static_material_route_requires_warehouse_detail_review(self):
+        review = review_result(label="review", confidence=0.68, parsed_extra={
+            "fulfillment_reconciliation": {
+                "evidence_route": "static_three_images",
+                "warehouse_check": {"state": "pending", "outcome": None},
+                "user_materials_complete": True,
+                "evidence_sufficiency": "insufficient",
+                "verdict": "indeterminate",
+            },
+        })
+
+        result = attach_advisory_assessment(
+            review,
+            {"scenario": "wrong_item"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["workflow_recommendation"], "human_review")
+        self.assertEqual(advisory["human_review"]["level"], "required")
+        self.assertIn("warehouse_fulfillment_detail_required", advisory["human_review"]["reason_codes"])
+        self.assertIn("仓库实发明细", advisory["human_review"]["recommendation"])
+        self.assertIn("发错", advisory["assessment"]["conclusion"])
+
     def test_trusted_warehouse_conclusion_replaces_the_earlier_visual_brief(self):
         review = review_result(label="negative", confidence=1.0, parsed_extra={
             "overall_audit": {
@@ -57,6 +221,8 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertIn("仓库终核", focus)
         self.assertNotIn("补证", focus)
         self.assertNotIn("视频覆盖不全", focus)
+        self.assertEqual(result["agent_report"]["parsed"]["predicted_label"], "negative")
+        self.assertEqual(result["agent_report"]["parsed"]["system_yes_no"], "NO")
 
     def test_four_scenarios_expose_customer_evidence_attention(self):
         scenarios = (
@@ -145,10 +311,9 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertIn("是否需要人工复核由单独的复核等级决定", advisory["policy"]["boundary"])
         self.assertEqual(advisory["assessment"]["calibration_status"], "uncalibrated_evidence_score")
         self.assertEqual(advisory["sop_recommendation"]["code"], "support_claim")
-        self.assertIn("无需人工复审", result["agent_brief"]["next_step"])
-        self.assertNotIn("VIP客服复核", result["agent_brief"]["next_step"])
+        self.assertNotIn("next_step", result["agent_brief"])
 
-    def test_comfort_compensation_is_independent_from_negative_evidence_verdict(self):
+    def test_negative_evidence_never_invents_compensation_action(self):
         result = attach_advisory_assessment(
             review_result(
                 label="negative",
@@ -157,7 +322,7 @@ class AdvisoryAssessmentTest(unittest.TestCase):
                     "decision_policy_audit": {
                         "rule_id": "PD-N-NONCOMPLIANT-OPENING-VIDEO",
                         "reason": "开箱视频不合规，当前证据不支持用户诉求。",
-                        "supplemental_evidence_note": "补充图片可供最低档安慰性补偿参考。",
+                        "supplemental_evidence_note": "补充图片只能证明后态损伤，不能替代开箱时态。",
                     }
                 },
             ),
@@ -167,7 +332,8 @@ class AdvisoryAssessmentTest(unittest.TestCase):
 
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_does_not_support_claim")
-        self.assertEqual(advisory["sop_recommendation"]["code"], "comfort_compensation")
+        self.assertEqual(advisory["sop_recommendation"]["code"], "not_support_claim")
+        self.assertNotIn("补偿", advisory["sop_recommendation"]["recommendation"])
         self.assertFalse(advisory["policy"]["business_action_allowed"])
         ReviewAdvisoryAssessment.model_validate(advisory)
 
@@ -195,6 +361,46 @@ class AdvisoryAssessmentTest(unittest.TestCase):
             advisory["sop_recommendation"]["basis"],
             advisory["assessment"]["conclusion"],
         )
+
+    def test_complete_minor_materials_do_not_emit_noop_manual_review_copy(self):
+        review = review_result(
+            label="positive",
+            confidence=0.92,
+            parsed_extra={
+                "minor_material_assessment": {
+                    "processing_status": "completed",
+                    "coverage_complete": True,
+                },
+                "material_readiness": {
+                    "scenario": "minor_refund",
+                    "status": "complete",
+                    "confidence": 0.92,
+                },
+                "next_step": "旧逻辑要求进入人工审核。",
+            },
+        )
+        review["material_readiness"] = {
+            "scenario": "minor_refund",
+            "status": "complete",
+            "confidence": 0.92,
+        }
+        review["agent_brief"]["next_step"] = "旧逻辑要求进入人工审核。"
+        review["agent_report"]["public_brief"] = {
+            "next_step": "旧逻辑要求进入人工审核。",
+        }
+
+        result = attach_advisory_assessment(
+            review,
+            {"scenario": "minor_refund"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        self.assertEqual(result["advisory_assessment"]["human_review"]["level"], "not_required")
+        self.assertEqual(result["advisory_assessment"]["human_review"]["recommendation"], "")
+        self.assertNotIn("next_step", result["agent_brief"])
+        self.assertNotIn("next_step", result["agent_report"]["parsed"])
+        self.assertNotIn("next_step", result["agent_report"]["public_brief"])
+        self.assertNotIn("材料已齐全", result["agent_brief"]["conclusion"])
 
     def test_unapplied_policy_reason_cannot_contradict_final_recommendation(self):
         result = attach_advisory_assessment(
@@ -236,21 +442,25 @@ class AdvisoryAssessmentTest(unittest.TestCase):
                 continuity={
                     "continuity_verdict": "brief_occlusion",
                     "longest_out_of_frame_seconds": 1.4,
-                    "tracked_subjects": [{"subject_id": "claimed_item"}],
+                    "tracked_subjects": [{
+                        "subject_id": "claimed_item",
+                        "out_of_frame_events": [{
+                            "duration_seconds": 1.4,
+                            "within_required_display_window": True,
+                            "identity_reestablished": True,
+                        }],
+                    }],
                 }
             ),
-            {
-                "scenario": "product_damage",
-                "review_routing_policy": {"out_of_frame_resubmit_seconds": 3.0},
-            },
+            {"scenario": "product_damage"},
             readiness={"full_review_ready": True, "missing_required": []},
         )
 
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "optional")
         self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
-        self.assertIn("short_out_of_frame", [item["code"] for item in advisory["signals"]])
-        self.assertIn("不要求逐单", result["agent_brief"]["next_step"])
+        self.assertIn("offscreen_review_signal", [item["code"] for item in advisory["signals"]])
+        self.assertIn("不要求每单", result["agent_brief"]["next_step"])
         self.assertNotIn("VIP客服复核", result["agent_brief"]["next_step"])
         self.assertIn("建议按风险偏好抽检", advisory["evidence_attention"]["headline"])
         self.assertNotIn("需先处理", advisory["evidence_attention"]["headline"])
@@ -274,30 +484,32 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(advisory["human_review"]["level"], "optional")
         self.assertIn("continuity_unresolved", [item["code"] for item in advisory["signals"]])
 
-    def test_three_second_out_of_frame_requests_material_without_forcing_human(self):
+    def test_long_out_of_frame_is_a_review_signal_not_an_automatic_material_gap(self):
         result = attach_advisory_assessment(
             review_result(
                 label="review",
                 continuity={
                     "continuity_verdict": "long_absence",
                     "longest_out_of_frame_seconds": 3.2,
-                    "tracked_subjects": [{"subject_id": "claimed_item"}],
+                    "tracked_subjects": [{
+                        "subject_id": "claimed_item",
+                        "out_of_frame_events": [{
+                            "duration_seconds": 3.2,
+                            "within_required_display_window": True,
+                            "identity_reestablished": False,
+                        }],
+                    }],
                 }
             ),
-            {
-                "scenario": "product_damage",
-                "review_routing_policy": {"out_of_frame_resubmit_seconds": 3.0},
-            },
+            {"scenario": "product_damage"},
             readiness={"full_review_ready": True, "missing_required": []},
         )
 
         advisory = result["advisory_assessment"]
-        self.assertEqual(advisory["human_review"]["level"], "not_required")
-        self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
-        self.assertTrue(result["agent_report"]["parsed"]["material_gaps"])
-        self.assertIn("补充", advisory["assessment"]["conclusion"])
-        self.assertNotIn("VIP客服复核", advisory["assessment"]["conclusion"])
-        self.assertIn("out_of_frame_over_threshold", [item["code"] for item in advisory["signals"]])
+        self.assertEqual(advisory["workflow_recommendation"], "human_review")
+        self.assertEqual(result["agent_report"]["parsed"]["material_gaps"], [])
+        self.assertNotIn("补充连续原视频", advisory["assessment"]["conclusion"])
+        self.assertIn("offscreen_review_signal", [item["code"] for item in advisory["signals"]])
 
     def test_shipping_package_absence_after_item_exposure_does_not_request_new_video(self):
         result = attach_advisory_assessment(
@@ -325,10 +537,7 @@ class AdvisoryAssessmentTest(unittest.TestCase):
                     ],
                 },
             ),
-            {
-                "scenario": "product_damage",
-                "review_routing_policy": {"out_of_frame_resubmit_seconds": 3.0},
-            },
+            {"scenario": "product_damage"},
             readiness={"full_review_ready": True, "missing_required": []},
         )
 
@@ -350,10 +559,7 @@ class AdvisoryAssessmentTest(unittest.TestCase):
                 },
                 parsed_extra={"material_gaps": ["缺少损伤成因证据"]},
             ),
-            {
-                "scenario": "product_damage",
-                "review_routing_policy": {"out_of_frame_resubmit_seconds": 3.0},
-            },
+            {"scenario": "product_damage"},
             readiness={"full_review_ready": True, "missing_required": []},
         )
 
@@ -494,23 +700,137 @@ class AdvisoryAssessmentTest(unittest.TestCase):
             ],
         )
 
-    def test_output_options_and_routing_thresholds_are_bounded(self):
+    def test_scene_material_readiness_gaps_drive_the_final_customer_action(self):
+        review = review_result(label="positive", confidence=0.74)
+        review["material_readiness"] = {
+            "scenario": "product_damage",
+            "status": "incomplete",
+            "confidence": 0.91,
+            "reason": "当前商品有伤场景仍缺少必要材料或已有材料不满足审核要求。",
+            "checklist": [],
+            "missing_items": ["开箱视频满足封箱起始、面单、连续性、商品展示与伤点可判断要求"],
+            "warnings": [],
+        }
+
+        result = attach_advisory_assessment(
+            review,
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
+        self.assertEqual(advisory["human_review"]["level"], "not_required")
+        self.assertIn(
+            "开箱视频满足封箱起始、面单、连续性、商品展示与伤点可判断要求",
+            result["agent_report"]["parsed"]["material_gaps"],
+        )
+        self.assertNotIn(
+            "inconclusive_product_damage_gate",
+            advisory["human_review"]["reason_codes"],
+        )
+
+    def test_confirmed_damage_is_not_hidden_by_opening_material_gap(self):
+        review = review_result(
+            label="review",
+            confidence=0.63,
+            parsed_extra={
+                "damage_causality_assessment": {
+                    "damage_presence": "confirmed",
+                    "reason": "主视频中已看到商品表面存在可见伤点。",
+                },
+            },
+        )
+        review["material_readiness"] = {
+            "scenario": "product_damage",
+            "status": "incomplete",
+            "confidence": 1.0,
+            "reason": "开箱证据链仍未闭环。",
+            "checklist": [],
+            "missing_items": ["开箱视频中的商品关联与连续展示证据"],
+            "warnings": [],
+        }
+
+        result = attach_advisory_assessment(
+            review,
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
+        self.assertEqual(advisory["assessment"]["conclusion_code"], "evidence_inconclusive")
+        self.assertIn("已确认商品存在可见伤点", advisory["assessment"]["conclusion"])
+        self.assertIn("暂不能判断责任归属", advisory["assessment"]["conclusion"])
+        self.assertNotIn("现有证据不足以形成明确事实判断", advisory["assessment"]["conclusion"])
+
+    def test_severe_structural_damage_is_not_hidden_by_missing_opening_material(self):
+        review = review_result(
+            label="positive",
+            confidence=0.94,
+            parsed_extra={
+                "decision_policy_audit": {
+                    "applied": True,
+                    "severe_alert_eligible": True,
+                    "rule_id": "PD-P-SEVERE-STRUCTURAL-DAMAGE",
+                    "reason": "高置信严重结构问题已确认，建议重点跟进。",
+                },
+            },
+        )
+        review["material_readiness"] = {
+            "scenario": "product_damage",
+            "status": "incomplete",
+            "confidence": 0.92,
+            "reason": "缺少开箱视频。",
+            "checklist": [],
+            "missing_items": ["包含初次拆开包裹动作的开箱视频"],
+            "warnings": [],
+        }
+
+        result = attach_advisory_assessment(
+            review,
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["workflow_recommendation"], "continue_by_customer_policy")
+        self.assertNotEqual(advisory["human_review"]["level"], "required")
+        self.assertEqual(
+            advisory["assessment"]["conclusion_code"],
+            "severe_structural_damage_follow_up",
+        )
+        self.assertIn("交易归属", advisory["assessment"]["conclusion"])
+        self.assertNotIn("支持用户诉求", advisory["assessment"]["conclusion"])
+        self.assertEqual(advisory["sop_recommendation"]["code"], "further_assessment")
+
+    def test_no_action_continuation_does_not_emit_process_filler(self):
+        result = attach_advisory_assessment(
+            review_result(),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        self.assertEqual(
+            result["advisory_assessment"]["workflow_recommendation"],
+            "continue_by_customer_policy",
+        )
+        self.assertEqual(result["advisory_assessment"]["human_review"]["level"], "not_required")
+        self.assertNotIn("next_step", result["agent_brief"])
+
+    def test_output_options_and_server_managed_routing_policy_are_explicit(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "CASE-OUTPUT-1",
                 "scenario": "product_damage",
                 "output_options": {"include_html_report": False},
-                "review_routing_policy": {
-                    "required_below_confidence": 0.45,
-                    "optional_below_confidence": 0.8,
-                    "out_of_frame_resubmit_seconds": 3.0,
-                },
+                "review_routing_policy": {"policy_ref": "MITAKO-ROUTING@20260815.1"},
             }
         )
 
         self.assertFalse(metadata.output_options.include_html_report)
         self.assertFalse(html_report_requested(metadata.model_dump(mode="json")))
-        self.assertEqual(metadata.review_routing_policy.out_of_frame_resubmit_seconds, 3.0)
+        self.assertEqual(metadata.review_routing_policy.policy_ref, "MITAKO-ROUTING@20260815.1")
 
     def test_legacy_fields_follow_primary_advisory_contract(self):
         stale = review_result(confidence=0.92)
@@ -591,18 +911,19 @@ class AdvisoryAssessmentTest(unittest.TestCase):
 
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "optional")
-        self.assertIn("不要求每单转VIP客服复审", advisory["assessment"]["conclusion"])
+        self.assertNotIn("VIP客服", advisory["assessment"]["conclusion"])
+        self.assertIn("不要求每单人工复审", advisory["human_review"]["recommendation"])
 
-    def test_minor_low_age_payment_process_gap_requests_material_without_human_review(self):
+    def test_under_ten_payment_gap_requests_only_the_missing_process_explanation(self):
         result = attach_advisory_assessment(
             review_result(
-                label="review",
+                label="positive",
                 confidence=0.82,
                 parsed_extra={"minor_material_assessment": {
                     "declared_image_count": 20,
                     "accepted_image_count": 20,
                     "processed_image_count": 20,
-                    "conclusion": "全量图片已处理，当前缺少支付来源与监护过程说明。",
+                    "conclusion": "五类材料已齐全，继续按材料事实审核。",
                     "required_materials": [
                         "请补充说明未成年人如何获得或得知支付密码。",
                         "请补充说明监护人如何、何时发现消费。",
@@ -625,16 +946,66 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         advisory = result["advisory_assessment"]
         self.assertEqual(advisory["human_review"]["level"], "not_required")
         self.assertEqual(advisory["workflow_recommendation"], "request_more_material")
-        self.assertEqual(
-            advisory["assessment"]["conclusion"],
-            "全量图片已处理，当前缺少支付来源与监护过程说明。",
-        )
-        self.assertEqual(advisory["human_review"]["reason_codes"], ["material_resubmission_available"])
+        self.assertIn("material_resubmission_available", advisory["human_review"]["reason_codes"])
         self.assertFalse(result["agent_report"]["parsed"]["human_required"])
-        signal = next(item for item in advisory["signals"] if item["code"] == "minor_payment_process_evidence_gap")
-        self.assertEqual(signal["severity"], "warning")
+        self.assertIn("支付密码", "；".join(result["agent_report"]["parsed"]["material_gaps"]))
+        self.assertIn("监护人如何、何时发现消费", "；".join(result["agent_report"]["parsed"]["material_gaps"]))
 
-    def test_minor_low_age_with_verified_payment_process_is_optional_not_required(self):
+    def test_inconclusive_sop_recommendation_uses_scene_specific_customer_language(self):
+        cases = (
+            ("product_damage", ("伤点", "商品身份", "开箱证据")),
+            ("wrong_item", ("是否发错", "应收商品", "实收商品", "同包裹证据")),
+            ("missing_item", ("是否漏发", "应发商品", "实收商品", "分包", "物流", "仓库")),
+        )
+
+        for scenario, expected_markers in cases:
+            with self.subTest(scenario=scenario):
+                result = attach_advisory_assessment(
+                    review_result(label="review", confidence=0.86),
+                    {"scenario": scenario},
+                    readiness={"full_review_ready": True, "missing_required": []},
+                )
+
+                recommendation = result["advisory_assessment"]["sop_recommendation"]["recommendation"]
+                self.assertNotIn("支持或不支持用户诉求", recommendation)
+                for marker in expected_markers:
+                    self.assertIn(marker, recommendation)
+
+    def test_minor_advisory_uses_material_language_instead_of_refund_support_language(self):
+        for label, expected in (
+            ("positive", "五类材料与可见字段初审齐全"),
+            ("negative", "五类材料存在明确缺口或冲突"),
+            ("review", "五类材料或可见字段仍待确认"),
+        ):
+            with self.subTest(label=label):
+                result = attach_advisory_assessment(
+                    review_result(
+                        label=label,
+                        confidence=0.86,
+                        parsed_extra={
+                            "minor_material_assessment": {
+                                "declared_image_count": 5,
+                                "accepted_image_count": 5,
+                                "processed_image_count": 5,
+                            },
+                        },
+                    ),
+                    {"scenario": "minor_refund"},
+                    readiness={"full_review_ready": True, "missing_required": []},
+                )
+
+                advisory = result["advisory_assessment"]
+                public_text = " ".join((
+                    advisory["assessment"]["conclusion"],
+                    advisory["sop_recommendation"]["recommendation"],
+                    result["agent_brief"]["conclusion"],
+                ))
+                self.assertIn(expected, public_text)
+                self.assertNotIn("支持用户诉求", public_text)
+                self.assertNotIn("不支持用户诉求", public_text)
+                self.assertEqual(advisory["sop_recommendation"]["code"], "further_assessment")
+
+    def test_minor_low_age_with_verified_payment_process_is_silent(self):
         result = attach_advisory_assessment(
             review_result(
                 label="positive",
@@ -658,8 +1029,8 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         )
 
         advisory = result["advisory_assessment"]
-        self.assertEqual(advisory["human_review"]["level"], "optional")
-        self.assertIn("minor_low_age_process_verified", advisory["human_review"]["reason_codes"])
+        self.assertEqual(advisory["human_review"]["level"], "not_required")
+        self.assertNotIn("minor_low_age_process_verified", advisory["human_review"]["reason_codes"])
         self.assertNotIn("minor_payment_capability_risk", advisory["human_review"]["reason_codes"])
 
     def test_minor_under_nine_high_confidence_requires_human_payment_review(self):
@@ -798,16 +1169,34 @@ class AdvisoryAssessmentTest(unittest.TestCase):
         self.assertEqual(public_contract.assessment.calibration_status, "not_applicable_processing_incomplete")
         self.assertEqual(public_contract.workflow_recommendation, "system_retry")
 
-    def test_reversed_routing_thresholds_are_rejected(self):
+    def test_video_transport_failure_is_a_system_retry_for_every_scene(self):
+        result = attach_advisory_assessment(
+            review_result(
+                label="review",
+                confidence=0.0,
+                parsed_extra={
+                    "processing_status": "technical_processing_incomplete",
+                    "system_action": "system_retry",
+                    "material_gaps": ["视频无法送审"],
+                },
+            ),
+            {"scenario": "product_damage"},
+            readiness={"full_review_ready": True, "missing_required": []},
+        )
+
+        advisory = result["advisory_assessment"]
+        self.assertEqual(advisory["workflow_recommendation"], "system_retry")
+        self.assertEqual(advisory["human_review"]["level"], "not_required")
+        self.assertEqual(advisory["evidence_attention"]["missing_evidence"], [])
+        self.assertNotIn("material_gap", [item["code"] for item in advisory["signals"]])
+
+    def test_case_caller_cannot_override_server_managed_routing_thresholds(self):
         with self.assertRaises(ValidationError):
             ReviewCaseMetadata.model_validate(
                 {
                     "client_case_id": "CASE-BAD-THRESHOLDS",
                     "scenario": "product_damage",
-                    "review_routing_policy": {
-                        "required_below_confidence": 0.9,
-                        "optional_below_confidence": 0.2,
-                    },
+                    "review_routing_policy": {"required_below_confidence": 0.9},
                 }
             )
 

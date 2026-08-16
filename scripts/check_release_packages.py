@@ -23,6 +23,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
+from scripts.run_final_commercial_acceptance import (
+    CONTRACT_VERSION,
+    REQUIRED_CASES_PER_SCENE,
+    SCENARIOS,
+    _blind_audit_valid,
+    _scene_contract_valid,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = ROOT / "tests" / "reports"
@@ -37,6 +45,9 @@ DYNAMIC_CAPACITY_EVIDENCE_PATHS = (
     "poc/visual_review_poc/workbench_server.py",
     "scripts/check_dynamic_material_capacity_http.py",
 )
+FOUR_SCENARIO_ACCEPTANCE = "tests/reports/review_0816_four_scenario_blind_results_latest.json"
+FOUR_SCENARIO_CONTRACT = "docs/product/四场景审核业务决策与报告契约-20260812.md"
+FOUR_SCENARIO_CUSTOMER_GUIDE = "甲方沟通交付文档/0814四场景审核业务理解与功能验收说明.html"
 
 
 def _sha256(path: Path) -> str:
@@ -142,6 +153,127 @@ def _verify_hashes(root: Path, entries: list[dict[str, Any]]) -> None:
         _assert(_sha256(file_path) == expected, f"证据哈希不一致：{relative}")
 
 
+def _resolve_acceptance_artifact(root: Path, relative: str) -> Path:
+    _assert(bool(relative) and not Path(relative).is_absolute(), f"当前盲测报告路径无效：{relative or '-'}")
+    resolved_root = root.resolve()
+    resolved = (resolved_root / relative).resolve()
+    _assert(resolved_root in resolved.parents, f"当前盲测报告路径越界：{relative}")
+    _assert(resolved.is_file(), f"当前盲测报告文件不存在：{relative}")
+    return resolved
+
+
+def _verify_acceptance_report(
+    *,
+    root: Path,
+    case: dict[str, Any],
+    key: str,
+) -> Path:
+    relative = str(case.get(key) or "")
+    _assert(
+        "review_0816_blind_" in relative and not any(old in relative for old in ("0809", "0812", "0813", "0815")),
+        f"当前盲测 case 引用了过期报告：{case.get('case_id') or '-'} / {key}",
+    )
+    path = _resolve_acceptance_artifact(root, relative)
+    expected_hash = str(case.get(f"{key}_sha256") or "").lower()
+    _assert(
+        bool(re.fullmatch(r"[0-9a-f]{64}", expected_hash)),
+        f"当前盲测 case 缺少有效报告哈希：{case.get('case_id') or '-'} / {key}",
+    )
+    _assert(_sha256(path) == expected_hash, f"当前盲测报告哈希不一致：{relative}")
+    return path
+
+
+def _verify_current_four_scenario_acceptance(path: Path, *, root: Path = ROOT) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"当前四场景盲测清单不可读：{path}") from exc
+    _assert(
+        payload.get("contract_version") == CONTRACT_VERSION and payload.get("label_state") == "sealed",
+        "四场景盲测不是当前 MITAKO-FOUR-SCENE@20260814.1 密封契约",
+    )
+    _assert(_blind_audit_valid(payload), "当前四场景盲测缺少有效的盲验输入审计")
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    _assert(
+        isinstance(checks, dict) and bool(checks) and all(value is True for value in checks.values()),
+        "当前四场景盲测门禁尚未全部通过",
+    )
+    for key in (
+        "all_required_random_cases_present",
+        "all_current_business_contracts_valid",
+        "api_html_same_job",
+        "blind_input_audit_valid",
+    ):
+        _assert(checks.get(key) is True, f"当前四场景盲测缺少门禁：{key}")
+    cases = payload.get("cases")
+    _assert(isinstance(cases, list), "当前四场景盲测清单缺少 cases")
+    counts = {scenario: 0 for scenario in SCENARIOS}
+    case_ids: set[str] = set()
+    for case in cases:
+        _assert(isinstance(case, dict), "当前四场景盲测清单包含无效 case")
+        scenario = str(case.get("scenario") or "")
+        case_id = str(case.get("case_id") or "")
+        _assert(
+            scenario in SCENARIOS
+            and bool(case_id)
+            and case_id not in case_ids
+            and not {"expected_label", "manual_baseline", "manual_source"}.intersection(case),
+            f"当前四场景盲测 case 字段无效：{case_id or '-'}",
+        )
+        _assert(_scene_contract_valid(case), f"当前盲测 case 违反业务契约：{case_id}")
+        counts[scenario] += 1
+        case_ids.add(case_id)
+        job_id = str(case.get("job_id") or "")
+        _assert(bool(job_id), f"当前盲测 case 缺少 job_id：{case_id}")
+        json_path = _verify_acceptance_report(root=root, case=case, key="report_json")
+        html_path = _verify_acceptance_report(root=root, case=case, key="report_html")
+        try:
+            report_payload = json.loads(json_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"当前盲测 JSON 报告不可读：{json_path}") from exc
+        report_job = report_payload.get("job") if isinstance(report_payload, dict) else None
+        report_job = report_job if isinstance(report_job, dict) else {}
+        _assert(report_job.get("job_id") == job_id, f"当前盲测 JSON 工单不一致：{case_id}")
+        _assert(report_job.get("scenario") == scenario, f"当前盲测 JSON 场景不一致：{case_id}")
+        _assert(report_job.get("status") == "SUCCEEDED", f"当前盲测 JSON 工单未成功：{case_id}")
+        html = html_path.read_text(encoding="utf-8-sig", errors="strict")
+        required_markers = {
+            "product_damage": (
+                "当前商品有伤场景下的用户材料是否齐全", "开箱视频九项核对",
+                "主视频损伤存在性", "诉求支持度",
+            ),
+            "wrong_item": (
+                "当前发错货场景下的用户材料是否齐全", "发错货应收与实收核对",
+                "身份定义属性", "同包裹证据",
+            ),
+            "missing_item": (
+                "当前漏发货场景下的用户材料是否齐全", "漏发货应发与实收核对",
+                "用户证据路线", "最终事实依据",
+            ),
+            "minor_refund": (
+                "当前未成年人退款场景下的用户材料是否齐全",
+                "未成年人退款五类材料核对", "视觉字段一致性初审",
+            ),
+        }.get(scenario, ())
+        _assert(
+            required_markers and all(marker in html for marker in required_markers),
+            f"当前盲测 HTML 缺少场景专属结构：{case_id}",
+        )
+        if scenario == "minor_refund":
+            forbidden = ("包裹开启过程完整性", "包裹与实收展示连续性")
+            _assert(not any(marker in html for marker in forbidden), "未成年人报告混入商品履约视频模板")
+    _assert(
+        len(cases) == len(SCENARIOS) * REQUIRED_CASES_PER_SCENE
+        and all(count == REQUIRED_CASES_PER_SCENE for count in counts.values()),
+        "当前四场景盲测必须恰好包含每场景 2 个密封 Case",
+    )
+
+
+def _verify_0812_four_scenario_acceptance(path: Path, *, root: Path = ROOT) -> None:
+    del path, root
+    raise RuntimeError("0812 正负槽位验收已退役；必须使用当前四场景密封盲测结果")
+
+
 class _LocalLinkCollector(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -176,69 +308,10 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "requirements.txt",
         "internal-package-manifest.json",
         "我方内部开发文档/Java开发部署与联调指南.md",
-        "我方内部开发文档/升级日志-2026-07-31-商品有伤SOP与报告一致性.md",
-        "我方内部开发文档/升级日志-2026-07-28-事实结论与人工复审闭环.md",
-        "我方内部开发文档/升级日志-2026-07-23-审核建议契约与可选HTML.md",
-        "我方内部开发文档/升级日志-2026-07-23-多源证据与接口联调.md",
-        "我方内部开发文档/升级日志-2026-07-17.md",
-        "我方内部开发文档/升级日志-2026-07-17-提交模式与双包.md",
-        "我方内部开发文档/升级日志-2026-07-17-144989未成年人资料审核.md",
-        "我方内部开发文档/升级日志-2026-07-20-未成年人资料字段一致性.md",
-        "我方内部开发文档/升级日志-2026-07-20-视觉证据安全与SKU基准.md",
-        "我方内部开发文档/升级日志-2026-07-20-独立逐帧审核与资料质量分层.md",
-        "我方内部开发文档/升级日志-2026-07-22-订单基线与官方商品图按需接入.md",
-        "我方内部开发文档/升级日志-2026-07-16.md",
-        "我方内部开发文档/升级日志-2026-07-15.md",
-        "我方内部开发文档/升级日志-2026-08-06-四场景与五类材料闭环.md",
-        "我方内部开发文档/升级日志-2026-08-07-黄金指南与速度影响闭环.md",
-        "我方内部开发文档/代码审查与商业验收报告-2026-08-09.md",
-        "甲方沟通交付文档/0812视频审核业务理解与模型路线验收说明.html",
-        "甲方沟通交付文档/0809四场景业务理解与审核能力验收说明.html",
-        "tests/reports/review_0809_commercial_acceptance_latest.json",
-        "docs/delivery/mitako-0807-guide-acceptance-20260807.html",
-        "甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html",
-        "tests/reports/review_0807_random_acceptance_latest.json",
-        "tests/reports/review_0807_random_acceptance_latest.html",
-        "tests/reports/0808-four-scenario-validation/PD-612691-final-0809-result.json",
-        "tests/reports/0808-four-scenario-validation/WI-76139-final-0809-result.json",
-        "tests/reports/0808-four-scenario-validation/MI-589330-final-0809-result.json",
-        "tests/reports/0808-four-scenario-validation/MR-547198-final-0809c-result.json",
-        "docs/delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
-        "甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html",
-        "tests/reports/blind_0806_final_product_p1.json",
-        "tests/reports/blind_0806_final_product_n1.json",
-        "tests/reports/blind_0806_final_product_rn.json",
-        "tests/reports/blind_0806_final_product_rp.json",
-        "tests/reports/blind_0806_final_minor_m1.json",
-        "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
-        "docs/delivery/mitako-0731-product-damage-sop-acceptance-20260731.html",
-        "甲方沟通交付文档/0731商品有伤SOP与报告一致性更新说明.html",
-        "tests/reports/blind_damage_0731_case_001_latest.json",
-        "tests/reports/blind_damage_0731_cases_002_004_latest.json",
-        "docs/delivery/mitako-0730-minor-report-acceptance-20260730.html",
-        "我方内部开发文档/升级日志-2026-07-30-未成年人策略与客服报告.md",
-        "甲方沟通交付文档/0730未成年人资料审核与客服报告升级说明.html",
-        "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
-        "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
-        "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-17.html",
-        "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
-        "甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html",
-        "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
-        "甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html",
-        "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
-        "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
-        "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
-        "甲方沟通交付文档/0728事实结论与人工复审闭环更新说明.html",
-        "甲方沟通交付文档/0728动态素材与统一审核链路更新说明.html",
+        FOUR_SCENARIO_CONTRACT,
+        FOUR_SCENARIO_ACCEPTANCE,
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
-        "tests/reports/minor_refund_144989_20260717-final.json",
-        "tests/reports/minor_refund_144989_20260720-latest.json",
-        "tests/reports/minor_refund_144989_20260720-latest.html",
-        "tests/reports/review_617911_individual24_20260720-latest.json",
-        "tests/reports/review_617911_individual24_20260720-latest.html",
-        "tests/reports/review_submission_modes_20260717-final.json",
-        "tests/reports/review_submission_modes_20260717-final.html",
         "tests/reports/dynamic_material_capacity_http_latest.json",
         "tests/reports/dynamic_material_capacity_http_51_20260730.json",
         "tests/reports/dynamic_material_capacity_http_62_20260730.json",
@@ -274,6 +347,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "动态素材证据不是当前验收提交的可信祖先，或相关审核实现已发生变化",
     )
     _verify_hashes(root, list(manifest.get("evidence") or []))
+    _verify_current_four_scenario_acceptance(root / FOUR_SCENARIO_ACCEPTANCE, root=root)
     return {"entries": len(names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
 
 
@@ -291,29 +365,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/openapi.yaml",
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
-        "甲方沟通交付文档/0812视频审核业务理解与模型路线验收说明.html",
-        "甲方沟通交付文档/0809四场景业务理解与审核能力验收说明.html",
-        "甲方沟通交付文档/0807黄金指南学习与审核能力更新说明.html",
-        "docs/delivery/mitako-0806-four-scenario-minor-material-acceptance-20260806.html",
-        "甲方沟通交付文档/0806四场景与未成年人五类材料审核说明.html",
-        "docs/delivery/mitako-visual-evaluation-engineering-acceptance-20260716.html",
-        "docs/delivery/mitako-0731-product-damage-sop-acceptance-20260731.html",
-        "甲方沟通交付文档/0731商品有伤SOP与报告一致性更新说明.html",
-        "docs/delivery/mitako-0730-minor-report-acceptance-20260730.html",
-        "甲方沟通交付文档/0730未成年人资料审核与客服报告升级说明.html",
-        "docs/delivery/mitako-0714-adversarial-acceptance-20260715.html",
-        "甲方沟通交付文档/甲方测试版与本轮更新说明-2026-07-17.html",
-        "甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html",
-        "甲方沟通交付文档/订单SKU快照接入与审核安全升级说明-2026-07-20.html",
-        "甲方沟通交付文档/视觉审核逐帧与资料审核整改说明-2026-07-20.html",
-        "甲方沟通交付文档/0722订单资料与官方商品图按需接入说明.html",
-        "甲方沟通交付文档/0723审核结论置信度与人工复审分级说明.html",
-        "甲方沟通交付文档/0723客诉审核Agent接口联调与商务沟通说明.html",
-        "甲方沟通交付文档/0728事实结论与人工复审闭环更新说明.html",
-        "甲方沟通交付文档/0728动态素材与统一审核链路更新说明.html",
-        "甲方沟通交付文档/144989未成年人资料审核整改与验收报告.html",
-        "甲方沟通交付文档/0717网页端视频读取问题整改与验收报告.html",
         "甲方沟通交付文档/README.md",
+        FOUR_SCENARIO_CUSTOMER_GUIDE,
         "visual_review_workbench/workbench.html",
     }
     missing = sorted(required - names)
@@ -347,12 +400,15 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(any(name.endswith("minor_material_model_prompt.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料识别协议")
     _assert(any(name.endswith("prompts/customer_service.pyc") for name in runtime_names), "甲方运行时缺少集中客服规则模块")
     _assert(any(name.endswith("prompts/visual_review/core.pyc") for name in runtime_names), "甲方运行时缺少集中视觉审核规则模块")
+    _assert(any(name.endswith("prompts/visual_review/schemas.pyc") for name in runtime_names), "甲方运行时缺少四场景结构化契约模块")
+    _assert(any(name.endswith("configs/model_catalog.pyc") for name in runtime_names), "甲方运行时缺少统一模型目录模块")
     _assert(any(name.endswith("official_reference_images.pyc") for name in runtime_names), "甲方运行时缺少官方商品图按需读取模块")
     _assert(any(name.endswith("order_info_adapter.pyc") for name in runtime_names), "甲方运行时缺少订单快照适配模块")
     _assert(any(name.endswith("advisory_assessment.pyc") for name in runtime_names), "甲方运行时缺少统一审核建议模块")
     _assert(any(name.endswith("model_auth.pyc") for name in runtime_names), "甲方运行时缺少模型认证适配模块")
     _assert(any(name.endswith("observability.pyc") for name in runtime_names), "甲方运行时缺少视觉调用可观测模块")
     _assert(any(name.endswith("native_video_perception.pyc") for name in runtime_names), "甲方运行时缺少原生视频感知模块")
+    _assert(any(name.endswith("media_preflight.pyc") for name in runtime_names), "甲方运行时缺少媒体送审预检模块")
     _assert(any(name.endswith("secure_media_tunnel.pyc") for name in runtime_names), "甲方运行时缺少安全媒体隧道模块")
     _assert(any(name.endswith("report_assets.pyc") for name in runtime_names), "甲方运行时缺少报告静态资源模块")
     _assert(any(name.endswith("report_evidence.pyc") for name in runtime_names), "甲方运行时缺少报告证据回链模块")
@@ -360,11 +416,24 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         any(name.endswith("internal_review_ledger.pyc") for name in runtime_names),
         "customer runtime is missing the persistent review request ledger",
     )
+    _assert(
+        any(name.endswith("review_public_safety.pyc") for name in runtime_names),
+        "customer runtime is missing the public review safety module",
+    )
+    _assert(
+        any(name.endswith("review_service/material_readiness.pyc") for name in runtime_names),
+        "customer runtime is missing the scene material readiness module",
+    )
+    _assert(
+        any(name.endswith("review_service/media_processing.pyc") for name in runtime_names),
+        "customer runtime is missing the persistent review media processing module",
+    )
     installer = (root / "install-runtime-windows.bat").read_text(encoding="utf-8-sig")
     _assert(
         "imageio-ffmpeg" in installer and "imageio_ffmpeg" in installer,
         "customer runtime installer is missing video transcoding support",
     )
+    _assert("pypdf==6.15.0" in installer, "customer runtime installer is missing PDF inventory support")
     _assert(
         "Cloudflare.cloudflared" in installer,
         "customer runtime installer is missing secure large-video tunnel support",
@@ -595,11 +664,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             "client_case_id": "RELEASE-CONTRACT-JSON-ONLY",
             "scenario": "product_damage",
             "output_options": {"include_html_report": False},
-            "review_routing_policy": {
-                "required_below_confidence": 0.5,
-                "optional_below_confidence": 0.8,
-                "out_of_frame_resubmit_seconds": 3.0,
-            },
+            "review_routing_policy": {"policy_ref": "MITAKO-ROUTING@20260815.1"},
         }
         validated = _request_json(
             f"http://127.0.0.1:{main_port}/api/v1/review/metadata/validate",
@@ -608,7 +673,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             headers={"Content-Type": "application/json"},
         )
         _assert(validated["metadata"]["output_options"]["include_html_report"] is False, "JSON-only 配置未生效")
-        invalid = {**metadata, "review_routing_policy": {"required_below_confidence": 0.9, "optional_below_confidence": 0.2}}
+        invalid = {**metadata, "review_routing_policy": {"required_below_confidence": 0.9}}
         _request_json(
             f"http://127.0.0.1:{main_port}/api/v1/review/metadata/validate",
             method="POST",

@@ -38,15 +38,15 @@ class ReviewStrengthPolicyTest(unittest.TestCase):
         all_checks = ReviewSamplingPolicy(forensic_checks=True)
         selected_checks = ReviewSamplingPolicy(
             auto_escalate=True,
-            confidence_threshold=0.82,
             forensic_checks=["timeline_consistency", "editor_metadata"],
         )
 
         self.assertEqual(legacy.preset, "adaptive")
         self.assertFalse(legacy.auto_escalate)
         self.assertEqual(all_checks.forensic_checks, True)
-        self.assertEqual(selected_checks.confidence_threshold, 0.82)
         self.assertEqual(selected_checks.forensic_checks, ["timeline_consistency", "editor_metadata"])
+        with self.assertRaises(ValidationError):
+            ReviewSamplingPolicy.model_validate({"confidence_threshold": 0.82})
 
 
 class MediaForensicsTest(unittest.TestCase):
@@ -321,11 +321,15 @@ class ReviewJobIntegrationTest(unittest.TestCase):
         self.assertEqual([item["status_code"] for item in payload["_workbench_transport"]["attempts"]], [503, 200])
 
     def test_workbench_request_id_changes_only_between_business_executions(self) -> None:
-        first = service._workbench_request_id({"job_id": "RJ-BUSINESS-RETRY", "attempts": 1})
-        second = service._workbench_request_id({"job_id": "RJ-BUSINESS-RETRY", "attempts": 2})
+        first = service._workbench_request_id({
+            "job_id": "RJ-BUSINESS-RETRY",
+            "attempts": 2,
+            "workbench_request_id": "RJ-BUSINESS-RETRY-workbench-1",
+        })
+        second = service._workbench_request_id({"job_id": "RJ-BUSINESS-RETRY", "attempts": 3})
 
         self.assertEqual(first, "RJ-BUSINESS-RETRY-workbench-1")
-        self.assertEqual(second, "RJ-BUSINESS-RETRY-workbench-2")
+        self.assertEqual(second, "RJ-BUSINESS-RETRY-workbench-3")
         self.assertNotEqual(first, second)
 
     def test_formal_api_requires_internal_token_before_workbench_call(self) -> None:
@@ -350,7 +354,7 @@ class ReviewJobIntegrationTest(unittest.TestCase):
         self.assertEqual(result["summary"]["video_assets"], 1)
 
     def test_workbench_contract_rejects_old_capacity_before_upload(self) -> None:
-        with self.assertRaisesRegex(ValueError, "visual_workbench_contract_mismatch"):
+        with self.assertRaisesRegex(ValueError, "actual_contract.*old"):
             service._validate_workbench_health(
                 {
                     "ok": True,
@@ -360,6 +364,74 @@ class ReviewJobIntegrationTest(unittest.TestCase):
                 expected_soft_limit=40,
                 expected_safe_limit=200,
             )
+
+    def test_workbench_health_contract_retries_before_upload(self) -> None:
+        health_payloads = [
+            {
+                "ok": True,
+                "review_contract_version": "old",
+                "asset_capacity": {"soft_limit": 40, "safe_limit": 200},
+            },
+            {
+                "ok": True,
+                "review_contract_version": service.REVIEW_CONTRACT_VERSION,
+                "asset_capacity": {"soft_limit": 40, "safe_limit": 200},
+            },
+        ]
+        post_calls = []
+
+        class Response:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._payload = payload
+                self.is_error = status_code >= 400
+
+            def json(self):
+                return self._payload
+
+        class Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def get(self, url):
+                return Response(200, health_payloads.pop(0))
+
+            def post(self, url, headers, data, files):
+                post_calls.append(url)
+                return Response(200, {"ok": True})
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_dir = root / "RJ-HEALTH-RETRY"
+            job_dir.mkdir()
+            (job_dir / "asset.webp").write_bytes(b"image")
+            job = {
+                "job_id": "RJ-HEALTH-RETRY",
+                "client_case_id": "CASE-HEALTH-RETRY",
+                "attempts": 1,
+                "scenario": "minor_refund",
+                "metadata": {},
+                "assets": [{
+                    "asset_id": "RA-1",
+                    "stored_name": "asset.webp",
+                    "original_name": "asset.webp",
+                    "mime_type": "image/webp",
+                }],
+            }
+            with patch.dict(os.environ, {"VISUAL_REPORT_SIGNING_SECRET": "test-internal-token"}), patch.object(
+                service, "upload_root", return_value=root
+            ), patch.object(service.httpx, "Client", Client), patch.object(service.time, "sleep"):
+                payload = service._call_workbench(job)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(post_calls, [service._workbench_url() + "/api/review-folder"])
+        self.assertEqual(health_payloads, [])
 
     def test_invalid_asset_capacity_configuration_is_rejected(self) -> None:
         with patch.dict(
@@ -468,6 +540,15 @@ class ReviewJobIntegrationTest(unittest.TestCase):
             "unavailable_reason": "ffprobe_not_available",
             "interpretation": "本轮不可用，不能据此判断剪辑。",
         }
+        media_manifest = {
+            "version": 2,
+            "videos": [{
+                "video_index": 1,
+                "source_sha256": "a" * 64,
+                "model_input_kind": "unavailable",
+                "validation_status": "failed",
+            }],
+        }
 
         def finish(job_id: str, *, status: str, result: dict, diagnostics: dict, expected_attempts=None) -> dict:
             return {"job_id": job_id, "status": status, "result": result, "diagnostics": diagnostics}
@@ -476,12 +557,16 @@ class ReviewJobIntegrationTest(unittest.TestCase):
             service.store, "get_job", return_value=job
         ), patch.object(service, "_media_forensics", return_value=forensic_result), patch.object(
             service, "_call_workbench", side_effect=RuntimeError("upstream unavailable")
-        ) as model, patch.object(service.store, "finish_job", side_effect=finish):
+        ) as model, patch.object(
+            service, "load_job_review_manifest", return_value=media_manifest
+        ), patch.object(service.store, "finish_job", side_effect=finish):
             completed = service.run_job("RJ-FAILED")
 
         self.assertEqual(model.call_count, 1)
         self.assertEqual(completed["status"], "FAILED")
         self.assertEqual(completed["result"]["media_forensics"], forensic_result)
+        media_execution = completed["result"]["review"]["media_preflight_execution"]
+        self.assertEqual(media_execution["videos"][0]["preparation_status"], "failed")
         self.assertTrue(completed["result"]["recommended_escalation"]["recommended"])
         self.assertEqual(completed["result"]["recommended_escalation"]["automatic_model_retries"], 0)
 

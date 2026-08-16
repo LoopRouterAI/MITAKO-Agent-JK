@@ -160,7 +160,11 @@ async def review_task_upload(
             run_review=not async_review,
         )
         if async_review:
-            background_tasks.add_task(service.run_visual_review_for_task, task["task_id"])
+            background_tasks.add_task(
+                service.run_visual_review_for_task,
+                task["task_id"],
+                str(task["tenant_id"]),
+            )
     except ValueError as exc:
         detail = str(exc)
         status = 413 if detail == "file_too_large" else 415 if detail == "unsupported_review_material" else 422 if detail == "unsupported_review_scenario" else 400
@@ -221,7 +225,17 @@ async def review_task_list(
 
 @router.get("/review-tasks/{task_id}", response_model=ReviewTaskDetailResponse)
 async def review_task_detail(task_id: str, request: Request):
-    task = store.get_review_task(task_id)
+    token = extract_bearer_token(request)
+    user = decode_token(token) if token else None
+    if not user:
+        if protected_api_auth_required() or not dev_auth_bypass_enabled():
+            raise HTTPException(status_code=401, detail="review_task_token_required")
+        tenant_id = "mitako"
+    else:
+        tenant_id = str(user.get("tenant_id") or "").strip()
+        if not tenant_id:
+            raise HTTPException(status_code=403, detail="review_task_tenant_mismatch")
+    task = store.get_review_task(task_id, tenant_id=tenant_id)
     if not task:
         raise HTTPException(status_code=404, detail="review_task_not_found")
     _assert_review_task_access(request, task)

@@ -50,8 +50,8 @@ Nginx / Java Gateway
 - 官方商品图：在 `fulfillment_baseline.expected_items[].master_image_urls` 提交本单商品主图；服务端按任务限量读取和缓存，不要由 Java 预先批量下载，也不要提交整份商品库。
 - 漏发货：必须使用 `fulfillment_baseline` 提交版本化应发清单、商品行数量、赠品/特典声明、包裹数和包裹商品映射；使用 `evidence_coverage` 提交本次实际包裹引用/物流单号和完整展示声明。
 - 分包映射：一个物流单号不能自动证明所有 SKU 都属于同一包裹；没有权威包裹-SKU 关系时必须留空并接受降级复核。
-- 商品有伤：使用 `damage_causality_policy` 控制动作因果专项扫描；使用 `continuity_policy` 配置离镜阈值和连续性专项扫描。
-- 人工复审分级：使用 `review_routing_policy` 配置必须复审、建议抽检和 3 秒离镜补件阈值；离镜阈值不得解释为自动拒绝或已证实调包。
+- 商品有伤：使用 `damage_causality_policy` 控制动作因果专项扫描；`continuity_policy` 只配置受控连续性取证与采样密度。离镜业务影响由服务端按必要展示窗口和重新入镜同物关系确定。
+- 人工复审分级：`review_routing_policy` 只接受服务端已批准的 `policy_ref`，调用方不能改写阈值；离镜时长仅作黄色证据说明，不自动补件、拒绝或证明调包。
 - 报告输出：网页默认生成 HTML；系统批量可用 `output_options.include_html_report=false` 只保留结构化 JSON。
 - 未成年人资料：默认提交 `minor_refund_policy={"review_mode":"standard","authoritative_verification":"disabled"}`。该模式不依赖甲方当前不存在的身份、运营商或支付验真接口；`advisory` 只提示，只有业务方明确批准严格流程后才使用 `strict + required`。
 - 单案素材容量：默认 40 份以内为标准处理，41-200 份自动扩展分批且不丢资料；超过 `REVIEW_MAX_ASSETS` 返回 HTTP 413 `too_many_review_assets`。Java 不得自行截断后继续提交。

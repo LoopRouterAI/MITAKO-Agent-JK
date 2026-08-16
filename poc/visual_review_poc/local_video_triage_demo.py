@@ -27,13 +27,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from runtime_paths import app_root
 from review_media_safety import ignored_upload_reason, valid_media_file
-from poc.visual_review_poc.order_info_adapter import build_order_info_context
+from poc.visual_review_poc.order_info_adapter import build_order_info_context, read_safe_ticket_manifest
 from poc.visual_review_poc.model_auth import DEFAULT_GEMINI_MODEL, gemini_channel_options, resolve_gemini_model
-from poc.visual_review_poc.model_catalog import MODEL_CONFIGS
-from poc.visual_review_poc.review_response_schema import REVIEW_RESPONSE_SCHEMA
+from configs.model_catalog import MODEL_CONFIGS
+from prompts.visual_review.schemas import REVIEW_RESPONSE_SCHEMA
 from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text
 from prompts.visual_review.core import build_system_prompt, build_user_prompt, scenario_rules
-from review_input_safety import redact_review_personal_data
+from review_input_safety import read_user_conversation_history
 
 ROOT = app_root()
 POC_DIR = ROOT / "poc" / "visual_review_poc"
@@ -294,31 +294,13 @@ def find_supplemental_images(video: Path, limit: int, resource_fields: Dict[str,
     return find_supplemental_images_in_dir(video.parent, limit, resource_fields)
 
 
-def order_info_context(path: Path) -> Dict[str, Any]:
+def order_info_context(path: Path, *, order_reference: str = "") -> Dict[str, Any]:
     """把甲方订单快照转换为最小化的 SKU/应发基准，不带用户和地址字段。"""
-    return build_order_info_context(path)
-
-
-def _redact_conversation_text(value: Any) -> str:
-    return redact_review_personal_data(str(value or "").strip()[:2000])
+    return build_order_info_context(path, order_reference=order_reference)
 
 
 def _blind_review_conversation(folder: Path) -> List[Dict[str, Any]]:
-    raw = read_json(folder / "conversation_predecision.json")
-    if not isinstance(raw, list):
-        return []
-    messages: List[Dict[str, Any]] = []
-    for item in raw:
-        if not isinstance(item, dict) or str(item.get("from") or "").lower() not in {"user", "customer"}:
-            continue
-        text = _redact_conversation_text(item.get("text"))
-        if text:
-            messages.append({
-                "role": "user",
-                "text": text,
-                "created_at": str(item.get("created_at") or "")[:80],
-            })
-    return messages[-80:]
+    return read_user_conversation_history(folder)
 
 
 def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional[Path] = None) -> Dict[str, Any]:
@@ -339,7 +321,11 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
     ]
     resource_fields = {str(item.get("local_file")): item.get("fields") or [] for item in (manifest.get("resources") or []) if item.get("local_file")}
     scenario = infer_scenario(claim)
-    order_snapshot = order_info_context(folder / "order_info_snapshot.json")
+    safe_ticket = read_safe_ticket_manifest(folder / "manifest.json")
+    order_snapshot = order_info_context(
+        folder / "order_info_snapshot.json",
+        order_reference=safe_ticket.get("order_reference", ""),
+    )
     conversation_history = _blind_review_conversation(folder)
     structured_business_context = {
         "order_items": read_json(folder / "order_items.json") or order_snapshot.get("order_items") or manifest.get("order_items") or [],
@@ -366,8 +352,8 @@ def load_case_from_folder(folder: Path, supplemental_limit: int, video: Optional
         "video_path": str(video) if video else "",
         "customer_claim": claim,
         "order_context": {
-            "ticket_id": manifest.get("id"),
-            "order_no": manifest.get("order_no"),
+            "ticket_id": safe_ticket.get("ticket_id"),
+            "order_no": safe_ticket.get("order_reference"),
             "created_at": manifest.get("created_at"),
         },
         "evidence_assets": evidence_assets,
@@ -388,7 +374,9 @@ def _structured_context_value(value: Any) -> Any:
         return ""
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        if text[:1] in {"{", "["}:
+            raise ValueError("送审业务字段不是有效 JSON") from exc
         return text
 
 
@@ -396,10 +384,10 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
     """把工作台录入的客服证据包并入模型上下文。"""
     try:
         context = json.loads(raw_context) if raw_context else {}
-    except json.JSONDecodeError:
-        context = {}
+    except json.JSONDecodeError as exc:
+        raise ValueError("送审业务上下文不是有效 JSON") from exc
     if not isinstance(context, dict):
-        context = {}
+        raise ValueError("送审业务上下文必须是 JSON 对象")
     business_scenario = str(context.get("business_scenario") or "").strip()
     if scenario:
         case["scenario"] = scenario
@@ -420,6 +408,9 @@ def apply_frontdesk_context(case: Dict[str, Any], scenario: str, raw_context: st
         value = str(context.get(key) or "").strip()
         if value:
             order_context[key] = value
+    assessment_at = str(context.get("assessment_at") or "").strip()
+    if assessment_at:
+        order_context["assessment_at"] = assessment_at
     structured = case.setdefault("structured_business_context", {})
     if business_scenario:
         structured["business_scenario"] = business_scenario

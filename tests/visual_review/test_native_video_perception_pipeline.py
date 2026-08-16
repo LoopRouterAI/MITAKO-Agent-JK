@@ -16,7 +16,10 @@ from poc.visual_review_poc.native_video_perception import (
     requires_claimed_item_detail,
     run_native_perception_pipeline,
 )
-from poc.visual_review_poc.unified_model_pass import native_dimension_gaps
+from poc.visual_review_poc.unified_model_pass import (
+    claimed_item_evidence_times,
+    native_dimension_gaps,
+)
 
 
 class NativeVideoPerceptionPipelineTest(unittest.TestCase):
@@ -31,6 +34,11 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
             "all_items_shown": True,
             "issue_visible": True,
             "overall_video_result": "compliant",
+            "opening_action_assessment": {
+                "present": True,
+                "confidence": 0.93,
+                "reason": "画面连续记录了包裹从闭合到拆开的动作。",
+            },
             "claimed_item_assessment": {
                 "identity_description": "争议文件夹",
                 "appeared": True,
@@ -56,6 +64,9 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
                 "location": "文件夹正面",
                 "severity_level": "severe",
                 "structural_failure": True,
+                "severity_confidence": 0.94,
+                "business_defect_qualification": "confirmed",
+                "conflicting_evidence": False,
                 "severity_reason": "主体断裂，已影响正常展示。",
                 "causal_chain_status": "direct_customer_action",
                 "causal_evidence_level": "direct",
@@ -63,18 +74,22 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
                 "causal_evidence_refs": [
                     {
                         "stage": "before_action", "asset_ref": "native_video_1",
+                        "video_index": 1,
                         "timestamp": "02:14.000", "subject": "争议文件夹", "location": "正面左上角",
                         "chain_id": "damage-chain-1", "damage_visible": False,
                         "fact": "动作前同部位未见断裂。",
                     },
                     {
                         "stage": "action", "asset_ref": "native_video_1",
+                        "video_index": 1,
                         "timestamp": "02:15.000", "subject": "争议文件夹", "location": "正面左上角",
                         "chain_id": "damage-chain-1", "damage_visible": None,
+                        "action_relation": "direct_contact",
                         "fact": "刀具接触该部位。",
                     },
                     {
                         "stage": "after_action", "asset_ref": "native_video_1",
+                        "video_index": 1,
                         "timestamp": "02:15.500", "subject": "争议文件夹", "location": "正面左上角",
                         "chain_id": "damage-chain-1", "damage_visible": True,
                         "fact": "动作后同部位出现断裂。",
@@ -94,49 +109,72 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
             },
             "evidence_refs": [
                 {
+                    "field": "opening_action",
+                    "asset_ref": "native_video_1",
+                    "video_index": 1,
+                    "timestamp": "00:05.000",
+                    "fact": "包裹从闭合状态被拆开",
+                },
+                {
                     "field": "sealed_start",
                     "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "00:00.000",
                     "fact": "完整未拆封外箱可见",
                 },
                 {
                     "field": "waybill_visible",
                     "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "00:02.000",
                     "fact": "面单已清晰入镜",
                 },
                 {
                     "field": "continuous",
                     "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "02:30.750",
                     "fact": "从封箱到商品展示未见剪辑或中断",
                 },
                 {
                     "field": "issue_visible",
                     "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "02:15.500",
                     "fact": "划痕清晰可见",
                 },
                 {
                     "field": "claimed_item",
                     "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "01:51.000",
                     "fact": "争议商品首次出现",
                 },
                 {
+                    "field": "claimed_item",
+                    "asset_ref": "native_video_1",
+                    "video_index": 1,
+                    "timestamp": "02:30.750",
+                    "fact": "同一争议商品完成必要展示",
+                },
+                {
                     "field": "has_edit", "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "02:30.750", "fact": "全片未见跳切或拼接。",
                 },
                 {
                     "field": "has_offscreen", "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "02:20.000", "fact": "必要展示窗口内商品未发生有意义离镜。",
                 },
                 {
                     "field": "has_speed_change", "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "01:00.000", "fact": "画面与声音节奏未见明显速度变化。",
                 },
                 {
                     "field": "all_items_shown", "asset_ref": "native_video_1",
+                    "video_index": 1,
                     "timestamp": "02:30.000", "fact": "争议商品所需表面已展示完成。",
                 },
             ],
@@ -182,11 +220,47 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         self.assertEqual(calls[0]["frames"], case["frames"])
         self.assertEqual(calls[0]["supplemental_images"], case["supplemental_images"])
         self.assertEqual(calls[0]["official_reference_images"], case["official_reference_images"])
-        self.assertNotIn("sampling_fps", calls[0]["native_video"])
+        self.assertEqual(calls[0]["native_video"]["sampling_fps"], 1.0)
         self.assertEqual(result["perception_pipeline"]["model_calls"], 1)
         self.assertEqual(
             set(result["perception_pipeline"]["channels"]),
             {"native_video"},
+        )
+
+    def test_pipeline_applies_one_fps_to_every_native_video_entry(self) -> None:
+        calls = []
+
+        def invoke(current: dict) -> dict:
+            calls.append(current)
+            return {
+                "status": "success",
+                "parsed": self._complete_perception(),
+            }
+
+        case = {
+            "scenario": "product_damage",
+            "customer_claim": "商品表面存在划痕",
+            "native_video": {"api_path": "video-primary.mp4"},
+            "native_videos": [
+                {"api_path": "video-primary.mp4"},
+                {"api_path": "video-secondary.mp4", "sampling_fps": 4.0},
+            ],
+            "structured_business_context": {},
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            run_native_perception_pipeline(
+                case,
+                Path("video-primary.mp4"),
+                Path(temp_dir),
+                invoke,
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["native_video"]["sampling_fps"], 1.0)
+        self.assertEqual(
+            [item["sampling_fps"] for item in calls[0]["native_videos"]],
+            [1.0, 1.0],
         )
 
     def test_compact_perception_expands_to_existing_report_contract(self) -> None:
@@ -202,6 +276,33 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         self.assertEqual(parsed["system_yes_no"], "YES")
         self.assertEqual(parsed["confidence"], 0.9)
         self.assertEqual(parsed["overall_audit"]["confidence"], 0.9)
+        atomic_facts = {
+            item["field"]: item
+            for item in parsed["atomic_facts"]
+        }
+        self.assertEqual(
+            set(atomic_facts),
+            {
+                "opening_action",
+                "sealed_start",
+                "waybill_visible",
+                "continuous",
+                "has_edit",
+                "has_offscreen",
+                "has_speed_change",
+                "all_items_shown",
+                "issue_visible",
+            },
+        )
+        self.assertTrue(atomic_facts["opening_action"]["value"])
+        self.assertEqual(atomic_facts["opening_action"]["confidence"], 0.93)
+        self.assertIn("闭合到拆开", atomic_facts["opening_action"]["reason"])
+        self.assertEqual(
+            atomic_facts["opening_action"]["evidence_refs"][0]["asset_ref"],
+            "native_video_1",
+        )
+        self.assertEqual(atomic_facts["issue_visible"]["confidence"], 0.9)
+        self.assertIn("划痕", atomic_facts["issue_visible"]["reason"])
         self.assertIn("同一连续开箱", parsed["overall_audit"]["conclusion"])
         self.assertTrue(parsed["frame_findings"])
         self.assertEqual(
@@ -213,6 +314,7 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         self.assertEqual(
             set(opening["validated_fields"]),
             {
+                "opening_action_visible",
                 "sealed_start",
                 "waybill_visible",
                 "single_take_continuity",
@@ -221,8 +323,9 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         )
         opening_evidence = parsed["opening_video_evidence"]
         self.assertTrue(opening_evidence["present"])
+        self.assertTrue(opening_evidence["sop_compliant"])
         self.assertEqual(opening_evidence["status"], "pass")
-        self.assertEqual(opening_evidence["confidence"], 0.9)
+        self.assertEqual(opening_evidence["confidence"], 0.93)
         self.assertIn("初次拆开包裹", opening_evidence["reason"])
         self.assertEqual(parsed["video_audit_conclusion"]["sampling_fps"], 4.0)
         self.assertEqual(
@@ -233,6 +336,15 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
             parsed["damage_causality_assessment"]["severity_assessment"]["level"],
             "severe",
         )
+        self.assertEqual(
+            parsed["damage_causality_assessment"]["severity_assessment"]["confidence"],
+            0.94,
+        )
+        self.assertEqual(
+            parsed["damage_causality_assessment"]["business_defect_qualification"],
+            "confirmed",
+        )
+        self.assertFalse(parsed["damage_observability"]["conflicting_evidence"])
         self.assertEqual(
             parsed["damage_causality_assessment"]["most_likely_origin"],
             "customer_opening_or_handling",
@@ -255,16 +367,59 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
             [item["timestamp"] for item in parsed["damage_causality_assessment"]["after_action_evidence"]],
             ["02:15.500"],
         )
+        for stage in ("before_action_evidence", "action_evidence", "after_action_evidence"):
+            reference = parsed["damage_causality_assessment"][stage][0]
+            self.assertEqual(reference["asset_ref"], "native_video_1")
+            self.assertEqual(reference["video_index"], 1)
+            self.assertNotIn("global_frame_index", reference)
         self.assertEqual(
             native_dimension_gaps(parsed, "product_damage"),
             [],
         )
 
+    def test_multi_video_claimed_item_evidence_accepts_non_primary_video(self) -> None:
+        self.assertEqual(
+            claimed_item_evidence_times({"evidence_refs": [
+                {"field": "claimed_item", "asset_ref": "native_video_2", "timestamp": "00:37.000"},
+                {"field": "claimed_item", "asset_ref": "native_video_2", "timestamp": "00:42.000"},
+            ]}),
+            [37.0, 42.0],
+        )
+
+    def test_out_of_range_video_timestamp_is_not_exposed_as_report_evidence(self) -> None:
+        parsed = expand_native_video_perception(
+            self._complete_perception(),
+            {
+                "scenario": "product_damage",
+                "videos": [
+                    {"video_index": 1, "duration_seconds": 10.0},
+                    {"video_index": 2, "duration_seconds": 300.0},
+                ],
+            },
+            sampling_fps=1.0,
+        )
+
+        impossible = [
+            item
+            for item in parsed["supporting_evidence"]
+            if item.get("video_index") == 1
+            and item.get("timestamp") in {"01:51.000", "02:15.500", "02:30.750"}
+        ]
+        self.assertEqual(impossible, [])
+        self.assertIsNone(parsed["claimed_item_assessment"]["presentation_complete"])
+        self.assertEqual(parsed["predicted_label"], "review")
+
     def test_missing_initial_opening_video_is_yellow_with_derived_confidence(self) -> None:
         perception = self._complete_perception()
-        perception["sealed_start"] = False
-        perception["field_confidences"]["sealed_start"] = 0.94
-        perception["field_confidences"]["continuous"] = 0.88
+        perception["opening_action_assessment"] = {
+            "present": False,
+            "confidence": 0.94,
+            "reason": "只拍到闭合包裹，没有看到拆包动作。",
+        }
+        perception["evidence_refs"] = [
+            item for item in perception["evidence_refs"]
+            if item.get("field") != "opening_action"
+        ]
 
         parsed = expand_native_video_perception(
             perception,
@@ -275,8 +430,495 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         opening_evidence = parsed["opening_video_evidence"]
         self.assertFalse(opening_evidence["present"])
         self.assertEqual(opening_evidence["status"], "yellow")
-        self.assertEqual(opening_evidence["confidence"], 0.88)
+        self.assertEqual(opening_evidence["confidence"], 0.94)
         self.assertIn("没有形成可信的初次开箱证据", opening_evidence["reason"])
+        self.assertEqual(parsed["overall_video_result"], "indeterminate")
+        self.assertEqual(
+            parsed["video_audit_conclusion"]["opening_video_compliance"]["result"],
+            "indeterminate",
+        )
+        self.assertEqual(parsed["predicted_label"], "review")
+
+    def test_unreferenced_opening_action_is_reported_as_missing_anchor_not_unseen(self) -> None:
+        perception = self._complete_perception()
+        perception["evidence_refs"] = [
+            item for item in perception["evidence_refs"]
+            if item.get("field") != "opening_action"
+        ]
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        opening = parsed["opening_video_evidence"]
+        self.assertFalse(opening["present"])
+        self.assertIn("没有返回可回看的时间点", opening["reason"])
+        self.assertNotIn("未直接观察到", opening["reason"])
+
+    def test_opening_action_structured_anchor_is_normalized_to_evidence_reference(self) -> None:
+        perception = self._complete_perception()
+        perception["evidence_refs"] = [
+            item for item in perception["evidence_refs"]
+            if item.get("field") != "opening_action"
+        ]
+        perception["opening_action_assessment"].update({
+            "asset_ref": "native_video_1",
+            "timestamp": "00:05.000",
+            "fact": "包裹从闭合状态被首次拆开。",
+        })
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        opening = parsed["opening_video_evidence"]
+        self.assertTrue(opening["present"])
+        action_ref = next(
+            item for item in opening["evidence_refs"]
+            if item.get("field") == "opening_action"
+        )
+        self.assertEqual(action_ref["asset_ref"], "native_video_1")
+        self.assertEqual(action_ref["timestamp"], "00:05.000")
+
+    def test_static_sealed_continuous_video_does_not_prove_opening_action(self) -> None:
+        perception = self._complete_perception()
+        perception["opening_action_assessment"] = {
+            "present": False,
+            "confidence": 0.92,
+            "reason": "画面连续但只展示闭合包裹，未出现拆封动作。",
+        }
+        perception["evidence_refs"] = [
+            item for item in perception["evidence_refs"]
+            if item.get("field") != "opening_action"
+        ]
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        opening = parsed["opening_video_evidence"]
+        self.assertFalse(opening["present"])
+        self.assertFalse(opening["sop_compliant"])
+        self.assertNotIn("opening_action", opening["validated_requirements"])
+        self.assertEqual(parsed["overall_video_result"], "indeterminate")
+
+    def test_low_confidence_edit_signal_is_yellow_not_noncompliant(self) -> None:
+        perception = self._complete_perception()
+        perception["has_edit"] = True
+        perception["field_confidences"]["has_edit"] = 0.05
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        self.assertIsNone(parsed["has_edit"])
+        self.assertEqual(parsed["overall_video_result"], "indeterminate")
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(
+            parsed["video_audit_conclusion"]["edit_review_signal"],
+            "yellow",
+        )
+
+    def test_native_reference_uses_explicit_video_index_without_frame_index(self) -> None:
+        perception = self._complete_perception()
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        opening_refs = parsed["video_audit_conclusion"]["opening_video_compliance"]["evidence_refs"]
+        self.assertEqual(parsed["overall_video_result"], "compliant")
+        self.assertTrue(opening_refs)
+        self.assertTrue(all(reference["video_index"] == 1 for reference in opening_refs))
+        self.assertTrue(all("global_frame_index" not in reference for reference in opening_refs))
+
+    def test_native_schema_reference_derives_video_index_from_asset_ref(self) -> None:
+        perception = self._complete_perception()
+        for reference in perception["evidence_refs"]:
+            reference.pop("video_index", None)
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        self.assertEqual(parsed["overall_video_result"], "compliant")
+        self.assertTrue(parsed["opening_video_evidence"]["present"])
+        opening_refs = parsed["video_audit_conclusion"]["opening_video_compliance"]["evidence_refs"]
+        self.assertTrue(opening_refs)
+        self.assertTrue(all(reference["video_index"] == 1 for reference in opening_refs))
+
+    def test_sampled_reference_requires_explicit_global_frame_index(self) -> None:
+        perception = self._complete_perception()
+        opening_reference = next(
+            reference
+            for reference in perception["evidence_refs"]
+            if reference.get("field") == "opening_action"
+        )
+        opening_reference.update({
+            "asset_ref": "video_1_frame_5",
+            "video_index": 1,
+        })
+        opening_reference.pop("global_frame_index", None)
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        opening = parsed["video_audit_conclusion"]["opening_video_compliance"]
+        self.assertEqual(parsed["overall_video_result"], "indeterminate")
+        self.assertNotIn("opening_action_visible", opening["validated_fields"])
+
+    def test_high_confidence_edit_in_critical_opening_chain_is_noncompliant(self) -> None:
+        perception = self._complete_perception()
+        perception["has_edit"] = True
+        perception["field_confidences"]["has_edit"] = 0.95
+        perception["evidence_refs"].append({
+            "field": "has_edit",
+            "asset_ref": "native_video_1",
+            "video_index": 1,
+            "timestamp": "01:12.000",
+            "fact": "关键开箱动作发生跳切后的画面。",
+        })
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        self.assertTrue(parsed["has_edit"])
+        self.assertEqual(parsed["overall_video_result"], "noncompliant")
+        self.assertEqual(parsed["predicted_label"], "negative")
+
+    def test_opening_action_presence_is_separate_from_full_sop_compliance(self) -> None:
+        perception = self._complete_perception()
+        perception["waybill_visible"] = False
+        perception["field_confidences"]["waybill_visible"] = 0.93
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        opening = parsed["opening_video_evidence"]
+        self.assertTrue(opening["present"])
+        self.assertFalse(opening["sop_compliant"])
+        self.assertEqual(opening["status"], "pass")
+        self.assertIn("已确认初次拆开包裹动作", opening["reason"])
+
+    def test_native_multi_claim_results_reach_decision_contract_with_real_refs(self) -> None:
+        perception = self._complete_perception()
+        for field in (
+            "visible_in_continuous_opening", "main_video_detail_sufficient",
+            "supplemental_damage_visible", "same_item_linkage", "timestamp",
+            "location", "severity_level", "structural_failure",
+            "severity_confidence", "business_defect_qualification",
+            "conflicting_evidence", "severity_reason",
+        ):
+            perception["damage_assessment"].pop(field, None)
+        perception["atomic_claim_results"] = [
+            {
+                "claim_id": "CLM-SCRATCH",
+                "subject_ref": "SKU-1",
+                "location": "面具正面",
+                "damage_type": "划痕",
+                "main_video_visibility": "visible",
+                "supplemental_visibility": "not_assessed",
+                "same_item_linkage": True,
+                "damage_presence": "confirmed",
+                "condition_at_unboxing": "supported",
+                "support_status": "supported",
+                "severity_level": "moderate",
+                "severity_confidence": 0.91,
+                "structural_failure": False,
+                "conflicting_evidence": False,
+                "evidence_refs": [{
+                    "asset_ref": "native_video_1",
+                    "timestamp": "02:15.500",
+                    "fact": "正面划痕在两个角度持续可见。",
+                }],
+                "reason": "主视频直接支持该划痕主张。",
+            },
+            {
+                "claim_id": "CLM-BASE",
+                "subject_ref": "SKU-1",
+                "location": "底座",
+                "damage_type": "断裂",
+                "main_video_visibility": "clearly_not_visible",
+                "supplemental_visibility": "not_assessed",
+                "same_item_linkage": True,
+                "damage_presence": "not_found_after_clear_coverage",
+                "condition_at_unboxing": "not_supported",
+                "support_status": "not_supported",
+                "severity_level": "none",
+                "severity_confidence": 0.89,
+                "structural_failure": False,
+                "conflicting_evidence": False,
+                "evidence_refs": [{
+                    "asset_ref": "native_video_1",
+                    "timestamp": "02:30.750",
+                    "fact": "底座完整展示，未见断裂。",
+                }],
+                "reason": "清晰展示不支持底座断裂主张。",
+            },
+        ]
+        perception["evidence_refs"].extend([
+            {"field": "issue_visible", **reference}
+            for claim in perception["atomic_claim_results"]
+            for reference in claim["evidence_refs"]
+        ])
+        case = {
+            "scenario": "product_damage",
+            "structured_business_context": {
+                "claim_scope": {
+                    "active_claim_ids": ["CLM-SCRATCH", "CLM-BASE"],
+                },
+            },
+        }
+
+        parsed = expand_native_video_perception(perception, case, sampling_fps=1.0)
+
+        results = parsed["claim_fact_assessment"]["atomic_claim_results"]
+        self.assertEqual([item["claim_id"] for item in results], ["CLM-SCRATCH", "CLM-BASE"])
+        self.assertTrue(all(item["evidence_refs"] for item in results))
+        self.assertEqual(results[0]["location"], "面具正面")
+        self.assertEqual(results[0]["condition_at_unboxing"], "supported")
+        self.assertEqual(results[1]["damage_presence"], "not_found_after_clear_coverage")
+        self.assertEqual(
+            parsed["damage_causality_assessment"]["severity_assessment"]["level"],
+            "moderate",
+        )
+        self.assertEqual(
+            parsed["damage_causality_assessment"]["business_defect_qualification"],
+            "not_qualified",
+        )
+        self.assertTrue(parsed["damage_observability"]["same_item_linkage"])
+        self.assertEqual(parsed["damage_observability"]["status"], "fully_observable")
+
+    def test_atomic_claim_refs_bind_to_submitted_assets_without_duplicate_fact_text(self) -> None:
+        perception = self._complete_perception()
+        perception["atomic_claim_results"] = [{
+            "claim_id": "CLM-1",
+            "subject_ref": "SKU-1",
+            "location": "正面",
+            "damage_type": "划痕",
+            "main_video_visibility": "visible",
+            "supplemental_visibility": "visible",
+            "same_item_linkage": True,
+            "damage_presence": "confirmed",
+            "condition_at_unboxing": "supported",
+            "support_status": "supported",
+            "severity_level": "moderate",
+            "severity_confidence": 0.9,
+            "structural_failure": False,
+            "conflicting_evidence": False,
+            "evidence_refs": [
+                {
+                    "asset_ref": "native_video_1",
+                    "timestamp": "00:12",
+                    "fact": "划痕在商品正面持续可见。",
+                },
+                {
+                    "asset_ref": "supplemental_image_1",
+                    "timestamp": None,
+                    "fact": "近照显示同一位置划痕。",
+                },
+                {
+                    "asset_ref": "supplemental_image_999",
+                    "timestamp": None,
+                    "fact": "伪造素材不得进入结果。",
+                },
+            ],
+            "reason": "视频与近照共同支持伤点事实。",
+        }]
+        perception["evidence_refs"] = [
+            item for item in perception["evidence_refs"]
+            if item.get("field") != "issue_visible"
+        ] + [{
+            "field": "issue_visible",
+            "asset_ref": "native_video_1",
+            "timestamp": "00:12",
+            "fact": "同一时点的规范化描述与伤点字段措辞不同。",
+        }]
+        case = {
+            "scenario": "product_damage",
+            "videos": [{"video_index": 1, "duration_seconds": 60}],
+            "supplemental_images": [{"image_index": 1}],
+            "structured_business_context": {
+                "claim_scope": {"active_claim_ids": ["CLM-1"]},
+            },
+        }
+
+        parsed = expand_native_video_perception(perception, case, sampling_fps=1.0)
+        refs = parsed["claim_fact_assessment"]["atomic_claim_results"][0]["evidence_refs"]
+
+        self.assertEqual(
+            {item["asset_ref"] for item in refs},
+            {"native_video_1", "supplemental_image_1"},
+        )
+
+    def test_linked_supplemental_damage_confirms_damage_without_claiming_opening_responsibility(self) -> None:
+        perception = self._complete_perception()
+        perception["issue_visible"] = None
+        perception["damage_assessment"]["visible_in_continuous_opening"] = None
+        perception["damage_assessment"]["main_video_detail_sufficient"] = False
+        perception["atomic_claim_results"] = [{
+            "claim_id": "CLM-1",
+            "subject_ref": "SKU-1",
+            "location": "商品表面",
+            "damage_type": "划痕",
+            "main_video_visibility": "uncertain",
+            "supplemental_visibility": "visible",
+            "same_item_linkage": True,
+            "damage_presence": "confirmed",
+            "condition_at_unboxing": "supported",
+            "support_status": "supported",
+            "severity_level": "minor",
+            "severity_confidence": 0.9,
+            "structural_failure": False,
+            "conflicting_evidence": False,
+            "evidence_refs": [{
+                "asset_ref": "supplemental_image_1",
+                "timestamp": None,
+                "fact": "同一商品近照可见表面划痕。",
+            }],
+            "reason": "补充近照确认伤损存在，主视频细节不足。",
+        }]
+        perception["evidence_refs"] = [
+            item for item in perception["evidence_refs"]
+            if item.get("field") != "issue_visible"
+        ] + [{
+            "field": "issue_visible",
+            "asset_ref": "supplemental_image_1",
+            "timestamp": None,
+            "fact": "同一商品近照可见表面划痕。",
+        }]
+        case = {
+            "scenario": "product_damage",
+            "videos": [{"video_index": 1, "duration_seconds": 180}],
+            "supplemental_images": [{"image_index": 1}],
+            "structured_business_context": {
+                "claim_scope": {"active_claim_ids": ["CLM-1"]},
+            },
+        }
+
+        parsed = expand_native_video_perception(perception, case, sampling_fps=1.0)
+        damage = parsed["damage_causality_assessment"]
+
+        self.assertEqual(damage["damage_presence"], "confirmed")
+        self.assertEqual(damage["claim_support"], "insufficient")
+        self.assertEqual(
+            damage["evidence_source_summary"]["primary_video"]["damage_presence"],
+            "uncertain",
+        )
+        self.assertEqual(
+            damage["evidence_source_summary"]["supplemental_images"]["damage_presence"],
+            "confirmed",
+        )
+        self.assertEqual(parsed["video_audit_conclusion"]["opening_video_compliance"]["result"], "indeterminate")
+
+    def test_single_traceable_video_anchor_does_not_hide_visible_minor_damage(self) -> None:
+        perception = self._complete_perception()
+        perception["atomic_claim_results"] = [{
+            "claim_id": "CLM-1",
+            "subject_ref": "SKU-1",
+            "location": "正面",
+            "damage_type": "轻微划痕",
+            "main_video_visibility": "visible",
+            "supplemental_visibility": "visible",
+            "same_item_linkage": True,
+            "damage_presence": "confirmed",
+            "condition_at_unboxing": "supported",
+            "support_status": "supported",
+            "severity_level": "minor",
+            "severity_confidence": 0.9,
+            "structural_failure": False,
+            "conflicting_evidence": False,
+            "evidence_refs": [
+                {
+                    "asset_ref": "native_video_1",
+                    "timestamp": "00:43",
+                    "fact": "连续开箱中清楚看见同一位置的轻微划痕。",
+                },
+                {
+                    "asset_ref": "supplemental_image_1",
+                    "timestamp": None,
+                    "fact": "近照用于核对同一伤点的形态。",
+                },
+            ],
+            "reason": "主视频直接支持伤点在开箱时已经存在。",
+        }]
+        perception["evidence_refs"] = [
+            item for item in perception["evidence_refs"]
+            if item.get("field") != "issue_visible"
+        ]
+        case = {
+            "scenario": "product_damage",
+            "videos": [{"video_index": 1, "duration_seconds": 600}],
+            "supplemental_images": [{"image_index": 1}],
+            "structured_business_context": {
+                "claim_scope": {"active_claim_ids": ["CLM-1"]},
+            },
+        }
+
+        parsed = expand_native_video_perception(perception, case, sampling_fps=1.0)
+
+        self.assertTrue(parsed["issue_visible"])
+        self.assertEqual(parsed["overall_video_result"], "compliant")
+        self.assertEqual(parsed["damage_observability"]["status"], "fully_observable")
+        self.assertEqual(
+            [
+                item["timestamp"]
+                for item in parsed["evidence_refs"]
+                if item.get("field") == "issue_visible"
+            ],
+            ["00:43"],
+        )
+
+    def test_single_claimed_item_anchor_cannot_prove_complete_no_offscreen_window(self) -> None:
+        perception = self._complete_perception()
+        perception["evidence_refs"] = [
+            item
+            for item in perception["evidence_refs"]
+            if item.get("field") != "claimed_item"
+        ] + [
+            {
+                "field": "claimed_item",
+                "asset_ref": "native_video_1",
+                "timestamp": "00:37.000",
+                "fact": "争议商品只在这个时点得到确认",
+            }
+        ]
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        self.assertIsNone(parsed["has_offscreen"])
+        self.assertIsNone(
+            parsed["object_continuity_assessment"]["claimed_item_timeline_complete"]
+        )
+        self.assertIn(
+            "claimed_item_identity_window",
+            native_dimension_gaps(parsed, "product_damage"),
+        )
 
     def test_supplemental_damage_requires_a_real_image_reference(self) -> None:
         perception = self._complete_perception()
@@ -333,6 +975,35 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         self.assertEqual(opening["result"], "indeterminate")
         self.assertEqual(parsed["overall_video_result"], "indeterminate")
         self.assertEqual(parsed["predicted_label"], "review")
+
+    def test_minor_surface_trace_without_replayable_video_anchor_stays_uncertain(self) -> None:
+        perception = self._complete_perception()
+        perception["damage_assessment"].update({
+            "severity_level": "minor",
+            "structural_failure": False,
+            "business_defect_qualification": "indeterminate",
+            "severity_reason": "画面仅疑似存在轻微表面痕迹。",
+        })
+        perception["evidence_refs"] = [
+            item for item in perception["evidence_refs"]
+            if item.get("field") != "issue_visible"
+        ]
+
+        result = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        self.assertIsNone(result["issue_visible"])
+        self.assertEqual(result["overall_video_result"], "indeterminate")
+        assessment = result["damage_causality_assessment"]
+        self.assertEqual(assessment["damage_presence"], "uncertain")
+        self.assertFalse(assessment["main_video_detail_sufficient"])
+        self.assertEqual(
+            assessment["evidence_source_summary"]["primary_video"]["damage_presence"],
+            "uncertain",
+        )
 
     def test_unknown_evidence_field_is_removed_before_decision_and_report(self) -> None:
         perception = self._complete_perception()
@@ -411,6 +1082,27 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         self.assertEqual(causal["most_likely_origin"], "indeterminate")
         self.assertEqual(causal["causal_evidence_level"], "none")
         self.assertFalse(causal["damage_change_observed"])
+
+    def test_direct_customer_action_without_contact_is_downgraded(self) -> None:
+        perception = self._complete_perception()
+        action = next(
+            item
+            for item in perception["damage_assessment"]["causal_evidence_refs"]
+            if item["stage"] == "action"
+        )
+        action["action_relation"] = "no_contact"
+        action["fact"] = "手在争议部位旁边悬停，未接触商品。"
+
+        parsed = expand_native_video_perception(
+            perception,
+            {"scenario": "product_damage"},
+            sampling_fps=1.0,
+        )
+
+        causal = parsed["damage_causality_assessment"]
+        self.assertFalse(causal["damage_change_observed"])
+        self.assertEqual(causal["most_likely_origin"], "indeterminate")
+        self.assertEqual(causal["causal_action_relation"], "no_contact")
 
     def test_direct_customer_action_requires_same_ordered_subject_location_chain(self) -> None:
         perception = self._complete_perception()
@@ -495,6 +1187,9 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
             parsed["video_audit_conclusion"]["speed_review_impact"]["status"],
             "uncertain",
         )
+        self.assertTrue(
+            parsed["video_audit_conclusion"]["speed_review_impact"]["critical_evidence_observable"]
+        )
 
     def test_uncertain_detail_stays_yellow_and_does_not_invent_offscreen(self) -> None:
         perception = self._complete_perception()
@@ -549,7 +1244,7 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         self.assertTrue(requires_claimed_item_detail(perception, "product_damage"))
         self.assertEqual(
             candidate_detail_timestamps(perception),
-            [135.5, 111.0, 9.75, 37.0, 41.0],
+            [135.5, 111.0, 150.75, 9.75, 37.0, 41.0],
         )
         perception["issue_visible"] = True
         self.assertTrue(requires_claimed_item_detail(perception, "product_damage"))
@@ -858,7 +1553,7 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
                 return {"summary": {"review_status": "completed"}, "agent_report": {}}
             with patch.dict(
                 os.environ,
-                {"VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.6-flash"},
+                {"VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash-lite"},
                 clear=False,
             ), patch.object(workbench_server, "load_visual_env"), patch.object(
                 workbench_server, "discover_case_videos", return_value=([video], {})
@@ -955,7 +1650,7 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.6-flash"},
+                {"VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash-lite"},
                 clear=False,
             ), patch.object(workbench_server, "load_visual_env"), patch.object(
                 workbench_server, "discover_case_videos", return_value=([video], {})
@@ -1008,7 +1703,99 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         )
         self.assertEqual(result["sampling"]["sampling_mode"], "native_video")
 
-    def test_native_transport_failure_uses_complete_one_fps_frame_fallback(self) -> None:
+    def test_claimed_item_identity_window_gap_requires_one_fps_frame_fallback(self) -> None:
+        from poc.visual_review_poc import workbench_server
+
+        self.assertFalse(
+            workbench_server._native_success_requires_frame_fallback(
+                ["claimed_item_identity_window"]
+            )
+        )
+        self.assertFalse(
+            workbench_server._native_success_requires_frame_fallback(["claim_facts"])
+        )
+
+    def test_one_fps_frame_fallback_is_disabled_by_default(self) -> None:
+        from poc.visual_review_poc import workbench_server
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(workbench_server._one_fps_frame_fallback_enabled())
+
+        with patch.dict(
+            "os.environ", {"REVIEW_ENABLE_ONE_FPS_FRAME_FALLBACK": "true"}, clear=True
+        ):
+            self.assertTrue(workbench_server._one_fps_frame_fallback_enabled())
+
+    def test_missing_item_single_unreferenced_true_opening_fact_requires_one_fps_fallback(self) -> None:
+        from poc.visual_review_poc import workbench_server
+
+        fields = (
+            "sealed_start",
+            "waybill_visible",
+            "waybill_matches_order",
+            "single_take_continuity",
+            "opening_complete",
+            "all_contents_laid_out",
+        )
+        parsed = {
+            "fulfillment_reconciliation": {
+                "evidence_route": "insufficient",
+                "package_observations": [{
+                    "package_ref": "ORDER-PACKAGE-001",
+                    **{field: True for field in fields},
+                    "evidence_refs": [
+                        {
+                            "asset_ref": "native_video_1",
+                            "timestamp": "00:08.00",
+                            "field": field,
+                            "fact": "可从原视频回看。",
+                        }
+                        for field in fields
+                        if field != "all_contents_laid_out"
+                    ] + [{
+                        "asset_ref": "supplemental_image_1",
+                        "timestamp": None,
+                        "field": "all_contents_laid_out",
+                        "fact": "补图中可见全部实物。",
+                    }],
+                }],
+            },
+        }
+        current_case = {
+            "structured_business_context": {
+                "frontdesk_evidence_package": {
+                    "fulfillment_baseline": {
+                        "packages": [{"package_ref": "ORDER-PACKAGE-001"}],
+                    },
+                },
+            },
+        }
+
+        self.assertTrue(
+            workbench_server._native_success_requires_frame_fallback(
+                [], parsed, current_case, "missing_item"
+            )
+        )
+
+        parsed["fulfillment_reconciliation"]["package_observations"][0]["waybill_visible"] = False
+        self.assertFalse(
+            workbench_server._native_success_requires_frame_fallback(
+                [], parsed, current_case, "missing_item"
+            )
+        )
+        parsed["fulfillment_reconciliation"]["package_observations"][0]["waybill_visible"] = True
+        parsed["fulfillment_reconciliation"]["package_observations"][0]["evidence_refs"] = [
+            ref
+            for ref in parsed["fulfillment_reconciliation"]["package_observations"][0]["evidence_refs"]
+            if ref["field"] != "opening_complete"
+        ]
+        self.assertFalse(
+            workbench_server._native_success_requires_frame_fallback(
+                [], parsed, current_case, "missing_item"
+            )
+        )
+
+    def test_controlled_one_fps_fallback_profile_is_explicit_and_bounded(self) -> None:
         from poc.visual_review_poc import workbench_server
 
         source_args = SimpleNamespace(
@@ -1087,7 +1874,7 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
         self.assertEqual(lifecycle, ["opened", "closed"])
         self.assertEqual(proxy.call_count, 0)
 
-    def test_workbench_prefers_ephemeral_original_url_for_regular_video(self) -> None:
+    def test_workbench_keeps_regular_video_inline_without_starting_tunnel(self) -> None:
         from poc.visual_review_poc import workbench_server
 
         lifecycle = []
@@ -1125,11 +1912,11 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
                     video,
                     Path(temp_dir) / "proxy",
                 ) as source:
-                    self.assertEqual(lifecycle, ["opened"])
-                    self.assertEqual(source["file_uri"], Tunnel.url)
-                    self.assertEqual(source["transport"], "ephemeral_original_url")
+                    self.assertEqual(lifecycle, [])
+                    self.assertEqual(source["api_path"], str(video))
+                    self.assertEqual(source["transport"], "raw_original_inline")
 
-        self.assertEqual(lifecycle, ["opened", "closed"])
+        self.assertEqual(lifecycle, [])
         self.assertEqual(proxy.call_count, 0)
 
     def test_workbench_falls_back_to_quality_proxy_when_tunnel_is_unavailable(self) -> None:
@@ -1173,6 +1960,81 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
                     self.assertEqual(source["api_mime_type"], "video/webm")
                     self.assertEqual(source["transport"], "full_duration_quality_proxy")
                     self.assertEqual(source["tunnel"]["status"], "unavailable")
+
+    def test_quality_proxy_url_uses_url_budget_instead_of_inline_budget(self) -> None:
+        from poc.visual_review_poc import workbench_server
+
+        class Tunnel:
+            url = "https://unit-test.trycloudflare.com/media/proxy"
+            diagnostics = {"status": "ready"}
+
+        @contextmanager
+        def fake_tunnel(_video, **_kwargs):
+            yield Tunnel()
+
+        with TemporaryDirectory() as temp_dir:
+            video = Path(temp_dir) / "source.mp4"
+            proxy = Path(temp_dir) / "proxy.mp4"
+            video.write_bytes(b"x" * 128)
+            proxy.write_bytes(b"y" * 64)
+            with patch.object(
+                workbench_server, "NATIVE_INLINE_MEDIA_MAX_BYTES", 32
+            ), patch.object(
+                workbench_server, "NATIVE_URL_MEDIA_MAX_BYTES", 96
+            ), patch.object(
+                workbench_server,
+                "prepare_native_video_proxy",
+                return_value={
+                    "status": "ready",
+                    "path": str(proxy),
+                    "mime_type": "video/mp4",
+                    "proxy_bytes": proxy.stat().st_size,
+                },
+            ) as prepare_proxy, patch.object(
+                workbench_server, "open_secure_media_tunnel", side_effect=fake_tunnel
+            ):
+                with workbench_server._native_video_proxy_source_context(
+                    video,
+                    Path(temp_dir) / "prepared",
+                ) as source:
+                    self.assertEqual(source["file_uri"], Tunnel.url)
+
+        self.assertEqual(prepare_proxy.call_args.args[2], 96)
+
+    def test_quality_proxy_source_keeps_the_trigger_reasons_for_public_audit(self) -> None:
+        from poc.visual_review_poc import workbench_server
+
+        @contextmanager
+        def fake_proxy_source(*_args, **_kwargs):
+            yield {
+                "video_index": 1,
+                "api_path": "proxy.mp4",
+                "api_mime_type": "video/mp4",
+                "transport": "full_duration_quality_proxy",
+                "proxy": {"status": "ready", "proxy_bytes": 70_000_000},
+            }
+
+        recommendation = {
+            "recommended": True,
+            "reasons": ["source_above_100mb", "resolution_above_2k"],
+        }
+        with TemporaryDirectory() as temp_dir:
+            video = Path(temp_dir) / "source.mp4"
+            video.write_bytes(b"video")
+            with patch.object(
+                workbench_server,
+                "video_proxy_recommendation",
+                return_value=recommendation,
+            ), patch.object(
+                workbench_server,
+                "_native_video_proxy_source_context",
+                side_effect=fake_proxy_source,
+            ):
+                with workbench_server._native_video_source_context(
+                    video,
+                    Path(temp_dir) / "prepared",
+                ) as source:
+                    self.assertEqual(source["quality_recommendation"], recommendation)
 
     def test_workbench_retries_native_review_with_proxy_url_after_provider_decode_rejection(self) -> None:
         from poc.visual_review_poc import workbench_server
@@ -1226,7 +2088,7 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
             video.write_bytes(b"video")
             with patch.dict(
                 os.environ,
-                {"VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.6-flash"},
+                {"VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash-lite"},
                 clear=False,
             ), patch.object(
                 workbench_server, "load_visual_env"
@@ -1285,6 +2147,19 @@ class NativeVideoPerceptionPipelineTest(unittest.TestCase):
                     "status": "failed",
                     "status_code": 400,
                     "error": "Invalid response_schema for file_uri input",
+                }
+            )
+        )
+
+    def test_original_video_read_timeout_retries_quality_proxy_before_frames(self) -> None:
+        from poc.visual_review_poc import workbench_server
+
+        self.assertTrue(
+            workbench_server._native_transport_requires_proxy_retry(
+                {
+                    "status": "failed",
+                    "error_type": "TimeoutError",
+                    "error": "The read operation timed out while fetching file_uri",
                 }
             )
         )

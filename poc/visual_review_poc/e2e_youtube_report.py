@@ -15,7 +15,7 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT_DIR = Path(__file__).resolve().parent / "reports" / "internal_archive"
-MODEL = "gemini-3.5-flash"
+MODEL = "gemini-3.5-flash-lite"
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")

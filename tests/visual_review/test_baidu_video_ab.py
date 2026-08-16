@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,11 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
+from poc.visual_review_poc.media_preflight import (
+    build_media_preflight_execution,
+    compress_image,
+    prepare_image_media,
+)
 from poc.visual_review_poc.model_selection_e2e import prepare_media
 from prompts.visual_review.review_model_prompt import (
     build_sampled_video_batch_prompt,
@@ -16,6 +22,7 @@ from prompts.visual_review.review_model_prompt import (
 
 from scripts.run_baidu_video_ab import (
     apply_perception_evidence_scope,
+    bind_claim_identity_result,
     bind_perception_identity,
     build_overlapping_frame_batches,
     build_candidate_detail_case,
@@ -32,6 +39,7 @@ from scripts.run_baidu_video_ab import (
     resolve_profiles,
     result_summary,
     run_sampled_perception_batched,
+    run_sampled_perception_batched_with_identity,
     signed_proxy_source,
     transcoded_url_max_bytes,
     validate_video_sampling_fps,
@@ -39,6 +47,204 @@ from scripts.run_baidu_video_ab import (
 
 
 class BaiduVideoABTest(unittest.TestCase):
+    def test_media_preflight_execution_exposes_only_actual_public_facts(self):
+        execution = build_media_preflight_execution(
+            native_source={
+                "api_path": r"D:\\private\\proxy.webm",
+                "file_uri": "https://secret-tunnel.example/video",
+                "transport": "ephemeral_proxy_url",
+                "tunnel": {"token": "secret"},
+                "proxy": {
+                    "path": r"D:\\private\\proxy.webm",
+                    "codec_profile": "vp9_webm",
+                    "source_width": 3840,
+                    "source_height": 2160,
+                    "proxy_width": 2560,
+                    "proxy_height": 1440,
+                    "proxy_fps": 24.0,
+                    "proxy_bytes": 62_000_000,
+                    "source_bytes": 606_000_000,
+                    "source_fps": 30.0,
+                    "source_bitrate_bps": 9_500_000,
+                    "proxy_bitrate_bps": 5_400_000,
+                    "source_duration_seconds": 452.5,
+                    "proxy_duration_seconds": 452.5,
+                },
+                "quality_recommendation": {
+                    "recommended": True,
+                    "reasons": ["source_above_100mb", "resolution_above_2k"],
+                },
+            },
+            native_status="success",
+            native_sampling_fps=1.0,
+            frame_fallback_used=False,
+            sampled_frame_count=0,
+            supplemental_image_count=3,
+        )
+
+        self.assertEqual(execution["video"]["submitted_source"], "quality_proxy")
+        self.assertEqual(execution["video"]["delivery"], "https_url")
+        self.assertEqual(execution["video"]["native_sampling_fps"], 1.0)
+        self.assertEqual(execution["video"]["codec_profile"], "vp9_webm")
+        self.assertEqual(execution["video"]["source_bytes"], 606_000_000)
+        self.assertEqual(execution["video"]["submitted_bytes"], 62_000_000)
+        self.assertEqual(
+            execution["video"]["quality_reasons"],
+            ["source_above_100mb", "resolution_above_2k"],
+        )
+        self.assertEqual(execution["video"]["source_duration_seconds"], 452.5)
+        self.assertEqual(execution["video"]["submitted_duration_seconds"], 452.5)
+        self.assertEqual(execution["images"]["representation"], "individual_webp")
+        self.assertEqual(execution["images"]["encoding_order"], ["lossless", "quality_90"])
+        self.assertFalse(execution["images"]["collage_used"])
+        self.assertFalse(execution["frame_fallback"]["used"])
+        serialized = str(execution)
+        self.assertNotIn("D:\\private", serialized)
+        self.assertNotIn("secret-tunnel", serialized)
+        self.assertNotIn("token", serialized)
+
+    def test_every_image_becomes_webp_and_falls_back_to_quality_90_when_lossless_is_larger(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "small.jpg"
+            source.write_bytes(b"small-original")
+            image = np.zeros((720, 1280, 3), dtype=np.uint8)
+            oversized_webp = np.frombuffer(b"R" * 100, dtype=np.uint8)
+            efficient_webp = np.frombuffer(b"WEBP-90", dtype=np.uint8)
+
+            with patch(
+                "poc.visual_review_poc.media_preflight.cv2.imdecode",
+                return_value=image,
+            ), patch(
+                "poc.visual_review_poc.media_preflight.cv2.imencode",
+                side_effect=[(True, oversized_webp), (True, efficient_webp)],
+            ) as encode:
+                result = compress_image(
+                    source,
+                    root / "prepared.webp",
+                    lossless_webp=True,
+                )
+
+            self.assertEqual(result, root / "prepared.webp")
+            self.assertEqual(result.read_bytes(), b"WEBP-90")
+            self.assertEqual(encode.call_args_list[0].args[0], ".webp")
+            self.assertEqual(encode.call_args_list[0].args[2], [cv2.IMWRITE_WEBP_QUALITY, 101])
+            self.assertEqual(encode.call_args_list[1].args[2], [cv2.IMWRITE_WEBP_QUALITY, 90])
+
+    def test_image_preflight_records_each_success_and_failure_without_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            valid = root / "valid.png"
+            invalid = root / "invalid.png"
+            image = np.zeros((32, 48, 3), dtype=np.uint8)
+            ok, encoded = cv2.imencode(".png", image)
+            self.assertTrue(ok)
+            encoded.tofile(str(valid))
+            invalid.write_bytes(b"not-an-image")
+            diagnostics = []
+
+            prepared = prepare_image_media(
+                [
+                    {"path": valid, "image_index": 1},
+                    {"path": invalid, "image_index": 2},
+                ],
+                root / "prepared",
+                diagnostics=diagnostics,
+            )
+
+        self.assertEqual(len(prepared), 1)
+        self.assertEqual([row["status"] for row in diagnostics], ["prepared", "failed"])
+        self.assertEqual(diagnostics[0]["asset_ref"], "supplemental_image_1")
+        self.assertEqual(diagnostics[1]["asset_ref"], "supplemental_image_2")
+        self.assertGreater(diagnostics[0]["source_bytes"], 0)
+        self.assertGreater(diagnostics[0]["submitted_bytes"], 0)
+        self.assertEqual(len(diagnostics[0]["source_sha256"]), 64)
+        self.assertEqual(len(diagnostics[0]["submitted_sha256"]), 64)
+        self.assertNotIn(str(root), str(diagnostics))
+
+    def test_media_preflight_execution_marks_partial_image_preparation(self):
+        execution = build_media_preflight_execution(
+            native_source=None,
+            native_status="not_run",
+            native_sampling_fps=None,
+            frame_fallback_used=False,
+            sampled_frame_count=0,
+            supplemental_image_count=1,
+            image_execution=[
+                {
+                    "asset_ref": "supplemental_image_1",
+                    "status": "prepared",
+                    "source_bytes": 1200,
+                    "submitted_bytes": 800,
+                    "source_sha256": "a" * 64,
+                    "submitted_sha256": "b" * 64,
+                    "submitted_encoding": "webp",
+                },
+                {
+                    "asset_ref": "supplemental_image_2",
+                    "status": "failed",
+                    "error_type": "image_decode_failed",
+                },
+            ],
+        )
+
+        self.assertEqual(execution["status"], "partial")
+        self.assertEqual(execution["images"]["attempted_count"], 2)
+        self.assertEqual(execution["images"]["prepared_count"], 1)
+        self.assertEqual(execution["images"]["failed_count"], 1)
+        self.assertEqual(len(execution["images"]["assets"]), 2)
+
+    def test_media_preflight_execution_keeps_auditable_video_derivative_hashes(self):
+        execution = build_media_preflight_execution(
+            native_source={
+                "file_uri": "https://media.example/review.webm",
+                "proxy": {
+                    "codec_profile": "vp9_webm",
+                    "source_sha256": "a" * 64,
+                    "proxy_sha256": "b" * 64,
+                    "cache_hit": True,
+                    "source_width": 3840,
+                    "source_height": 2160,
+                    "proxy_width": 2560,
+                    "proxy_height": 1440,
+                },
+            },
+            native_status="success",
+            native_sampling_fps=1.0,
+            frame_fallback_used=False,
+            sampled_frame_count=0,
+            supplemental_image_count=0,
+        )
+
+        video = execution["video"]
+        self.assertEqual(video["source_sha256"], "a" * 64)
+        self.assertEqual(video["proxy_sha256"], "b" * 64)
+        self.assertTrue(video["cache_hit"])
+        self.assertEqual(video["submitted_width"], 2560)
+
+    def test_default_image_budget_keeps_exact_4k_width_and_converts_to_webp(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "4k.png"
+            source.write_bytes(b"source")
+            image = np.zeros((2160, 3840, 3), dtype=np.uint8)
+            encoded = np.frombuffer(b"RIFF-webp", dtype=np.uint8)
+
+            with patch(
+                "poc.visual_review_poc.media_preflight.cv2.imdecode",
+                return_value=image,
+            ), patch(
+                "poc.visual_review_poc.media_preflight.cv2.resize",
+                return_value=np.zeros((1440, 2560, 3), dtype=np.uint8),
+            ) as resize, patch(
+                "poc.visual_review_poc.media_preflight.cv2.imencode",
+                return_value=(True, encoded),
+            ):
+                result = compress_image(source, root / "prepared.webp", lossless_webp=True)
+
+            self.assertEqual(result.suffix, ".webp")
+            resize.assert_not_called()
+
     def test_sampled_frames_are_individual_lossless_webp_at_1080p_budget(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -63,6 +269,12 @@ class BaiduVideoABTest(unittest.TestCase):
             self.assertEqual(output.read_bytes()[:4], b"RIFF")
             decoded = cv2.imdecode(np.fromfile(str(output), dtype=np.uint8), cv2.IMREAD_COLOR)
             self.assertEqual(max(decoded.shape[:2]), 1920)
+
+    def test_legacy_model_selection_media_helper_is_the_shared_preflight_helper(self):
+        from poc.visual_review_poc import model_selection_e2e
+
+        self.assertIs(model_selection_e2e.compress_image, compress_image)
+        self.assertIs(model_selection_e2e.prepare_media, prepare_image_media)
     def test_candidate_detail_window_only_uses_model_discovered_timestamps(self):
         parsed = {
             "claimed_item_assessment": {
@@ -191,6 +403,193 @@ class BaiduVideoABTest(unittest.TestCase):
                 "expected_order_item": {},
             },
         }), {})
+
+    def test_claim_identity_binding_uses_the_matched_official_reference(self):
+        case = {
+            "supplemental_images": [
+                {"image_index": 1, "api_path": "order-overview.webp"},
+                {"image_index": 2, "api_path": "target-closeup.webp"},
+            ],
+            "official_reference_images": [
+                {
+                    "reference_index": 1,
+                    "item_ref": "ORDER-LINE-001",
+                    "sku": "SKU-001",
+                },
+                {
+                    "reference_index": 2,
+                    "item_ref": "ORDER-LINE-002",
+                    "sku": "SKU-002",
+                },
+            ],
+            "structured_business_context": {
+                "continuity_claim_identity": {"customer_claim": "摆件有红痕"},
+            },
+        }
+        identity = bind_claim_identity_result(case, {
+            "status": "success",
+            "parsed": {
+                "match_status": "matched",
+                "confidence": 0.94,
+                "expected_order_item": {
+                    "item_ref": "ORDER-LINE-002",
+                    "sku": "SKU-002",
+                    "product_name": "目标摆件",
+                    "specification": "45mm",
+                },
+                "evidence_refs": [
+                    {"asset_ref": "supplemental_image_2", "fact": "目标特写"},
+                ],
+            },
+        })
+
+        self.assertEqual(identity["identity_anchor_asset_ref"], "official_product_reference_2")
+        self.assertEqual(identity["product_name"], "目标摆件")
+        self.assertEqual(
+            case["structured_business_context"]["continuity_claim_identity"]["customer_claim"],
+            "摆件有红痕",
+        )
+
+    def test_sampled_batched_resolves_identity_before_parallel_timeline(self):
+        case = {
+            "case_id": "CASE-MULTI-SKU",
+            "scenario": "product_damage",
+            "customer_claim": "目标摆件有红痕",
+            "videos": [{"video_index": 1, "duration_seconds": 7.0}],
+            "frames": [
+                {
+                    "video_index": 1,
+                    "global_frame_index": index,
+                    "timestamp": f"00:{index - 1:02d}.00",
+                }
+                for index in range(1, 8)
+            ],
+            "supplemental_images": [
+                {"image_index": 1, "api_path": "target-closeup.webp"},
+            ],
+            "official_reference_images": [
+                {"reference_index": 1, "item_ref": "LINE-1", "sku": "SKU-1"},
+                {"reference_index": 2, "item_ref": "LINE-2", "sku": "SKU-2"},
+            ],
+            "structured_business_context": {
+                "business_scenario": "product_damage",
+                "continuity_claim_identity": {"customer_claim": "目标摆件有红痕"},
+            },
+        }
+        calls = []
+
+        def fake_call(_cfg, current, timeout, retries):
+            del timeout, retries
+            mode = current["structured_business_context"]["analysis_mode"]
+            calls.append(copy.deepcopy(current))
+            if mode == "claim_identity_only":
+                return {
+                    "status": "success",
+                    "parsed": {
+                        "match_status": "matched",
+                        "confidence": 0.93,
+                        "expected_order_item": {
+                            "item_ref": "LINE-2",
+                            "sku": "SKU-2",
+                            "product_name": "目标摆件",
+                            "specification": "45mm",
+                        },
+                        "evidence_refs": [
+                            {"asset_ref": "supplemental_image_1", "fact": "目标近照"},
+                        ],
+                        "reason": "图片可唯一对应订单目标。",
+                    },
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                    "cost": {"estimated_usd": 0.001},
+                    "model_http_request_count": 1,
+                }
+            return {
+                "status": "success",
+                "parsed": {
+                    "sealed_start": True,
+                    "waybill_visible": True,
+                    "continuous": True,
+                    "has_edit": False,
+                    "has_offscreen": False,
+                    "has_speed_change": None,
+                    "all_items_shown": True,
+                    "issue_visible": True,
+                    "claimed_item_assessment": {},
+                    "speed_assessment": {},
+                    "damage_assessment": {},
+                    "evidence_refs": [],
+                },
+                "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+                "cost": {"estimated_usd": 0.01},
+                "model_http_request_count": 1,
+            }
+
+        with patch("scripts.run_baidu_video_ab.call_model", side_effect=fake_call):
+            result = run_sampled_perception_batched_with_identity(
+                {"provider": "gemini_native"},
+                case,
+                timeout=60,
+                retries=0,
+                batch_size=4,
+                overlap=1,
+                workers=2,
+            )
+
+        modes = [
+            item["structured_business_context"]["analysis_mode"] for item in calls
+        ]
+        self.assertEqual(modes[0], "claim_identity_only")
+        self.assertEqual(modes.count("sampled_video_batch_observation"), 2)
+        self.assertEqual(modes.count("sampled_video_perception_reduce"), 1)
+        for item in calls[1:3]:
+            self.assertEqual(
+                [row["reference_index"] for row in item["official_reference_images"]],
+                [2],
+            )
+            self.assertEqual(item["supplemental_images"], [])
+        self.assertEqual(result["batching"]["identity_preflight_model_calls"], 1)
+        self.assertEqual(result["batching"]["identity_anchor_model_sends"], 2)
+        self.assertEqual(result["batching"]["total_model_calls"], 4)
+        self.assertEqual(result["usage"]["total_tokens"], 375)
+
+    def test_sampled_batched_stops_when_image_identity_is_ambiguous(self):
+        case = {
+            "frames": [{"video_index": 1, "global_frame_index": 1}],
+            "supplemental_images": [{"image_index": 1}],
+            "official_reference_images": [{"reference_index": 1}],
+            "structured_business_context": {"business_scenario": "product_damage"},
+        }
+        ambiguous = {
+            "status": "success",
+            "parsed": {
+                "match_status": "ambiguous",
+                "confidence": 0.91,
+                "expected_order_item": {
+                    "item_ref": "",
+                    "sku": "",
+                    "product_name": "",
+                    "specification": "",
+                },
+                "evidence_refs": [],
+                "reason": "多个候选无法区分。",
+            },
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+            "cost": {"estimated_usd": 0.001},
+            "model_http_request_count": 1,
+        }
+
+        with patch("scripts.run_baidu_video_ab.call_model", return_value=ambiguous) as mocked:
+            result = run_sampled_perception_batched_with_identity(
+                {"provider": "gemini_native"},
+                case,
+                timeout=60,
+                retries=0,
+            )
+
+        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"], "claim_identity_not_resolved")
+        self.assertEqual(result["batching"]["total_model_calls"], 1)
 
     def test_video_only_keeps_only_the_matched_official_identity_reference(self):
         case = {
@@ -362,6 +761,7 @@ class BaiduVideoABTest(unittest.TestCase):
         self.assertIn("supplemental_image_2", prompt)
         self.assertIn("只用于商品身份比对", prompt)
         self.assertIn("不能证明伤点来自开箱过程", prompt)
+        self.assertIn("field 必须写 claimed_item", prompt)
 
     def test_sampled_batch_never_guesses_the_first_identity_anchor(self):
         original = {
@@ -389,6 +789,22 @@ class BaiduVideoABTest(unittest.TestCase):
         metadata = prepared["structured_business_context"]["sampled_frame_batch"]
         self.assertEqual(metadata["identity_anchor_asset_ref"], "")
         self.assertEqual(metadata["identity_anchor_role"], "none")
+
+    def test_sampled_reducer_does_not_count_packaged_item_as_first_visible(self):
+        prompt = build_sampled_video_reduce_prompt({
+            "customer_claim": "目标商品有伤",
+            "frames": [],
+            "supplemental_images": [],
+            "structured_business_context": {
+                "continuity_claim_identity": {
+                    "identity_anchor_asset_ref": "official_product_reference_1",
+                },
+                "sampled_batch_results": [],
+            },
+        })
+
+        self.assertIn("袋装或包装状态只能作为候选线索", prompt)
+        self.assertIn("首次露出足以区分 SKU 的实体特征", prompt)
 
     def test_native_perception_identity_is_bound_before_sampled_fallback(self):
         case = {
@@ -501,7 +917,10 @@ class BaiduVideoABTest(unittest.TestCase):
                         "identity_anchor_asset_ref": "video_1_frame_3"
                     },
                     "evidence_refs": [
-                        {"field": "claimed_item", "asset_ref": "video_1_frame_4"},
+                        {
+                            "field": "claimed_item_assessment.appeared",
+                            "asset_ref": "video_1_frame_4",
+                        },
                         {"field": "claimed_item", "asset_ref": "missing_frame"},
                     ],
                 },
@@ -654,17 +1073,16 @@ class BaiduVideoABTest(unittest.TestCase):
         self.assertTrue(summary["field_completeness"]["overall_video_result"])
         self.assertEqual(summary["complete_field_count"], 13)
 
-    def test_profiles_compare_same_models_with_explicit_visual_settings(self):
-        profiles = dict(resolve_profiles("lite-default,lite-high,flash36-medium,flash36-high"))
+    def test_profiles_compare_only_lite_and_flash37_with_explicit_visual_settings(self):
+        profiles = dict(resolve_profiles("lite-default,lite-high,flash37-high"))
 
         self.assertNotIn("thinking_level", profiles["lite-default"])
         self.assertEqual(profiles["lite-high"]["thinking_level"], "high")
         self.assertEqual(profiles["lite-high"]["media_resolution"], "high")
-        self.assertEqual(profiles["flash36-medium"]["model"], "gemini-3.6-flash")
-        self.assertEqual(profiles["flash36-medium"]["thinking_level"], "medium")
-        self.assertNotIn("max_output_tokens", profiles["flash36-medium"])
-        self.assertEqual(profiles["flash36-high"]["thinking_level"], "high")
-        self.assertNotIn("max_output_tokens", profiles["flash36-high"])
+        self.assertEqual(profiles["flash37-high"]["model"], "gemini-3.7-flash")
+        self.assertEqual(profiles["flash37-high"]["thinking_level"], "high")
+        self.assertEqual(profiles["flash37-high"]["media_resolution"], "high")
+        self.assertNotIn("max_output_tokens", profiles["flash37-high"])
 
     def test_large_video_uses_full_duration_proxy_instead_of_known_time_window(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -691,7 +1109,7 @@ class BaiduVideoABTest(unittest.TestCase):
             video,
             root / "output",
             4,
-            profiles=("hevc_mp4", "vp9_webm"),
+            profiles=("vp9_webm", "hevc_mp4"),
         )
         self.assertEqual(source["api_path"], str(proxy_path))
         self.assertEqual(source["api_mime_type"], "video/webm")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +22,18 @@ def upload(name: str, body: bytes, content_type: str = "application/octet-stream
 
 
 class MediaUploadSafetyTest(unittest.IsolatedAsyncioTestCase):
+    def test_formal_uploads_reuse_external_runtime_media_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"VISUAL_RUNTIME_MEDIA_DIR": temp_dir, "REVIEW_UPLOAD_DIR": ""},
+        ):
+            self.assertEqual(service.upload_root(), (Path(temp_dir) / "review_jobs").resolve())
+
+    def test_default_ingestion_limits_allow_large_media_to_reach_quality_preflight(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(service._limit_bytes("REVIEW_MAX_ASSET_MB", 1024), 1024 * 1024 * 1024)
+            self.assertEqual(service._limit_bytes("REVIEW_MAX_CASE_MB", 2048), 2048 * 1024 * 1024)
+
     def test_system_and_hidden_paths_are_detected_before_name_cleanup(self) -> None:
         cases = {
             "__MACOSX/._002_clip.mp4": "system_directory",

@@ -7,7 +7,17 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 from poc.visual_review_poc.object_continuity import subject_longest_out_of_frame
 
 
-DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-PD-ADVISORY@20260811.2"
+DEFAULT_PRODUCT_DAMAGE_POLICY_REF = "MITAKO-FOUR-SCENE@20260814.1"
+RETIRED_BUILTIN_POLICY_REFS = {
+    "MITAKO-PD-MISSING-OPENING@20260717.1",
+    "MITAKO-PD-COMPLETE-NO-DAMAGE@20260720.1",
+    "MITAKO-PD-ADVISORY@20260728.1",
+    "MITAKO-PD-ADVISORY@20260731.1",
+    "MITAKO-PD-ADVISORY@20260806.1",
+    "MITAKO-PD-ADVISORY@20260811.1",
+    "MITAKO-PD-ADVISORY@20260811.2",
+    "MITAKO-PD-ADVISORY@20260812.1",
+}
 
 
 APPROVED_POLICY_SNAPSHOTS: Dict[Any, Dict[str, Any]] = {
@@ -15,8 +25,8 @@ APPROVED_POLICY_SNAPSHOTS: Dict[Any, Dict[str, Any]] = {
         "mode": "classification_recommendation",
         "recommendation_gate_mode": "core_sop",
         "opening_video_required": True,
-        "missing_required_opening_video": "negative",
-        "noncompliant_opening_video": "negative",
+        "missing_required_opening_video": "review",
+        "noncompliant_opening_video": "review",
         "direct_customer_damage": "negative",
         "extreme_visible_damage_without_opening": "positive",
         "confirmed_visible_damage": "positive",
@@ -31,115 +41,28 @@ APPROVED_POLICY_SNAPSHOTS: Dict[Any, Dict[str, Any]] = {
         "require_same_item_linkage": False,
         "require_media_forensics": False,
         "maximum_forensic_risk": "medium",
-        "max_unobserved_seconds": 3.0,
-    },
-    ("mitako", "MITAKO-PD-ADVISORY@20260811.1"): {
-        "mode": "classification_recommendation",
-        "recommendation_gate_mode": "core_sop",
-        "opening_video_required": True,
-        "missing_required_opening_video": "negative",
-        "noncompliant_opening_video": "negative",
-        "direct_customer_damage": "negative",
-        "confirmed_visible_damage": "positive",
-        "complete_video_no_claimed_damage": "negative",
-        "require_claim_scope": True,
-        "minimum_visibility_coverage": 0.7,
-        "minimum_required_view_coverage": 0.6,
-        "minimum_confidence": 0.65,
-        "require_continuity_complete": False,
-        "require_fully_observable": False,
-        "require_claimed_region_closeup": False,
-        "require_same_item_linkage": False,
-        "require_media_forensics": False,
-        "maximum_forensic_risk": "medium",
-        "max_unobserved_seconds": 3.0,
-    },
-    ("mitako", "MITAKO-PD-ADVISORY@20260806.1"): {
-        "mode": "classification_recommendation",
-        "recommendation_gate_mode": "core_sop",
-        "opening_video_required": False,
-        "verified_supplemental_damage": "positive",
-        "missing_video_no_visible_damage": "negative",
-        "noncompliant_opening_video": "negative",
-        "direct_customer_damage": "negative",
-        "confirmed_visible_damage": "positive",
-        "complete_video_no_claimed_damage": "negative",
-        "require_claim_scope": True,
-        "minimum_visibility_coverage": 0.7,
-        "minimum_required_view_coverage": 0.6,
-        "minimum_confidence": 0.65,
-        "require_continuity_complete": False,
-        "require_fully_observable": False,
-        "require_claimed_region_closeup": False,
-        "require_same_item_linkage": False,
-        "require_media_forensics": False,
-        "maximum_forensic_risk": "medium",
-        "max_unobserved_seconds": 3.0,
-    },
-    ("mitako", "MITAKO-PD-ADVISORY@20260731.1"): {
-        "mode": "classification_recommendation",
-        "recommendation_gate_mode": "core_sop",
-        "opening_video_required": True,
-        "missing_required_opening_video": "negative",
-        "noncompliant_opening_video": "negative",
-        "confirmed_visible_damage": "positive",
-        "complete_video_no_claimed_damage": "negative",
-        "require_claim_scope": True,
-        "minimum_visibility_coverage": 0.7,
-        "minimum_required_view_coverage": 0.6,
-        "minimum_confidence": 0.65,
-        "require_continuity_complete": False,
-        "require_fully_observable": False,
-        "require_claimed_region_closeup": False,
-        "require_same_item_linkage": False,
-        "require_media_forensics": False,
-        "maximum_forensic_risk": "medium",
-        "max_unobserved_seconds": 3.0,
-    },
-    ("mitako", "MITAKO-PD-ADVISORY@20260728.1"): {
-        "mode": "classification_recommendation",
-        "opening_video_required": True,
-        "missing_required_opening_video": "negative",
-        "complete_video_no_claimed_damage": "negative",
-        "require_claim_scope": True,
-        "minimum_visibility_coverage": 0.8,
-        "minimum_required_view_coverage": 0.8,
-        "minimum_confidence": 0.8,
-        "require_continuity_complete": True,
-        "require_fully_observable": True,
-        "require_claimed_region_closeup": True,
-        "require_same_item_linkage": True,
-        "require_media_forensics": False,
-        "maximum_forensic_risk": "medium",
-        "max_unobserved_seconds": 3.0,
-    },
-    ("mitako", "MITAKO-PD-MISSING-OPENING@20260717.1"): {
-        "mode": "classification_recommendation",
-        "opening_video_required": True,
-        "missing_required_opening_video": "negative",
-        "complete_video_no_claimed_damage": "review",
-        "require_claim_scope": True,
-    },
-    ("mitako", "MITAKO-PD-COMPLETE-NO-DAMAGE@20260720.1"): {
-        "mode": "classification_recommendation",
-        "complete_video_no_claimed_damage": "negative",
-        "require_claim_scope": True,
-        "minimum_visibility_coverage": 0.85,
-        "minimum_required_view_coverage": 1.0,
-        "minimum_confidence": 0.8,
-        "require_continuity_complete": True,
-        "require_fully_observable": True,
-        "require_claimed_region_closeup": True,
-        "require_same_item_linkage": True,
-        "require_media_forensics": True,
-        "maximum_forensic_risk": "low",
-        "max_unobserved_seconds": 0.0,
     },
 }
 
 
 def _dict(value: Any) -> Dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _has_unresolved_effective_display_gap(value: Any) -> bool:
+    continuity = _dict(value)
+    for subject in continuity.get("tracked_subjects") or []:
+        if not isinstance(subject, dict) or subject.get("subject_id") != "claimed_item":
+            continue
+        for event in subject.get("out_of_frame_events") or []:
+            if not isinstance(event, dict):
+                continue
+            if (
+                event.get("within_required_display_window") is True
+                and event.get("identity_reestablished") is not True
+            ):
+                return True
+    return False
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -171,13 +94,72 @@ def _opening_field_has_reference(opening: Dict[str, Any], field_name: str) -> bo
     references = opening.get("evidence_refs") or []
     if isinstance(references, dict):
         references = references.get(field_name) or []
-    return any(
-        isinstance(item, dict)
-        and (item.get("field") in {None, field_name})
-        and item.get("video_index")
-        and item.get("global_frame_index")
-        and item.get("timestamp")
-        for item in references
+    for item in references:
+        if not isinstance(item, dict) or item.get("field") not in {None, field_name}:
+            continue
+        if item.get("video_index") is None or not str(item.get("timestamp") or "").strip():
+            continue
+        asset_ref = str(item.get("asset_ref") or "").strip()
+        if asset_ref.startswith("native_video_"):
+            return True
+        if item.get("global_frame_index") is not None:
+            return True
+    return False
+
+
+def _timestamp_seconds(value: Any) -> Optional[float]:
+    parts = str(value or "").strip().split(":")
+    try:
+        if len(parts) == 2:
+            return float(parts[0]) * 60 + float(parts[1])
+        if len(parts) == 3:
+            return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return None
+
+
+def _direct_damage_chain_verified(damage: Dict[str, Any]) -> bool:
+    stage_names = ("before_action_evidence", "action_evidence", "after_action_evidence")
+    stages = [damage.get(stage_name) or [] for stage_name in stage_names]
+    if any(len(stage) != 1 or not isinstance(stage[0], dict) for stage in stages):
+        return False
+    before, action, after = (stage[0] for stage in stages)
+    times = [_timestamp_seconds(item.get("timestamp")) for item in (before, action, after)]
+    if any(value is None for value in times) or not times[0] < times[1] < times[2]:
+        return False
+    common_fields = ("subject", "location", "chain_id")
+    if any(
+        not str(before.get(field) or "").strip()
+        or len({str(item.get(field) or "").strip() for item in (before, action, after)}) != 1
+        for field in common_fields
+    ):
+        return False
+    if len({(item.get("video_index"), item.get("asset_ref")) for item in (before, action, after)}) != 1:
+        return False
+    return (
+        before.get("damage_visible") is False
+        and after.get("damage_visible") is True
+        and action.get("action_relation") in {"direct_contact", "indirect_force"}
+    )
+
+
+def _native_edit_failure_verified(parsed: Dict[str, Any], video_audit: Dict[str, Any]) -> bool:
+    confidences = _dict(parsed.get("field_confidences"))
+    edit_references = [
+        item
+        for item in parsed.get("evidence_refs") or []
+        if isinstance(item, dict)
+        and item.get("field") == "has_edit"
+        and item.get("video_index") is not None
+        and str(item.get("asset_ref") or "").startswith("native_video_")
+        and str(item.get("timestamp") or "").strip()
+    ]
+    return (
+        parsed.get("has_edit") is True
+        and _float(confidences.get("has_edit"), 0.0) >= 0.8
+        and len(edit_references) >= 2
+        and video_audit.get("edit_review_signal") == "confirmed_critical_break"
     )
 
 
@@ -204,6 +186,7 @@ def _replace_opening_evidence(parsed: Dict[str, Any], opening: Dict[str, Any]) -
         or (item.get("video_index"), item.get("global_frame_index")) not in ref_keys
     ]
     labels = {
+        "opening_action_visible": "初次拆包动作",
         "sealed_start": "封箱起始",
         "waybill_visible": "面单可核验",
         "single_take_continuity": "一镜到底连续拆封",
@@ -420,14 +403,27 @@ def _apply_review(review: Dict[str, Any], audit: Dict[str, Any], confidence: flo
         "confidence": parsed.get("confidence"),
         "conclusion": _dict(parsed.get("overall_audit")).get("conclusion") or "",
     }
-    next_step = "按审核建议完成补充核验后再分类。"
+    opening_material_gap = audit.get("rule_id") in {
+        "PD-R-OPENING-VIDEO-REQUIRED",
+        "PD-R-NONCOMPLIANT-OPENING-VIDEO",
+        "PD-R-CLAIMED-ITEM-NOT-SHOWN",
+    }
+    if audit.get("rule_id") == "PD-R-NONCOMPLIANT-OPENING-VIDEO":
+        opening = _dict(_dict(audit.get("evidence_gate")).get("opening_video_compliance"))
+        _replace_opening_evidence(parsed, opening)
+        _normalize_noncompliant_opening_damage(parsed, opening)
+    next_step = (
+        "请补充包含初次拆包动作、封箱起始、面单和连续拆封过程的开箱视频。"
+        if opening_material_gap
+        else "按审核建议完成补充核验后再分类。"
+    )
     parsed.update({
         "predicted_label": "review",
         "system_yes_no": "REVIEW",
-        "decision": "manual_review",
+        "decision": "request_more_material" if opening_material_gap else "manual_review",
         "confidence": round(confidence, 4),
         "business_action_allowed": False,
-        "human_required": True,
+        "human_required": not opening_material_gap,
         "business_follow_up_reason": audit.get("reason") or "当前证据仍需强化复核。",
         "next_step": next_step,
         "decision_policy_audit": audit,
@@ -505,13 +501,17 @@ def apply_review_decision_policy(
     has_video = _has_video(job.get("assets") or [])
     scope_ready = _claim_scope_ready(scope, fallback_claim)
     coverage = _visibility_coverage(continuity)
-    claimed_item_longest_absence = subject_longest_out_of_frame(continuity, "claimed_item")
+    claimed_item_longest_absence = subject_longest_out_of_frame(
+        continuity,
+        "claimed_item",
+        required_window_only=True,
+    )
     model_confidence = _first_float(
         [parsed.get("confidence"), _dict(review.get("summary")).get("confidence")],
         0.0,
     )
     audit: Dict[str, Any] = {
-        "version": "2026-07-17.1",
+        "version": "2026-08-13.1",
         "mode": policy.get("mode") or "conservative_review",
         "policy_ref": policy_ref,
         "policy_source": "server_approved_registry" if approved_snapshot else "not_approved",
@@ -519,6 +519,7 @@ def apply_review_decision_policy(
             key for key in requested_policy if key not in {"mode", "policy_ref"}
         ),
         "applied": False,
+        "severe_alert_eligible": False,
         "rule_id": "",
         "claim_scope": {
             "claim_id": scope.get("claim_id") or "",
@@ -561,6 +562,14 @@ def apply_review_decision_policy(
     if not policy_ref:
         audit["reason"] = "未提供服务端已批准的版本化策略引用，保持人工复核。"
         return output
+    if (
+        approved_policies is None
+        and tenant_id == "mitako"
+        and policy_ref in RETIRED_BUILTIN_POLICY_REFS
+    ):
+        audit["policy_source"] = "retired"
+        audit["reason"] = "该历史策略版本已停用，不能绕过当前商品有伤开箱门槛。"
+        return output
     if not approved_snapshot:
         audit["reason"] = "策略版本未在服务端批准策略注册表中启用，保持人工复核。"
         return output
@@ -578,6 +587,27 @@ def apply_review_decision_policy(
             if claim_id not in result_by_id
             or not str(result_by_id[claim_id].get("subject_ref") or "").strip()
             or result_by_id[claim_id].get("support_status") not in {"supported", "not_supported"}
+            or not str(result_by_id[claim_id].get("location") or "").strip()
+            or not str(result_by_id[claim_id].get("damage_type") or "").strip()
+            or result_by_id[claim_id].get("main_video_visibility") not in {
+                "visible", "clearly_not_visible", "uncertain", "not_assessed",
+            }
+            or result_by_id[claim_id].get("supplemental_visibility") not in {
+                "visible", "clearly_not_visible", "uncertain", "not_assessed",
+            }
+            or result_by_id[claim_id].get("same_item_linkage") is not True
+            or result_by_id[claim_id].get("damage_presence") not in {
+                "confirmed", "not_found_after_clear_coverage",
+            }
+            or result_by_id[claim_id].get("condition_at_unboxing") not in {
+                "supported", "not_supported",
+            }
+            or result_by_id[claim_id].get("severity_level") not in {
+                "none", "minor", "moderate", "severe", "extreme",
+            }
+            or not isinstance(result_by_id[claim_id].get("structural_failure"), bool)
+            or not isinstance(result_by_id[claim_id].get("conflicting_evidence"), bool)
+            or result_by_id[claim_id].get("conflicting_evidence") is True
             or not result_by_id[claim_id].get("evidence_refs")
         ]
         if set(result_ids) != set(active_claim_ids) or len(result_ids) != len(set(result_ids)) or incomplete_ids:
@@ -587,6 +617,15 @@ def apply_review_decision_policy(
                 "reason": "多诉求案件仍有诉求未绑定独立商品、证据与事实结论，不能用整单总标签覆盖原子审核结果。",
             })
             audit["evidence_gate"]["atomic_claim_incomplete_ids"] = incomplete_ids
+            return _apply_review(output, audit, min(model_confidence, 0.69))
+        support_statuses = {result_by_id[claim_id]["support_status"] for claim_id in active_claim_ids}
+        if len(support_statuses) > 1:
+            audit.update({
+                "applied": True,
+                "rule_id": "PD-R-ATOMIC-CLAIM-MIXED",
+                "reason": "同一工单的多个独立伤点结论不一致，必须逐项保留，不能用整单结论覆盖。",
+            })
+            audit["evidence_gate"]["atomic_claim_support_statuses"] = sorted(support_statuses)
             return _apply_review(output, audit, min(model_confidence, 0.69))
 
     if order_linkage.get("status") == "failed":
@@ -634,29 +673,40 @@ def apply_review_decision_policy(
         and supplemental_referenced > 0
     )
     severity = _dict(damage.get("severity_assessment"))
-    extreme_structural_damage = (
-        not has_video
-        and policy.get("extreme_visible_damage_without_opening") == "positive"
-        and supplemental_damage_confirmed
-        and damage.get("damage_presence") == "confirmed"
+    direct_damage_evidence = (
+        supplemental_damage_confirmed
+        or (
+            primary_video.get("damage_presence") == "confirmed"
+            and int(primary_video.get("referenced_count") or 0) > 0
+        )
+        or bool(_dict(damage.get("first_visible_evidence")).get("asset_ref"))
+    )
+    severity_confidence = _nonnegative_float(severity.get("confidence"), 0.0)
+    forensic_risk = str(forensic_summary.get("risk_level") or "unknown")
+    forensics_acceptable = (
+        forensics.get("status") != "completed"
+        or forensic_risk in {"none", "low", "medium", "unknown"}
+    )
+    severe_structural_damage = (
+        policy.get("extreme_visible_damage_without_opening") == "positive"
+        and direct_damage_evidence
         and damage.get("business_defect_qualification") == "confirmed"
-        and severity.get("level") == "extreme"
+        and severity.get("level") in {"severe", "extreme"}
         and severity.get("structural_failure") is True
-        and order_linkage.get("status") == "verified"
         and observability.get("same_item_linkage") is True
         and observability.get("conflicting_evidence") is False
-        and forensics.get("status") == "completed"
-        and str(forensic_summary.get("risk_level") or "unknown") in {"none", "low", "medium"}
+        and forensics_acceptable
+        and severity_confidence >= 0.8
         and model_confidence >= 0.8
     )
-    if extreme_structural_damage:
+    if severe_structural_damage:
+        severe_conclusion = "材料可能不齐全，但高置信严重结构问题已确认，建议重点跟进；成因与责任未确认。"
         audit.update({
             "applied": True,
-            "rule_id": "PD-P-EXTREME-VISIBLE-DAMAGE-WITHOUT-OPENING",
-            "reason": (
-                "现有清晰材料确认争议商品存在极重结构性损坏，且订单、同物与真实性核验均无冲突；"
-                "即使缺少开箱视频，当前证据也倾向跟进处理。损伤存在已确认，成因未确认。"
-            ),
+            "severe_alert_eligible": True,
+            "rule_id": "PD-P-SEVERE-STRUCTURAL-DAMAGE",
+            "conclusion_code": "severe_structural_damage_follow_up",
+            "reason": severe_conclusion,
         })
         audit["evidence_gate"].update({
             "severity_level": severity.get("level"),
@@ -664,21 +714,13 @@ def apply_review_decision_policy(
             "same_item_linkage": True,
             "business_defect_qualification": "confirmed",
         })
-        return _apply_positive(output, audit, model_confidence)
-    if (
-        not has_video
-        and policy.get("verified_supplemental_damage") == "positive"
-        and supplemental_damage_confirmed
-    ):
-        audit.update(
-            {
-                "applied": True,
-                "rule_id": "PD-P-VERIFIED-SUPPLEMENTAL-DAMAGE",
-                "reason": "按照商品有伤 SOP，本轮虽未提交开箱视频，但现有清晰照片已确认所诉损伤，当前证据倾向支持用户的有伤诉求。",
-            }
-        )
-        return _apply_positive(output, audit, model_confidence)
-
+        result = _apply_positive(output, audit, model_confidence)
+        result["summary"].update({
+            "severe_alert_eligible": True,
+            "conclusion_code": "severe_structural_damage_follow_up",
+            "conclusion": severe_conclusion,
+        })
+        return result
     if (
         not has_video
         and policy.get("missing_video_no_visible_damage") == "negative"
@@ -695,17 +737,16 @@ def apply_review_decision_policy(
         return _apply_negative(output, audit, model_confidence)
 
     if policy.get("opening_video_required") is True and not has_video:
-        if policy.get("missing_required_opening_video") == "negative":
-            audit.update(
-                {
-                    "applied": True,
-                    "rule_id": "PD-N-OPENING-VIDEO-REQUIRED",
-                    "reason": "甲方策略要求商品有伤必须提交开箱视频，本案未提交，当前材料不支持本次诉求。",
-                }
-            )
-            return _apply_negative(output, audit, 0.99)
-        audit["reason"] = "缺少策略要求的开箱视频，但甲方策略仍要求人工复核。"
-        return output
+        audit.update({
+            "applied": True,
+            "rule_id": "PD-R-OPENING-VIDEO-REQUIRED",
+            "reason": "当前商品有伤材料不齐全：缺少可核对初次拆包动作与连续开箱链的开箱视频。补充图片只能证明后态伤损存在，不能替代开箱时态证据。",
+        })
+        audit["evidence_gate"].update({
+            "opening_video_present": False,
+            "material_status": "incomplete",
+        })
+        return _apply_review(output, audit, min(model_confidence, 0.69))
 
     is_current_advisory = policy_ref == DEFAULT_PRODUCT_DAMAGE_POLICY_REF
     speed_status = str(speed_impact.get("status") or "none").strip().lower()
@@ -717,7 +758,7 @@ def apply_review_decision_policy(
     missing_opening_fields = [
         field_name
         for field_name in (
-            "sealed_start", "waybill_visible", "single_take_continuity",
+            "opening_action_visible", "sealed_start", "waybill_visible", "single_take_continuity",
             "issue_visible_in_continuous_opening",
         )
         if opening_compliance.get(field_name) is False
@@ -766,7 +807,43 @@ def apply_review_decision_policy(
         or opening_start_failure_verified
         or opening_compliance_failure_verified
     )
+    structural_opening_fields = {
+        "opening_action_visible",
+        "sealed_start",
+        "waybill_visible",
+        "single_take_continuity",
+    }
+    verified_structural_opening = (
+        all(opening_compliance.get(field_name) is True for field_name in structural_opening_fields)
+        and structural_opening_fields.issubset(validated_opening_fields)
+        and all(
+            _opening_field_has_reference(opening_compliance, field_name)
+            for field_name in structural_opening_fields
+        )
+    )
+    if (
+        is_current_advisory
+        and has_video
+        and verified_structural_opening
+        and full_timeline_issue_absence_verified
+    ):
+        audit.update({
+            "applied": True,
+            "rule_id": "PD-N-COMPLETE-NO-CLAIMED-DAMAGE",
+            "reason": "完整、可回链的初次开箱证据已覆盖所诉部位，但连续开箱时间轴中未观察到所诉伤点；当前事实不支持到手已损主张。",
+        })
+        audit["evidence_gate"].update({
+            "opening_complete": True,
+            "opening_video_compliance": opening_compliance,
+            "missing_opening_fields": ["issue_visible_in_continuous_opening"],
+        })
+        _replace_opening_evidence(output_parsed, opening_compliance)
+        _normalize_noncompliant_opening_damage(output_parsed, opening_compliance)
+        output_agent_report["parsed"] = output_parsed
+        output["agent_report"] = output_agent_report
+        return _apply_negative(output, audit, model_confidence)
     opening_field_labels = {
+        "opening_action_visible": "真实初次拆包动作",
         "sealed_start": "完整未拆封快递外包装起点",
         "waybill_visible": "面单可核验",
         "single_take_continuity": "一镜到底连续拆封",
@@ -778,12 +855,12 @@ def apply_review_decision_policy(
     if (
         is_current_advisory
         and has_video
-        and policy.get("noncompliant_opening_video") == "negative"
+        and policy.get("noncompliant_opening_video") in {"review", "negative"}
         and opening_hard_failure_verified
     ):
         audit.update({
             "applied": True,
-            "rule_id": "PD-N-NONCOMPLIANT-OPENING-VIDEO",
+            "rule_id": "PD-R-NONCOMPLIANT-OPENING-VIDEO",
             "reason": (
                 "按照商品有伤 SOP，可回链的开箱起始帧专项复核确认视频并非从完整未拆封快递外包装开始，当前开箱材料不合规。"
                 if opening_start_failure_verified
@@ -795,18 +872,47 @@ def apply_review_decision_policy(
             "opening_video_compliance": opening_compliance,
             "missing_opening_fields": missing_opening_fields,
         })
-        return _apply_negative(output, audit, model_confidence)
+        return _apply_review(output, audit, min(model_confidence, 0.69))
 
     native_overall_result = str(parsed.get("overall_video_result") or "").strip().lower()
     native_timeline = video_audit.get("technical_timeline_status") == "native_full_video"
+    native_opening_failure_verified = (
+        opening_compliance.get("source") == "native_full_video_perception"
+        and any(
+            field_name in validated_opening_fields
+            and _opening_field_has_reference(opening_compliance, field_name)
+            for field_name in missing_opening_fields
+        )
+    )
+    native_hard_failure_verified = (
+        opening_hard_failure_verified
+        or native_opening_failure_verified
+        or _native_edit_failure_verified(parsed, video_audit)
+    )
+    if (
+        is_current_advisory
+        and native_timeline
+        and native_overall_result == "noncompliant"
+        and not native_hard_failure_verified
+    ):
+        audit.update({
+            "applied": True,
+            "rule_id": "PD-R-NATIVE-VIDEO-INDETERMINATE",
+            "reason": "当前原生视频聚合负值没有回链到已验证的开箱硬失败，或仅有低置信、单一剪辑技术信号；保留黄色复核，不自动判负。",
+        })
+        audit["evidence_gate"].update({
+            "overall_video_result": "indeterminate",
+            "edit_review_signal": video_audit.get("edit_review_signal") or "yellow",
+        })
+        return _apply_review(output, audit, min(model_confidence, 0.69))
     if is_current_advisory and native_timeline and native_overall_result == "noncompliant":
         audit.update({
             "applied": True,
-            "rule_id": "PD-N-NATIVE-VIDEO-NONCOMPLIANT",
-            "reason": "完整原生视频九项核对已确定存在硬门槛失败，后续伤点或补充图片不能覆盖该不合格结论。",
+            "rule_id": "PD-R-NONCOMPLIANT-OPENING-VIDEO",
+            "reason": "完整原生视频九项核对已确定存在开箱材料缺口；补充图片不能覆盖开箱时态，应补充合规开箱证据后再分类。",
         })
         audit["evidence_gate"]["overall_video_result"] = native_overall_result
-        return _apply_negative(output, audit, model_confidence)
+        return _apply_review(output, audit, min(model_confidence, 0.69))
     if is_current_advisory and native_timeline and native_overall_result == "indeterminate":
         audit.update({
             "applied": True,
@@ -837,7 +943,7 @@ def apply_review_decision_policy(
 
     opening_integrity = str(video_audit.get("opening_integrity") or "").strip().lower()
     timeline_verified = video_audit.get("opening_integrity_source") == "full_timeline_continuity"
-    max_unobserved_seconds = _nonnegative_float(policy.get("max_unobserved_seconds"), 0.0)
+    unresolved_effective_display_gap = _has_unresolved_effective_display_gap(continuity)
     explicitly_incomplete = timeline_verified and opening_integrity in {
         "incomplete", "不完整", "开箱不完整", "invalid", "noncompliant"
     }
@@ -858,11 +964,12 @@ def apply_review_decision_policy(
         and damage.get("opening_action_visible") is True
         and damage.get("most_likely_origin") == "customer_opening_or_handling"
         and damage.get("causal_evidence_level") == "direct"
+        and damage.get("causal_action_relation") in {"direct_contact", "indirect_force"}
         and damage.get("claim_support") == "not_supported"
+        and _direct_damage_chain_verified(damage)
     )
     long_unresolved_absence = (
-        claimed_item_longest_absence is not None
-        and claimed_item_longest_absence > max_unobserved_seconds
+        unresolved_effective_display_gap
         and continuity.get("continuity_verdict") in {"long_absence", "indeterminate"}
         and continuity.get("claimed_item_timeline_complete") is True
         and continuity.get("claimed_item_reference_status") == "available"
@@ -873,12 +980,12 @@ def apply_review_decision_policy(
         and continuity.get("claimed_item_reference_status") == "available"
         and video_audit.get("sampling_boundary_status") == "covered"
     )
-    if policy.get("noncompliant_opening_video") == "negative" and claimed_item_never_shown:
+    if policy.get("noncompliant_opening_video") in {"review", "negative"} and claimed_item_never_shown:
         audit.update(
             {
                 "applied": True,
-                "rule_id": "PD-N-CLAIMED-ITEM-NOT-SHOWN",
-                "reason": "按照商品有伤 SOP，完整送审时间轴中未展示与订单 SKU 匹配的争议商品，当前视频不支持本次诉求。",
+                "rule_id": "PD-R-CLAIMED-ITEM-NOT-SHOWN",
+                "reason": "按照商品有伤 SOP，完整送审时间轴中未展示与订单 SKU 匹配的争议商品，当前材料不足以判断所诉损伤，应补充可核验的开箱证据。",
             }
         )
         audit["evidence_gate"].update(
@@ -888,7 +995,7 @@ def apply_review_decision_policy(
                 "claimed_item_reference_status": "available",
             }
         )
-        return _apply_negative(output, audit, model_confidence)
+        return _apply_review(output, audit, min(model_confidence, 0.69))
     if policy.get("direct_customer_damage") == "negative" and direct_customer_damage:
         audit.update(
             {
@@ -899,7 +1006,7 @@ def apply_review_decision_policy(
         )
         return _apply_negative(output, audit, model_confidence)
     if (
-        policy.get("noncompliant_opening_video") == "negative"
+        policy.get("noncompliant_opening_video") in {"review", "negative"}
         and (
             explicitly_incomplete
             or long_unresolved_absence
@@ -908,15 +1015,15 @@ def apply_review_decision_policy(
     ):
         supplemental_count = int(supplemental.get("provided_count") or 0)
         note = (
-            "补充图片可作为损伤参考，但不能替代合规开箱视频；可供客服按 SOP 最低档补偿规则参考。"
+            "补充图片可作为后态损伤参考，但不能替代合规开箱视频，也不能单独证明开箱时态或成因。"
             if supplemental_count else
             "本轮没有可替代合规开箱视频的补充损伤证据。"
         )
         audit.update(
             {
                 "applied": True,
-                "rule_id": "PD-N-NONCOMPLIANT-OPENING-VIDEO",
-                "reason": "按照商品有伤 SOP，本案开箱视频不合规，当前证据倾向不支持本次诉求。",
+                "rule_id": "PD-R-NONCOMPLIANT-OPENING-VIDEO",
+                "reason": "按照商品有伤 SOP，本案开箱视频未形成完整可核验链，当前材料不足以判断开箱时态，应补充合规开箱证据后再分类。",
                 "supplemental_evidence_note": note,
             }
         )
@@ -925,11 +1032,11 @@ def apply_review_decision_policy(
                 "opening_complete": False,
                 "opening_integrity": opening_integrity or "unknown",
                 "full_timeline_unresolved_opening": unresolved_opening_after_full_timeline,
-                "max_unobserved_seconds": max_unobserved_seconds,
+                "unresolved_effective_display_gap": unresolved_effective_display_gap,
                 "claimed_item_longest_out_of_frame_seconds": claimed_item_longest_absence,
             }
         )
-        return _apply_negative(output, audit, model_confidence)
+        return _apply_review(output, audit, min(model_confidence, 0.69))
 
     first_visible_evidence = _dict(damage.get("first_visible_evidence"))
     first_visible_source = str(first_visible_evidence.get("source_type") or "").strip().lower()
@@ -978,11 +1085,6 @@ def apply_review_decision_policy(
         })
         return _apply_review(output, audit, min(model_confidence, 0.69))
 
-    structural_opening_fields = {
-        "sealed_start",
-        "waybill_visible",
-        "single_take_continuity",
-    }
     required_opening_fields = structural_opening_fields | {
         "issue_visible_in_continuous_opening",
     }
@@ -1006,7 +1108,7 @@ def apply_review_decision_policy(
             "applied": True,
             "rule_id": "PD-R-OPENING-GATE-INDETERMINATE",
             "reason": (
-                "商品有伤必须先通过开箱视频门槛；当前封箱起始、面单、连续拆封或伤点展示"
+                "商品有伤必须先通过开箱视频门槛；当前初次拆包动作、封箱起始、面单、连续拆封或伤点展示"
                 "仍有字段未确认或无法回链，不能仅凭后补图片或孤立伤点转为支持。"
             ),
         })
@@ -1073,10 +1175,7 @@ def apply_review_decision_policy(
         view_coverage = _float(observability.get("required_view_coverage"))
         required_views_complete = view_coverage >= minimum_view_coverage
         no_conflict = observability.get("conflicting_evidence") is not True
-        no_unobserved_time = (
-            claimed_item_longest_absence is not None
-            and claimed_item_longest_absence <= max_unobserved_seconds
-        )
+        effective_display_window_resolved = not unresolved_effective_display_gap
         continuity_gate = not require_continuity_complete or continuity_complete
         observability_gate = (
             (not require_fully_observable or fully_observable)
@@ -1108,7 +1207,7 @@ def apply_review_decision_policy(
             "claim_not_supported": support_not_found,
             "visibility_coverage": enough_coverage,
             "model_confidence": enough_confidence,
-            "claimed_item_absence_within_limit": no_unobserved_time,
+            "effective_display_window_continuity": effective_display_window_resolved,
             "damage_observability": observability_gate,
             "media_forensics": forensic_gate,
             "supplemental_evidence_resolved": supplemental_resolved,
@@ -1139,7 +1238,7 @@ def apply_review_decision_policy(
             )
             if supplemental_count:
                 audit["supplemental_evidence_note"] = (
-                    "补充照片可供最低档安慰性补偿参考，但不能推翻完整主视频未观察到所诉损伤的审核倾向。"
+                    "补充照片只记录后态损伤线索，不能推翻完整主视频对所诉部位的可见事实，也不产生补偿等经营动作。"
                 )
             return _apply_negative(output, audit, min(model_confidence, coverage or model_confidence))
         audit["reason"] = "主视频尚未同时满足完整开箱、未见所诉损伤、诉求不受支持和聚合过程完整；保留复核信号，不据此自动形成支持或不支持结论。"
@@ -1161,7 +1260,7 @@ def apply_review_decision_policy(
                 "claimed_region_closeup": closeup_complete,
                 "required_view_coverage": view_coverage,
                 "conflicting_evidence": observability.get("conflicting_evidence"),
-                "max_unobserved_seconds": max_unobserved_seconds,
+                "unresolved_effective_display_gap": unresolved_effective_display_gap,
                 "claimed_item_longest_out_of_frame_seconds": claimed_item_longest_absence,
                 "maximum_forensic_risk": maximum_forensic_risk,
                 "strict_recommendation": strict_recommendation,

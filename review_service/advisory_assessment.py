@@ -64,19 +64,10 @@ def _confidence(*values: Any) -> Optional[float]:
 
 
 def _routing_policy(metadata: Dict[str, Any]) -> Dict[str, float]:
-    raw = _dict(metadata.get("review_routing_policy"))
-    required = _confidence(raw.get("required_below_confidence"), 0.5)
-    optional = _confidence(raw.get("optional_below_confidence"), 0.8)
-    required = 0.5 if required is None else required
-    optional = max(required, 0.8 if optional is None else optional)
-    try:
-        resubmit = max(0.5, min(float(raw.get("out_of_frame_resubmit_seconds", 3.0)), 30.0))
-    except (TypeError, ValueError):
-        resubmit = 3.0
+    # 路由阈值属于已批准的服务端策略，普通工单输入不得改写。
     return {
-        "required_below_confidence": required,
-        "optional_below_confidence": optional,
-        "out_of_frame_resubmit_seconds": resubmit,
+        "required_below_confidence": 0.5,
+        "optional_below_confidence": 0.8,
     }
 
 
@@ -175,13 +166,37 @@ def html_report_requested(metadata_or_job: Dict[str, Any]) -> bool:
     return options.get("include_html_report") is not False
 
 
+def is_no_action_continuation(
+    review: Dict[str, Any],
+    advisory: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """没有客服动作时不重复解释系统内部流转。"""
+    agent_report = _dict(review.get("agent_report"))
+    parsed = _dict(agent_report.get("parsed"))
+    material = _dict(review.get("material_readiness")) or _dict(parsed.get("material_readiness"))
+    resolved_advisory = _dict(advisory) or _dict(review.get("advisory_assessment"))
+    human_review = _dict(resolved_advisory.get("human_review"))
+    return (
+        human_review.get("level") == "not_required"
+        and resolved_advisory.get("workflow_recommendation") == "continue_by_customer_policy"
+    )
+
+
 def _sop_recommendation(
     label: str,
     workflow: str,
     parsed: Dict[str, Any],
     conclusion: str,
+    scenario: str,
 ) -> Dict[str, str]:
     audit = _dict(parsed.get("decision_policy_audit"))
+    severe_follow_up = (
+        audit.get("conclusion_code") == "severe_structural_damage_follow_up"
+        or (
+            audit.get("severe_alert_eligible") is True
+            and audit.get("rule_id") == "PD-P-SEVERE-STRUCTURAL-DAMAGE"
+        )
+    )
     audit_reason = str(audit.get("reason") or "").strip()
     basis = (
         audit_reason
@@ -194,18 +209,28 @@ def _sop_recommendation(
     elif workflow == "request_more_material":
         code = "request_more_material"
         recommendation = "按照 SOP，只补充报告明确列出的缺失或看不清材料。"
+    elif severe_follow_up:
+        code = "further_assessment"
+        recommendation = "严重结构问题已确认，应重点跟进；交易归属、成因和责任仍待确认。"
+    elif scenario in {"minor_refund", "minor_material"}:
+        code = "further_assessment"
+        recommendation = {
+            "positive": "五类材料与可见字段初审齐全。",
+            "negative": "五类材料存在明确缺口或冲突，请按报告逐项更正。",
+        }.get(label, "五类材料或可见字段仍待确认，请只核对报告标黄或标红项目。")
     elif label == "positive":
         code = "support_claim"
         recommendation = "按照 SOP，当前证据倾向支持用户诉求。"
-    elif label == "negative" and audit.get("supplemental_evidence_note"):
-        code = "comfort_compensation"
-        recommendation = "按照 SOP，当前证据不支持用户诉求；补充证据可供最低档安慰性补偿参考。"
     elif label == "negative":
         code = "not_support_claim"
         recommendation = "按照 SOP，当前证据倾向不支持用户诉求。"
     else:
         code = "further_assessment"
-        recommendation = "当前证据仍无法明确支持或不支持用户诉求，请按报告中的具体疑点继续评估。"
+        recommendation = {
+            "product_damage": "当前尚未确认所诉伤点及其开箱链路，请核对报告中的伤点、商品身份和开箱证据。",
+            "wrong_item": "当前尚未确认是否发错，请核对报告中的应收商品、实收商品和同包裹证据。",
+            "missing_item": "当前尚未确认是否漏发，请核对报告中的应发商品、实收商品、分包、物流和仓库信息。",
+        }.get(scenario, "当前事实仍待确认，请核对报告列出的证据缺口。")
     return {"code": code, "recommendation": recommendation, "basis": basis}
 
 
@@ -224,6 +249,7 @@ def attach_advisory_assessment(
     overall = _dict(parsed.get("overall_audit"))
     brief = dict(output.get("agent_brief") or {})
     policy = _routing_policy(metadata)
+    scenario = str(metadata.get("scenario") or "")
 
     label = str(
         output.get("predicted_label")
@@ -248,7 +274,22 @@ def attach_advisory_assessment(
         or parsed.get("conclusion")
         or "当前证据尚不足以形成明确事实判断。"
     ).strip()
+    decision_audit = _dict(parsed.get("decision_policy_audit"))
+    severe_follow_up = (
+        decision_audit.get("conclusion_code") == "severe_structural_damage_follow_up"
+        or (
+            decision_audit.get("severe_alert_eligible") is True
+            and decision_audit.get("rule_id") == "PD-P-SEVERE-STRUCTURAL-DAMAGE"
+        )
+    )
+    if severe_follow_up:
+        conclusion_code = "severe_structural_damage_follow_up"
+        conclusion = (
+            "严重结构问题已确认，建议重点跟进；交易归属、成因和责任待确认。"
+        )
     fulfillment = _dict(parsed.get("fulfillment_reconciliation"))
+    if scenario == "missing_item" and fulfillment.get("scenario_transition") == "wrong_item":
+        scenario = "wrong_item"
     if fulfillment.get("resolution_basis") == "warehouse_verification" and overall.get("conclusion"):
         conclusion = str(overall["conclusion"]).strip()
     readiness_guard = _dict(output.get("input_readiness_guard")) or _dict(parsed.get("input_readiness_guard"))
@@ -261,19 +302,66 @@ def attach_advisory_assessment(
     declared_images = int(minor.get("declared_image_count") or 0)
     accepted_images = int(minor.get("accepted_image_count") or 0)
     processed_images = int(minor.get("processed_image_count") or 0)
-    technical_processing_incomplete = bool(minor) and (
-        accepted_images < declared_images
-        or processed_images < accepted_images
-        or bool(minor.get("image_batch_failures"))
+    technical_processing_incomplete = (
+        parsed.get("processing_status") == "technical_processing_incomplete"
+        and parsed.get("system_action") == "system_retry"
+    ) or (
+        bool(minor) and (
+            accepted_images < declared_images
+            or processed_images < accepted_images
+            or bool(minor.get("image_batch_failures"))
+        )
+    )
+    material_readiness = _dict(output.get("material_readiness")) or _dict(parsed.get("material_readiness"))
+    trusted_system_gap_checks = [
+        item
+        for item in material_readiness.get("checklist") or []
+        if isinstance(item, dict)
+        and item.get("source") == "trusted_system"
+        and item.get("status") in {"missing", "invalid", "unknown"}
+    ]
+    trusted_system_gap_labels = {
+        str(item.get("label") or "").strip()
+        for item in trusted_system_gap_checks
+        if str(item.get("label") or "").strip()
+    }
+    trusted_system_data_required = (
+        scenario in {"wrong_item", "missing_item"}
+        and bool(trusted_system_gap_checks)
+        and fulfillment.get("resolution_basis") not in {
+            "warehouse_verification",
+            "trusted_expected_item_resolution",
+        }
+    )
+    if trusted_system_data_required:
+        label = "review"
+        confidence = None
+        conclusion_code = "evidence_inconclusive"
+    scene_material_gaps = (
+        []
+        if technical_processing_incomplete
+        else _material_gap_items(material_readiness.get("missing_items"))
     )
     material_gaps = [] if technical_processing_incomplete else _material_gap_items(parsed.get("material_gaps"))
     required_materials = [] if technical_processing_incomplete else _material_gap_items(minor.get("required_materials"))
     missing_material = list(dict.fromkeys(
         _actionable_material_gap_items(missing_required)
+        + _actionable_material_gap_items(scene_material_gaps)
         + _actionable_material_gap_items(material_gaps)
         + _actionable_material_gap_items(required_materials)
     ))
-    decision_audit = _dict(parsed.get("decision_policy_audit"))
+    blocking_material_gaps = list(dict.fromkeys(
+        _actionable_material_gap_items(missing_required)
+        + _actionable_material_gap_items(scene_material_gaps)
+        + _actionable_material_gap_items(required_materials)
+    ))
+    if trusted_system_gap_labels:
+        missing_material = [
+            item for item in missing_material if item not in trusted_system_gap_labels
+        ]
+        blocking_material_gaps = [
+            item for item in blocking_material_gaps if item not in trusted_system_gap_labels
+        ]
     internal_defect_standard_unresolved = (
         decision_audit.get("rule_id") == "PD-R-SPECIAL-PRODUCT-DEFECT-UNRESOLVED"
     )
@@ -294,30 +382,27 @@ def attach_advisory_assessment(
     authenticity = _dict(parsed.get("authenticity_assessment")) or _dict(minor.get("authenticity_assessment"))
     authenticity_critical = str(authenticity.get("severity") or "").lower() == "critical"
     payment_capability = _dict(minor.get("payment_capability_risk"))
-    payment_process_gap = (
-        payment_capability.get("low_age") is True
-        and (
-            payment_capability.get("requires_more_material") is True
-            or payment_capability.get("process_evidence_status") != "matched"
-        )
-    )
-    low_age_process_verified = (
-        payment_capability.get("low_age") is True
-        and payment_capability.get("process_evidence_status") == "matched"
-        and not payment_process_gap
-    )
     customer_risk = _dict(metadata.get("customer_risk_context"))
     customer_risk_level = str(customer_risk.get("risk_level") or "unknown").lower()
     diagnostics = _dict(output.get("diagnostics")) or _dict(agent_report.get("diagnostics"))
     failed = succeeded is False or summary.get("review_status") == "failed" or bool(diagnostics)
 
     continuity = _dict(parsed.get("object_continuity_assessment"))
-    scenario = str(metadata.get("scenario") or "")
+    static_warehouse_review_required = (
+        scenario in {"wrong_item", "missing_item"}
+        and fulfillment.get("evidence_route") == "static_three_images"
+        and fulfillment.get("user_materials_complete") is True
+        and _dict(fulfillment.get("warehouse_check")).get("state") == "pending"
+    )
     try:
         global_out_of_frame_seconds = max(0.0, float(continuity.get("longest_out_of_frame_seconds") or 0.0))
     except (TypeError, ValueError):
         global_out_of_frame_seconds = 0.0
-    claimed_item_absence = subject_longest_out_of_frame(continuity, "claimed_item")
+    claimed_item_absence = subject_longest_out_of_frame(
+        continuity,
+        "claimed_item",
+        required_window_only=True,
+    )
     out_of_frame_seconds = (
         claimed_item_absence
         if scenario == "product_damage" and claimed_item_absence is not None
@@ -333,6 +418,10 @@ def attach_advisory_assessment(
         for subject in identity_subjects
         for event in subject.get("out_of_frame_events") or []
         if isinstance(event, dict)
+        and (
+            scenario != "product_damage"
+            or event.get("within_required_display_window") is True
+        )
     )
     continuity_unresolved = (
         str(continuity.get("continuity_verdict") or "").lower() == "indeterminate"
@@ -343,14 +432,17 @@ def attach_advisory_assessment(
         and payment_capability.get("age_confidence") == "high"
         and payment_capability.get("requires_review") is True
     )
+    if minor:
+        minor["required_materials"] = required_materials
+        if not under_nine_high_confidence:
+            payment_capability["level"] = "none"
+            payment_capability["effect"] = ""
     if failed:
         missing_material = []
         conflicts = []
         authoritative_pending = False
         authenticity = {}
         authenticity_critical = False
-        payment_process_gap = False
-        low_age_process_verified = False
         under_nine_high_confidence = False
         customer_risk_level = "unknown"
         out_of_frame_seconds = 0.0
@@ -367,23 +459,12 @@ def attach_advisory_assessment(
             accepted_count=accepted_images,
             processed_count=processed_images,
         ))
-    if out_of_frame_seconds >= policy["out_of_frame_resubmit_seconds"]:
-        if "连续开箱原视频（完整展示争议商品和所诉部位）" not in missing_material:
-            missing_material.append("连续开箱原视频（完整展示争议商品和所诉部位）")
+    if out_of_frame_seconds > 0:
         signals.append(_signal(
-            "out_of_frame_over_threshold",
+            "offscreen_review_signal",
             "warning",
-            "当前开箱证据不完整，建议补充连续原视频；该信号不能单独证明调包、剪辑或欺诈。",
+            "有效展示窗口内观察到离镜或遮挡；该信号只降低证据强度，不按固定秒数自动补件，也不能单独证明调包、剪辑或欺诈。",
             duration_seconds=round(out_of_frame_seconds, 3),
-            threshold_seconds=policy["out_of_frame_resubmit_seconds"],
-        ))
-    elif out_of_frame_seconds > 0:
-        signals.append(_signal(
-            "short_out_of_frame",
-            "warning",
-            "短暂离镜或遮挡仅降低证据强度，不单独触发拒绝或强制人工复审。",
-            duration_seconds=round(out_of_frame_seconds, 3),
-            threshold_seconds=policy["out_of_frame_resubmit_seconds"],
         ))
     if identity_unresolved:
         signals.append(_signal(
@@ -426,20 +507,6 @@ def attach_advisory_assessment(
             risk_percent=authenticity.get("risk_percent"),
             evidence_image_indices=_items(authenticity.get("evidence_image_indices"))[:20],
         ))
-    if payment_process_gap:
-        signals.append(_signal(
-            "minor_payment_process_evidence_gap",
-            "warning",
-            "低龄申请的支付密码来源或监护人发现消费过程尚未闭环；请补充对应说明。该信号不判断未成年人能否独立支付，也不自动决定退款、拒绝或人工复核。",
-            evidence_image_indices=_items(payment_capability.get("evidence_image_indices"))[:20],
-        ))
-    elif low_age_process_verified:
-        signals.append(_signal(
-            "minor_low_age_process_verified",
-            "warning",
-            "低龄材料已核对支付来源和监护发现过程；保留抽检提示，但不覆盖材料事实结论。",
-            evidence_image_indices=_items(payment_capability.get("evidence_image_indices"))[:20],
-        ))
     if under_nine_high_confidence:
         signals.append(_signal(
             "minor_under_nine_high_confidence",
@@ -478,6 +545,10 @@ def attach_advisory_assessment(
         required_reasons.append("image_authenticity_risk")
     if under_nine_high_confidence:
         required_reasons.append("minor_under_nine_high_confidence")
+    if static_warehouse_review_required and not failed:
+        required_reasons.append("warehouse_fulfillment_detail_required")
+    if trusted_system_data_required and not failed:
+        required_reasons.append("trusted_system_data_required")
     if (
         label == "review"
         and str(metadata.get("scenario") or "") == "product_damage"
@@ -496,9 +567,19 @@ def attach_advisory_assessment(
     ):
         required_reasons.append("confidence_below_required_threshold")
 
-    decisive_fact = label in {"positive", "negative"}
-    needs_more_material = not decisive_fact and (
-        bool(missing_material) or out_of_frame_seconds >= policy["out_of_frame_resubmit_seconds"]
+    material_gap_override_allowed = (
+        decision_audit.get("severe_alert_eligible") is True
+        or fulfillment.get("resolution_basis") in {
+            "warehouse_verification",
+            "trusted_expected_item_resolution",
+        }
+    )
+    needs_more_material = (
+        bool(blocking_material_gaps)
+        if scenario in {"minor_refund", "minor_material"}
+        else (
+            bool(blocking_material_gaps) and not material_gap_override_allowed
+        )
     )
     if not required_reasons and not needs_more_material:
         if confidence is not None and confidence < policy["optional_below_confidence"]:
@@ -509,8 +590,6 @@ def attach_advisory_assessment(
             optional_reasons.append("non_blocking_risk_signal")
         if customer_risk_level in {"medium", "high"}:
             optional_reasons.append("customer_risk_sampling")
-        if low_age_process_verified:
-            optional_reasons.append("minor_low_age_process_verified")
 
     if technical_processing_incomplete:
         level = "not_required"
@@ -523,7 +602,21 @@ def attach_advisory_assessment(
     elif required_reasons:
         level = "required"
         workflow = "human_review"
-        recommendation = "建议必须由授权人员复核原始证据后再进入甲方业务规则。"
+        recommendation = (
+            "用户静态三类材料已齐全，请人工客服读取仓库实发明细并完成双重核验。"
+            if static_warehouse_review_required
+            else "请先查询甲方订单、拆单、物流签收与仓库实发数据；不要要求用户重复补交甲方系统本可取得的信息。"
+            if trusted_system_data_required
+            else "建议必须由授权人员复核原始证据后再进入甲方业务规则。"
+        )
+        if static_warehouse_review_required:
+            scene_fact = "发错" if scenario == "wrong_item" else "漏发"
+            conclusion = f"用户静态三类材料已齐全；在人工读取仓库实发明细前，暂不形成{scene_fact}事实结论。"
+        elif trusted_system_data_required:
+            conclusion = (
+                "当前用户证据与甲方内部履约数据尚未完成交叉核验，暂不形成漏发或发错事实结论；"
+                "请先查询甲方内部订单、拆单、物流与仓库数据。"
+            )
         reason_codes = list(dict.fromkeys(required_reasons))
     elif needs_more_material:
         level = "not_required"
@@ -541,16 +634,31 @@ def attach_advisory_assessment(
         recommendation = "当前证据链与置信度达到本次配置门槛，可由甲方系统按自身业务规则继续处理。"
         reason_codes = ["configured_thresholds_satisfied"]
 
-    if minor and workflow == "continue_by_customer_policy" and label == "review":
-        conclusion = "五类材料已齐全；部分可见字段建议抽检，但不要求每单转VIP客服复审。"
-
     if workflow == "request_more_material":
         if minor.get("conclusion"):
             conclusion = str(minor["conclusion"]).strip()
+        elif (
+            scenario == "product_damage"
+            and _dict(parsed.get("damage_causality_assessment")).get("damage_presence") == "confirmed"
+        ):
+            conclusion = (
+                "已确认商品存在可见伤点；但开箱证据链或商品关联仍未闭环，"
+                "暂不能判断责任归属，请只补充报告列出的材料。"
+            )
         elif conclusion_code == "evidence_inconclusive" or readiness_guard.get("applied") is True:
             conclusion = "当前证据或业务基准不足，建议先补充所列材料，再形成明确事实判断。"
         else:
             conclusion = f"{conclusion.rstrip('。')}；但连续性或材料仍有缺口，建议补充所列材料。"
+
+    if scenario in {"minor_refund", "minor_material"}:
+        if workflow == "system_retry":
+            pass
+        elif missing_material or label == "negative":
+            conclusion = "五类材料存在明确缺口或冲突，请按报告逐项补充或更正。"
+        elif label == "positive":
+            conclusion = "五类材料与可见字段初审齐全。"
+        else:
+            conclusion = "五类材料或可见字段仍待确认。"
 
     parsed["material_gaps"] = missing_material
     evidence_attention = _evidence_attention(
@@ -584,7 +692,7 @@ def attach_advisory_assessment(
                 else "uncalibrated_evidence_score"
             ),
         },
-        "sop_recommendation": _sop_recommendation(label, workflow, parsed, conclusion),
+        "sop_recommendation": _sop_recommendation(label, workflow, parsed, conclusion, scenario),
         "human_review": {
             "level": level,
             "reason_codes": reason_codes,
@@ -601,6 +709,9 @@ def attach_advisory_assessment(
             "boundary": "本服务负责输出明确的证据结论和SOP处理建议；退款、补发、换货等业务动作由甲方系统执行，是否需要人工复核由单独的复核等级决定。",
         },
     }
+    no_action_continuation = is_no_action_continuation(output, advisory)
+    if no_action_continuation:
+        advisory["human_review"]["recommendation"] = ""
 
     parsed["business_action_allowed"] = False
     parsed["predicted_label"] = label
@@ -620,10 +731,10 @@ def attach_advisory_assessment(
     summary["needs_human_review"] = level == "required"
     summary["predicted_label"] = label
     summary["system_yes_no"] = final_system_yes_no
-    if technical_processing_incomplete:
+    if confidence is None:
         summary["confidence"] = None
         parsed["confidence"] = None
-    elif confidence is not None:
+    else:
         summary["confidence"] = confidence
     summary["human_review_level"] = level
     summary["workflow_recommendation"] = workflow
@@ -631,17 +742,24 @@ def attach_advisory_assessment(
     brief["system_yes_no"] = final_system_yes_no
     brief["human_review_level"] = level
     brief["workflow_recommendation"] = workflow
-    if workflow == "request_more_material":
+    if no_action_continuation:
+        brief.pop("next_step", None)
+        parsed.pop("next_step", None)
+        public_brief = dict(agent_report.get("public_brief") or {})
+        public_brief.pop("next_step", None)
+        agent_report["public_brief"] = public_brief
+    elif workflow == "request_more_material":
         brief["next_step"] = "只补交报告明确列出的缺失或看不清材料，补齐后在同一工单继续审核。"
     elif workflow == "human_review":
         brief["next_step"] = recommendation
     elif workflow == "system_retry":
         brief["next_step"] = "由系统重试本轮技术处理，不要求用户重复补材料。"
     elif level == "not_required":
-        brief["next_step"] = "按 SOP 审核倾向继续处理，本轮无需人工复审；具体业务动作由甲方系统执行。"
+        brief.pop("next_step", None)
     else:
-        brief["next_step"] = "按 SOP 审核倾向继续处理；仅按甲方抽检规则回看风险项，不要求逐单人工复审。"
+        brief["next_step"] = recommendation
     output["summary"] = summary
+    agent_report["parsed"] = parsed
     output["agent_report"] = agent_report
     output["agent_brief"] = brief
     output["advisory_assessment"] = advisory

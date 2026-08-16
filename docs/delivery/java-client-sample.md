@@ -75,13 +75,9 @@ public Mono<JsonNode> validateMetadata(WebClient client, String token, Map<Strin
   "evidence_coverage": {"submitted_package_refs": ["PKG-1"], "submitted_tracking_nos": ["SF000001"]},
   "product_master_data": {"LINE-1": {"sku": "SKU-001", "product_name": "角色拍立得", "specification": "A款"}},
   "sampling_policy": {"preset": "strict", "frames_per_model_call": 24},
-  "continuity_policy": {"out_of_frame_warning_seconds": 3.0, "force_dense_scan": true},
+  "continuity_policy": {"force_dense_scan": true, "scan_fps": 1.0},
   "output_options": {"include_html_report": false},
-  "review_routing_policy": {
-    "required_below_confidence": 0.5,
-    "optional_below_confidence": 0.8,
-    "out_of_frame_resubmit_seconds": 3.0
-  }
+  "review_routing_policy": {"policy_ref": "MITAKO-ROUTING@20260815.1"}
 }
 ```
 
@@ -137,7 +133,7 @@ public Mono<JsonNode> samplingPlan(WebClient client, String token) {
           "video_count", 1,
           "scenario", "product_damage",
           "sampling_policy", Map.of("preset", "strict", "frames_per_model_call", 24),
-          "continuity_policy", Map.of("out_of_frame_warning_seconds", 3.0, "force_dense_scan", true),
+          "continuity_policy", Map.of("force_dense_scan", true, "scan_fps", 1.0),
           "damage_causality_policy", Map.of("force_action_scan", true, "dedicated_chunk_frames", 20)))
       .retrieve()
       .bodyToMono(JsonNode.class);

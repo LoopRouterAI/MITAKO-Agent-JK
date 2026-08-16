@@ -56,7 +56,7 @@ def _case(image_count: int = 20, frame_count: int = 3) -> dict:
         "scenario": "minor_material",
         "scenario_label": "未成年人退款资料审核",
         "customer_claim": "申请退款",
-        "order_context": {},
+        "order_context": {"created_at": "2026-08-01"},
         "evidence_assets": [
             {"file": f"asset_{index:03d}.jpg", "status": "downloaded"}
             for index in range(1, image_count + 1)
@@ -82,7 +82,7 @@ def _observation(index: int) -> dict:
         18: ("birth_certificate", "not_applicable", "page"),
     }
     document_type, role, side = mapping.get(index, ("other", "not_applicable", "page"))
-    return {
+    observation = {
         "image_index": index,
         "asset_ref": f"supplemental_image_{index}",
         "document_types": [document_type],
@@ -93,8 +93,24 @@ def _observation(index: int) -> dict:
         "sop_eligibility": "valid" if document_type != "other" else "unknown",
         "editing_evidence": [],
         "quality_issues": [],
+        "document_box_2d": [100, 100, 900, 900],
         "ocr_text": "不应进入聚合结果的个人信息 18012345678 320000200801011234",
     }
+    if document_type == "order_payment_proof":
+        observation["order_payment_evidence_type"] = "combined"
+        observation["application_scope_coverage"] = "complete"
+    return observation
+
+
+def _order_payment_observation(index: int, evidence_type: str) -> dict:
+    observation = _observation(8)
+    observation.update({
+        "image_index": index,
+        "asset_ref": f"supplemental_image_{index}",
+        "order_payment_evidence_type": evidence_type,
+        "application_scope_coverage": "complete",
+    })
+    return observation
 
 
 def _consistency_result(check_id: str, status: str = "matched") -> dict:
@@ -110,9 +126,14 @@ def _consistency_result(check_id: str, status: str = "matched") -> dict:
         "commitment_signatures": [
             "guardian_signer", "minor_signer", "signature_presence", "signature_method", "field_alignment",
             "commitment_content", "refund_scope", "recipient_information", "signed_date",
+            "account_bound_phone", "account_nickname", "consumption_time_range",
+            "refund_amount", "refund_method", "payment_recipient",
         ],
         "order_payment": [
-            "order_reference", "payer_identity", "amount", "transaction_scope", "commitment_amount",
+            "order_reference", "order_item_scope", "item_quantity", "order_status",
+            "payer_identity", "payment_status", "transaction_time", "amount",
+            "merchant_identity", "transaction_id", "merchant_order_id",
+            "transaction_scope", "commitment_amount",
         ],
         "mobile_realname": [
             "subscriber_identity", "account_mobile", "invoice_identity", "invoice_phone",
@@ -128,6 +149,7 @@ def _consistency_result(check_id: str, status: str = "matched") -> dict:
                 "relationship_evidence_type": (
                     "birth_certificate" if check_id == "guardian_relationship" else "not_applicable"
                 ),
+                "minor_birth_date_iso": "2010-01-01" if check_id == "identity_age" else None,
                 "age_band": "10_to_17" if check_id == "identity_age" else "unknown",
                 "low_age": False if check_id == "identity_age" else None,
                 "under_nine": False if check_id == "identity_age" else None,
@@ -152,21 +174,196 @@ def _consistency_result(check_id: str, status: str = "matched") -> dict:
 
 
 class MinorMaterialPipelineTest(unittest.TestCase):
-    def test_payment_screenshot_remains_present_when_only_authoritative_use_is_limited(self) -> None:
-        payment = _observation(8)
-        payment["sop_eligibility"] = "supporting_only"
 
-        row = next(item for item in _checklist([payment], True) if item["requirement_id"] == "payment")
+    def test_consistency_stage_uses_original_image_detail_crop(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source.png"
+            Image.new("RGB", (4000, 3000), (120, 180, 220)).save(source)
+            prepared = root / "prepared.webp"
+            Image.new("RGB", (2560, 1920), (120, 180, 220)).save(prepared)
+            case = _case(image_count=1, frame_count=0)
+            case["supplemental_images"] = [{
+                **_image(1),
+                "path": source,
+                "api_path": str(prepared),
+                "api_mime_type": "image/webp",
+            }]
+            consistency_paths = []
+            detail_contexts = []
+
+            def invoke(batch_case: dict) -> dict:
+                mode = batch_case["structured_business_context"]["analysis_mode"]
+                if mode == "minor_material_inventory":
+                    return {"status": "success", "parsed": {"material_observations": [_observation(1)]}}
+                consistency_paths.extend(item["api_path"] for item in batch_case["supplemental_images"])
+                detail_contexts.extend(
+                    batch_case["structured_business_context"]["minor_consistency_check"]["material_context"]
+                )
+                return _consistency_result(
+                    batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+                )
+
+            result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
+
+            self.assertTrue(consistency_paths)
+            self.assertTrue(all("detail_crops" in path for path in consistency_paths))
+            self.assertTrue(any(item["detail_crop_applied"] is True for item in detail_contexts))
+            self.assertEqual(result["chunking"]["document_detail_crop_count"], 1)
+
+    def test_consistency_stage_skips_irrelevant_images_before_detail_crop(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source.png"
+            prepared = root / "prepared.webp"
+            Image.new("RGB", (4000, 3000), (120, 180, 220)).save(source)
+            Image.new("RGB", (2560, 1920), (120, 180, 220)).save(prepared)
+            case = _case(image_count=2, frame_count=0)
+            case["supplemental_images"] = [
+                {
+                    **_image(index),
+                    "path": source,
+                    "api_path": str(prepared),
+                    "api_mime_type": "image/webp",
+                }
+                for index in (1, 2)
+            ]
+            consistency_indices = []
+
+            def invoke(batch_case: dict) -> dict:
+                mode = batch_case["structured_business_context"]["analysis_mode"]
+                if mode == "minor_material_inventory":
+                    irrelevant = {
+                        **_observation(2),
+                        "document_types": ["other"],
+                        "subject_role": "not_applicable",
+                        "document_state": "unknown",
+                        "sop_eligibility": "unknown",
+                    }
+                    return {
+                        "status": "success",
+                        "parsed": {"material_observations": [_observation(1), irrelevant]},
+                    }
+                consistency_indices.extend(
+                    int(item["image_index"])
+                    for item in batch_case["supplemental_images"]
+                )
+                return _consistency_result(
+                    batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+                )
+
+            result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
+
+            self.assertNotIn(2, consistency_indices)
+            self.assertEqual(result["chunking"]["document_detail_crop_count"], 1)
+
+    def test_pipeline_preserves_consistent_model_request_profile(self) -> None:
+        case = _case(image_count=1, frame_count=0)
+        profile = {
+            "provider": "gemini_native",
+            "model": "gemini-3.5-flash-lite",
+            "thinking_level": "high",
+            "media_resolution": "high",
+            "max_output_tokens": "provider_default",
+            "native_video_count": 0,
+            "sampling_fps": None,
+            "transport": "none",
+        }
+
+        def invoke(batch_case: dict) -> dict:
+            mode = batch_case["structured_business_context"]["analysis_mode"]
+            if mode == "minor_material_inventory":
+                parsed = {"material_observations": [_observation(1)]}
+            else:
+                parsed = _consistency_result(
+                    batch_case["structured_business_context"]["minor_consistency_check"]["check_id"]
+                )["parsed"]
+            return {
+                "status": "success",
+                "parsed": parsed,
+                "request_profile": dict(profile),
+            }
+
+        result = run_minor_material_pipeline(case, invoke=invoke, workers=1)
+
+        self.assertEqual(result["request_profile"], profile)
+    def test_combined_order_payment_proof_remains_present_when_authoritative_use_is_limited(self) -> None:
+        combined_proof = _observation(8)
+        combined_proof["order_payment_evidence_type"] = "combined"
+        combined_proof["sop_eligibility"] = "supporting_only"
+
+        row = next(
+            item for item in _checklist([combined_proof], True)
+            if item["requirement_id"] == "payment"
+        )
 
         self.assertEqual(row["status"], "present")
         self.assertEqual(row["quality_status"], "needs_manual_confirmation")
+
+    def test_order_page_without_payment_record_does_not_satisfy_order_payment_requirement(self) -> None:
+        order_page = _order_payment_observation(8, "order")
+
+        row = next(
+            item for item in _checklist([order_page], True)
+            if item["requirement_id"] == "payment"
+        )
+
+        self.assertEqual(row["status"], "not_observed_after_full_scan")
+        self.assertIn("订单材料和支付材料", row["rule_note"])
+
+    def test_payment_record_without_order_page_does_not_satisfy_order_payment_requirement(self) -> None:
+        payment_record = _order_payment_observation(8, "payment")
+
+        row = next(
+            item for item in _checklist([payment_record], True)
+            if item["requirement_id"] == "payment"
+        )
+
+        self.assertEqual(row["status"], "not_observed_after_full_scan")
+        self.assertIn("订单材料和支付材料", row["rule_note"])
+
+    def test_order_and_payment_records_together_satisfy_order_payment_requirement(self) -> None:
+        order_page = _order_payment_observation(8, "order")
+        payment_record = _order_payment_observation(9, "payment")
+
+        row = next(
+            item for item in _checklist([order_page, payment_record], True)
+            if item["requirement_id"] == "payment"
+        )
+
+        self.assertEqual(row["status"], "present")
+        self.assertEqual(row["quality_status"], "usable")
+
+    def test_partial_payment_coverage_does_not_satisfy_application_scope(self) -> None:
+        order_page = _order_payment_observation(8, "order")
+        payment_record = _order_payment_observation(9, "payment")
+        payment_record["application_scope_coverage"] = "partial"
+
+        row = next(
+            item for item in _checklist([order_page, payment_record], True)
+            if item["requirement_id"] == "payment"
+        )
+
+        self.assertEqual(row["status"], "not_observed_after_full_scan")
+        self.assertIn("覆盖申请范围", row["rule_note"])
+
+    def test_combined_order_payment_record_satisfies_both_required_sources(self) -> None:
+        combined_record = _order_payment_observation(8, "combined")
+
+        row = next(
+            item for item in _checklist([combined_record], True)
+            if item["requirement_id"] == "payment"
+        )
+
+        self.assertEqual(row["status"], "present")
+        self.assertEqual(row["quality_status"], "usable")
 
     def test_minor_sop_prompt_covers_field_level_business_rules(self) -> None:
         metadata = ReviewCaseMetadata.model_validate({
             "client_case_id": "MINOR-SOP-GUIDE",
             "scenario": "minor_refund",
         })
-        self.assertEqual(metadata.minor_refund_policy.independent_payment_min_age, 10)
+        self.assertFalse(hasattr(metadata.minor_refund_policy, "independent_payment_min_age"))
 
         case = {
             "supplemental_images": [{"image_index": 1}],
@@ -191,14 +388,19 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             "销户或原号码归属证明",
             "红色填写说明",
             "样本水印",
+            "order_payment_evidence_type",
+            "application_scope_coverage",
+            "不得根据文件名",
+            "只有订单页或只有支付页都不齐全",
         ):
             self.assertIn(rule, inventory_prompt)
         for rule in (
-            "低于策略阈值 10 岁",
+            "低于 10 周岁",
             "payment_password_access",
             "guardian_discovery_process",
             "如何获得或得知支付密码",
             "监护人如何、何时发现消费",
+            "未满 9 周岁且年龄证据为高置信",
             "空白签字栏",
             "打印或电脑录入的姓名",
             "两本户口本",
@@ -206,8 +408,22 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             "每张关系材料按可见户号",
             "relationship_document_linkage",
             "explicit_relationship_entry",
+            "account_bound_phone",
+            "account_nickname",
+            "consumption_time_range",
+            "refund_method",
+            "payment_status",
+            "transaction_time",
+            "merchant_identity",
+            "transaction_id",
+            "merchant_order_id",
+            "订单材料和支付材料必须分别出现",
+            "明确的跨来源金额或主体冲突才输出 mismatched",
         ):
             self.assertIn(rule, consistency_prompt)
+        self.assertIn("盖章的合法监护证明", inventory_prompt)
+        self.assertIn("主副卡关系证明", inventory_prompt)
+        self.assertIn("销户或原号码归属证明", inventory_prompt)
 
     def test_field_level_minor_anomalies_return_specific_required_materials(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -240,7 +456,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         required = "；".join(parsed["minor_material_assessment"]["required_materials"])
 
-        self.assertEqual(parsed["predicted_label"], "negative")
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["system_yes_no"], "REVIEW")
         self.assertIn("非法定监护人", required)
         self.assertIn("双方亲笔签名", required)
         self.assertIn("字段填写位置正确", required)
@@ -498,7 +715,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             [3, 4],
         )
 
-    def test_low_age_payment_process_gap_requests_material_without_forcing_human_review(self) -> None:
+    def test_under_ten_payment_process_gap_requests_material_without_forcing_human_review(self) -> None:
         case = _case(image_count=20, frame_count=0)
         rows = [(list(range(1, 21)), {
             "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
@@ -513,6 +730,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         identity["parsed"]["consistency_check"]["low_age"] = True
         identity["parsed"]["consistency_check"]["age_band"] = "under_10"
+        identity["parsed"]["consistency_check"]["minor_birth_date_iso"] = "2017-01-01"
         identity["parsed"]["consistency_check"]["payment_capability_risk"] = "high"
         for field in identity["parsed"]["consistency_check"]["field_results"]:
             if field["field_name"] in {"payment_password_access", "guardian_discovery_process"}:
@@ -526,18 +744,206 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertEqual(parsed["predicted_label"], "review")
         self.assertFalse(parsed["human_required"])
         self.assertEqual(parsed["decision"], "request_more_material")
-        self.assertEqual(assessment["payment_capability_risk"]["level"], "high")
         self.assertTrue(assessment["payment_capability_risk"]["requires_more_material"])
         self.assertFalse(assessment["payment_capability_risk"]["requires_review"])
-        self.assertNotIn("独立完成支付", assessment["conclusion"])
-        self.assertIn("支付密码来源", assessment["conclusion"])
         required = "；".join(assessment["required_materials"])
         self.assertIn("如何获得或得知支付密码", required)
         self.assertIn("监护人如何、何时发现消费", required)
-        panel = render_minor_material_panel(assessment, lambda value: html.escape(str(value)))
-        self.assertIn('status-card status-amber"><h3>低龄支付过程核验', panel)
-        self.assertIn("需补支付过程说明", panel)
-        self.assertNotIn("低龄独立支付风险", panel)
+
+    def test_identity_requires_both_sides_for_guardian_and_minor(self) -> None:
+        observations = [
+            _observation(1),
+            _observation(3),
+            _observation(5),
+        ]
+
+        identity = next(
+            item for item in _checklist(observations, True)
+            if item["requirement_id"] == "identity"
+        )
+
+        self.assertEqual(identity["status"], "not_observed_after_full_scan")
+        self.assertEqual(identity["quality_status"], "needs_manual_confirmation")
+
+    def test_stamped_legal_guardianship_proof_reaches_relationship_check(self) -> None:
+        images = [_image(1)]
+        observations = [{
+            "image_index": 1,
+            "asset_ref": "supplemental_image_1",
+            "document_type": "other",
+            "document_types": ["other"],
+            "subject_role": "not_applicable",
+            "document_side": "multiple",
+            "readability": "clear",
+            "document_state": "filled",
+            "sop_eligibility": "valid",
+            "quality_issues": [],
+        }]
+
+        relationship = next(
+            item for item in _checklist(observations, True)
+            if item["requirement_id"] == "relationship"
+        )
+        job = next(
+            item for item in _consistency_image_jobs(observations, images)
+            if item["check_id"] == "guardian_relationship"
+        )
+
+        self.assertEqual(relationship["status"], "present")
+        self.assertEqual([item["image_index"] for item in job["selected"]], [1])
+
+    def test_official_phone_exception_proof_reaches_mobile_check(self) -> None:
+        images = [_image(1)]
+        observations = [{
+            "image_index": 1,
+            "asset_ref": "supplemental_image_1",
+            "document_type": "other",
+            "document_types": ["other"],
+            "subject_role": "guardian",
+            "document_side": "multiple",
+            "readability": "clear",
+            "document_state": "filled",
+            "sop_eligibility": "valid",
+            "quality_issues": [],
+        }]
+
+        job = next(
+            item for item in _consistency_image_jobs(observations, images)
+            if item["check_id"] == "mobile_realname"
+        )
+
+        self.assertEqual([item["image_index"] for item in job["selected"]], [1])
+
+    def test_payment_process_statement_reaches_identity_age_check(self) -> None:
+        images = [_image(1)]
+        observations = [{
+            "image_index": 1,
+            "asset_ref": "supplemental_image_1",
+            "document_type": "other",
+            "document_types": ["other"],
+            "subject_role": "not_applicable",
+            "document_side": "page",
+            "readability": "clear",
+            "document_state": "filled",
+            "sop_eligibility": "valid",
+            "quality_issues": [],
+        }]
+
+        job = next(
+            item for item in _consistency_image_jobs(observations, images)
+            if item["check_id"] == "identity_age"
+        )
+
+        self.assertEqual([item["image_index"] for item in job["selected"]], [1])
+
+    def test_order_payment_check_receives_commitment_for_amount_alignment(self) -> None:
+        images = [_image(7), _image(8)]
+        observations = [_observation(7), _observation(8)]
+
+        job = next(
+            item for item in _consistency_image_jobs(observations, images)
+            if item["check_id"] == "order_payment"
+        )
+
+        self.assertEqual([item["image_index"] for item in job["selected"]], [8, 7])
+
+    def test_uncertain_required_commitment_field_requests_specific_correction(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        commitment = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "commitment_signatures"
+        )
+        field = next(item for item in commitment["field_results"] if item["field_name"] == "account_nickname")
+        field["status"] = "uncertain"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+
+        self.assertEqual(parsed["decision"], "request_more_material")
+        self.assertIn("账号昵称", "；".join(parsed["minor_material_assessment"]["required_materials"]))
+
+    def test_typed_names_request_corrected_commitment_without_forcing_manual_review(self) -> None:
+        parsed = self._aggregate_with_commitment_field_status("signature_method", "mismatched")
+
+        self.assertEqual(parsed["decision"], "request_more_material")
+        self.assertFalse(parsed["human_required"])
+        self.assertIn("电脑录入姓名", "；".join(parsed["minor_material_assessment"]["required_materials"]))
+
+    def test_single_signature_requests_corrected_commitment_without_forcing_manual_review(self) -> None:
+        parsed = self._aggregate_with_commitment_field_status("signature_presence", "mismatched")
+
+        self.assertEqual(parsed["decision"], "request_more_material")
+        self.assertFalse(parsed["human_required"])
+        self.assertIn("双方亲笔签名", "；".join(parsed["minor_material_assessment"]["required_materials"]))
+
+    def test_missing_signed_date_requests_corrected_commitment_without_forcing_manual_review(self) -> None:
+        parsed = self._aggregate_with_commitment_field_status("signed_date", "mismatched")
+
+        self.assertEqual(parsed["decision"], "request_more_material")
+        self.assertFalse(parsed["human_required"])
+        self.assertIn("签署日期", "；".join(parsed["minor_material_assessment"]["required_materials"]))
+
+    def test_cross_source_commitment_amount_conflict_still_requires_manual_review(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(
+            list(range(1, 21)),
+            {"parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}},
+        )]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        order_payment = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "order_payment"
+        )
+        next(
+            field for field in order_payment["field_results"]
+            if field["field_name"] == "commitment_amount"
+        )["status"] = "mismatched"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+
+        self.assertEqual(parsed["decision"], "manual_review")
+        self.assertTrue(parsed["human_required"])
+
+    def _aggregate_with_commitment_field_status(self, field_name: str, status: str) -> dict:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(
+            list(range(1, 21)),
+            {"parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}},
+        )]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        commitment = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "commitment_signatures"
+        )
+        next(field for field in commitment["field_results"] if field["field_name"] == field_name)["status"] = status
+        return aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
 
     def test_model_high_payment_risk_without_confirmed_low_age_does_not_request_material(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -594,6 +1000,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         identity["low_age"] = True
         identity["age_band"] = "under_10"
+        identity["minor_birth_date_iso"] = "2017-01-01"
         identity["payment_capability_risk"] = "high"
         for field in identity["field_results"]:
             if field["field_name"] in {"payment_password_access", "guardian_discovery_process"}:
@@ -608,11 +1015,52 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
         )
 
-        self.assertEqual(parsed["predicted_label"], "negative")
-        self.assertEqual(parsed["decision"], "visual_precheck_not_passed")
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["system_yes_no"], "REVIEW")
         self.assertTrue(parsed["human_required"])
         self.assertIn("明确冲突", parsed["minor_material_assessment"]["conclusion"])
+        self.assertIn("回看", parsed["next_step"])
+        self.assertIn("支付密码来源", parsed["next_step"])
         self.assertNotIn("独立完成支付", parsed["minor_material_assessment"]["conclusion"])
+
+    def test_commitment_guardian_conflict_invalidates_matched_applicant_guardian_role(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        commitment = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "commitment_signatures"
+        )
+        next(
+            field for field in commitment["field_results"]
+            if field["field_name"] == "guardian_signer"
+        )["status"] = "mismatched"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        consistency = parsed["minor_material_assessment"]["field_consistency"]
+        relationship = next(
+            item for item in consistency["checks"]
+            if item["check_id"] == "guardian_relationship"
+        )
+        applicant_role = next(
+            field for field in relationship["field_results"]
+            if field["field_name"] == "applicant_guardian_role"
+        )
+
+        self.assertEqual(relationship["status"], "mismatched")
+        self.assertEqual(applicant_role["status"], "mismatched")
+        self.assertEqual(consistency["verdict"], "mismatched")
+        self.assertTrue(parsed["human_required"])
 
     def test_low_age_with_matched_payment_process_does_not_override_positive_material_result(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -632,6 +1080,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         identity["low_age"] = True
         identity["age_band"] = "under_10"
+        identity["minor_birth_date_iso"] = "2017-01-01"
         identity["payment_capability_risk"] = "high"
 
         parsed = aggregate_minor_material_results(
@@ -644,6 +1093,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertTrue(risk["low_age"])
         self.assertFalse(risk["requires_review"])
         self.assertEqual(risk["process_evidence_status"], "matched")
+        self.assertEqual(parsed["next_step"], "")
 
     def test_high_confidence_under_nine_requires_human_review_without_changing_fact_label(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -663,6 +1113,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
         )
         identity.update({
+            "minor_birth_date_iso": "2018-01-01",
             "age_band": "under_10",
             "low_age": True,
             "under_nine": True,
@@ -682,6 +1133,47 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertTrue(risk["requires_review"])
         self.assertIn("未满 9 周岁", risk["effect"])
 
+    def test_under_ten_process_gap_and_under_nine_attention_coexist(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(list(range(1, 21)), {
+            "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
+        })]
+        checks = [
+            _consistency_result(check_id)
+            for check_id in (
+                "identity_age", "guardian_relationship", "commitment_signatures",
+                "order_payment", "mobile_realname",
+            )
+        ]
+        identity = next(
+            item["parsed"]["consistency_check"] for item in checks
+            if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
+        )
+        identity.update({
+            "minor_birth_date_iso": "2018-01-01",
+            "age_band": "under_10",
+            "low_age": True,
+            "under_nine": True,
+            "age_confidence": "high",
+            "payment_capability_risk": "high",
+        })
+        for field in identity["field_results"]:
+            if field["field_name"] in {"payment_password_access", "guardian_discovery_process"}:
+                field["status"] = "uncertain"
+
+        parsed = aggregate_minor_material_results(
+            case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
+        )
+        risk = parsed["minor_material_assessment"]["payment_capability_risk"]
+
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["system_yes_no"], "REVIEW")
+        self.assertEqual(parsed["decision"], "request_more_material")
+        self.assertTrue(parsed["human_required"])
+        self.assertTrue(risk["requires_more_material"])
+        self.assertTrue(risk["requires_review"])
+        self.assertIn("同时", risk["effect"])
+
     def test_under_nine_without_high_confidence_does_not_force_human_review(self) -> None:
         case = _case(image_count=20, frame_count=0)
         case["order_context"]["created_at"] = "2026-08-01"
@@ -700,6 +1192,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             if item["parsed"]["consistency_check"]["check_id"] == "identity_age"
         )
         identity.update({
+            "minor_birth_date_iso": None,
             "age_band": "under_10",
             "low_age": True,
             "under_nine": True,
@@ -716,7 +1209,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertFalse(risk["requires_review"])
         self.assertNotEqual(risk["age_confidence"], "high")
 
-    def test_age_band_conflict_blocks_low_age_material_request(self) -> None:
+    def test_model_age_flags_cannot_override_program_date_calculation(self) -> None:
         case = _case(image_count=20, frame_count=0)
         rows = [(list(range(1, 21)), {
             "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
@@ -745,7 +1238,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         risk = parsed["minor_material_assessment"]["payment_capability_risk"]
         required = "；".join(parsed["minor_material_assessment"]["required_materials"])
 
-        self.assertIsNone(risk["low_age"])
+        self.assertFalse(risk["low_age"])
         self.assertFalse(risk["requires_more_material"])
         self.assertNotIn("支付密码", required)
 
@@ -828,6 +1321,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertFalse(assessment["authenticity_assessment"]["blocks_visual_precheck"])
         self.assertEqual(result["chunking"]["channels"]["minor_field_consistency"]["model_calls"], 5)
         serialized = json.dumps(parsed, ensure_ascii=False)
+        self.assertNotIn("不支持", serialized)
         self.assertNotIn("18012345678", serialized)
         self.assertNotIn("320000200801011234", serialized)
 
@@ -973,7 +1467,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         required = "；".join(parsed["minor_material_assessment"]["required_materials"])
 
-        self.assertEqual(parsed["predicted_label"], "negative")
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["system_yes_no"], "REVIEW")
         self.assertIn("申请监护人", required)
 
     def test_uncertain_guardian_phone_holder_requests_material_instead_of_passing(self) -> None:
@@ -1024,7 +1519,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         required = "；".join(parsed["minor_material_assessment"]["required_materials"])
 
-        self.assertEqual(parsed["predicted_label"], "negative")
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["system_yes_no"], "REVIEW")
         self.assertIn("完整承诺内容", required)
         self.assertIn("签署日期", required)
 
@@ -1208,7 +1704,7 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertIn("支付截图不能替代", result["parsed"]["material_gaps"][0])
         self.assertIn("另有字段待补正", result["parsed"]["overall_audit"]["conclusion"])
 
-    def test_uncertain_field_without_evidence_does_not_request_material(self) -> None:
+    def test_uncertain_required_field_uses_check_evidence_to_request_material(self) -> None:
         case = _case(image_count=20, frame_count=0)
         rows = [(list(range(1, 21)), {
             "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
@@ -1234,12 +1730,13 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             case, rows, [], [], [], consistency_results=checks, consistency_failures=[]
         )
 
-        self.assertNotIn(
+        self.assertIn(
             "金额与订单可退款范围一致",
             "；".join(parsed["minor_material_assessment"]["required_materials"]),
         )
+        self.assertEqual(parsed["decision"], "request_more_material")
 
-    def test_uncertain_noncritical_commitment_fields_do_not_expand_material_request(self) -> None:
+    def test_uncertain_required_commitment_fields_each_request_specific_correction(self) -> None:
         case = _case(image_count=20, frame_count=0)
         rows = [(list(range(1, 21)), {
             "parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}
@@ -1264,8 +1761,10 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
         required = parsed["minor_material_assessment"]["required_materials"]
 
-        self.assertEqual(len(required), 1)
+        self.assertEqual(len(required), 3)
         self.assertIn("双方亲笔签名", required[0])
+        self.assertIn("退款范围", "；".join(required))
+        self.assertIn("收款信息", "；".join(required))
 
     def test_material_completeness_without_field_consistency_cannot_pass(self) -> None:
         case = _case(image_count=20, frame_count=0)
@@ -1306,7 +1805,8 @@ class MinorMaterialPipelineTest(unittest.TestCase):
             consistency_failures=[],
         )
 
-        self.assertEqual(parsed["predicted_label"], "negative")
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["system_yes_no"], "REVIEW")
         self.assertEqual(parsed["minor_material_assessment"]["field_consistency"]["verdict"], "mismatched")
         relationship = next(
             item
@@ -1486,6 +1986,44 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         )
 
         self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["decision"], "request_more_material")
+        self.assertFalse(parsed["human_required"])
+
+    def test_unreadable_identity_fields_require_clear_identity_materials(self) -> None:
+        case = _case(image_count=20, frame_count=0)
+        rows = [(
+            list(range(1, 21)),
+            {"parsed": {"material_observations": [_observation(index) for index in range(1, 21)]}},
+        )]
+        checks = [_consistency_result(check_id) for check_id in (
+            "identity_age", "guardian_relationship", "commitment_signatures",
+            "order_payment", "mobile_realname",
+        )]
+        identity = checks[0]["parsed"]["consistency_check"]
+        identity["status"] = "uncertain"
+        for field in identity["field_results"]:
+            if field["field_name"] in {"guardian_identity", "minor_identity"}:
+                field["status"] = "uncertain"
+                field["visibility"] = "unreadable"
+
+        parsed = aggregate_minor_material_results(
+            case,
+            rows,
+            [],
+            [],
+            [],
+            consistency_results=checks,
+            consistency_failures=[],
+        )
+
+        assessment = parsed["minor_material_assessment"]
+        identity_item = next(
+            item for item in assessment["checklist"]
+            if item["requirement_id"] == "identity"
+        )
+        self.assertEqual(identity_item["status"], "present")
+        self.assertEqual(identity_item["quality_status"], "needs_manual_confirmation")
+        self.assertTrue(any("清晰" in item and "身份" in item for item in assessment["required_materials"]))
         self.assertEqual(parsed["decision"], "request_more_material")
         self.assertFalse(parsed["human_required"])
 
@@ -2043,6 +2581,22 @@ class MinorMaterialPipelineTest(unittest.TestCase):
         self.assertIn("签发国家/地区", prompt)
         self.assertNotIn('"authoritative_verification": "customer_integration_required"', prompt)
         self.assertNotIn("expected_predicted_label", prompt)
+
+    def test_consistency_prompt_uses_trusted_assessment_date(self) -> None:
+        case = _case(image_count=2, frame_count=0)
+        case["order_context"] = {"assessment_at": "2026-08-16"}
+        case["structured_business_context"].update({
+            "analysis_mode": "minor_material_consistency",
+            "minor_consistency_check": {
+                "check_id": "identity_age",
+                "expected_image_indices": [1, 2],
+            },
+        })
+
+        prompt = build_selection_prompt(case)
+
+        self.assertIn("年龄判断基准日期：2026-08-16", prompt)
+        self.assertNotIn("工单创建日期未提供", prompt)
 
     def test_report_renders_consistency_matrix_and_authoritative_boundary(self) -> None:
         case = _case(image_count=20, frame_count=0)

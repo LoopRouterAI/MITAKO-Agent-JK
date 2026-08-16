@@ -17,6 +17,29 @@ from review_service.service import _review_fields
 
 
 class InputReadinessTest(unittest.TestCase):
+    def test_formal_review_forwards_trusted_assessment_date(self):
+        fields = _review_fields({
+            "scenario": "minor_refund",
+            "client_case_id": "MINOR-DATE-1",
+            "created_at": 1785513600.0,
+            "metadata": {},
+            "assets": [],
+        })
+        case = apply_frontdesk_context(
+            {"structured_business_context": {}},
+            fields["scenario"],
+            json.dumps(fields, ensure_ascii=False),
+        )
+
+        self.assertEqual(fields["assessment_at"], "2026-08-01")
+        self.assertEqual(case["order_context"]["assessment_at"], "2026-08-01")
+
+    def test_minor_material_readiness_does_not_force_manual_review_wording(self):
+        result = assess_input_readiness({"scenario": "minor_refund", "sop_context": {"version": "test"}})
+
+        self.assertTrue(result["full_review_ready"])
+        self.assertEqual(result["warnings"], [])
+
     def test_contract_declares_native_video_and_individual_webp_transport(self):
         media = contract()["media_processing"]
 
@@ -37,6 +60,10 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(
             set(warehouse["terminal_statuses"]),
             {"confirmed_missing", "confirmed_not_missing"},
+        )
+        self.assertEqual(
+            set(warehouse["required_fields"]),
+            {"status", "source", "verification_ref", "baseline_version", "verified_at", "snapshot_ref", "packages"},
         )
         self.assertIn("可追溯", warehouse["trust_boundary"])
         self.assertIn("仓库终核", contract()["scenario_input_readiness"]["missing_item"])
@@ -76,7 +103,20 @@ class InputReadinessTest(unittest.TestCase):
                         "status": "confirmed_not_missing",
                         "source": "customer_warehouse",
                         "verification_ref": "WH-CHECK-1",
+                        "baseline_version": "ORDER-1@V1",
+                        "verified_at": "2026-08-13T10:00:00+08:00",
+                        "snapshot_ref": "WH-SNAPSHOT-1",
+                        "packages": [{
+                            "package_ref": "PKG-1",
+                            "tracking_no": "TRACK-1",
+                            "actual_shipped_items": [{"item_ref": "LINE-1", "shipped_quantity": 1}],
+                        }],
                     },
+                    "packages": [{
+                        "package_ref": "PKG-1",
+                        "tracking_no": "TRACK-1",
+                        "expected_item_refs": ["LINE-1"],
+                    }],
                 },
             }
         )
@@ -86,6 +126,24 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(result["missing_required"], [])
         self.assertEqual(result["missing_recommended"], [])
         self.assertFalse(any("视频未完整" in warning for warning in result["warnings"]))
+
+    def test_bare_warehouse_status_is_not_treated_as_a_terminal_fact(self):
+        result = assess_input_readiness({
+            "scenario": "missing_item",
+            "fulfillment_baseline": {
+                "baseline_version": "ORDER-1@V1",
+                "expected_items": [{"item_ref": "LINE-1", "sku": "SKU-1", "expected_quantity": 1}],
+                "warehouse_verification": {
+                    "status": "confirmed_not_missing",
+                    "source": "customer_warehouse",
+                    "verification_ref": "WH-CHECK-OLD",
+                },
+            },
+        })
+
+        self.assertFalse(result["decision_ready"])
+        self.assertFalse(result["capabilities"]["missing_item_decision"])
+        self.assertEqual(result["warehouse_verification"], {})
 
     def test_wrong_item_is_ready_with_package_and_submitted_tracking_linkage(self):
         result = assess_input_readiness(
@@ -110,8 +168,10 @@ class InputReadinessTest(unittest.TestCase):
             }
         )
 
-        self.assertTrue(result["full_review_ready"])
-        self.assertTrue(result["capabilities"]["wrong_item_decision"])
+        self.assertTrue(result["ready_for_visual_analysis"])
+        self.assertFalse(result["decision_ready"])
+        self.assertFalse(result["capabilities"]["wrong_item_decision"])
+        self.assertIn("received_item_identity", result["pending_semantic_checks"])
 
     def test_wrong_item_without_order_baseline_degrades_but_keeps_continuity(self):
         result = assess_input_readiness({"scenario": "wrong_item", "order_items": []})
@@ -189,10 +249,12 @@ class InputReadinessTest(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(result["full_review_ready"])
-        self.assertTrue(result["capabilities"]["missing_item_decision"])
+        self.assertTrue(result["ready_for_visual_analysis"])
+        self.assertFalse(result["decision_ready"])
+        self.assertFalse(result["capabilities"]["missing_item_decision"])
+        self.assertIn("missing_item_user_evidence_route", result["pending_semantic_checks"])
 
-    def test_missing_item_in_transit_cannot_form_definite_conclusion(self):
+    def test_missing_item_in_transit_can_start_analysis_but_is_not_decision_ready(self):
         result = assess_input_readiness(
             {
                 "scenario": "missing_item",
@@ -218,10 +280,11 @@ class InputReadinessTest(unittest.TestCase):
             }
         )
 
-        self.assertFalse(result["full_review_ready"])
-        self.assertIn("all_expected_packages_delivered", result["missing_required"])
+        self.assertTrue(result["ready_for_visual_analysis"])
+        self.assertFalse(result["decision_ready"])
+        self.assertIn("missing_item_user_evidence_route", result["pending_semantic_checks"])
 
-    def test_selection_rules_must_be_explicitly_declared_even_when_not_applicable(self):
+    def test_absent_selection_rules_are_not_a_material_gap(self):
         result = assess_input_readiness(
             {
                 "scenario": "wrong_item",
@@ -236,7 +299,8 @@ class InputReadinessTest(unittest.TestCase):
             }
         )
 
-        self.assertIn("selection_rules_declaration", result["missing_required"])
+        self.assertNotIn("selection_rules_declaration", result["missing_required"])
+        self.assertTrue(result["ready_for_visual_analysis"])
 
     def test_product_damage_without_claim_or_resolved_scope_is_degraded(self):
         result = assess_input_readiness({"scenario": "product_damage"})
@@ -244,7 +308,7 @@ class InputReadinessTest(unittest.TestCase):
         self.assertFalse(result["full_review_ready"])
         self.assertIn("customer_claim_or_claim_scope", result["missing_required"])
 
-    def test_missing_item_incomplete_video_coverage_must_review(self):
+    def test_missing_item_self_reported_coverage_does_not_decide_semantic_readiness(self):
         result = assess_input_readiness(
             {
                 "scenario": "missing_item",
@@ -258,10 +322,37 @@ class InputReadinessTest(unittest.TestCase):
                 "evidence_coverage": {"all_packages_uploaded": False, "all_items_displayed": False},
             }
         )
-        self.assertFalse(result["full_review_ready"])
-        self.assertIn("complete_evidence_coverage", result["missing_required"])
+        self.assertFalse(result["decision_ready"])
+        self.assertFalse(result["capabilities"]["missing_item_decision"])
+        self.assertIn("missing_item_user_evidence_route", result["pending_semantic_checks"])
+        self.assertNotIn("complete_evidence_coverage", result["missing_required"])
 
-    def test_missing_item_declared_complete_without_package_refs_is_not_ready(self):
+    def test_preflight_can_start_analysis_without_frontend_package_coverage_claims(self):
+        result = assess_input_readiness(
+            {
+                "scenario": "missing_item",
+                "customer_claim": "少了一本插画集",
+                "fulfillment_baseline": {
+                    "baseline_version": "ORDER-1@V1",
+                    "expected_items": [
+                        {"item_ref": "LINE-1", "sku": "SKU-1", "expected_quantity": 1}
+                    ],
+                    "expected_package_count": 1,
+                    "packages": [
+                        {"package_ref": "PKG-1", "expected_item_refs": ["LINE-1"]}
+                    ],
+                    "benefit_rules_complete": True,
+                    "selection_rules_complete": True,
+                },
+            }
+        )
+
+        self.assertTrue(result["ready_for_visual_analysis"])
+        self.assertFalse(result["decision_ready"])
+        self.assertNotIn("submitted_package_mapping", result["missing_required"])
+        self.assertIn("missing_item_user_evidence_route", result["pending_semantic_checks"])
+
+    def test_frontend_complete_flags_do_not_make_missing_item_decision_ready(self):
         result = assess_input_readiness(
             {
                 "scenario": "missing_item",
@@ -275,8 +366,10 @@ class InputReadinessTest(unittest.TestCase):
                 "evidence_coverage": {"all_packages_uploaded": True, "all_items_displayed": True},
             }
         )
-        self.assertFalse(result["full_review_ready"])
-        self.assertIn("submitted_package_mapping", result["missing_required"])
+        self.assertTrue(result["ready_for_visual_analysis"])
+        self.assertFalse(result["decision_ready"])
+        self.assertNotIn("submitted_package_mapping", result["missing_required"])
+        self.assertIn("missing_item_user_evidence_route", result["pending_semantic_checks"])
 
     def test_missing_item_rejects_package_mapping_to_unknown_item(self):
         result = assess_input_readiness(
@@ -321,18 +414,38 @@ class InputReadinessTest(unittest.TestCase):
         self.assertFalse(parsed["business_action_allowed"])
         self.assertIn("complete_evidence_coverage", parsed["material_gaps"])
 
-    def test_continuity_policy_is_bounded_in_openapi_model(self):
+    def test_continuity_policy_exposes_sampling_controls_without_business_time_threshold(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "CASE-1",
                 "scenario": "product_damage",
-                "continuity_policy": {"out_of_frame_warning_seconds": 3.5},
+                "continuity_policy": {"scan_fps": 1.0},
             }
         )
-        self.assertEqual(metadata.continuity_policy.out_of_frame_warning_seconds, 3.5)
+        self.assertEqual(metadata.continuity_policy.scan_fps, 1.0)
+        self.assertNotIn("out_of_frame_warning_seconds", metadata.continuity_policy.model_dump())
         self.assertFalse(metadata.continuity_policy.force_dense_scan)
         self.assertFalse(metadata.damage_causality_policy.force_action_scan)
 
+    def test_continuity_policy_rejects_retired_seconds_threshold(self):
+        with self.assertRaises(ValueError):
+            ReviewCaseMetadata.model_validate(
+                {
+                    "client_case_id": "CASE-LEGACY-CONTINUITY",
+                    "scenario": "product_damage",
+                    "continuity_policy": {"out_of_frame_warning_seconds": 3.0},
+                }
+            )
+
+    def test_decision_policy_rejects_retired_business_threshold(self):
+        with self.assertRaises(ValueError):
+            ReviewCaseMetadata.model_validate(
+                {
+                    "client_case_id": "CASE-LEGACY-DECISION",
+                    "scenario": "product_damage",
+                    "decision_policy": {"max_unobserved_seconds": 3.0},
+                }
+            )
     def test_api_accepts_typed_logistics_and_privacy_safe_risk_summary(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
@@ -434,8 +547,24 @@ class InputReadinessTest(unittest.TestCase):
         self.assertEqual(plan["estimated_channel_calls"]["object_continuity"], 0)
         self.assertEqual(plan["estimated_channel_calls"]["damage_causality"], 0)
         self.assertEqual(plan["estimated_total_model_calls"], 1)
+        self.assertTrue(plan["transcode_recommended"])
+        self.assertEqual(plan["quality_proxy_assessment_reasons"], ["source_at_least_100mb"])
 
-    def test_sampling_plan_uses_three_second_default_out_of_frame_policy(self):
+    def test_long_video_below_one_hundred_mb_is_not_transcoded_only_for_duration(self):
+        plan = sampling_plan(
+            720,
+            80 * 1024 * 1024,
+            1,
+            {"preset": "adaptive"},
+            "product_damage",
+            {},
+            {},
+        )
+
+        self.assertFalse(plan["transcode_recommended"])
+        self.assertEqual(plan["quality_proxy_assessment_reasons"], [])
+
+    def test_sampling_plan_has_no_default_out_of_frame_business_threshold(self):
         plan = sampling_plan(
             60,
             12_000_000,
@@ -446,19 +575,19 @@ class InputReadinessTest(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(
-            plan["effective_review_policies"]["continuity_policy"]["out_of_frame_warning_seconds"],
-            3.0,
+        self.assertNotIn(
+            "out_of_frame_warning_seconds",
+            plan["effective_review_policies"]["continuity_policy"],
         )
 
-    def test_sampling_frequency_is_derived_from_out_of_frame_threshold(self):
+    def test_dense_sampling_frequency_uses_explicit_scan_fps(self):
         one_fps = sampling_plan(
             72,
             22_000_000,
             1,
             {"preset": "adaptive"},
             "product_damage",
-            {"out_of_frame_warning_seconds": 2.0, "force_dense_scan": True},
+            {"scan_fps": 1.0, "force_dense_scan": True},
         )
         two_fps = sampling_plan(
             72,
@@ -466,7 +595,7 @@ class InputReadinessTest(unittest.TestCase):
             1,
             {"preset": "adaptive"},
             "product_damage",
-            {"out_of_frame_warning_seconds": 1.0, "force_dense_scan": True},
+            {"scan_fps": 2.0, "force_dense_scan": True},
         )
         self.assertEqual(one_fps["sampling_mode"], "dense")
         self.assertEqual(one_fps["fps"], 1.0)
@@ -506,7 +635,7 @@ class InputReadinessTest(unittest.TestCase):
                 1,
                 {"preset": "adaptive", "frames_per_model_call": 24},
                 "product_damage",
-                {"out_of_frame_warning_seconds": 2.0, "force_dense_scan": True},
+                {"scan_fps": 1.0, "force_dense_scan": True},
                 {"force_action_scan": True, "dedicated_chunk_frames": 20},
             )
         channels = plan["estimated_channel_calls"]
@@ -606,11 +735,7 @@ class InputReadinessTest(unittest.TestCase):
                 "client_case_id": "CASE-OUTPUT-PROPAGATION",
                 "scenario": "product_damage",
                 "output_options": {"include_html_report": False},
-                "review_routing_policy": {
-                    "required_below_confidence": 0.48,
-                    "optional_below_confidence": 0.82,
-                    "out_of_frame_resubmit_seconds": 3.0,
-                },
+                "review_routing_policy": {"policy_ref": "MITAKO-ROUTING@20260815.1"},
             }
         ).model_dump(mode="json")
 
@@ -624,7 +749,10 @@ class InputReadinessTest(unittest.TestCase):
         )
 
         self.assertEqual(fields["include_html_report"], "false")
-        self.assertEqual(json.loads(fields["review_routing_policy"])["optional_below_confidence"], 0.82)
+        self.assertEqual(
+            json.loads(fields["review_routing_policy"])["policy_ref"],
+            "MITAKO-ROUTING@20260815.1",
+        )
 
     def test_formal_job_propagates_structured_logistics_to_model_evidence(self):
         metadata = ReviewCaseMetadata.model_validate(

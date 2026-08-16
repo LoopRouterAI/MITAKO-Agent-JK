@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from starlette.datastructures import Headers
 
 from poc.visual_review_poc import workbench_server
@@ -26,6 +26,35 @@ def upload(name: str, body: bytes) -> UploadFile:
 
 
 class WorkbenchUploadSafetyTest(unittest.TestCase):
+    def test_default_folder_limit_accepts_the_formal_api_case_limit(self) -> None:
+        self.assertEqual(workbench_server.MAX_FOLDER_BYTES, 2048 * 1024 * 1024)
+
+    def test_folder_upload_reports_insufficient_storage_without_leaking_file_content(self) -> None:
+        class FullDiskWriter:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def write(self, _chunk: bytes) -> None:
+                raise OSError(28, "No space left on device")
+
+        original_upload_dir = workbench_server.UPLOAD_DIR
+        valid_body = b"\x00\x00\x00\x18ftypmp42" + b"0" * 64
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workbench_server.UPLOAD_DIR = Path(temp_dir)
+            try:
+                with patch("pathlib.Path.open", return_value=FullDiskWriter()):
+                    with self.assertRaises(HTTPException) as raised:
+                        workbench_server._save_folder_uploads([upload("evidence.mp4", valid_body)])
+            finally:
+                workbench_server.UPLOAD_DIR = original_upload_dir
+
+        self.assertEqual(raised.exception.status_code, 507)
+        self.assertEqual(raised.exception.detail["code"], "review_storage_insufficient")
+        self.assertNotIn("evidence.mp4", str(raised.exception.detail))
+
     def test_complete_frame_fallback_extracts_lossless_webp_without_jpeg_intermediate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

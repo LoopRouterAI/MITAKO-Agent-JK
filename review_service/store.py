@@ -13,6 +13,7 @@ from runtime_paths import data_dir
 
 DB_PATH = data_dir() / "review_service.db"
 JSON_FIELDS = ("metadata", "assets", "result", "diagnostics")
+MAX_JOB_ATTEMPTS = 3
 
 
 @contextmanager
@@ -64,7 +65,10 @@ def init_db() -> None:
               assets TEXT NOT NULL,
               result TEXT NOT NULL DEFAULT '{}',
               diagnostics TEXT NOT NULL DEFAULT '{}',
+              prior_total_tokens INTEGER NOT NULL DEFAULT 0,
+              prior_estimated_usd REAL NOT NULL DEFAULT 0,
               attempts INTEGER NOT NULL DEFAULT 0,
+              workbench_request_id TEXT NOT NULL DEFAULT '',
               lease_until REAL NOT NULL DEFAULT 0,
               created_at REAL NOT NULL,
               started_at REAL NOT NULL DEFAULT 0,
@@ -76,11 +80,30 @@ def init_db() -> None:
               WHERE idempotency_key <> '';
             CREATE INDEX IF NOT EXISTS idx_review_jobs_status_created
               ON review_jobs(status, created_at DESC);
+            CREATE TABLE IF NOT EXISTS review_job_attempts (
+              job_id TEXT NOT NULL,
+              attempt INTEGER NOT NULL,
+              status TEXT NOT NULL,
+              result TEXT NOT NULL DEFAULT '{}',
+              diagnostics TEXT NOT NULL DEFAULT '{}',
+              workbench_request_id TEXT NOT NULL DEFAULT '',
+              started_at REAL NOT NULL DEFAULT 0,
+              completed_at REAL NOT NULL,
+              PRIMARY KEY(job_id, attempt)
+            );
+            CREATE INDEX IF NOT EXISTS idx_review_job_attempts_job
+              ON review_job_attempts(job_id, attempt);
             """
         )
         cols = {row[1] for row in conn.execute("PRAGMA table_info(review_jobs)").fetchall()}
         if "lease_until" not in cols:
             conn.execute("ALTER TABLE review_jobs ADD COLUMN lease_until REAL NOT NULL DEFAULT 0")
+        if "prior_total_tokens" not in cols:
+            conn.execute("ALTER TABLE review_jobs ADD COLUMN prior_total_tokens INTEGER NOT NULL DEFAULT 0")
+        if "prior_estimated_usd" not in cols:
+            conn.execute("ALTER TABLE review_jobs ADD COLUMN prior_estimated_usd REAL NOT NULL DEFAULT 0")
+        if "workbench_request_id" not in cols:
+            conn.execute("ALTER TABLE review_jobs ADD COLUMN workbench_request_id TEXT NOT NULL DEFAULT ''")
 
 
 def create_job(job: Dict[str, Any], request_hash: str) -> Dict[str, Any]:
@@ -147,7 +170,12 @@ def claim_job(job_id: str, lease_seconds: int) -> bool:
         cur = conn.execute(
             """
             UPDATE review_jobs
-            SET status='RUNNING', attempts=attempts+1, started_at=?, completed_at=0,
+            SET status='RUNNING',
+                workbench_request_id=CASE
+                    WHEN workbench_request_id='' THEN printf('%s-workbench-%d', job_id, attempts + 1)
+                    ELSE workbench_request_id
+                END,
+                attempts=attempts+1, started_at=?, completed_at=0,
                 diagnostics='{}', lease_until=?, updated_at=?
             WHERE job_id=? AND status IN ('QUEUED', 'RETRYING')
             """,
@@ -182,27 +210,78 @@ def finish_job(
         if expected_attempts is not None:
             sql += " AND status='RUNNING' AND attempts=?"
             params = (*params, int(expected_attempts))
-        conn.execute(sql, params)
+        cur = conn.execute(sql, params)
+        if cur.rowcount:
+            conn.execute(
+                """
+                INSERT INTO review_job_attempts(
+                  job_id, attempt, status, result, diagnostics,
+                  workbench_request_id, started_at, completed_at
+                )
+                SELECT job_id, attempts, ?, ?, ?, workbench_request_id, started_at, ?
+                FROM review_jobs WHERE job_id=?
+                ON CONFLICT(job_id, attempt) DO UPDATE SET
+                  status=excluded.status,
+                  result=excluded.result,
+                  diagnostics=excluded.diagnostics,
+                  workbench_request_id=excluded.workbench_request_id,
+                  started_at=excluded.started_at,
+                  completed_at=excluded.completed_at
+                """,
+                (status, _json(result), _json(diagnostics), now, job_id),
+            )
     return get_job(job_id) or {}
 
 
 def queue_retry(job_id: str) -> Optional[Dict[str, Any]]:
     now = time.time()
     with _connect() as conn:
+        # 兼容迁移前已完成、但尚未写入轮次表的工单。
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO review_job_attempts(
+              job_id, attempt, status, result, diagnostics,
+              workbench_request_id, started_at, completed_at
+            )
+            SELECT job_id, attempts, status, result, diagnostics,
+                   workbench_request_id, started_at, completed_at
+            FROM review_jobs
+            WHERE job_id=? AND status IN ('FAILED', 'SUCCEEDED')
+            """,
+            (job_id,),
+        )
         cur = conn.execute(
             """
             UPDATE review_jobs
-            SET status='RETRYING', result='{}', diagnostics='{}', started_at=0,
-                completed_at=0, lease_until=0, updated_at=?
-            WHERE job_id=? AND (
+            SET status='RETRYING',
+                prior_total_tokens=prior_total_tokens + COALESCE(
+                    CAST(json_extract(result, '$.review.agent_report.inference_estimate.total_tokens') AS INTEGER),
+                    0
+                ),
+                prior_estimated_usd=prior_estimated_usd + COALESCE(
+                    CAST(json_extract(result, '$.review.agent_report.inference_estimate.estimated_usd') AS REAL),
+                    0
+                ),
+                result='{}', diagnostics='{}', started_at=0,
+                completed_at=0, lease_until=0, workbench_request_id='', updated_at=?
+            WHERE job_id=? AND attempts<? AND (
                 status='FAILED'
                 OR (
                     status='SUCCEEDED'
-                    AND json_extract(result, '$.review.advisory_assessment.workflow_recommendation')='system_retry'
+                    AND (
+                        json_extract(result, '$.review.advisory_assessment.workflow_recommendation')='system_retry'
+                        OR (
+                            json_extract(result, '$.review.agent_report.inference_estimate.native_video.technical_status')='failed'
+                            AND COALESCE(
+                                CAST(json_extract(result, '$.review.agent_report.inference_estimate.total_tokens') AS INTEGER),
+                                0
+                            )=0
+                        )
+                    )
                 )
             )
             """,
-            (now, job_id),
+            (now, job_id, MAX_JOB_ATTEMPTS),
         )
     return get_job(job_id) if cur.rowcount else None
 
@@ -211,6 +290,19 @@ def recover_incomplete() -> List[str]:
     init_db()
     now = time.time()
     with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO review_job_attempts(
+              job_id, attempt, status, result, diagnostics,
+              workbench_request_id, started_at, completed_at
+            )
+            SELECT job_id, attempts, 'LEASE_EXPIRED', result, ?,
+                   workbench_request_id, started_at, ?
+            FROM review_jobs
+            WHERE status='RUNNING' AND (lease_until=0 OR lease_until<=?)
+            """,
+            (_json({"error_type": "lease_expired"}), now, now),
+        )
         conn.execute(
             """
             UPDATE review_jobs
@@ -223,6 +315,31 @@ def recover_incomplete() -> List[str]:
             "SELECT job_id FROM review_jobs WHERE status IN ('QUEUED', 'RETRYING') ORDER BY created_at"
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+def list_attempts(job_id: str) -> List[Dict[str, Any]]:
+    """返回内部执行轮次；公开 API 和甲方报告不得直接透传。"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT job_id, attempt, status, result, diagnostics,
+                   workbench_request_id, started_at, completed_at
+            FROM review_job_attempts
+            WHERE job_id=? ORDER BY attempt
+            """,
+            (job_id,),
+        ).fetchall()
+    output: List[Dict[str, Any]] = []
+    for raw in rows:
+        item = dict(raw)
+        for key in ("result", "diagnostics"):
+            try:
+                item[key] = json.loads(item.get(key) or "{}")
+            except json.JSONDecodeError:
+                item[key] = {}
+        output.append(item)
+    return output
 
 
 def list_jobs(tenant_id: str, status: str = "", scenario: str = "", limit: int = 50) -> List[Dict[str, Any]]:
@@ -267,8 +384,8 @@ def batch_snapshot(tenant_id: str, batch_id: str) -> List[Dict[str, Any]]:
             SELECT
               status,
               COUNT(*) AS count,
-              COALESCE(SUM(CAST(json_extract(result, '$.review.agent_report.inference_estimate.total_tokens') AS INTEGER)), 0) AS total_tokens,
-              COALESCE(SUM(CAST(json_extract(result, '$.review.agent_report.inference_estimate.estimated_usd') AS REAL)), 0) AS estimated_usd
+              COALESCE(SUM(prior_total_tokens + COALESCE(CAST(json_extract(result, '$.review.agent_report.inference_estimate.total_tokens') AS INTEGER), 0)), 0) AS total_tokens,
+              COALESCE(SUM(prior_estimated_usd + COALESCE(CAST(json_extract(result, '$.review.agent_report.inference_estimate.estimated_usd') AS REAL), 0)), 0) AS estimated_usd
             FROM review_jobs
             WHERE tenant_id=? AND json_extract(metadata, '$.batch_id')=?
             GROUP BY status
@@ -308,10 +425,10 @@ def snapshot(tenant_id: str = "") -> Dict[str, Any]:
         usage = conn.execute(
             f"""
             SELECT
-                SUM(COALESCE(json_extract(result, '$.review.agent_report.inference_estimate.total_tokens'), 0)) AS total_tokens,
-                SUM(COALESCE(json_extract(result, '$.review.agent_report.inference_estimate.estimated_usd'), 0)) AS estimated_usd
+                SUM(prior_total_tokens + COALESCE(json_extract(result, '$.review.agent_report.inference_estimate.total_tokens'), 0)) AS total_tokens,
+                SUM(prior_estimated_usd + COALESCE(json_extract(result, '$.review.agent_report.inference_estimate.estimated_usd'), 0)) AS estimated_usd
             FROM review_jobs
-            WHERE status='SUCCEEDED'
+            WHERE 1=1
             {"AND tenant_id=?" if tenant_id else ""}
             """,
             params,

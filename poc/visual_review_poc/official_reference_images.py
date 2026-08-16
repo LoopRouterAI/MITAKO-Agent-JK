@@ -26,6 +26,7 @@ from poc.visual_review_poc.order_info_adapter import (
 )
 from runtime_paths import data_dir
 from review_media_safety import valid_media_magic
+from poc.visual_review_poc.media_preflight import compress_image
 
 
 ALLOWED_IMAGE_MIME = {
@@ -214,7 +215,7 @@ def _cache_hit(path: Path) -> bool:
             path.unlink(missing_ok=True)
             return False
         with path.open("rb") as stream:
-            valid = valid_media_magic(".jpg", stream.read(32))
+            valid = valid_media_magic(path.suffix, stream.read(32))
         if valid:
             os.utime(path, None)
         return valid
@@ -231,7 +232,7 @@ def _prune_cache(cache_dir: Path) -> None:
     max_bytes = _bounded_int("REVIEW_PRODUCT_IMAGE_CACHE_MAX_MB", 512, 16, 4096) * 1024 * 1024
     with _CACHE_HOUSEKEEPING_LOCK:
         files = sorted(
-            (item for item in cache_dir.glob("*.jpg") if item.is_file()),
+            (item for item in cache_dir.glob("*.webp") if item.is_file()),
             key=lambda item: item.stat().st_mtime,
         )
         total = sum(item.stat().st_size for item in files)
@@ -249,7 +250,7 @@ def _download_and_compress(
     client: httpx.Client,
 ) -> tuple[Optional[Path], str, bool]:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"{hashlib.sha256(url.encode('utf-8')).hexdigest()}.jpg"
+    cache_path = cache_dir / f"{hashlib.sha256(url.encode('utf-8')).hexdigest()}.webp"
     cache_key = cache_path.stem
     with _url_lock(cache_key):
         if _cache_hit(cache_path):
@@ -291,7 +292,7 @@ def _download_uncached(
         return None, "download_failed", False
     if not valid_media_magic(suffix, bytes(body[:32])):
         return None, "invalid_image_content", False
-    max_edge = _bounded_int("REVIEW_PRODUCT_IMAGE_MAX_EDGE", 1280, 320, 1920)
+    max_edge = _bounded_int("REVIEW_PRODUCT_IMAGE_MAX_EDGE", 1280, 320, 2560)
     quality = _bounded_int("REVIEW_PRODUCT_IMAGE_JPEG_QUALITY", 82, 70, 92)
     max_pixels = _bounded_int("REVIEW_PRODUCT_IMAGE_MAX_PIXELS", 20000000, 1000000, 40000000)
     try:
@@ -302,20 +303,29 @@ def _download_uncached(
                 if width <= 0 or height <= 0 or width * height > max_pixels:
                     return None, "image_pixel_limit", False
                 source.load()
-                image = source.convert("RGB")
-                image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
-                encoded = io.BytesIO()
-                image.save(encoded, format="JPEG", quality=quality, optimize=True)
-                encoded_bytes = encoded.getvalue()
     except (Image.DecompressionBombError, Image.DecompressionBombWarning, UnidentifiedImageError, OSError, ValueError, MemoryError):
         return None, "invalid_image_content", False
-    temp_path = cache_path.with_name(f".{cache_path.stem}.{uuid4().hex}.tmp")
+    token = uuid4().hex
+    source_path = cache_path.with_name(f".{cache_path.stem}.{token}{suffix}")
+    temp_path = cache_path.with_name(f".{cache_path.stem}.{token}.webp")
     try:
-        temp_path.write_bytes(encoded_bytes)
+        source_path.write_bytes(body)
+        prepared_path = compress_image(
+            source_path,
+            temp_path,
+            max_edge=max_edge,
+            quality=quality,
+            lossless_webp=True,
+            resize_trigger_edge=max_edge,
+        )
+        if prepared_path != temp_path:
+            raise ValueError("unexpected_reference_image_path")
         os.replace(temp_path, cache_path)
-    except OSError:
+    except (OSError, ValueError):
         temp_path.unlink(missing_ok=True)
         return None, "cache_write_failed", False
+    finally:
+        source_path.unlink(missing_ok=True)
     return cache_path, "", False
 
 
@@ -366,7 +376,7 @@ def prepare_official_reference_images(
                 "skus": reference.get("skus", []),
                 "evidence_role": "official_product_reference",
                 "api_path": str(path),
-                "api_mime_type": "image/jpeg",
+                "api_mime_type": "image/webp",
                 "api_bytes": path.stat().st_size,
                 "cache_hit": cache_hit,
             })

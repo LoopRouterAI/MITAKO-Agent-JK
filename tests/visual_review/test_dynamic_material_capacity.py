@@ -80,7 +80,79 @@ def _inventory_result(indices: list[int]) -> dict:
 
 
 class DynamicMaterialCapacityTest(unittest.TestCase):
-    def test_product_damage_frames_keep_1080p_detail_profile(self) -> None:
+    def test_multiple_native_videos_skip_full_frame_sampling(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sample_dir = root / "case"
+            sample_dir.mkdir()
+            videos = [sample_dir / "001.mp4", sample_dir / "002.mp4"]
+            for video in videos:
+                video.write_bytes(b"video")
+            args = SimpleNamespace(
+                fps=1.0,
+                sampling_mode="dense",
+                max_frames_per_video=1200,
+                api_frame_limit=24,
+                probe_seconds=1.0,
+                frame_width=1920,
+                supplemental_image_limit=40,
+            )
+            current = {
+                "case_id": "multi-native",
+                "scenario": "product_damage",
+                "structured_business_context": {},
+                "supplemental_images": [],
+                "frames": [],
+                "videos": [],
+            }
+            sources = [
+                {
+                    "video_index": index,
+                    "file_uri": f"https://media.example/video-{index}",
+                    "api_mime_type": "video/webm",
+                }
+                for index in (1, 2)
+            ]
+            with (
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.discover_case_videos",
+                    return_value=(videos, {}),
+                ),
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.load_case",
+                    return_value=current,
+                ),
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.extract_video_start_anchors",
+                    return_value=[],
+                ),
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.sample_video_frames"
+                ) as sample_frames,
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.prepare_media",
+                    side_effect=lambda items, *_args, **_kwargs: list(items),
+                ),
+                patch("poc.visual_review_poc.model_selection_e2e.prepare_official_reference_images"),
+            ):
+                case = load_case_bundle(
+                    sample_dir,
+                    args,
+                    root / "run",
+                    scenario_override="product_damage",
+                    native_videos=sources,
+                    selected_videos=videos,
+                )
+
+        sample_frames.assert_not_called()
+        self.assertEqual(case["sampling_mode"], "native_video")
+        self.assertEqual(
+            [row["video_index"] for row in case["native_videos"]],
+            [1, 2],
+        )
+        self.assertEqual(case["frames"], [])
+
+    def test_product_damage_frames_keep_1080p_budget_but_uploaded_images_use_shared_2k_policy(self) -> None:
         calls: list[dict] = []
 
         def record_prepare(items, *_args, **kwargs):
@@ -126,10 +198,57 @@ class DynamicMaterialCapacityTest(unittest.TestCase):
                     scenario_override="product_damage",
                 )
 
-        self.assertEqual(
-            calls[0],
+        self.assertEqual(calls, [
             {"max_edge": 1920, "quality": 88, "lossless_webp": True},
-        )
+            {"diagnostics": []},
+        ])
+
+    def test_fulfillment_images_use_shared_2k_webp_policy(self) -> None:
+        calls: list[dict] = []
+
+        def record_prepare(items, *_args, **kwargs):
+            calls.append(dict(kwargs))
+            return list(items)
+
+        with TemporaryDirectory() as temp_dir:
+            sample_dir = Path(temp_dir) / "case"
+            sample_dir.mkdir()
+            args = SimpleNamespace(
+                fps=1.0,
+                sampling_mode="dense",
+                max_frames_per_video=1200,
+                api_frame_limit=24,
+                probe_seconds=1.0,
+                frame_width=1920,
+                supplemental_image_limit=40,
+            )
+            current = {
+                "case_id": "wrong-item-resolution",
+                "scenario": "wrong_item",
+                "structured_business_context": {},
+                "supplemental_images": [_image(1)],
+                "frames": [],
+                "videos": [],
+            }
+            with (
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.load_case_from_folder",
+                    return_value=current,
+                ),
+                patch(
+                    "poc.visual_review_poc.model_selection_e2e.prepare_media",
+                    side_effect=record_prepare,
+                ),
+                patch("poc.visual_review_poc.model_selection_e2e.prepare_official_reference_images"),
+            ):
+                load_case_bundle(
+                    sample_dir,
+                    args,
+                    Path(temp_dir) / "run",
+                    scenario_override="wrong_item",
+                )
+
+        self.assertEqual(calls[-1], {"diagnostics": []})
 
     def test_hidden_files_do_not_consume_folder_capacity(self) -> None:
         png = b"\x89PNG\r\n\x1a\n" + b"0" * 32

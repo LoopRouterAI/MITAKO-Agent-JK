@@ -145,7 +145,8 @@ def test_business_rule_resolution_keeps_immutable_boundary(isolated_store) -> No
         default_rules="默认五类材料审核规则。",
         tenant_id="mitako",
     )
-    assert "默认五类材料审核规则" not in resolved
+    assert "默认五类材料审核规则" in resolved
+    assert "高级客服已发布的补充业务规则" in resolved
     assert "未满九周岁" in resolved
     assert "不能仅凭年龄" in resolved
 
@@ -400,3 +401,57 @@ def test_missing_item_rules_do_not_force_review_for_split_orders_or_photo_eviden
     assert "无视频时只能" not in prompt
     assert "全部分包" in prompt
     assert "清晰照片" in prompt
+
+
+def test_minor_rules_keep_under_ten_material_check_separate_from_under_nine_routing(isolated_store) -> None:
+    from prompts.visual_review.core import build_system_prompt
+
+    prompt = build_system_prompt("minor_refund", tenant_id="mitako")
+
+    assert "低于 10 周岁" in prompt
+    assert "支付密码" in prompt
+    assert "监护人发现" in prompt
+    assert "低于 9 周岁" in prompt
+    assert "额外" in prompt
+    assert "不能覆盖五类材料事实" in prompt
+    assert "高置信未满 9 周岁只提示" not in prompt
+
+
+def test_four_scenes_have_independent_prompt_and_schema_definitions() -> None:
+    from prompts.visual_review.scenes import get_scene_definition, resolve_response_schema
+    from prompts.visual_review.schemas import (
+        MISSING_ITEM_OBSERVATION_RESPONSE_SCHEMA,
+        MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA,
+        NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA,
+        PRODUCT_DAMAGE_IMAGE_RESPONSE_SCHEMA,
+        WRONG_ITEM_OBSERVATION_RESPONSE_SCHEMA,
+    )
+
+    modules = {
+        get_scene_definition(scene)["module"]
+        for scene in ("product_damage", "wrong_item", "missing_item", "minor_refund")
+    }
+    assert len(modules) == 4
+    assert resolve_response_schema("product_damage", "product_damage_images", False) is PRODUCT_DAMAGE_IMAGE_RESPONSE_SCHEMA
+    assert resolve_response_schema("product_damage", "native_video_perception", True) is NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA
+    assert resolve_response_schema("wrong_item", "", False) is WRONG_ITEM_OBSERVATION_RESPONSE_SCHEMA
+    assert resolve_response_schema("missing_item", "", False) is MISSING_ITEM_OBSERVATION_RESPONSE_SCHEMA
+    assert resolve_response_schema("wrong_item", "unexpected_mode", True) is WRONG_ITEM_OBSERVATION_RESPONSE_SCHEMA
+    assert resolve_response_schema("missing_item", "unexpected_mode", True) is MISSING_ITEM_OBSERVATION_RESPONSE_SCHEMA
+    assert WRONG_ITEM_OBSERVATION_RESPONSE_SCHEMA is not MISSING_ITEM_OBSERVATION_RESPONSE_SCHEMA
+    assert WRONG_ITEM_OBSERVATION_RESPONSE_SCHEMA["properties"]["schema_version"]["enum"] == [
+        "wrong_item_observation_v2"
+    ]
+    assert MISSING_ITEM_OBSERVATION_RESPONSE_SCHEMA["properties"]["schema_version"]["enum"] == [
+        "missing_item_observation_v2"
+    ]
+    assert resolve_response_schema("minor_refund", "minor_material_consistency", False) is MINOR_MATERIAL_CONSISTENCY_RESPONSE_SCHEMA
+    assert resolve_response_schema("product_damage", "", False) is NATIVE_VIDEO_PERCEPTION_RESPONSE_SCHEMA
+
+
+def test_current_four_scene_contract_version_is_shared_by_runtime_and_policy() -> None:
+    from prompts.visual_review.contract import REVIEW_CONTRACT_VERSION
+    from review_service.decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
+
+    assert REVIEW_CONTRACT_VERSION == "2026-08-15.1"
+    assert DEFAULT_PRODUCT_DAMAGE_POLICY_REF == "MITAKO-FOUR-SCENE@20260814.1"

@@ -83,6 +83,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             "opening_integrity_source": "full_timeline_continuity",
             "sampling_boundary_status": "covered",
             "opening_video_compliance": {
+                "opening_action_visible": True,
                 "sealed_start": True,
                 "waybill_visible": True,
                 "single_take_continuity": True,
@@ -90,6 +91,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "result": "compliant",
                 "source": "global_timeline_aggregation",
                 "validated_fields": [
+                    "opening_action_visible",
                     "sealed_start",
                     "waybill_visible",
                     "single_take_continuity",
@@ -104,6 +106,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                     }
                     for index, field in enumerate(
                         (
+                            "opening_action_visible",
                             "sealed_start",
                             "waybill_visible",
                             "single_take_continuity",
@@ -134,6 +137,43 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             review(parsed),
         )
         return result
+
+    def test_native_timestamp_reference_does_not_require_sampled_frame_index(self):
+        fields = (
+            "opening_action_visible",
+            "sealed_start",
+            "waybill_visible",
+            "single_take_continuity",
+            "issue_visible_in_continuous_opening",
+        )
+        result = self._default_visible_damage_case(
+            video_overrides={
+                "source": "native_full_video_perception",
+                "opening_video_compliance": {
+                    **{field: True for field in fields},
+                    "result": "compliant",
+                    "source": "native_full_video_perception",
+                    "validated_fields": list(fields),
+                    "evidence_refs": [
+                        {
+                            "field": field,
+                            "asset_ref": "native_video_1",
+                            "video_index": 1,
+                            "timestamp": f"00:0{index}.000",
+                            "visible_facts": "原生视频时间戳事实",
+                        }
+                        for index, field in enumerate(fields, start=1)
+                    ],
+                },
+            },
+            parsed_overrides={"overall_video_result": "compliant"},
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "positive")
+        self.assertNotEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-R-OPENING-GATE-INDETERMINATE",
+        )
 
     def test_explicit_order_package_linkage_failure_blocks_damage_attribution(self):
         result = self._default_visible_damage_case(
@@ -203,6 +243,16 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                         "claim_id": claim_id,
                         "subject_ref": f"SKU-{index + 1}",
                         "support_status": "supported",
+                        "location": "商品表面",
+                        "damage_type": "断裂",
+                        "main_video_visibility": "visible",
+                        "supplemental_visibility": "visible",
+                        "same_item_linkage": True,
+                        "damage_presence": "confirmed",
+                        "condition_at_unboxing": "supported",
+                        "severity_level": "moderate",
+                        "structural_failure": False,
+                        "conflicting_evidence": False,
                         "evidence_refs": [{"video_index": 1, "global_frame_index": 18 + index}],
                     }
                     for index, claim_id in enumerate(("CLM-1", "CLM-2"))
@@ -211,9 +261,37 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         )
 
         self.assertEqual(result["summary"]["predicted_label"], "positive")
+
+    def test_multi_claim_case_keeps_review_when_atomic_results_conflict(self):
+        atomic_results = []
+        for index, claim_id in enumerate(("CLM-1", "CLM-2")):
+            supported = index == 0
+            atomic_results.append({
+                "claim_id": claim_id,
+                "subject_ref": f"SKU-{index + 1}",
+                "support_status": "supported" if supported else "not_supported",
+                "location": "商品表面",
+                "damage_type": "断裂",
+                "main_video_visibility": "visible" if supported else "clearly_not_visible",
+                "supplemental_visibility": "visible" if supported else "clearly_not_visible",
+                "same_item_linkage": True,
+                "damage_presence": "confirmed" if supported else "not_found_after_clear_coverage",
+                "condition_at_unboxing": "supported" if supported else "not_supported",
+                "severity_level": "moderate" if supported else "none",
+                "structural_failure": False,
+                "conflicting_evidence": False,
+                "evidence_refs": [{"video_index": 1, "global_frame_index": 18 + index}],
+            })
+        result = self._default_visible_damage_case(
+            active_claim_ids=["CLM-1", "CLM-2"],
+            fact_overrides={"atomic_claim_results": atomic_results},
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-ATOMIC-CLAIM-MIXED")
         self.assertNotEqual(result["decision_policy_audit"]["rule_id"], "PD-R-ATOMIC-CLAIM-INCOMPLETE")
 
-    def test_long_out_of_frame_sop_rule_precedes_later_visible_damage(self):
+    def test_long_out_of_frame_duration_does_not_override_confirmed_damage(self):
         result = self._default_visible_damage_case(
             continuity_overrides={
                 "continuity_verdict": "long_absence",
@@ -225,8 +303,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             }
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
-        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertEqual(result["summary"]["predicted_label"], "positive")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-P-CONFIRMED-VISIBLE-DAMAGE")
         self.assertEqual(
             result["decision_policy_audit"]["evidence_verdict_before_policy"]["predicted_label"],
             "review",
@@ -246,6 +324,13 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-P-CONFIRMED-VISIBLE-DAMAGE")
 
     def test_direct_customer_damage_chain_is_negative(self):
+        common = {
+            "video_index": 1,
+            "asset_ref": "native_video_1",
+            "subject": "争议商品",
+            "location": "正面左上角",
+            "chain_id": "damage-chain-1",
+        }
         result = self._default_visible_damage_case(
             damage_overrides={
                 "damage_timing": "appears_during_opening",
@@ -255,6 +340,22 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "origin_confidence": 0.92,
                 "causal_evidence_level": "direct",
                 "claim_support": "not_supported",
+                "causal_action_relation": "direct_contact",
+                "before_action_evidence": [{
+                    **common,
+                    "timestamp": "00:10.000",
+                    "damage_visible": False,
+                }],
+                "action_evidence": [{
+                    **common,
+                    "timestamp": "00:11.000",
+                    "action_relation": "direct_contact",
+                }],
+                "after_action_evidence": [{
+                    **common,
+                    "timestamp": "00:12.000",
+                    "damage_visible": True,
+                }],
             },
         )
 
@@ -264,6 +365,48 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         self.assertNotIn("补齐", parsed["overall_audit"]["business_follow_up_suggestion"])
         self.assertNotIn("重新提交", result["agent_brief"]["next_step"])
         self.assertIn("SOP", result["agent_brief"]["next_step"])
+
+    def test_single_take_continuity_cannot_substitute_for_direct_damage_chain(self):
+        result = self._default_visible_damage_case(
+            damage_overrides={
+                "damage_timing": "appears_during_opening",
+                "damage_change_observed": True,
+                "opening_action_visible": True,
+                "most_likely_origin": "customer_opening_or_handling",
+                "causal_evidence_level": "direct",
+                "claim_support": "not_supported",
+                "causal_action_relation": "direct_contact",
+                "before_action_evidence": [],
+                "action_evidence": [],
+                "after_action_evidence": [],
+            },
+        )
+
+        self.assertNotEqual(result["summary"]["predicted_label"], "negative")
+        self.assertNotEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-N-DIRECT-CUSTOMER-DAMAGE",
+        )
+
+    def test_customer_damage_without_direct_action_relation_is_not_negative(self):
+        result = self._default_visible_damage_case(
+            damage_overrides={
+                "damage_timing": "appears_during_opening",
+                "damage_change_observed": True,
+                "opening_action_visible": True,
+                "most_likely_origin": "customer_opening_or_handling",
+                "origin_confidence": 0.92,
+                "causal_evidence_level": "direct",
+                "claim_support": "not_supported",
+                "causal_action_relation": "no_contact",
+            },
+        )
+
+        self.assertNotEqual(result["summary"]["predicted_label"], "negative")
+        self.assertNotEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-N-DIRECT-CUSTOMER-DAMAGE",
+        )
 
     def test_pre_opening_visible_damage_remains_supported(self):
         result = self._default_visible_damage_case()
@@ -361,7 +504,6 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             "require_same_item_linkage": True,
             "require_media_forensics": True,
             "maximum_forensic_risk": "low",
-            "max_unobserved_seconds": 0.0,
         }
         policy.update(policy_overrides or {})
         metadata = ReviewCaseMetadata.model_validate(
@@ -496,15 +638,6 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 {"damage_observability": {"same_item_linkage": False}},
             ),
             (
-                "max_unobserved_seconds",
-                {"max_unobserved_seconds": 3.0},
-                {"object_continuity_assessment": {"tracked_subjects": [{
-                    "subject_id": "claimed_item",
-                    "visibility_coverage": 1.0,
-                    "longest_out_of_frame_seconds": 2.5,
-                }]}},
-            ),
-            (
                 "require_media_forensics",
                 {"require_media_forensics": False},
                 {},
@@ -537,7 +670,6 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             "require_same_item_linkage": True,
             "require_media_forensics": True,
             "maximum_forensic_risk": "low",
-            "max_unobserved_seconds": 0.0,
         }
         result = self._complete_no_damage_case(
             strict_policy,
@@ -565,7 +697,6 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "require_claimed_region_closeup": False,
                 "require_same_item_linkage": False,
                 "require_media_forensics": False,
-                "max_unobserved_seconds": 30.0,
             },
         )
         self.assertEqual(result["summary"]["predicted_label"], "review")
@@ -619,7 +750,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         self.assertTrue(audit["ready"])
         self.assertEqual(audit["issue_types"], ["product_damage"])
 
-    def test_noncompliant_opening_video_recommends_negative_but_keeps_supplemental_reference(self):
+    def test_noncompliant_opening_video_requests_material_instead_of_rejecting_claim(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "case-615437",
@@ -671,10 +802,11 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
         )
         audit = result["decision_policy_audit"]
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
-        self.assertEqual(audit["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
-        self.assertIn("最低档补偿", audit["supplemental_evidence_note"])
-        self.assertTrue(result["agent_report"]["parsed"]["human_required_for_business_action"])
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(audit["rule_id"], "PD-R-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertIn("不能替代合规开箱视频", audit["supplemental_evidence_note"])
+        self.assertNotIn("补偿", audit["supplemental_evidence_note"])
+        self.assertEqual(result["agent_report"]["parsed"]["decision"], "request_more_material")
 
     def test_full_timeline_indeterminate_opening_without_verified_hard_failure_stays_review(self):
         metadata = ReviewCaseMetadata.model_validate(
@@ -774,6 +906,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "opening_integrity_source": "full_timeline_continuity",
                 "sampling_boundary_status": "covered",
                 "opening_video_compliance": {
+                    "opening_action_visible": True,
                     "sealed_start": True,
                     "waybill_visible": True,
                     "single_take_continuity": True,
@@ -781,6 +914,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                     "result": "compliant",
                     "source": "native_video_perception",
                     "validated_fields": [
+                        "opening_action_visible",
                         "sealed_start",
                         "waybill_visible",
                         "single_take_continuity",
@@ -795,6 +929,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                         }
                         for index, field in enumerate(
                             (
+                                "opening_action_visible",
                                 "sealed_start",
                                 "waybill_visible",
                                 "single_take_continuity",
@@ -901,13 +1036,129 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             review(parsed),
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertEqual(
             result["decision_policy_audit"]["rule_id"],
-            "PD-N-OPENING-VIDEO-REQUIRED",
+            "PD-R-OPENING-VIDEO-REQUIRED",
         )
 
-    def test_extreme_structural_damage_with_verified_identity_can_bypass_opening_gate(self):
+    def test_current_policy_requests_opening_video_instead_of_rejecting_ordinary_damage(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-0812-missing-opening",
+                "scenario": "product_damage",
+                "customer_claim": "商品表面存在普通划痕",
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": DEFAULT_PRODUCT_DAMAGE_POLICY_REF,
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.78,
+            "damage_causality_assessment": {
+                "damage_presence": "confirmed",
+                "supplemental_damage_presence": "confirmed",
+                "claim_support": "insufficient",
+                "severity_assessment": {
+                    "level": "moderate",
+                    "structural_failure": False,
+                    "confidence": 0.9,
+                },
+                "evidence_source_summary": {
+                    "supplemental_images": {
+                        "provided_count": 1,
+                        "referenced_count": 1,
+                        "linkage_status": "verified",
+                    }
+                },
+            },
+        }
+
+        result = apply_review_decision_policy(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "image/jpeg"}],
+            },
+            review(parsed),
+        )
+
+        self.assertEqual(DEFAULT_PRODUCT_DAMAGE_POLICY_REF, "MITAKO-FOUR-SCENE@20260814.1")
+        self.assertEqual(result["decision_policy_audit"]["version"], "2026-08-13.1")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["summary"]["system_yes_no"], "REVIEW")
+        self.assertEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-R-OPENING-VIDEO-REQUIRED",
+        )
+        self.assertIn("材料不齐全", result["decision_policy_audit"]["reason"])
+        self.assertIn("初次拆包动作", result["agent_brief"]["next_step"])
+        self.assertIn("开箱视频", result["agent_brief"]["next_step"])
+
+    def test_custom_policy_cannot_restore_retired_photo_only_shortcut(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-retired-photo-shortcut",
+                "scenario": "product_damage",
+                "customer_claim": "商品表面有普通划痕",
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": "CUSTOM-OLD-PHOTO-RULE",
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.91,
+            "damage_causality_assessment": {
+                "damage_presence": "confirmed",
+                "supplemental_damage_presence": "confirmed",
+                "claim_support": "supported",
+                "business_defect_qualification": "confirmed",
+                "severity_assessment": {
+                    "level": "moderate",
+                    "structural_failure": False,
+                    "confidence": 0.91,
+                },
+                "evidence_source_summary": {
+                    "supplemental_images": {
+                        "provided_count": 1,
+                        "referenced_count": 1,
+                        "linkage_status": "verified",
+                    }
+                },
+            },
+        }
+
+        result = apply_review_decision_policy(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "image/jpeg"}],
+            },
+            review(parsed),
+            approved_policies={
+                ("mitako", "CUSTOM-OLD-PHOTO-RULE"): {
+                    "mode": "classification_recommendation",
+                    "require_claim_scope": False,
+                    "opening_video_required": True,
+                    "missing_required_opening_video": "negative",
+                    "verified_supplemental_damage": "positive",
+                }
+            },
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-R-OPENING-VIDEO-REQUIRED",
+        )
+
+    def test_severe_structural_damage_with_reliable_same_item_can_bypass_opening_without_order(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "case-extreme-structural-photo",
@@ -924,8 +1175,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             "confidence": 0.91,
             "claim_fact_assessment": {
                 "order_linkage": {
-                    "status": "verified",
-                    "reason": "订单 SKU、包装和商品外观一致。",
+                    "status": "not_provided",
+                    "reason": "本轮未提供订单资料。",
                 },
                 "scene_match": {"status": "matched"},
             },
@@ -937,6 +1188,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "severity_assessment": {
                     "level": "extreme",
                     "structural_failure": True,
+                    "confidence": 0.94,
                     "reason": "主体拦腰断裂，已无法正常展示。",
                 },
                 "causal_chain_assessment": {
@@ -964,6 +1216,356 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         }
 
+        for severity_level in ("severe", "extreme"):
+            parsed["damage_causality_assessment"]["severity_assessment"]["level"] = severity_level
+            for assets in (
+                [{"mime_type": "image/jpeg"}],
+                [{"mime_type": "video/mp4"}, {"mime_type": "image/jpeg"}],
+            ):
+                with self.subTest(severity=severity_level, has_video=len(assets) == 2):
+                    result = apply_review_decision_policy(
+                        {
+                            "tenant_id": "mitako",
+                            "scenario": "product_damage",
+                            "metadata": metadata,
+                            "assets": assets,
+                        },
+                        review(parsed),
+                        media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
+                    )
+
+                    self.assertEqual(result["summary"]["predicted_label"], "positive")
+                    self.assertEqual(
+                        result["decision_policy_audit"]["rule_id"],
+                        "PD-P-SEVERE-STRUCTURAL-DAMAGE",
+                    )
+                    self.assertEqual(
+                        result["decision_policy_audit"]["conclusion_code"],
+                        "severe_structural_damage_follow_up",
+                    )
+                    self.assertEqual(
+                        result["agent_report"]["parsed"]["overall_audit"]["conclusion"],
+                        "材料可能不齐全，但高置信严重结构问题已确认，建议重点跟进；成因与责任未确认。",
+                    )
+                    self.assertIn(
+                        "成因与责任未确认",
+                        result["agent_report"]["parsed"]["overall_audit"]["core_reason"],
+                    )
+                    self.assertNotIn(
+                        "订单、同物与真实性核验均无冲突",
+                        result["decision_policy_audit"]["reason"],
+                    )
+
+    def test_product_damage_image_contract_reaches_current_decision_policy(self):
+        from prompts.visual_review.product_damage_image_adapter import (
+            expand_product_damage_image_observation,
+        )
+
+        metadata = ReviewCaseMetadata.model_validate({
+            "client_case_id": "case-image-contract",
+            "scenario": "product_damage",
+            "customer_claim": "摆件主体断裂",
+            "decision_policy": {
+                "mode": "classification_recommendation",
+                "policy_ref": DEFAULT_PRODUCT_DAMAGE_POLICY_REF,
+            },
+        }).model_dump(mode="json")
+        compact = {
+            "claimed_item_assessment": {
+                "identity_description": "订单对应摆件",
+                "identity_confidence": 0.95,
+                "same_item_linkage": True,
+                "reason": "用户图片与订单商品结构一致。",
+            },
+            "damage_assessment": {
+                "damage_visible": True,
+                "detail_sufficient": True,
+                "location": "主体腰部",
+                "severity_level": "severe",
+                "structural_failure": True,
+                "severity_confidence": 0.94,
+                "business_defect_qualification": "confirmed",
+                "conflicting_evidence": False,
+                "reason": "主体拦腰断裂，已影响完整展示。",
+            },
+            "evidence_refs": [
+                {"field": "claimed_item", "asset_ref": "supplemental_image_1", "fact": "结构与订单摆件一致。"},
+                {"field": "supplemental_damage_visible", "asset_ref": "supplemental_image_1", "fact": "主体腰部完全断开。"},
+            ],
+        }
+        parsed = expand_product_damage_image_observation(
+            compact,
+            {"supplemental_images": [{"image_index": 1}]},
+        )
+
+        severe = apply_review_decision_policy(
+            {"tenant_id": "mitako", "scenario": "product_damage", "metadata": metadata, "assets": [{"mime_type": "image/jpeg"}]},
+            review(parsed),
+            media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
+        )
+        self.assertEqual(severe["summary"]["predicted_label"], "positive")
+        self.assertEqual(severe["decision_policy_audit"]["rule_id"], "PD-P-SEVERE-STRUCTURAL-DAMAGE")
+
+        compact["damage_assessment"].update({
+            "severity_level": "moderate",
+            "structural_failure": False,
+            "business_defect_qualification": "indeterminate",
+        })
+        ordinary = apply_review_decision_policy(
+            {"tenant_id": "mitako", "scenario": "product_damage", "metadata": metadata, "assets": [{"mime_type": "image/jpeg"}]},
+            review(expand_product_damage_image_observation(compact, {"supplemental_images": [{"image_index": 1}]})),
+        )
+        self.assertEqual(ordinary["summary"]["predicted_label"], "review")
+        self.assertEqual(ordinary["decision_policy_audit"]["rule_id"], "PD-R-OPENING-VIDEO-REQUIRED")
+
+    def test_product_damage_image_contract_preserves_multiple_atomic_claims(self):
+        from prompts.visual_review.product_damage_image_adapter import (
+            expand_product_damage_image_observation,
+        )
+
+        parsed = expand_product_damage_image_observation(
+            {
+                "claimed_item_assessment": {
+                    "identity_description": "同一摆件",
+                    "identity_confidence": 0.96,
+                    "same_item_linkage": True,
+                    "reason": "订单图与用户图的结构特征一致。",
+                },
+                "atomic_claim_results": [
+                    {
+                        "claim_id": "CLM-1",
+                        "subject_ref": "ITEM-1",
+                        "location": "底座",
+                        "damage_type": "划痕",
+                        "supplemental_visibility": "visible",
+                        "same_item_linkage": True,
+                        "damage_presence": "confirmed",
+                        "severity_level": "minor",
+                        "severity_confidence": 0.88,
+                        "structural_failure": False,
+                        "conflicting_evidence": False,
+                        "reason": "底座表面可见细划痕。",
+                    },
+                    {
+                        "claim_id": "CLM-2",
+                        "subject_ref": "ITEM-1",
+                        "location": "主体腰部",
+                        "damage_type": "断裂",
+                        "supplemental_visibility": "visible",
+                        "same_item_linkage": True,
+                        "damage_presence": "confirmed",
+                        "severity_level": "severe",
+                        "severity_confidence": 0.94,
+                        "structural_failure": True,
+                        "conflicting_evidence": False,
+                        "reason": "主体腰部完全断开。",
+                    },
+                ],
+                "evidence_refs": [
+                    {"field": "claimed_item", "claim_id": "CLM-1", "asset_ref": "supplemental_image_1", "fact": "同一摆件底座。"},
+                    {"field": "supplemental_damage_visible", "claim_id": "CLM-1", "asset_ref": "supplemental_image_1", "fact": "底座细划痕。"},
+                    {"field": "claimed_item", "claim_id": "CLM-2", "asset_ref": "supplemental_image_2", "fact": "同一摆件主体。"},
+                    {"field": "supplemental_damage_visible", "claim_id": "CLM-2", "asset_ref": "supplemental_image_2", "fact": "主体腰部完全断开。"},
+                ],
+            },
+            {"supplemental_images": [{"image_index": 1}, {"image_index": 2}]},
+        )
+
+        claims = parsed["claim_fact_assessment"]["atomic_claim_results"]
+        self.assertEqual([item["claim_id"] for item in claims], ["CLM-1", "CLM-2"])
+        self.assertEqual(claims[0]["support_status"], "insufficient")
+        self.assertEqual(claims[1]["support_status"], "insufficient")
+        self.assertEqual(
+            parsed["damage_causality_assessment"]["business_defect_qualification"],
+            "confirmed",
+        )
+        self.assertEqual(
+            parsed["damage_causality_assessment"]["severity_assessment"]["level"],
+            "severe",
+        )
+
+    def test_severe_structural_damage_in_main_video_does_not_require_supplemental_photo(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-severe-main-video",
+                "scenario": "product_damage",
+                "customer_claim": "手办主体拦腰断裂",
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": DEFAULT_PRODUCT_DAMAGE_POLICY_REF,
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.92,
+            "claim_fact_assessment": {
+                "order_linkage": {"status": "verified"},
+                "scene_match": {"status": "matched"},
+            },
+            "damage_causality_assessment": {
+                "damage_presence": "confirmed",
+                "supplemental_damage_presence": "not_assessed",
+                "claim_support": "insufficient",
+                "business_defect_qualification": "confirmed",
+                "severity_assessment": {
+                    "level": "severe",
+                    "structural_failure": True,
+                    "confidence": 0.93,
+                    "reason": "主体断裂，无法正常展示。",
+                },
+                "first_visible_evidence": {
+                    "source_type": "video_frame",
+                    "asset_ref": "native_video_1",
+                    "timestamp": "00:41.000",
+                    "damage_visible": True,
+                },
+                "evidence_source_summary": {
+                    "primary_video": {
+                        "damage_presence": "confirmed",
+                        "referenced_count": 1,
+                    },
+                    "supplemental_images": {
+                        "provided_count": 0,
+                        "referenced_count": 0,
+                        "linkage_status": "not_assessed",
+                    },
+                },
+            },
+            "damage_observability": {
+                "status": "fully_observable",
+                "same_item_linkage": True,
+                "conflicting_evidence": False,
+            },
+            "video_audit_conclusion": {
+                "technical_timeline_status": "native_full_video",
+                "opening_video_compliance": {
+                    "sealed_start": False,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "result": "noncompliant",
+                },
+            },
+        }
+
+        result = apply_review_decision_policy(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "video/mp4"}],
+            },
+            review(parsed),
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "positive")
+        self.assertEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-P-SEVERE-STRUCTURAL-DAMAGE",
+        )
+
+    def test_severe_structural_damage_confirmed_only_by_verified_photo_bypasses_opening_gate(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-severe-photo-only-observation",
+                "scenario": "product_damage",
+                "customer_claim": "手办主体断裂",
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": DEFAULT_PRODUCT_DAMAGE_POLICY_REF,
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.94,
+            "overall_video_result": "noncompliant",
+            "claim_fact_assessment": {
+                "order_linkage": {"status": "verified"},
+                "scene_match": {"status": "matched"},
+            },
+            "damage_causality_assessment": {
+                "damage_presence": "not_visible",
+                "supplemental_damage_presence": "confirmed",
+                "business_defect_qualification": "confirmed",
+                "severity_assessment": {
+                    "level": "severe",
+                    "structural_failure": True,
+                    "confidence": 0.95,
+                },
+                "evidence_source_summary": {
+                    "primary_video": {"damage_presence": "not_visible", "referenced_count": 1},
+                    "supplemental_images": {
+                        "provided_count": 1,
+                        "referenced_count": 1,
+                        "linkage_status": "verified",
+                    },
+                },
+            },
+            "damage_observability": {
+                "same_item_linkage": True,
+                "conflicting_evidence": False,
+            },
+            "video_audit_conclusion": {
+                "technical_timeline_status": "native_full_video",
+                "opening_video_compliance": {
+                    "sealed_start": False,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": False,
+                    "result": "noncompliant",
+                },
+            },
+        }
+
+        result = apply_review_decision_policy(
+            {
+                "tenant_id": "mitako",
+                "scenario": "product_damage",
+                "metadata": metadata,
+                "assets": [{"mime_type": "video/mp4"}, {"mime_type": "image/jpeg"}],
+            },
+            review(parsed),
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "positive")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-P-SEVERE-STRUCTURAL-DAMAGE")
+        self.assertIn("成因与责任未确认", result["agent_report"]["parsed"]["overall_audit"]["core_reason"])
+
+    def test_retired_builtin_policy_cannot_bypass_current_opening_gate(self):
+        metadata = ReviewCaseMetadata.model_validate(
+            {
+                "client_case_id": "case-retired-policy",
+                "scenario": "product_damage",
+                "customer_claim": "商品表面有普通划痕",
+                "decision_policy": {
+                    "mode": "classification_recommendation",
+                    "policy_ref": "MITAKO-PD-ADVISORY@20260806.1",
+                },
+            }
+        ).model_dump(mode="json")
+        parsed = {
+            "predicted_label": "review",
+            "confidence": 0.91,
+            "damage_causality_assessment": {
+                "damage_presence": "confirmed",
+                "supplemental_damage_presence": "confirmed",
+                "severity_assessment": {
+                    "level": "moderate",
+                    "structural_failure": False,
+                    "confidence": 0.91,
+                },
+                "evidence_source_summary": {
+                    "supplemental_images": {
+                        "provided_count": 1,
+                        "referenced_count": 1,
+                        "linkage_status": "verified",
+                    },
+                },
+            },
+        }
+
         result = apply_review_decision_policy(
             {
                 "tenant_id": "mitako",
@@ -972,23 +1574,11 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "assets": [{"mime_type": "image/jpeg"}],
             },
             review(parsed),
-            media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "positive")
-        self.assertEqual(
-            result["decision_policy_audit"]["rule_id"],
-            "PD-P-EXTREME-VISIBLE-DAMAGE-WITHOUT-OPENING",
-        )
-        self.assertIn(
-            "成因未确认",
-            result["agent_report"]["parsed"]["overall_audit"]["core_reason"],
-        )
-        self.assertEqual(
-            result["agent_report"]["parsed"]["damage_causality_assessment"]
-            ["causal_chain_assessment"]["status"],
-            "indeterminate",
-        )
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["policy_source"], "retired")
+        self.assertIn("已停用", result["decision_policy_audit"]["reason"])
 
     def test_extreme_photo_without_verified_same_item_linkage_keeps_opening_gate(self):
         metadata = ReviewCaseMetadata.model_validate(
@@ -1042,15 +1632,18 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             media_forensics={"status": "completed", "summary": {"risk_level": "low"}},
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertEqual(
             result["decision_policy_audit"]["rule_id"],
-            "PD-N-OPENING-VIDEO-REQUIRED",
+            "PD-R-OPENING-VIDEO-REQUIRED",
         )
 
     def test_native_nine_field_noncompliance_blocks_visible_damage_positive(self):
         result = self._default_visible_damage_case(
-            video_overrides={"technical_timeline_status": "native_full_video"},
+            video_overrides={
+                "technical_timeline_status": "native_full_video",
+                "edit_review_signal": "confirmed_critical_break",
+            },
             parsed_overrides={
                 "overall_video_result": "noncompliant",
                 "all_items_shown": True,
@@ -1061,13 +1654,151 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "issue_visible": True,
                 "sealed_start": True,
                 "waybill_visible": True,
+                "field_confidences": {"has_edit": 0.95},
+                "evidence_refs": [
+                    {
+                        "field": "has_edit",
+                        "asset_ref": "native_video_1",
+                        "video_index": 1,
+                        "timestamp": "00:11.000",
+                    },
+                    {
+                        "field": "has_edit",
+                        "asset_ref": "native_video_1",
+                        "video_index": 1,
+                        "timestamp": "00:12.000",
+                    },
+                ],
             },
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertEqual(
             result["decision_policy_audit"]["rule_id"],
-            "PD-N-NATIVE-VIDEO-NONCOMPLIANT",
+            "PD-R-NONCOMPLIANT-OPENING-VIDEO",
+        )
+
+    def test_single_low_confidence_edit_signal_cannot_make_native_video_negative(self):
+        result = self._default_visible_damage_case(
+            video_overrides={
+                "technical_timeline_status": "native_full_video",
+                "edit_review_signal": "yellow",
+            },
+            parsed_overrides={
+                "overall_video_result": "noncompliant",
+                "has_edit": True,
+                "field_confidences": {"has_edit": 0.42},
+                "evidence_refs": [{
+                    "field": "has_edit",
+                    "asset_ref": "native_video_1",
+                    "video_index": 1,
+                    "timestamp": "00:11.000",
+                }],
+            },
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-R-NATIVE-VIDEO-INDETERMINATE",
+        )
+
+    def test_unverified_native_opening_action_failure_stays_review(self):
+        result = self._default_visible_damage_case(
+            video_overrides={
+                "technical_timeline_status": "native_full_video",
+                "opening_video_compliance": {
+                    "opening_action_visible": False,
+                    "sealed_start": True,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "result": "noncompliant",
+                    "source": "native_full_video_perception",
+                    "validated_fields": [],
+                    "evidence_refs": [],
+                },
+            },
+            parsed_overrides={"overall_video_result": "noncompliant"},
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-R-NATIVE-VIDEO-INDETERMINATE",
+        )
+
+    def test_verified_native_opening_action_failure_requests_more_material(self):
+        action_reference = {
+            "field": "opening_action_visible",
+            "asset_ref": "native_video_1",
+            "video_index": 1,
+            "timestamp": "00:05.000",
+        }
+        result = self._default_visible_damage_case(
+            video_overrides={
+                "technical_timeline_status": "native_full_video",
+                "opening_video_compliance": {
+                    "opening_action_visible": False,
+                    "sealed_start": True,
+                    "waybill_visible": True,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "result": "noncompliant",
+                    "source": "native_full_video_perception",
+                    "validated_fields": ["opening_action_visible"],
+                    "evidence_refs": [action_reference],
+                },
+            },
+            parsed_overrides={"overall_video_result": "noncompliant"},
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-R-NONCOMPLIANT-OPENING-VIDEO",
+        )
+
+    def test_low_confidence_edit_does_not_hide_verified_waybill_failure(self):
+        waybill_reference = {
+            "field": "waybill_visible",
+            "asset_ref": "native_video_1",
+            "video_index": 1,
+            "timestamp": "00:02.000",
+        }
+        result = self._default_visible_damage_case(
+            video_overrides={
+                "technical_timeline_status": "native_full_video",
+                "edit_review_signal": "yellow",
+                "opening_video_compliance": {
+                    "opening_action_visible": True,
+                    "sealed_start": True,
+                    "waybill_visible": False,
+                    "single_take_continuity": True,
+                    "issue_visible_in_continuous_opening": True,
+                    "result": "noncompliant",
+                    "source": "native_full_video_perception",
+                    "validated_fields": ["waybill_visible"],
+                    "evidence_refs": [waybill_reference],
+                },
+            },
+            parsed_overrides={
+                "overall_video_result": "noncompliant",
+                "has_edit": True,
+                "field_confidences": {"has_edit": 0.42},
+                "evidence_refs": [{
+                    "field": "has_edit",
+                    "asset_ref": "native_video_1",
+                    "video_index": 1,
+                    "timestamp": "00:11.000",
+                }],
+            },
+        )
+
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(
+            result["decision_policy_audit"]["rule_id"],
+            "PD-R-NONCOMPLIANT-OPENING-VIDEO",
         )
 
     def test_native_nine_field_indeterminate_cannot_be_overridden_positive(self):
@@ -1082,7 +1813,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             "PD-R-NATIVE-VIDEO-INDETERMINATE",
         )
 
-    def test_missing_video_without_visible_damage_forms_negative_sop_tendency(self):
+    def test_missing_video_without_visible_damage_requests_required_material(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "case-no-video-no-damage",
@@ -1120,10 +1851,10 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             review(parsed),
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertEqual(
             result["decision_policy_audit"]["rule_id"],
-            "PD-N-OPENING-VIDEO-REQUIRED",
+            "PD-R-OPENING-VIDEO-REQUIRED",
         )
 
     def test_acceleration_alone_never_makes_opening_video_noncompliant(self):
@@ -1165,6 +1896,20 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-SPEED-UNRESOLVED")
         self.assertNotIn("sampling_upgrade", result["decision_policy_audit"])
+
+    def test_unknown_speed_is_only_a_yellow_signal_when_key_evidence_remains_visible(self):
+        result = self._default_visible_damage_case(video_overrides={
+            "playback_speed": "unknown",
+            "sampling_fps": 1.0,
+            "speed_review_impact": {
+                "status": "uncertain",
+                "critical_evidence_observable": True,
+                "affected_review_items": [],
+            },
+        })
+
+        self.assertEqual(result["summary"]["predicted_label"], "positive")
+        self.assertNotEqual(result["decision_policy_audit"].get("rule_id"), "PD-R-SPEED-UNRESOLVED")
 
     def test_speed_review_preserves_zero_confidence(self):
         result = self._default_visible_damage_case(
@@ -1210,8 +1955,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         })
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
-        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-NONCOMPLIANT-OPENING-VIDEO")
 
     def test_indeterminate_opening_gate_cannot_be_promoted_by_visible_damage(self):
         result = self._default_visible_damage_case(video_overrides={
@@ -1233,7 +1978,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             "PD-R-OPENING-GATE-INDETERMINATE",
         )
 
-    def test_issue_not_visible_in_continuous_opening_is_a_verified_hard_failure(self):
+    def test_issue_absence_without_complete_opening_action_chain_requests_more_material(self):
         result = self._default_visible_damage_case(video_overrides={
             "source": "global_timeline_aggregation",
             "sampling_boundary_status": "covered",
@@ -1254,8 +1999,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         })
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
-        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-NONCOMPLIANT-OPENING-VIDEO")
 
     def test_unverified_noncompliant_opening_review_cannot_keep_positive_follow_up(self):
         result = self._default_visible_damage_case(
@@ -1296,7 +2041,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             "insufficient",
         )
 
-    def test_full_timeline_absence_can_verify_issue_not_shown_without_single_frame_anchor(self):
+    def test_full_timeline_absence_without_complete_opening_action_chain_stays_review(self):
         result = self._default_visible_damage_case(video_overrides={
             "source": "global_timeline_aggregation",
             "sampling_boundary_status": "covered",
@@ -1319,8 +2064,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         })
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
-        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-NONCOMPLIANT-OPENING-VIDEO")
         facts = [item.get("fact") for item in result["agent_report"]["parsed"]["adopted_evidence"]]
         self.assertTrue(any("伤点在连续开箱中清晰展示" in str(fact) and "不符合" in str(fact) for fact in facts))
 
@@ -1368,10 +2113,10 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertEqual(
             result["decision_policy_audit"]["rule_id"],
-            "PD-N-NONCOMPLIANT-OPENING-VIDEO",
+            "PD-R-NONCOMPLIANT-OPENING-VIDEO",
         )
         reason = result["decision_policy_audit"]["reason"]
         self.assertIn("面单可核验", reason)
@@ -1381,7 +2126,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         parsed = result["agent_report"]["parsed"]
         self.assertNotIn("支持用户", parsed["next_step"])
         self.assertNotIn("支持用户", parsed["business_follow_up_reason"])
-        self.assertIn("开箱材料不合规", parsed["business_follow_up_reason"])
+        self.assertIn("开箱", parsed["business_follow_up_reason"])
         damage = parsed["damage_causality_assessment"]
         self.assertEqual(damage["claim_support"], "insufficient")
         self.assertEqual(
@@ -1482,8 +2227,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         })
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
-        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-NONCOMPLIANT-OPENING-VIDEO")
 
     def test_unverified_segment_opening_false_cannot_trigger_hard_negative(self):
         result = self._default_visible_damage_case(video_overrides={
@@ -1509,7 +2254,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         })
 
-        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-NONCOMPLIANT-OPENING-VIDEO")
 
     def test_supplemental_later_state_does_not_become_main_video_positive(self):
         result = self._default_visible_damage_case(
@@ -1606,7 +2351,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
         self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertFalse(result["decision_policy_audit"]["applied"])
 
-    def test_confirmed_damage_fact_is_preserved_but_long_absence_fails_opening_sop(self):
+    def test_confirmed_damage_fact_is_preserved_but_long_absence_requests_more_material(self):
         result = self._complete_no_damage_case(
             policy_overrides={"noncompliant_opening_video": "negative"},
             parsed_overrides={
@@ -1623,6 +2368,11 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                         "subject_id": "claimed_item",
                         "visibility_coverage": 0.6,
                         "longest_out_of_frame_seconds": 8.0,
+                        "out_of_frame_events": [{
+                            "duration_seconds": 8.0,
+                            "within_required_display_window": True,
+                            "identity_reestablished": False,
+                        }],
                     }],
                 },
                 "video_audit_conclusion": {
@@ -1633,8 +2383,8 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         )
         audit = result["decision_policy_audit"]
-        self.assertEqual(audit.get("rule_id"), "PD-N-NONCOMPLIANT-OPENING-VIDEO")
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
+        self.assertEqual(audit.get("rule_id"), "PD-R-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
         self.assertEqual(
             result["agent_report"]["parsed"]["damage_causality_assessment"]["damage_presence"],
             "confirmed",
@@ -1644,7 +2394,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             8.0,
         )
 
-    def test_complete_reference_anchored_timeline_without_claimed_item_recommends_negative(self):
+    def test_complete_reference_anchored_timeline_without_claimed_item_requests_more_material(self):
         result = self._complete_no_damage_case(
             policy_overrides={"noncompliant_opening_video": "negative"},
             parsed_overrides={
@@ -1668,10 +2418,10 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
-        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-CLAIMED-ITEM-NOT-SHOWN")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-CLAIMED-ITEM-NOT-SHOWN")
 
-    def test_unresolved_long_absence_on_complete_reference_timeline_is_noncompliant(self):
+    def test_unresolved_long_absence_on_complete_reference_timeline_requests_more_material(self):
         result = self._complete_no_damage_case(
             policy_overrides={"noncompliant_opening_video": "negative"},
             parsed_overrides={
@@ -1698,10 +2448,10 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["summary"]["predicted_label"], "negative")
-        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-N-NONCOMPLIANT-OPENING-VIDEO")
+        self.assertEqual(result["summary"]["predicted_label"], "review")
+        self.assertEqual(result["decision_policy_audit"]["rule_id"], "PD-R-NONCOMPLIANT-OPENING-VIDEO")
 
-    def test_617341_explicit_versioned_policy_can_recommend_negative(self):
+    def test_617341_retired_negative_policy_cannot_be_reactivated(self):
         metadata = ReviewCaseMetadata.model_validate(
             {
                 "client_case_id": "case-617341",
@@ -1725,13 +2475,10 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
             review(),
         )
         parsed = result["agent_report"]["parsed"]
-        self.assertEqual(parsed["predicted_label"], "negative")
-        self.assertEqual(parsed["decision_policy_audit"]["rule_id"], "PD-N-OPENING-VIDEO-REQUIRED")
-        self.assertFalse(parsed["business_action_allowed"])
-        self.assertTrue(parsed["human_required_for_business_action"])
-        self.assertIn("必须提交开箱视频", parsed["overall_audit"]["conclusion"])
-        self.assertIn("视觉证明商品无损", parsed["overall_audit"]["core_reason"])
-        self.assertIn("必须提交开箱视频", result["agent_brief"]["conclusion"])
+        self.assertEqual(parsed["predicted_label"], "review")
+        self.assertEqual(parsed["decision_policy_audit"]["policy_source"], "retired")
+        self.assertFalse(parsed["decision_policy_audit"]["applied"])
+        self.assertIn("已停用", parsed["decision_policy_audit"]["reason"])
 
     def test_missing_closeup_does_not_erase_clear_no_damage_sop_recommendation(self):
         metadata = ReviewCaseMetadata.model_validate(
@@ -1805,7 +2552,6 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                     "require_fully_observable": False,
                     "require_claimed_region_closeup": False,
                     "minimum_required_view_coverage": 0.8,
-                    "max_unobserved_seconds": 12.0,
                 },
             }
         ).model_dump(mode="json")
@@ -1874,7 +2620,6 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                     "require_continuity_complete": True,
                     "require_fully_observable": True,
                     "require_claimed_region_closeup": True,
-                    "max_unobserved_seconds": 0.0,
                     "require_media_forensics": True,
                 },
             }
@@ -2001,7 +2746,6 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                     "require_fully_observable": False,
                     "require_claimed_region_closeup": False,
                     "minimum_required_view_coverage": 0.8,
-                    "max_unobserved_seconds": 12.0,
                 },
             }
         ).model_dump(mode="json")
@@ -2087,9 +2831,7 @@ class ReviewDecisionPolicy0717Test(unittest.TestCase):
                 "claim_scope": {"split_status": "ambiguous"},
                 "decision_policy": {
                     "mode": "classification_recommendation",
-                    "policy_ref": "MITAKO-PD-MISSING-OPENING@20260717.1",
-                    "opening_video_required": True,
-                    "missing_required_opening_video": "negative",
+                    "policy_ref": DEFAULT_PRODUCT_DAMAGE_POLICY_REF,
                 },
             }
         ).model_dump(mode="json")

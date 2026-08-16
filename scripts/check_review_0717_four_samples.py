@@ -117,7 +117,6 @@ def metadata(case_id: str, claim: str, preset: str, run_id: str) -> Dict[str, An
             "forensic_checks": True,
         },
         "continuity_policy": {
-            "out_of_frame_warning_seconds": 2.0,
             "require_identity_reestablishment": True,
         },
         "damage_causality_policy": {"dedicated_chunk_frames": 20, "context_frames": 6},

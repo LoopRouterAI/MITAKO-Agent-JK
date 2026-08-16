@@ -6,6 +6,8 @@ import os
 from typing import Any, Dict, Iterable, List, Tuple
 from urllib.parse import quote, urlsplit
 
+from configs.model_catalog import MODEL_CONFIGS
+
 
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
@@ -20,11 +22,18 @@ def _first_env(names: Iterable[str]) -> str:
 
 
 def resolve_gemini_model(model: str = "") -> str:
-    return (
-        str(model or "").strip()
-        or _first_env(("VISUAL_REVIEW_PRIMARY_MODEL", "GEMINI_MODEL"))
-        or DEFAULT_GEMINI_MODEL
+    supported = {
+        str(config.get("model") or "").strip()
+        for config in MODEL_CONFIGS.values()
+        if str(config.get("model") or "").strip()
+    }
+    candidates = (
+        str(model or "").strip(),
+        os.getenv("VISUAL_REVIEW_PRIMARY_MODEL", "").strip(),
+        os.getenv("GEMINI_MODEL", "").strip(),
+        DEFAULT_GEMINI_MODEL,
     )
+    return next((candidate for candidate in candidates if candidate in supported), DEFAULT_GEMINI_MODEL)
 
 
 def endpoint_vendor_hint(endpoint: str) -> str:

@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env", override=False)
 
+from poc.visual_review_poc.media_preflight import resolve_runtime_temp_dir
 from review_service.media_forensics import inspect_job_media, resolve_ffprobe
 
 
@@ -49,12 +50,14 @@ def main() -> int:
     else:
         checks.append({"name": "ffprobe_executable", "ok": False, "reason": "ffprobe_not_available"})
 
-    usage = shutil.disk_usage(Path.cwd())
+    runtime_dir = resolve_runtime_temp_dir(ROOT)
+    usage = shutil.disk_usage(runtime_dir)
     minimum_free = args.minimum_free_mb * 1024 * 1024
     checks.append(
         {
             "name": "storage_headroom",
             "ok": usage.free >= minimum_free,
+            "checked_path": str(runtime_dir),
             "free_bytes": usage.free,
             "minimum_free_bytes": minimum_free,
         }

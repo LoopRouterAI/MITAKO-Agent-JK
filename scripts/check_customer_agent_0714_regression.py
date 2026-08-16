@@ -270,7 +270,7 @@ async def run() -> Dict[str, Any]:
     record("普通问答不插入无关流程卡", general_card is None, general_card)
 
     review_task_id = "RV-0714-REGRESSION"
-    if not private_domain_store.get_review_task(review_task_id):
+    if not private_domain_store.get_review_task(review_task_id, tenant_id="mitako"):
         private_domain_store.create_review_task({
             "task_id": review_task_id,
             "user_id": "usr_006",
@@ -287,7 +287,7 @@ async def run() -> Dict[str, Any]:
                 "summary": {"confidence": 0.91, "needs_human_review": False},
                 "report": {"html_url": "/reports/RV-0714-REGRESSION.html"},
             },
-        })
+        }, tenant_id="mitako")
     review_context = _recent_review_attachments(
         "usr_006", "regression_0714_review", "mitako", "之前视频审核结果和置信度是什么"
     )

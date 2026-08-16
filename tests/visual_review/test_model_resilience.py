@@ -312,6 +312,31 @@ class ModelResilienceTest(unittest.TestCase):
         )
         sleep.assert_called_once_with(1.25)
 
+    def test_http_retry_treats_baidu_gcs_stream_error_as_transient(self) -> None:
+        from poc.visual_review_poc import model_selection_e2e as selection
+
+        responses = [
+            _Response(
+                400,
+                text=(
+                    "failed to process file_data URI: upload to GCS failed: "
+                    "stream ID 1; INTERNAL_ERROR"
+                ),
+            ),
+            _Response(200, data={"ok": True}),
+        ]
+        with patch.object(selection.httpx, "Client", return_value=_Client(responses)), patch.object(
+            selection.random, "uniform", return_value=0.25
+        ), patch.object(selection.time, "sleep") as sleep:
+            result = selection.post_with_retries("https://example.invalid", {}, {}, 10, 1)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            [item["outcome"] for item in result["request_attempts"]],
+            ["failed", "success"],
+        )
+        sleep.assert_called_once_with(1.25)
+
     def test_success_after_http_retry_reports_partial_unknown_cost(self) -> None:
         from poc.visual_review_poc import model_selection_e2e as selection
 
@@ -346,7 +371,9 @@ class ModelResilienceTest(unittest.TestCase):
             selection,
             "gemini_request_options",
             return_value=[{"channel": "baidu", "endpoint": "https://example.invalid", "headers": {}}],
-        ), patch.object(selection, "post_with_retries", return_value=response):
+        ), patch.object(selection, "post_with_retries", return_value=response), patch.object(
+            selection, "validate_model_response", return_value={}
+        ):
             result = selection.call_model(cfg, case, timeout=1, retries=1)
 
         self.assertEqual(result["status"], "success")
@@ -473,7 +500,11 @@ class ModelResilienceTest(unittest.TestCase):
             "scenario": "product_damage",
             "structured_business_context": {},
             "model_frames_per_call": 1,
-            "frames": [{"global_frame_index": 1}, {"global_frame_index": 2}],
+            "frames": [
+                {"global_frame_index": 1},
+                {"global_frame_index": 2},
+                {"global_frame_index": 3},
+            ],
             "supplemental_images": [],
             "official_reference_images": [],
         }

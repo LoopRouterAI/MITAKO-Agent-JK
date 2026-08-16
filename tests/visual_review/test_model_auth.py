@@ -71,12 +71,12 @@ class ModelAuthTest(unittest.TestCase):
         }
         with patch.dict("os.environ", env, clear=True):
             channel = gemini_channels()[0]
-            option = gemini_request_options({"model": "gemini-3.5-flash"})[0]
+            option = gemini_request_options({"model": "gemini-3.7-flash"})[0]
 
         self.assertEqual(channel["headers"]["Authorization"], "Bearer gateway-secret")
         self.assertNotIn("x-goog-api-key", channel["headers"])
         self.assertEqual(option["headers"]["Authorization"], "Bearer gateway-secret")
-        self.assertTrue(option["endpoint"].endswith("/v1beta/models/gemini-3.5-flash:generateContent"))
+        self.assertTrue(option["endpoint"].endswith("/v1beta/models/gemini-3.7-flash:generateContent"))
 
     def test_gemini_named_credentials_are_labeled_by_baidu_endpoint(self):
         from poc.visual_review_poc.model_auth import gemini_channel_options
@@ -160,15 +160,16 @@ class ModelAuthTest(unittest.TestCase):
             "os.environ",
             {
                 **gateway,
-                "VISUAL_REVIEW_PRIMARY_MODEL": "visual-primary-model",
-                "GEMINI_MODEL": "gemini-model",
+                "VISUAL_REVIEW_PRIMARY_MODEL": "gemini-3.5-flash-lite",
+                "GEMINI_MODEL": "gemini-3.7-flash",
             },
             clear=True,
         ):
-            self.assertEqual(gemini_channel_options("explicit-model")[0]["model"], "explicit-model")
-            self.assertEqual(gemini_channel_options()[0]["model"], "visual-primary-model")
-        with patch.dict("os.environ", {**gateway, "GEMINI_MODEL": "gemini-model"}, clear=True):
-            self.assertEqual(gemini_channel_options()[0]["model"], "gemini-model")
+            self.assertEqual(gemini_channel_options("gemini-3.7-flash")[0]["model"], "gemini-3.7-flash")
+            self.assertEqual(gemini_channel_options()[0]["model"], "gemini-3.5-flash-lite")
+            self.assertEqual(gemini_channel_options("unsupported-model")[0]["model"], "gemini-3.5-flash-lite")
+        with patch.dict("os.environ", {**gateway, "GEMINI_MODEL": "gemini-3.7-flash"}, clear=True):
+            self.assertEqual(gemini_channel_options()[0]["model"], "gemini-3.7-flash")
         with patch.dict("os.environ", gateway, clear=True):
             self.assertEqual(gemini_channel_options()[0]["model"], "gemini-3.5-flash-lite")
 
@@ -266,17 +267,19 @@ class ModelAuthTest(unittest.TestCase):
             "GEMINI_MODEL": "gemini-3.5-flash-lite",
         }
         with patch.dict("os.environ", env, clear=True):
-            self.assertEqual(resolver(), "gemini-3.5-flash")
+            self.assertEqual(resolver(), "gemini-3.5-flash-lite")
             self.assertEqual(resolver("gemini-3.5-flash-lite"), "gemini-3.5-flash-lite")
+            self.assertEqual(resolver("gemini-3.7-flash"), "gemini-3.7-flash")
+            self.assertEqual(resolver("gemini-3.6-flash"), "gemini-3.5-flash-lite")
             self.assertEqual(
                 estimate_cost({"input_tokens": 1_000_000, "output_tokens": 1_000_000})["estimated_usd"],
-                10.5,
+                2.8,
             )
 
     def test_failed_single_sample_report_marks_cost_unknown_or_not_incurred(self):
         from poc.visual_review_poc import local_video_triage_demo as demo
 
-        channel = {"channel": "official", "model": "gemini-3.5-flash", "soft_retries": 0}
+        channel = {"channel": "official", "model": "gemini-3.5-flash-lite", "soft_retries": 0}
         with patch.object(demo, "gemini_channels", return_value=[channel]), patch.object(
             demo,
             "post_json",
@@ -304,7 +307,7 @@ class ModelAuthTest(unittest.TestCase):
             clear=True,
         ):
             html = demo.render_html(report)
-        self.assertIn("gemini-3.5-flash 单样本审核报告", html)
+        self.assertIn("gemini-3.5-flash-lite 单样本审核报告", html)
         self.assertIn("成本未知", html)
         self.assertNotIn("$0.0", html)
 
@@ -597,7 +600,7 @@ class ModelAuthTest(unittest.TestCase):
 
         with patch.object(selection, "gemini_request_options", return_value=options), patch.object(
             selection, "post_with_retries", return_value=response
-        ) as post:
+        ) as post, patch.object(selection, "validate_model_response", return_value={}):
             result = selection.call_model(cfg, case, timeout=30, retries=0)
 
         self.assertEqual(result["status"], "success")
@@ -685,8 +688,10 @@ class ModelAuthTest(unittest.TestCase):
         }
         with patch.dict("os.environ", gateway, clear=True):
             self.assertEqual(gemini_channels()[0]["model"], "gemini-3.5-flash-lite")
+        with patch.dict("os.environ", {**gateway, "GEMINI_MODEL": "gemini-3.7-flash"}, clear=True):
+            self.assertEqual(gemini_channels()[0]["model"], "gemini-3.7-flash")
         with patch.dict("os.environ", {**gateway, "GEMINI_MODEL": "gemini-custom"}, clear=True):
-            self.assertEqual(gemini_channels()[0]["model"], "gemini-custom")
+            self.assertEqual(gemini_channels()[0]["model"], "gemini-3.5-flash-lite")
 
     def test_flash_lite_single_sample_cost_uses_its_own_price(self):
         from poc.visual_review_poc.local_video_triage_demo import estimate_cost

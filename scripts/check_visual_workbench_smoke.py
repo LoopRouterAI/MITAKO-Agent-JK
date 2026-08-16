@@ -282,7 +282,9 @@ def test_workbench_api() -> None:
         image_data = image_only.json()
         assert image_data["ok"] is True, image_data
         assert image_data["review"]["summary"]["successful_reviews"] == 1, image_data
-        assert "补充图片 1 张" in image_data["review"]["frame_strategy"], image_data
+        frame_strategy = image_data["review"]["frame_strategy"]
+        assert "未提交视频" in frame_strategy, image_data
+        assert "1 张补充图片" in frame_strategy, image_data
 
         workbench_server.call_model = fake_failed
         workbench_server.call_model_chunked = fake_failed
@@ -323,10 +325,14 @@ def test_workbench_api() -> None:
         assert video_failed.status_code == 200, video_failed.text
         video_failed_data = video_failed.json()
         assert video_failed_data["ok"] is False, video_failed_data
-        assert video_failed_data["review"]["diagnostics"]["videos_received"] == 1, video_failed_data
+        assert video_failed_data["ingestion"]["video_count"] == 1, video_failed_data
+        assert video_failed_data["review"]["summary"]["successful_reviews"] == 0, video_failed_data
+        video_failed_advisory = video_failed_data["review"]["advisory_assessment"]
+        assert video_failed_advisory["assessment"]["conclusion_code"] == "technical_processing_incomplete", video_failed_data
+        assert video_failed_advisory["workflow_recommendation"] == "system_retry", video_failed_data
         video_failed_html = client.get(video_failed_data["review"]["report"]["html_url"])
         assert video_failed_html.status_code == 200, video_failed_html.text
-        for text in ("本轮失败诊断", "审核未完成", "系统复核服务繁忙"):
+        for text in ("技术处理未完成", "系统重试", "不要求用户重复"):
             assert text in video_failed_html.text, text
         assert_public_payload_clean(video_failed_data["review"])
         assert_public_payload_clean(video_failed_html.text)
@@ -350,7 +356,6 @@ def test_workbench_api() -> None:
         assert hidden_data["ingestion"]["skipped_count"] == 4, hidden_data
         reason_codes = {item["reason_code"] for item in hidden_data["ingestion"]["skipped_files"]}
         assert {"system_directory", "appledouble_file", "hidden_file", "invalid_media_content"} == reason_codes, hidden_data
-        assert hidden_data["review"]["diagnostics"]["videos_received"] == 1, hidden_data
         assert_public_payload_clean(hidden_data["review"])
 
         workbench_server.call_model = fake_unstructured
@@ -381,6 +386,7 @@ def test_model_transport_contract() -> None:
     case = {
         "case_id": "image_only_contract",
         "scenario": "product_damage",
+        "analysis_mode": "product_damage_images",
         "scenario_label": "商品有伤审核",
         "customer_claim": "用户反馈商品有划痕",
         "order_context": {},
@@ -404,13 +410,41 @@ def test_model_transport_contract() -> None:
 
     def fake_post(endpoint, headers, payload, timeout, retries, deadline_at=None):
         captured["payload"] = payload
+        parsed = {
+            "claimed_item_assessment": {
+                "identity_description": "订单商品与补充特写中的主体外观一致。",
+                "identity_confidence": 0.9,
+                "same_item_linkage": True,
+                "reason": "可见外观特征一致。",
+            },
+            "atomic_claim_results": [{
+                "claim_id": "claim-1",
+                "subject_ref": "supplemental_image_1",
+                "location": "商品表面",
+                "damage_type": "表面痕迹",
+                "supplemental_visibility": "visible",
+                "same_item_linkage": True,
+                "damage_presence": "confirmed",
+                "severity_level": "minor",
+                "severity_confidence": 0.8,
+                "structural_failure": False,
+                "conflicting_evidence": False,
+                "reason": "补充特写可见表面痕迹，但静态图片不能证明形成时点。",
+            }],
+            "evidence_refs": [{
+                "field": "supplemental_damage_visible",
+                "claim_id": "claim-1",
+                "asset_ref": "supplemental_image_1",
+                "fact": "补充特写可见商品表面痕迹。",
+            }],
+        }
         return {
             "ok": True,
             "status_code": 200,
             "latency_seconds": 0.01,
             "attempt": 1,
             "data": {
-                "candidates": [{"content": {"parts": [{"text": json.dumps({"predicted_label": "positive", "system_yes_no": "YES", "confidence": 0.9}, ensure_ascii=False)}]}}],
+                "candidates": [{"content": {"parts": [{"text": json.dumps(parsed, ensure_ascii=False)}]}}],
                 "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 15},
             },
         }
@@ -418,7 +452,7 @@ def test_model_transport_contract() -> None:
     try:
         os.environ["VISION_REVIEW_API_KEY"] = "fake-key-for-contract-test"
         model_selection.post_with_retries = fake_post
-        result = model_selection.call_model(model_selection.MODEL_CONFIGS["gemini35"], case, timeout=1, retries=0)
+        result = model_selection.call_model(model_selection.MODEL_CONFIGS["gemini35lite"], case, timeout=1, retries=0)
         assert result["status"] == "success", result
         parts = captured["payload"]["contents"][0]["parts"]
         inline_items = [item for item in parts if "inlineData" in item]
@@ -655,7 +689,7 @@ def test_review_prompt_policy() -> None:
         "gemini": {
             "status": "success",
             "winner": {
-                "model": "gemini-3.5-flash",
+                "model": "gemini-3.5-flash-lite",
                 "latency_seconds": 1.2,
                 "usage": {"total_tokens": 100},
                 "raw_text": "{\"predicted_label\":\"negative\"}",

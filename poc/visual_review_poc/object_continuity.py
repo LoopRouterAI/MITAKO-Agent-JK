@@ -32,19 +32,30 @@ def _enum(value: Any, allowed: set[str], fallback: str) -> str:
     return normalized if normalized in allowed else fallback
 
 
-def subject_longest_out_of_frame(value: Any, subject_id: str) -> float | None:
+def subject_longest_out_of_frame(
+    value: Any,
+    subject_id: str,
+    *,
+    required_window_only: bool = False,
+) -> float | None:
     durations = []
+    subject_found = False
     for subject in (value if isinstance(value, dict) else {}).get("tracked_subjects") or []:
         if not isinstance(subject, dict) or str(subject.get("subject_id") or "") != subject_id:
             continue
-        if subject.get("longest_out_of_frame_seconds") not in (None, ""):
+        subject_found = True
+        if not required_window_only and subject.get("longest_out_of_frame_seconds") not in (None, ""):
             durations.append(_float(subject.get("longest_out_of_frame_seconds")))
         durations.extend(
             _float(event.get("duration_seconds"))
             for event in subject.get("out_of_frame_events") or []
             if isinstance(event, dict)
+            and (
+                not required_window_only
+                or event.get("within_required_display_window") is not False
+            )
         )
-    return max(durations) if durations else None
+    return max(durations) if durations else 0.0 if subject_found else None
 
 
 def _events(value: Any) -> List[Dict[str, Any]]:
@@ -169,16 +180,21 @@ def apply_object_continuity_guard(
     output = dict(result)
     if not has_video or scenario not in {"video_unboxing", "wrong_item", "missing_item", "product_damage"}:
         return output
-    policy = policy or {}
-    warning_seconds = max(0.5, _float(policy.get("out_of_frame_warning_seconds"), 3.0))
     assessment = normalize_object_continuity(output.get("object_continuity_assessment"))
     assessment["policy"] = {
-        "out_of_frame_warning_seconds": warning_seconds,
-        "effect": "超过阈值建议补充连续原视频，不自动拒绝，也不单独强制人工复核",
+        "effect": "离镜时长只作证据描述；仅结合必要展示窗口和重新入镜身份判断，不按统一秒数补件或判负",
     }
     output["object_continuity_assessment"] = assessment
     relevant_subject_id = "claimed_item" if scenario == "product_damage" else ""
-    relevant_absence = subject_longest_out_of_frame(assessment, relevant_subject_id) if relevant_subject_id else None
+    relevant_absence = (
+        subject_longest_out_of_frame(
+            assessment,
+            relevant_subject_id,
+            required_window_only=True,
+        )
+        if relevant_subject_id
+        else None
+    )
     relevant_absence = assessment["longest_out_of_frame_seconds"] if relevant_absence is None else relevant_absence
     assessment["relevant_subject_id"] = relevant_subject_id or "all_tracked_subjects"
     assessment["relevant_longest_out_of_frame_seconds"] = relevant_absence
@@ -190,17 +206,18 @@ def apply_object_continuity_guard(
         if _confirmed_damage_fact(output, scenario):
             return _preserve_damage_fact_with_warning(output, "争议商品连续性仍不确定")
         return _review_output(output, "主体连续性结论不确定，需要查看原视频和离镜时间点。")
-    if relevant_absence >= warning_seconds:
-        output["continuity_recommendation"] = "request_more_material"
+    if relevant_absence > 0:
+        output["continuity_recommendation"] = "continue_with_warning"
         output["continuity_requires_human_review"] = False
         output["continuity_guard_reason"] = (
             f"检测到当前审核主体最长连续离镜/不可观察 {relevant_absence:.2f} 秒，"
-            f"达到 {warning_seconds:.2f} 秒补件阈值；该信号不能单独证明调包、剪辑或欺诈。"
+            "该时长只作黄色证据提示，需结合是否处于必要展示窗口及重新入镜身份判断；"
+            "不能单独证明调包、剪辑或欺诈，也不自动要求补件。"
         )
         return output
     output["continuity_recommendation"] = "continue_with_warning" if relevant_absence > 0 else "continue"
     output["continuity_requires_human_review"] = False
-    output["continuity_guard_reason"] = "已按主体输出连续性时间轴，未超过配置的离镜复核阈值。"
+    output["continuity_guard_reason"] = "已按主体输出连续性时间轴，本轮没有需要提示的离镜区间。"
     return output
 
 
@@ -323,6 +340,7 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
                     "duration_upper_bound_seconds": round(upper_bound, 3) if upper_bound is not None else None,
                     "sampling_resolution_seconds": round(max(boundary_gaps), 3),
                     "visibility": "out_of_frame",
+                    "within_required_display_window": None,
                     "before_evidence": before,
                     "out_of_frame_evidence": start,
                     "after_evidence": item,
@@ -355,6 +373,7 @@ def _derived_subject(video_index: int, subject_id: str, rows: List[Dict[str, Any
                     else None
                 ),
                 "visibility": "out_of_frame",
+                "within_required_display_window": None,
                 "before_evidence": before,
                 "out_of_frame_evidence": start,
                 "after_evidence": None,
@@ -421,23 +440,31 @@ def aggregate_object_continuity(
     derived_subjects = [item for item in derived if item]
     subjects = derived_subjects or [subject for item in assessments for subject in item.get("tracked_subjects") or []]
     longest = max((subject.get("longest_out_of_frame_seconds") or 0 for subject in subjects), default=0.0)
-    warning_seconds = max(0.5, _float((policy or {}).get("out_of_frame_warning_seconds"), 3.0))
     verdicts = {item["continuity_verdict"] for item in assessments}
     events = [
         event
         for subject in subjects
         for event in subject.get("out_of_frame_events") or []
     ]
-    trailing_absence = any(
+    required_window_events = [
+        event for event in events
+        if event.get("within_required_display_window") is True
+    ]
+    unresolved_required_window = any(
+        event.get("identity_reestablished") is not True
+        for event in required_window_events
+    )
+    trailing_unscoped_absence = any(
         event.get("source") == "deterministic_frame_timeline"
         and event.get("after_evidence") is None
+        and event.get("within_required_display_window") is not False
         for event in events
     )
-    if trailing_absence:
+    if trailing_unscoped_absence:
         verdict = "indeterminate"
-    elif longest >= warning_seconds:
+    elif unresolved_required_window:
         verdict = "long_absence"
-    elif events:
+    elif required_window_events or events:
         verdict = "brief_occlusion"
     elif derived_subjects:
         verdict = "continuous"
@@ -445,6 +472,8 @@ def aggregate_object_continuity(
         verdict = "indeterminate"
     elif "brief_occlusion" in verdicts:
         verdict = "brief_occlusion"
+    elif "long_absence" in verdicts:
+        verdict = "indeterminate"
     else:
         verdict = "continuous"
     return normalize_object_continuity(

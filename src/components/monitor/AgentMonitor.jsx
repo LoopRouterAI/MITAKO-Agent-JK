@@ -235,13 +235,14 @@ export default function AgentMonitor({
                 <button
                   type="button"
                   role="switch"
+                  aria-label={t('monitor.streamReply')}
                   aria-checked={streamReplyEnabled}
                   onClick={() => onStreamReplyChange(!streamReplyEnabled)}
-                  className={`relative h-6 w-11 flex-shrink-0 rounded-full border-2 border-slate-950 transition-colors focus-visible:ring-2 focus-visible:ring-[var(--mitako-lime)] ${
+                  className={`relative h-11 w-14 flex-shrink-0 rounded-[8px] border-2 border-slate-950 transition-colors focus-visible:ring-2 focus-visible:ring-[var(--mitako-lime)] ${
                     streamReplyEnabled ? 'bg-[var(--mitako-lime)]' : 'bg-slate-300'
                   }`}
                 >
-                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                  <span className={`absolute left-1 top-2 h-6 w-6 rounded-[8px] bg-white shadow transition-transform ${
                     streamReplyEnabled ? 'translate-x-5' : 'translate-x-0'
                   }`} />
                 </button>
@@ -277,12 +278,12 @@ export default function AgentMonitor({
       <div className="grid flex-shrink-0 grid-cols-2 gap-2 border-b-2 border-slate-950 bg-slate-50 px-3 py-2">
         <div>
           <span className="text-xs font-black uppercase text-slate-500">{t('monitor.intentLabel')}</span>
-          <div className="mt-0.5 truncate rounded-lg border border-slate-950 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700">{monitorIntent}</div>
+          <div className="mt-0.5 line-clamp-2 break-words rounded-lg border border-slate-950 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700">{monitorIntent}</div>
         </div>
         <div>
           <span className="text-xs font-black uppercase text-slate-500">{t('monitor.emotionLabel')}</span>
           <div className="mt-0.5 flex items-center justify-between gap-1 rounded-lg border border-slate-950 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700">
-            <span className="truncate">{monitorEmotion}</span>
+            <span className="line-clamp-2 break-words">{monitorEmotion}</span>
             <span className={`h-2 w-2 flex-shrink-0 rounded-full ${emotionDotClass}`} style={emotionDotStyle} />
           </div>
         </div>
@@ -301,7 +302,7 @@ export default function AgentMonitor({
             role="tab"
             id={`tab-${tab.id}`}
             aria-selected={activeTab === tab.id}
-            aria-controls={`tabpanel-${tab.id}`}
+            aria-controls="monitor-tabpanel"
             onClick={() => setActiveTab(tab.id)}
             className={`flex-1 border-b-2 py-2 font-black transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--mitako-lime)] ${
               activeTab === tab.id ? 'border-slate-950 bg-[var(--mitako-lime)] text-slate-950' : 'border-transparent text-slate-500'
@@ -312,7 +313,7 @@ export default function AgentMonitor({
         ))}
       </div>
 
-      <div className="min-h-0 overflow-hidden bg-white">
+      <div id="monitor-tabpanel" role="tabpanel" aria-labelledby={`tab-${activeTab}`} tabIndex={0} className="min-h-0 overflow-hidden bg-white">
         {activeTab === 'reasoning' ? (
           <ApiLogPanel
             apiLogs={apiLogs}

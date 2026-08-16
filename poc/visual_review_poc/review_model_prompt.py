@@ -3,9 +3,11 @@
 from prompts.visual_review.review_model_prompt import (
     build_claim_identity_prompt,
     build_claimed_item_detail_prompt,
+    build_fulfillment_observation_prompt,
     build_native_video_perception_prompt,
     build_opening_compliance_prompt,
     build_opening_start_prompt,
+    build_product_damage_image_prompt,
     build_sampled_video_batch_prompt,
     build_sampled_video_reduce_prompt,
     build_selection_prompt,
@@ -14,9 +16,11 @@ from prompts.visual_review.review_model_prompt import (
 __all__ = [
     "build_claim_identity_prompt",
     "build_claimed_item_detail_prompt",
+    "build_fulfillment_observation_prompt",
     "build_native_video_perception_prompt",
     "build_opening_compliance_prompt",
     "build_opening_start_prompt",
+    "build_product_damage_image_prompt",
     "build_sampled_video_batch_prompt",
     "build_sampled_video_reduce_prompt",
     "build_selection_prompt",

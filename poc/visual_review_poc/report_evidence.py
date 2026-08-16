@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -32,7 +33,16 @@ def _readable_fact(value: Any) -> str:
         parts = [_readable_fact(item) for item in value]
         return "；".join(dict.fromkeys(part for part in parts if part))
     if not isinstance(value, dict):
-        return str(value)
+        text = str(value).strip()
+        if text.startswith(("{", "[")):
+            try:
+                decoded = json.loads(text)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return text
+            if isinstance(decoded, (dict, list)):
+                readable = _readable_fact(decoded).strip()
+                return readable or "结构化证据未附可读事实说明"
+        return text
 
     subject = str(
         value.get("subject")
@@ -217,6 +227,18 @@ def _summary_evidence_items(parsed: Dict[str, Any]) -> List[Dict[str, Any]]:
         value = parsed.get(key)
         if isinstance(value, list):
             candidates.extend(value)
+    fulfillment = parsed.get("fulfillment_reconciliation")
+    if isinstance(fulfillment, dict):
+        for key in (
+            "observed_items",
+            "unexpected_items",
+            "suspected_missing_items",
+            "unconfirmed_items",
+            "package_observations",
+        ):
+            for item in fulfillment.get(key) or []:
+                if isinstance(item, dict) and isinstance(item.get("evidence_refs"), list):
+                    candidates.extend(item["evidence_refs"])
     return _merge_evidence_items(candidates)
 
 
@@ -373,17 +395,27 @@ def _evidence_items(
             preview_seconds = _timestamp_key(media.get("timestamp") or item.get("timestamp"))
             video_link = (
                 f'<button class="jump preview-trigger" type="button" data-preview-kind="video" '
+                f'aria-label="预览原视频 {_h(media.get("timestamp") or item.get("timestamp") or "")}" '
                 f'data-preview-src="{_h(media.get("video_url"))}" data-preview-seconds="{_h(preview_seconds)}" '
                 f'data-preview-title="原视频 {_h(media.get("timestamp") or item.get("timestamp") or "")}">'
                 f'预览原视频 {_h(media.get("timestamp") or item.get("timestamp") or "")}</button>'
             )
         if not media.get("url"):
             return f'<div class="evidence-media">{video_link}</div>'
+        preview_index = (
+            media.get("image_index") or media.get("reference_index")
+            or image_key or reference_key
+        )
+        preview_label = (
+            media.get("file") or media.get("timestamp") or item.get("timestamp")
+            or (f"{media_label} {preview_index}" if preview_index not in (None, "") else media_label)
+        )
         return (
             '<div class="evidence-media">'
             f'<button class="thumb preview-trigger" type="button" data-preview-kind="image" '
-            f'data-preview-src="{_h(media.get("url"))}" data-preview-title="{_h(media.get("file") or media_label)}">'
-            f'<img src="{_h(media.get("url"))}" alt="{_h(media.get("file") or "证据素材")}"></button>'
+            f'aria-label="预览{_h(preview_label)}" data-preview-src="{_h(media.get("url"))}" '
+            f'data-preview-title="{_h(preview_label)}">'
+            f'<img src="{_h(media.get("url"))}" alt="{_h(preview_label)}"></button>'
             f"{video_link}</div>"
         )
 
@@ -419,11 +451,20 @@ def _gallery_items(items: List[Dict[str, Any]], kind: str) -> str:
     for item in visible_items:
         if not item.get("url"):
             continue
-        subtitle = item.get("timestamp") or item.get("file") or "-"
+        item_index = next(
+            (item.get(key) for key in ("image_index", "reference_index", "global_frame_index", "frame_index")
+             if item.get(key) not in (None, "")),
+            None,
+        )
+        subtitle = (
+            item.get("timestamp") or item.get("file")
+            or (f"{kind} {item_index}" if item_index is not None else kind)
+        )
         video_link = ""
         if item.get("video_url"):
             video_link = (
                 f'<button class="inline-preview preview-trigger" type="button" data-preview-kind="video" '
+                f'aria-label="预览视频时间点 {_h(item.get("timestamp") or "")}" '
                 f'data-preview-src="{_h(item.get("video_url"))}" data-preview-seconds="{_h(_timestamp_key(item.get("timestamp")))}" '
                 f'data-preview-title="视频时间点 {_h(item.get("timestamp") or "")}">预览视频时间点</button>'
             )
@@ -432,8 +473,9 @@ def _gallery_items(items: List[Dict[str, Any]], kind: str) -> str:
         html_items.append(
             f'<figure class="media-tile"{anchor}>'
             f'<button class="preview-trigger" type="button" data-preview-kind="image" '
-            f'data-preview-src="{_h(item.get("url"))}" data-preview-title="{_h(item.get("file") or kind)}">'
-            f'<img src="{_h(item.get("url"))}" alt="{_h(item.get("file") or kind)}"></button>'
+            f'aria-label="预览{_h(kind)}：{_h(subtitle)}" data-preview-src="{_h(item.get("url"))}" '
+            f'data-preview-title="{_h(item.get("file") or subtitle)}">'
+            f'<img src="{_h(item.get("url"))}" alt="{_h(item.get("file") or subtitle)}"></button>'
             f"<figcaption><b>{_h(kind)}</b><span>{_h(subtitle)}</span>{video_link}</figcaption>"
             "</figure>"
         )

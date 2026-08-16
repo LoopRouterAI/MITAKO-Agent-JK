@@ -7,8 +7,10 @@ import json
 import logging
 import re
 import subprocess
+import ssl
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -97,7 +99,7 @@ class SecureMediaTunnelTest(unittest.TestCase):
                         f"http://127.0.0.1:{tunnel.diagnostics['bind_port']}"
                         f"{public.path}"
                     )
-                    with httpx.Client(timeout=2) as client:
+                    with httpx.Client(timeout=2, trust_env=False) as client:
                         full = client.get(local_url)
                         head = client.head(local_url)
                         ranged = client.get(local_url, headers={"Range": "bytes=2-5"})
@@ -182,6 +184,30 @@ class SecureMediaTunnelTest(unittest.TestCase):
                 self.assertEqual(len(attempts), 3)
                 self.assertEqual(tunnel.diagnostics["public_probe_attempts"], 3)
                 self.assertEqual(urlsplit(attempts[-1][0]).hostname, "dns-race.trycloudflare.com")
+
+    def test_local_tls_eof_is_reported_without_reopening_the_tunnel(self) -> None:
+        module = load_module()
+        process = FakeCloudflaredProcess("https://tls-loopback.trycloudflare.com\n")
+        attempts = []
+
+        def probe(_url: str, _timeout: float) -> None:
+            attempts.append(True)
+            raise urllib.error.URLError(ssl.SSLEOFError(8, "unexpected eof"))
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            module.time, "sleep", return_value=None
+        ):
+            media = Path(temp_dir) / "evidence.webm"
+            media.write_bytes(b"video")
+            with module.open_secure_media_tunnel(
+                media,
+                process_factory=ProcessFactory(process),
+                readiness_probe=probe,
+                startup_timeout=2,
+            ) as tunnel:
+                self.assertEqual(len(attempts), 3)
+                self.assertEqual(tunnel.diagnostics["public_probe_status"], "local_tls_unavailable")
+
 
     def test_missing_trycloudflare_url_fails_closed_and_terminates_process(self) -> None:
         module = load_module()

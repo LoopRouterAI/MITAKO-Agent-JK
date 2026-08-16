@@ -60,7 +60,6 @@ class ObjectContinuityTest(unittest.TestCase):
             },
             "product_damage",
             True,
-            {"out_of_frame_warning_seconds": 3.0},
         )
 
         self.assertEqual(result["predicted_label"], "positive")
@@ -95,7 +94,7 @@ class ObjectContinuityTest(unittest.TestCase):
         self.assertEqual(result["continuity_recommendation"], "continue_with_warning")
         self.assertIn("不覆盖已确认的可见伤情", result["continuity_guard_reason"])
 
-    def test_configurable_long_absence_preserves_label_and_requests_more_material(self):
+    def test_absence_duration_alone_preserves_label_without_requesting_material(self):
         result = apply_object_continuity_guard(
             {
                 "predicted_label": "positive",
@@ -104,14 +103,14 @@ class ObjectContinuityTest(unittest.TestCase):
             },
             "product_damage",
             True,
-            {"out_of_frame_warning_seconds": 2.0},
         )
         self.assertEqual(result["predicted_label"], "positive")
-        self.assertEqual(result["continuity_recommendation"], "request_more_material")
+        self.assertEqual(result["continuity_recommendation"], "continue_with_warning")
         self.assertFalse(result["continuity_requires_human_review"])
         self.assertIn("3.00 秒", result["continuity_guard_reason"])
+        self.assertNotIn("补件阈值", result["continuity_guard_reason"])
 
-    def test_brief_occlusion_within_threshold_preserves_label(self):
+    def test_brief_occlusion_preserves_label(self):
         result = apply_object_continuity_guard(
             {
                 "predicted_label": "positive",
@@ -120,15 +119,55 @@ class ObjectContinuityTest(unittest.TestCase):
             },
             "product_damage",
             True,
-            {"out_of_frame_warning_seconds": 2.0},
         )
         self.assertEqual(result["predicted_label"], "positive")
 
+    def test_absence_outside_required_display_window_is_not_a_claimed_item_warning(self):
+        assessment = continuity("long_absence", 18.0)
+        assessment["tracked_subjects"][0]["out_of_frame_events"][0].update(
+            {
+                "within_required_display_window": False,
+                "identity_reestablished": False,
+            }
+        )
+
+        result = apply_object_continuity_guard(
+            {
+                "predicted_label": "positive",
+                "confidence": 0.9,
+                "object_continuity_assessment": assessment,
+            },
+            "product_damage",
+            True,
+        )
+
+        self.assertEqual(result["predicted_label"], "positive")
+        self.assertEqual(result["continuity_recommendation"], "continue")
+        self.assertEqual(
+            result["object_continuity_assessment"]["relevant_longest_out_of_frame_seconds"],
+            0.0,
+        )
+
+    def test_aggregation_does_not_turn_elapsed_seconds_into_long_absence(self):
+        combined = aggregate_object_continuity(
+            [{"object_continuity_assessment": continuity("brief_occlusion", 18.0)}]
+        )
+
+        self.assertEqual(combined["continuity_verdict"], "brief_occlusion")
+        self.assertEqual(combined["longest_out_of_frame_seconds"], 18.0)
+
     def test_chunk_aggregation_keeps_longest_absence(self):
+        unresolved = continuity("long_absence", 5.5)
+        unresolved["tracked_subjects"][0]["out_of_frame_events"][0].update(
+            {
+                "within_required_display_window": True,
+                "identity_reestablished": False,
+            }
+        )
         combined = aggregate_object_continuity(
             [
                 {"object_continuity_assessment": continuity("continuous", 0.0)},
-                {"object_continuity_assessment": continuity("long_absence", 5.5)},
+                {"object_continuity_assessment": unresolved},
             ]
         )
         self.assertEqual(combined["continuity_verdict"], "long_absence")
@@ -237,12 +276,11 @@ class ObjectContinuityTest(unittest.TestCase):
             {"video_index": 1, "global_frame_index": 2, "timestamp": "00:00.50", "source_timestamp": "00:20.50"},
             {"video_index": 1, "global_frame_index": 3, "timestamp": "00:01.00", "source_timestamp": "00:21.00"},
         ]
-        combined = aggregate_object_continuity([{"frame_findings": findings}], frames, {"out_of_frame_warning_seconds": 2.0})
+        combined = aggregate_object_continuity([{"frame_findings": findings}], frames)
         guarded = apply_object_continuity_guard(
             {"predicted_label": "positive", "confidence": 0.9, "object_continuity_assessment": combined},
             "wrong_item",
             True,
-            {"out_of_frame_warning_seconds": 2.0},
         )
         self.assertEqual(combined["continuity_verdict"], "brief_occlusion")
         self.assertEqual(combined["out_of_frame_events"][0]["start_timestamp"], "00:20.50")

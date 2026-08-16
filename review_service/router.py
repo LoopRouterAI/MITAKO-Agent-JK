@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import ValidationError
 
 from auth.jwt_utils import dev_auth_bypass_enabled, protected_api_auth_required
@@ -37,6 +37,11 @@ from .schemas import (
 router = APIRouter(prefix="/api/v1/review", tags=["review-service"])
 LOGGER = logging.getLogger("mitako.review_service")
 _RECOVERY_TASK: asyncio.Task | None = None
+_PRIVATE_RESPONSE_HEADERS = {
+    "Cache-Control": "private, no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+}
 
 
 def _structured_error_detail(detail: str):
@@ -219,12 +224,12 @@ async def job_report(job_id: str, user=_integration_user()):
         raise HTTPException(status_code=409, detail="review_report_not_requested")
     if job.get("status") != "SUCCEEDED":
         raise HTTPException(status_code=409, detail="review_report_not_ready")
-    return HTMLResponse(service.render_job_report(job))
+    return HTMLResponse(service.render_job_report(job), headers=_PRIVATE_RESPONSE_HEADERS)
 
 
 _BINARY_MEDIA_CONTENT = {
     media_type: {"schema": {"type": "string", "format": "binary"}}
-    for media_type in ("image/jpeg", "image/png", "image/webp", "video/mp4", "application/octet-stream")
+    for media_type in ("image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm", "application/octet-stream")
 }
 
 
@@ -260,6 +265,10 @@ async def job_media(
             raise HTTPException(status_code=404, detail="review_job_not_found")
     elif protected_api_auth_required() or not dev_auth_bypass_enabled():
         raise HTTPException(status_code=401, detail="protected_api_token_required")
+    local_media = service.resolve_job_media_path(job, media_id)
+    if local_media:
+        path, media_type = local_media
+        return FileResponse(path, media_type=media_type, headers=_PRIVATE_RESPONSE_HEADERS)
     try:
         source_url = service.resolve_job_media_url(job, media_id)
     except ValueError as exc:
@@ -291,6 +300,7 @@ async def job_media(
         for name in ("content-length", "content-range", "accept-ranges", "etag", "last-modified")
         if name in upstream.headers
     }
+    response_headers.update(_PRIVATE_RESPONSE_HEADERS)
     return StreamingResponse(
         body(),
         status_code=upstream.status_code,
