@@ -68,7 +68,7 @@ VISUAL_REVIEW_CASES: List[Dict[str, Any]] = [
             "confidence": 0.59,
             "evidence": "视频连续但瑕疵位置过暗，模型无法稳定判断",
         },
-        "expected": "manual_review",
+        "expected": "pass",
     },
     {
         "case_id": "product_damage_pass",

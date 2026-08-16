@@ -42,7 +42,7 @@ set HANDOFF_BACKEND=hybrid
 set CHATWOOT_MOCK=1
 set APP_PORT=8000
 set ALLOW_PORT_FALLBACK=0
-if "%MITAKO_JWT_SECRET%"=="" set MITAKO_JWT_SECRET=mitako-local-poc-secret-change-before-production
+if "%MITAKO_JWT_SECRET%"=="" for /f "delims=" %%S in ('venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"') do set "MITAKO_JWT_SECRET=%%S"
 set MITAKO_AUTH_REQUIRED=1
 set MITAKO_PROTECTED_API_AUTH_REQUIRED=1
 set MITAKO_DEV_AUTH_BYPASS=0

@@ -183,6 +183,7 @@ export default function App() {
 
   const handleDemoUserChange = (userId) => {
     if (userId === currentUser) return;
+    chat.prepareUserSwitch();
     setOrderPickerOpen(false);
     selectOrder(null);
     setCurrentUser(userId);
@@ -205,6 +206,7 @@ export default function App() {
       <div className={`flex-1 min-h-0 grid grid-cols-1 ${monitorOpen ? 'lg:grid-cols-12 gap-4' : ''} relative items-stretch`}>
         <div id="main-content" className={`min-h-0 flex flex-col h-full max-h-full overflow-hidden ${monitorOpen ? 'lg:col-span-7' : ''}`}>
           <ChatPanel
+            key={currentUser}
             memberLabel={memberLabel}
             orders={orders}
             activeOrderId={activeOrderId}

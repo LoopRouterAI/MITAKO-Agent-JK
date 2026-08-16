@@ -83,7 +83,7 @@ async def run_enterprise_suite() -> list[CaseResult]:
         import jwt
         token = headers.get("Authorization", "").replace("Bearer ", "")
         if not token:
-            lr = await client.post(f"{base}/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+            lr = await client.post(f"{base}/api/v1/auth/login", json={"username": "admin", "password": "admin123", "tenant_id": "mitako"})
             token = lr.json().get("token", "")
         payload = jwt.decode(token, options={"verify_signature": False}) if token else {}
         results.append(CaseResult("ENT", "admin", "JWT-tenant-claim", "tenant_id" in payload, payload.get("tenant_id", ""), int((time.time() - t0) * 1000)))

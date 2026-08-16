@@ -8,3 +8,9 @@ tmp/** export-ignore
 release/** export-ignore
 docs.7z export-ignore
 *.zip export-ignore
+dist/*.html text eol=lf
+dist/assets/*.js text eol=lf
+dist/assets/*.css text eol=lf
+index.html text eol=lf
+admin.html text eol=lf
+desk.html text eol=lf

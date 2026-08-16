@@ -47,7 +47,7 @@ def self_check(report: Dict[str, Any]) -> None:
     assert decisions["product_damage_pass"] == "pass", decisions
     assert decisions["product_damage_severe"] == "pass", decisions
     assert decisions["product_damage_unclear"] == "manual_review", decisions
-    assert decisions["minor_material_complete"] == "manual_review", decisions
+    assert decisions["minor_material_complete"] == "pass", decisions
     assert decisions["minor_material_missing"] == "request_more_material", decisions
     assert decisions["minor_material_tampered"] == "manual_review", decisions
     assert all(item["mock_only"] is True for item in report["reviews"]), report

@@ -79,28 +79,46 @@ def main() -> int:
         "/api/v1/review/jobs/{job_id}/report",
         "/api/v1/review/jobs/{job_id}/retry",
         "/api/v1/review/metrics",
+        "/api/v1/review/readiness",
     }
     missing = sorted(required_paths - paths)
     _case(results, "OPENAPI-required-paths", code == 200 and not missing, f"paths={len(paths)} missing={missing}", t0)
 
     t0 = time.time()
     schemas = openapi.get("components", {}).get("schemas", {})
-    required_schemas = ("GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata", "ReviewSamplingPolicy", "ReviewSamplingPlanRequest", "ReviewSamplingPlanResponse", "ReviewJobResponse", "ReviewBatchResponse")
+    required_schemas = (
+        "GroupMessageIn", "ProductEventIn", "ReviewTaskUploadResponse", "ReviewCaseMetadata",
+        "ReviewClaimScope", "ReviewDecisionPolicy", "ReviewSamplingPolicy", "ReviewSamplingPlanRequest",
+        "ReviewSamplingPlanResponse", "ReviewJobResponse", "ReviewBatchResponse",
+        "ReviewAdvisoryAssessment", "ReviewHumanReviewAdvice", "ReviewAdvisorySignal",
+        "ReviewAdvisoryPolicy", "ReviewReportReference",
+    )
     typed = all(name in schemas for name in required_schemas)
     _case(results, "OPENAPI-typed-schemas", typed, f"schemas={','.join(name for name in schemas if name in required_schemas)}", t0)
 
     t0 = time.time()
-    code, auth = _request(
-        "POST",
-        f"{base}/api/v1/auth/login",
-        json_body={
-            "username": os.getenv("E2E_ADMIN_USERNAME", "admin"),
-            "password": os.getenv("E2E_ADMIN_PASSWORD", "admin123"),
-            "tenant_id": os.getenv("E2E_TENANT_ID", "mitako"),
-        },
+    status_code, auth_status = _request("GET", f"{base}/api/v1/auth/status")
+    auth_required = bool(
+        auth_status.get("protected_api_auth_required", auth_status.get("auth_required", True))
     )
-    admin_token = auth.get("token") or ""
-    _case(results, "AUTH-admin-token", code == 200 and bool(admin_token), auth.get("error", "token ok"), t0)
+    admin_token = ""
+    if auth_required:
+        code, auth = _request(
+            "POST",
+            f"{base}/api/v1/auth/login",
+            json_body={
+                "username": os.getenv("E2E_ADMIN_USERNAME", "admin"),
+                "password": os.getenv("E2E_ADMIN_PASSWORD", "admin123"),
+                "tenant_id": os.getenv("E2E_TENANT_ID", "mitako"),
+            },
+        )
+        admin_token = auth.get("token") or ""
+        auth_ok = code == 200 and bool(admin_token)
+        auth_detail = auth.get("error", "strict auth token ok")
+    else:
+        auth_ok = status_code == 200 and auth_status.get("ok") is True
+        auth_detail = "demo bypass declared by auth status; protected endpoints verified without token"
+    _case(results, "AUTH-runtime-mode", auth_ok, auth_detail, t0)
 
     t0 = time.time()
     code, contracts = _request("GET", f"{base}/api/v1/private-domain/contracts", token=admin_token)
@@ -131,19 +149,67 @@ def main() -> int:
             "duration_seconds": 452.5,
             "source_bytes": 543351335,
             "video_count": 1,
+            "scenario": "product_damage",
             "sampling_policy": {"preset": "strict", "frames_per_model_call": 24},
         },
     )
     sampling_plan = sampling.get("plan") or {}
+    channel_calls = sampling_plan.get("estimated_channel_calls") or {}
+    unified_multitask = sampling_plan.get("unified_multitask") or {}
+    fallback_calls = (
+        unified_multitask.get("fallback_channel_calls")
+        or unified_multitask.get("backup_channel_calls")
+        or {}
+    )
     _case(
         results,
         "REVIEW-sampling-plan",
         code == 200
         and sampling_plan.get("fps") == 1.0
         and sampling_plan.get("estimated_frames_per_video", 0) >= 453
-        and sampling_plan.get("estimated_model_segments") == 19
+        and sampling_plan.get("main_review_frames") == sampling_plan.get("estimated_total_frames")
+        and sampling_plan.get("main_review_strategy") == "unified_dense_multitask"
+        and sampling_plan.get("estimated_model_segments") == channel_calls.get("main_review")
+        and channel_calls.get("main_review", 0) > 0
+        and channel_calls.get("object_continuity") == 0
+        and channel_calls.get("damage_causality") == 0
+        and sampling_plan.get("estimated_total_model_calls") == sum(channel_calls.values())
+        and unified_multitask.get("enabled") is True
+        and unified_multitask.get("primary_transport") in {"gemini_native", "vision_review_native"}
+        and fallback_calls.get("object_continuity", 0) > 0
+        and fallback_calls.get("damage_causality", 0) > 0
         and sampling_plan.get("transcode_recommended") is True,
         f"plan={sampling_plan}",
+        t0,
+    )
+
+    t0 = time.time()
+    code, adaptive_sampling = _request(
+        "POST",
+        f"{base}/api/v1/review/sampling-plan",
+        token=admin_token,
+        json_body={
+            "duration_seconds": 452.5,
+            "source_bytes": 543351335,
+            "video_count": 1,
+            "scenario": "product_damage",
+            "sampling_policy": {"preset": "adaptive", "frames_per_model_call": 24},
+        },
+    )
+    adaptive_plan = adaptive_sampling.get("plan") or {}
+    adaptive_channels = adaptive_plan.get("estimated_channel_calls") or {}
+    _case(
+        results,
+        "REVIEW-product-damage-adaptive-bounded-pass",
+        code == 200
+        and adaptive_plan.get("sampling_mode") == "adaptive"
+        and adaptive_plan.get("fps") == 1.0
+        and 0 < adaptive_plan.get("estimated_frames_per_video", 0) <= 24
+        and adaptive_channels.get("main_review") == 1
+        and adaptive_channels.get("object_continuity") == 0
+        and adaptive_channels.get("damage_causality") == 0
+        and adaptive_plan.get("estimated_total_model_calls") == sum(adaptive_channels.values()),
+        f"plan={adaptive_plan}",
         t0,
     )
 
@@ -156,11 +222,43 @@ def main() -> int:
             "client_case_id": "api-smoke-missing-item",
             "scenario": "missing_item",
             "customer_claim": "订单有两件商品，用户称只收到一件；本项只校验接口字段，不作为准确率样本。",
-            "order_items": [{"sku": "api-smoke-sku", "quantity": 2}],
-            "logistics": {"split_shipment": False},
+            "fulfillment_baseline": {
+                "baseline_version": "api-smoke-order@v1",
+                "expected_items": [
+                    {"item_ref": "line-1", "sku": "api-smoke-sku", "expected_quantity": 2}
+                ],
+                "expected_package_count": 1,
+                "packages": [
+                    {"package_ref": "pkg-1", "tracking_no": "api-smoke-tracking-1", "expected_item_refs": ["line-1"]}
+                ],
+                "benefit_rules_complete": True,
+                "selection_rules_complete": True,
+            },
+            "evidence_coverage": {
+                "submitted_package_refs": ["pkg-1"],
+                "submitted_tracking_nos": ["api-smoke-tracking-1"],
+                "all_packages_uploaded": True,
+                "all_items_displayed": True,
+            },
+            "logistics": {
+                "source": "customer_logistics_system",
+                "snapshot_at": "2026-07-23T10:00:00+08:00",
+                "all_packages_delivered": True,
+                "packages": [
+                    {"package_ref": "pkg-1", "tracking_ref": "api-smoke-tracking-1", "shipment_status": "delivered"}
+                ],
+            },
         },
     )
-    _case(results, "REVIEW-missing-item-metadata", code == 200 and (missing_item_metadata.get("metadata") or {}).get("scenario") == "missing_item", f"status={code}", t0)
+    _case(
+        results,
+        "REVIEW-missing-item-metadata",
+        code == 200
+        and (missing_item_metadata.get("metadata") or {}).get("scenario") == "missing_item"
+        and (missing_item_metadata.get("readiness") or {}).get("full_review_ready") is True,
+        f"status={code} readiness={(missing_item_metadata.get('readiness') or {}).get('status')}",
+        t0,
+    )
 
     t0 = time.time()
     code, group = _request(

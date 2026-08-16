@@ -5,9 +5,13 @@ from __future__ import annotations
 from typing import FrozenSet, Optional
 
 from fastapi import Depends, HTTPException, Request, WebSocket
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from auth.jwt_utils import auth_required, decode_token, dev_auth_bypass_enabled, protected_api_auth_required
 from auth.roles import Role
+
+
+_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _extract_bearer(request: Request) -> Optional[str]:
@@ -56,26 +60,32 @@ def _synthetic_super_admin() -> dict:
     }
 
 
-def require_roles(allowed: FrozenSet[str]):
+def require_roles(allowed: FrozenSet[str], *, require_tenant: bool = False):
     """返回 FastAPI Depends；后台/坐席 API 默认必须登录。"""
 
-    def _dep(request: Request) -> dict:
+    def _dep(
+        request: Request,
+        _credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    ) -> dict:
+        def authorize(user: dict) -> dict:
+            if user.get("role") not in allowed:
+                raise HTTPException(status_code=403, detail="权限不足")
+            if require_tenant and not str(user.get("tenant_id") or "").strip():
+                raise HTTPException(status_code=403, detail="tenant_claim_required")
+            return user
+
         if not protected_api_auth_required():
             # 鉴权关闭时仍优先解析 Bearer，便于 E2E 验证职责分离等身份相关逻辑
             user = get_current_user_optional(request)
             if user:
-                if user.get("role") not in allowed:
-                    raise HTTPException(status_code=403, detail="权限不足")
-                return user
+                return authorize(user)
             if not dev_auth_bypass_enabled():
                 raise HTTPException(status_code=401, detail="protected_api_token_required")
             return _synthetic_super_admin()
         user = get_current_user_optional(request)
         if not user:
             raise HTTPException(status_code=401, detail="未登录或 token 无效")
-        if user.get("role") not in allowed:
-            raise HTTPException(status_code=403, detail="权限不足")
-        return user
+        return authorize(user)
 
     return Depends(_dep)
 
@@ -83,7 +93,9 @@ def require_roles(allowed: FrozenSet[str]):
 def tenant_allowed(user: dict, tenant_id: str) -> bool:
     if not protected_api_auth_required() and dev_auth_bypass_enabled():
         return True
-    return (user.get("tenant_id") or "mitako") == (tenant_id or "mitako")
+    user_tenant = str(user.get("tenant_id") or "").strip()
+    target_tenant = str(tenant_id or "").strip()
+    return bool(user_tenant and target_tenant and user_tenant == target_tenant)
 
 
 def assert_tenant_access(user: dict, tenant_id: str) -> None:

@@ -1,4 +1,11 @@
-﻿$ErrorActionPreference = "Stop"
+﻿[CmdletBinding()]
+param(
+    [string]$BaseUrl = $(if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }),
+    [string]$VisualUrl = $(if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }),
+    [switch]$RunModelBatch
+)
+
+$ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -6,13 +13,57 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Root = Split-Path -Parent $PSScriptRoot
 $Date = Get-Date -Format "yyyyMMdd"
 $ZipName = "MITAKO_Agent-customer-preview-$Date.zip"
-$ZipPath = Join-Path (Split-Path -Parent $Root) $ZipName
+$DeliveryDir = Join-Path $Root "dist"
+$ZipPath = Join-Path $DeliveryDir $ZipName
+$CustomerHtmlPath = Join-Path $DeliveryDir "MITAKO_Agent-customer-delivery.html"
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_customer_stage_$Date"
 $CompileStage = Join-Path $env:TEMP "mitako_runtime_compile_$Date"
+$GitCommit = (git rev-parse HEAD).Trim()
 
-$InternalBaseUrl = if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }
-$InternalVisualUrl = if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }
-& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $InternalBaseUrl -VisualUrl $InternalVisualUrl
+function Assert-NoTrackedChanges([string]$Message) {
+    & git diff --quiet --
+    if ($LASTEXITCODE -ne 0) { throw $Message }
+    & git diff --cached --quiet --
+    if ($LASTEXITCODE -ne 0) { throw $Message }
+}
+
+function Assert-NoUntrackedCode([string]$Message) {
+    $untracked = @(& git ls-files --others --exclude-standard)
+    if ($LASTEXITCODE -ne 0) { throw $Message }
+    if ($untracked.Count -gt 0) { throw "$Message`n$($untracked -join "`n")" }
+}
+
+function Get-RepositoryRelativePath([string]$Path) {
+    $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]"\/")
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $prefix = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $fullPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path is outside repository root: $fullPath"
+    }
+    return $fullPath.Substring($prefix.Length)
+}
+
+Assert-NoTrackedChanges "Working tree contains tracked changes. Commit them before creating an auditable customer package."
+Assert-NoUntrackedCode "Working tree contains untracked code. Commit or remove it before creating an auditable customer package."
+$modelBatchParams = @{}
+if ($RunModelBatch) { $modelBatchParams.RunModelBatch = $true }
+& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl @modelBatchParams
+Assert-NoTrackedChanges "Release validation changed tracked files. Review and commit them before customer packaging."
+Assert-NoUntrackedCode "Release validation created untracked code. Review it before customer packaging."
+
+function Resolve-PythonRuntime {
+    foreach ($candidate in @(
+        (Join-Path $Root ".venv\Scripts\python.exe"),
+        (Join-Path $Root "venv\Scripts\python.exe")
+    )) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    foreach ($commandName in @("python", "python3")) {
+        $command = Get-Command $commandName -ErrorAction SilentlyContinue
+        if ($command) { return $command.Source }
+    }
+    throw "Missing Python runtime: expected .venv, venv, python, or python3."
+}
 
 Write-Host "=== MITAKO customer preview package ===" -ForegroundColor Cyan
 Write-Host "Project: $Root"
@@ -27,9 +78,34 @@ function Reset-Dir([string]$Path) {
     New-Item -ItemType Directory -Path $Path | Out-Null
 }
 
+function Assert-CommittedPath([string]$RelPath, [switch]$IgnorePythonCaches) {
+    $source = Join-Path $Root $RelPath
+    if (-not (Test-Path -LiteralPath $source)) { return }
+
+    $tracked = @(& git -c core.quotepath=false ls-files --error-unmatch -- $RelPath 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $tracked.Count -eq 0) {
+        throw "Customer package input is not committed: $RelPath"
+    }
+    $trackedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in $tracked) { [void]$trackedSet.Add($item.Replace("/", "\")) }
+    $actualFiles = if (Test-Path -LiteralPath $source -PathType Container) {
+        @(Get-ChildItem -LiteralPath $source -Recurse -Force -File)
+    } else {
+        @(Get-Item -LiteralPath $source)
+    }
+    foreach ($file in $actualFiles) {
+        $relative = Get-RepositoryRelativePath $file.FullName
+        if ($IgnorePythonCaches -and $relative -match '(^|\\)__pycache__(\\|$)') { continue }
+        if (-not $trackedSet.Contains($relative)) {
+            throw "Customer package input contains an uncommitted file: $relative"
+        }
+    }
+}
+
 function Copy-File([string]$RelPath, [string]$DestRelPath = "") {
     $src = Join-Path $Root $RelPath
     if (-not (Test-Path $src)) { return }
+    Assert-CommittedPath $RelPath
     $targetRel = if ($DestRelPath) { $DestRelPath } else { $RelPath }
     $dest = Join-Path $Stage $targetRel
     $destDir = Split-Path $dest -Parent
@@ -40,6 +116,7 @@ function Copy-File([string]$RelPath, [string]$DestRelPath = "") {
 function Copy-Dir([string]$RelPath, [string]$DestRelPath = "") {
     $src = Join-Path $Root $RelPath
     if (-not (Test-Path $src)) { return }
+    Assert-CommittedPath $RelPath
     $targetRel = if ($DestRelPath) { $DestRelPath } else { $RelPath }
     $dest = Join-Path $Stage $targetRel
     if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
@@ -50,6 +127,7 @@ function Copy-Dir([string]$RelPath, [string]$DestRelPath = "") {
 function Copy-RuntimeSource([string]$RelPath) {
     $src = Join-Path $Root $RelPath
     if (-not (Test-Path $src)) { return }
+    Assert-CommittedPath $RelPath
     $dest = Join-Path $CompileStage $RelPath
     $destDir = Split-Path $dest -Parent
     if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
@@ -59,6 +137,7 @@ function Copy-RuntimeSource([string]$RelPath) {
 function Copy-RuntimeDir([string]$RelPath) {
     $src = Join-Path $Root $RelPath
     if (-not (Test-Path $src)) { return }
+    Assert-CommittedPath $RelPath -IgnorePythonCaches
     $dest = Join-Path $CompileStage $RelPath
     if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
     New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
@@ -129,8 +208,6 @@ END = _workflow_graph.END
         $text = $text.Replace("mock", "sample")
         $text = $text.Replace("provider", "route")
         $text = $text.Replace("Provider", "Route")
-        $text = $text.Replace("channel", "route")
-        $text = $text.Replace("Channel", "Route")
         $text = $text.Replace("https://vision-endpoint.local", "https://vision-endpoint.local")
         $text = $text.Replace("https://api.vision_route.com/v1", "https://review-endpoint.local/v1")
         $text = $text.Replace("https://api.vision_route.com", "https://review-endpoint.local")
@@ -205,8 +282,7 @@ END = _workflow_graph.END
 
 function Assert-PycConstantsNoRuntimeLeak([string]$ZipFile) {
     if (-not (Test-Path $ZipFile)) { return }
-    $py = Join-Path $Root "venv\Scripts\python.exe"
-    if (-not (Test-Path $py)) { $py = "python" }
+    $py = Resolve-PythonRuntime
     $scanScript = Join-Path $env:TEMP "mitako_scan_pyc_constants.py"
     @'
 import json
@@ -316,7 +392,6 @@ function Assert-ZipNoRuntimeLeak([string]$ZipFile) {
         "mock_",
         "Mock",
         "provider",
-        "channel",
         "download_manifest",
         "https://vision-endpoint.local",
         "https://api.vision_route.com",
@@ -460,58 +535,36 @@ if (-not (Test-Path (Join-Path $Root "dist\index.html"))) {
 }
 
 Write-Host "[2/6] Copy customer-visible files ..."
-Copy-Dir "dist"
+Copy-File "dist\index.html"
+Copy-File "dist\admin.html"
+Copy-File "dist\desk.html"
+Copy-File "dist\xiaojiao_avatar.png"
+Copy-Dir "dist\assets"
+Copy-Dir "public\memes" "memes"
 Copy-Dir "templates"
-Copy-Dir "docs\delivery"
-$deliveryEngineer = Join-Path $Stage "docs\delivery\engineer-onboarding.md"
-if (Test-Path $deliveryEngineer) { Remove-Item -LiteralPath $deliveryEngineer -Force }
+Copy-File "docs\delivery\openapi.yaml"
+Copy-File "docs\delivery\review-advisory-api.md"
+Copy-File "docs\delivery\after-sales-agent-integration.md"
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
+$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0814四场景审核业务理解与功能验收说明.html"
+if (-not (Test-Path -LiteralPath $CustomerHtmlSource -PathType Leaf)) {
+    throw "Customer delivery HTML is missing: $CustomerHtmlSource"
+}
+$FourScenarioAcceptanceSource = Join-Path $Root "tests\reports\review_0816_four_scenario_blind_results_latest.json"
+if (-not (Test-Path -LiteralPath $FourScenarioAcceptanceSource -PathType Leaf)) {
+    throw "Four-scenario acceptance evidence is missing: $FourScenarioAcceptanceSource"
+}
+$AcceptancePython = Resolve-PythonRuntime
+& $AcceptancePython -c "import pathlib,sys; sys.path.insert(0,sys.argv[2]); from scripts.check_release_packages import _verify_current_four_scenario_acceptance; _verify_current_four_scenario_acceptance(pathlib.Path(sys.argv[1]))" $FourScenarioAcceptanceSource $Root
+if ($LASTEXITCODE -ne 0) { throw "Four-scenario acceptance evidence is invalid." }
 if (Test-Path (Join-Path $Root $customerDocsName)) {
-    Copy-Dir $customerDocsName $customerDocsName
-
-    # 保留仓库历史资料，但客户包只交付当前有效口径，避免旧“三类审核”等说明造成误解。
-    $obsoleteDoc1 = New-Utf16String @(0x0050,0x004F,0x0043,0x5BA1,0x67E5,0x0044,0x0065,0x006D,0x006F,0x4F7F,0x7528,0x4E0E,0x8FB9,0x754C,0x8BF4,0x660E,0x002D,0x0032,0x0030,0x0032,0x0036,0x002D,0x0030,0x0037,0x002D,0x0030,0x0033,0x002E,0x006D,0x0064)
-    $obsoleteDoc2 = New-Utf16String @(0x4E09,0x7C7B,0x89C6,0x89C9,0x5BA1,0x6838,0x4F18,0x5148,0x8BF4,0x660E,0x002E,0x006D,0x0064)
-    $obsoleteDoc3 = New-Utf16String @(0x77E5,0x8BC6,0x5E93,0x4E0E,0x89C6,0x89C9,0x8BC6,0x522B,0x6269,0x5C55,0x9700,0x6C42,0x002E,0x006D,0x0064)
-    $obsoleteCustomerDocs = @($obsoleteDoc1, $obsoleteDoc2, $obsoleteDoc3)
-    foreach ($name in $obsoleteCustomerDocs) {
-        $obsoletePath = Join-Path (Join-Path $Stage $customerDocsName) $name
-        if (Test-Path $obsoletePath) {
-            [System.IO.File]::Delete($obsoletePath)
-        }
-    }
+    Copy-File "$customerDocsName\README.md"
+    Copy-File "$customerDocsName\0814四场景审核业务理解与功能验收说明.html"
 }
 
 Copy-File "config\handoff_routing.json"
 Copy-File "mock_data.json" "sample_data.json"
-
-$visualConfigDir = Join-Path $Stage "config"
-New-Item -ItemType Directory -Path $visualConfigDir -Force | Out-Null
-$visualConfig = @{
-    review_mode = "strict"
-    strict_checks = @{
-        detect_cut = $true
-        object_left_frame = $true
-        six_sides_required = $true
-        shipping_label_visible_before_open = $true
-        damage_visible = $true
-        minor_material_desensitized = $true
-        manual_review_confidence_lt = 0.8
-    }
-    report = @{
-        show_backend_config = $false
-        show_route_chain = $false
-        show_frame_strategy = $true
-        show_cost_estimate = $false
-    }
-}
-$visualConfigJson = $visualConfig | ConvertTo-Json -Depth 8
-[System.IO.File]::WriteAllText(
-    (Join-Path $visualConfigDir "visual_review_admin_config.json"),
-    $visualConfigJson,
-    (New-Object System.Text.UTF8Encoding($false))
-)
 
 New-Item -ItemType Directory -Path (Join-Path $Stage "data") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $Stage "runtime") -Force | Out-Null
@@ -519,21 +572,30 @@ New-Item -ItemType Directory -Path (Join-Path $Stage "runtime") -Force | Out-Nul
 Write-Host "[3/6] Prepare visual review workbench ..."
 New-Item -ItemType Directory -Path (Join-Path $Stage "visual_review_workbench\sample_videos") -Force | Out-Null
 Copy-File "poc\visual_review_poc\workbench.html" "visual_review_workbench\workbench.html"
-if (Test-Path (Join-Path $Root "poc\visual_review_poc\sample_videos")) {
-    $sampleIndex = 1
-    Get-ChildItem -LiteralPath (Join-Path $Root "poc\visual_review_poc\sample_videos") -File | Where-Object {
-        $_.Extension.ToLowerInvariant() -in @(".mp4", ".mov", ".m4v", ".webm", ".mkv")
-    } | ForEach-Object {
-        $stem = switch -Wildcard ($_.Name) {
-            "*unboxing*" { "unboxing_sample"; break }
-            "*damage*" { "damage_sample"; break }
-            "*minor*" { "material_sample"; break }
-            default { "review_sample"; break }
-        }
-        $safeName = "{0}_{1:D2}{2}" -f $stem, $sampleIndex, $_.Extension.ToLowerInvariant()
-        $sampleIndex += 1
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Stage "visual_review_workbench\sample_videos\$safeName") -Force
+$customerDemoVideos = [ordered]@{
+    "video_unboxing_fallback_sintel_trailer.mp4" = @{
+        destination = "unboxing_sample_01.mp4"
+        sha256 = "b670602fa00934ca27c4351bb0efe7ea7a07fae57284e44226025eeed7c51254"
     }
+    "product_damage_fallback_big_buck_bunny_trailer.mp4" = @{
+        destination = "damage_sample_02.mp4"
+        sha256 = "b2ded9ae5a20fa36ca8cec49ef923bffb5e1a51d9e8c1f8336273d2fa9d35ff0"
+    }
+    "minor_material_fallback_mdn_flower.mp4" = @{
+        destination = "material_sample_03.mp4"
+        sha256 = "0cd83d944a6ca7822b4a8306cecc60a36e859b041f6702c6a1ad9ead78924451"
+    }
+}
+foreach ($sourceName in $customerDemoVideos.Keys) {
+    $sourcePath = Join-Path $Root "poc\visual_review_poc\sample_videos\$sourceName"
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Approved customer demo video is missing: $sourceName"
+    }
+    $actualHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $customerDemoVideos[$sourceName].sha256) {
+        throw "Approved customer demo video hash mismatch: $sourceName"
+    }
+    Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $Stage "visual_review_workbench\sample_videos\$($customerDemoVideos[$sourceName].destination)") -Force
 }
 
 Write-Host "[4/6] Compile Python runtime ..."
@@ -559,6 +621,9 @@ $RuntimeFiles = @(
     "logging_utils.py",
     "ops_service.py",
     "partner_guard.py",
+    "review_input_safety.py",
+    "review_media_safety.py",
+    "review_public_safety.py",
     "runtime_paths.py",
     "sla_lock.py",
     "viking_memory.py",
@@ -566,16 +631,47 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\workbench_server.py",
     "poc\visual_review_poc\local_video_triage_demo.py",
     "poc\visual_review_poc\model_selection_e2e.py",
+    "poc\visual_review_poc\model_auth.py",
+    "poc\visual_review_poc\review_response_schema.py",
+    "poc\visual_review_poc\media_deduplication.py",
+    "poc\visual_review_poc\media_preflight.py",
+    "poc\visual_review_poc\media_registry.py",
+    "poc\visual_review_poc\internal_review_ledger.py",
+    "poc\visual_review_poc\native_video_proxy.py",
+    "poc\visual_review_poc\native_video_perception.py",
+    "poc\visual_review_poc\secure_media_tunnel.py",
+    "poc\visual_review_poc\observability.py",
+    "poc\visual_review_poc\minor_material_model_prompt.py",
+    "poc\visual_review_poc\minor_material_pipeline.py",
+    "poc\visual_review_poc\continuity_model_prompt.py",
+    "poc\visual_review_poc\damage_causality.py",
+    "poc\visual_review_poc\damage_causality_model_prompt.py",
+    "poc\visual_review_poc\fulfillment_reconciliation.py",
+    "poc\visual_review_poc\model_catalog.py",
+    "poc\visual_review_poc\model_result_scoring.py",
+    "poc\visual_review_poc\object_continuity.py",
+    "poc\visual_review_poc\official_reference_images.py",
+    "poc\visual_review_poc\order_info_adapter.py",
+    "poc\visual_review_poc\report_assessment_sections.py",
+    "poc\visual_review_poc\report_assets.py",
+    "poc\visual_review_poc\report_evidence.py",
     "poc\visual_review_poc\report_renderer.py",
-    "poc\visual_review_poc\url_video_fetcher.py"
+    "poc\visual_review_poc\review_model_prompt.py",
+    "poc\visual_review_poc\sample_evaluation.py",
+    "poc\visual_review_poc\specialized_model_pass.py",
+    "poc\visual_review_poc\url_video_fetcher.py",
+    "poc\visual_review_poc\unified_model_pass.py"
 )
 
 foreach ($file in $RuntimeFiles) { Copy-RuntimeSource $file }
 New-Item -ItemType Directory -Path (Join-Path $CompileStage "poc") -Force | Out-Null
+Assert-CommittedPath "poc\visual_review_poc\local_video_triage_demo.py"
 Copy-Item -LiteralPath (Join-Path $Root "poc\visual_review_poc\local_video_triage_demo.py") -Destination (Join-Path $CompileStage "poc\visual_review_runtime.py") -Force
 Copy-RuntimeDir "auth"
 Copy-RuntimeDir "handoff_backend"
 Copy-RuntimeDir "private_domain"
+Copy-RuntimeDir "prompts"
+Copy-RuntimeDir "configs"
 Copy-RuntimeDir "review_service"
 Copy-RuntimeDir "sla_worker"
 Rename-RuntimeSource "viking_memory.py" "service_memory.py"
@@ -594,8 +690,11 @@ Sanitize-RuntimeSources
 
 Push-Location $Root
 try {
-    $py = Join-Path $Root "venv\Scripts\python.exe"
-    if (-not (Test-Path $py)) { $py = "python" }
+    $py = Resolve-PythonRuntime
+    $RuntimePythonVersion = (& $py -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+    if ($RuntimePythonVersion -ne "3.11") {
+        throw "Customer compiled runtime requires Python 3.11; build interpreter is $RuntimePythonVersion."
+    }
     & $py -OO -m compileall -q -b -s $CompileStage -p "." $CompileStage
     if ($LASTEXITCODE -ne 0) { throw "Python runtime compile failed" }
 } finally {
@@ -617,39 +716,62 @@ setlocal
 cd /d "%~dp0"
 
 if exist venv\Scripts\python.exe (
-  venv\Scripts\python.exe -c "mods=['fastapi','uvicorn','httpx','jwt','multipart','sse_starlette','pydantic','dotenv','cv2','yt_dlp','redis','jinja2','websockets','celery',''.join(('lang','graph')),''.join(('lang','chain_core')),''.join(('lang','chain_','op','en','ai'))]; [__import__(m) for m in mods]" >nul 2>nul
-  if not errorlevel 1 exit /b 0
-  echo [INFO] Existing runtime is incomplete; repairing dependencies...
+  venv\Scripts\python.exe -c "import sys; assert sys.version_info[:2] == (3,11); mods=['fastapi','uvicorn','httpx','jwt','multipart','sse_starlette','pydantic','dotenv','cv2','PIL','yt_dlp','imageio_ffmpeg','redis','jinja2','websockets','celery',''.join(('lang','graph')),''.join(('lang','chain_core')),''.join(('lang','chain_','op','en','ai'))]; [__import__(m) for m in mods]" >nul 2>nul
+  if not errorlevel 1 goto UPGRADE_INSTALLER
+  echo [INFO] Existing runtime is incompatible or incomplete; rebuilding with Python 3.11...
+  rmdir /s /q venv
 )
 
 echo [1/4] Creating Python virtual environment...
 where py >nul 2>nul
 if %ERRORLEVEL%==0 (
-  py -3.13 -m venv venv >nul 2>nul
-  if not exist venv\Scripts\python.exe py -3.12 -m venv venv >nul 2>nul
-  if not exist venv\Scripts\python.exe py -3.11 -m venv venv >nul 2>nul
-  if not exist venv\Scripts\python.exe py -3 -m venv venv >nul 2>nul
+  py -3.11 -m venv venv >nul 2>nul
 )
-if not exist venv\Scripts\python.exe python -m venv venv
 if not exist venv\Scripts\python.exe (
-  echo [ERROR] Python 3.11 or newer is required. Please install Python and rerun this script.
+  python -c "import sys; assert sys.version_info[:2] == (3,11)" >nul 2>nul
+  if not errorlevel 1 python -m venv venv
+)
+if not exist venv\Scripts\python.exe (
+  echo [ERROR] Python 3.11 is required because the compiled runtime is version-bound. Please install Python 3.11 and rerun this script.
   pause
   exit /b 1
 )
 
+:UPGRADE_INSTALLER
 echo [2/4] Upgrading package installer...
-venv\Scripts\python.exe -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
+venv\Scripts\python.exe -m pip install --upgrade "pip>=26.1.2" "setuptools>=83.0.0" -i https://pypi.tuna.tsinghua.edu.cn/simple
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
-echo [3/3] Installing runtime dependencies...
+echo [3/4] Installing runtime dependencies...
 set "LG=lang"
 set "WG=graph"
 set "LC=langchain"
 set "OC=op"
 set "AI=enai"
-venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple fastapi uvicorn sse-starlette python-multipart pydantic httpx PyJWT python-dotenv %LG%%WG% %LC%-core %LC%-%OC%%AI% pyahocorasick redis jinja2 websockets celery opencv-python yt-dlp
+venv\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://pypi.org/simple fastapi uvicorn sse-starlette python-multipart pydantic httpx "aiohttp>=3.14.3" PyJWT "cryptography>=50.0.0" python-dotenv %LG%%WG% %LC%-core %LC%-%OC%%AI% pyahocorasick redis jinja2 websockets celery opencv-python Pillow yt-dlp imageio-ffmpeg pypdf==6.15.0
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
+:CHECK_CLOUDFLARED
+echo [4/4] Checking secure large-video tunnel...
+where cloudflared >nul 2>nul
+if not errorlevel 1 goto RUNTIME_READY
+if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\cloudflared.exe" goto RUNTIME_READY
+where winget >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] cloudflared is required for secure large-video URL review, and WinGet is unavailable.
+  echo Install Cloudflare cloudflared, then rerun this script.
+  exit /b 1
+)
+winget install --id Cloudflare.cloudflared --exact --silent --accept-package-agreements --accept-source-agreements
+if errorlevel 1 exit /b %ERRORLEVEL%
+where cloudflared >nul 2>nul
+if not errorlevel 1 goto RUNTIME_READY
+if not exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\cloudflared.exe" (
+  echo [ERROR] cloudflared installation completed but the executable was not found.
+  exit /b 1
+)
+
+:RUNTIME_READY
 echo [OK] Runtime is ready.
 exit /b 0
 '@
@@ -675,6 +797,16 @@ if %ERRORLEVEL% EQU 2 (
 
 call install-runtime-windows.bat
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
+
+if not exist data mkdir data
+if not exist data\report-signing-secret.txt venv\Scripts\python.exe -c "import secrets,pathlib; pathlib.Path(r'data\report-signing-secret.txt').write_text(secrets.token_hex(32), encoding='ascii')"
+if not exist data\report-signing-secret.txt (
+  echo [ERROR] Failed to create the persistent report signing secret.
+  pause
+  exit /b 1
+)
+set /p VISUAL_REPORT_SIGNING_SECRET=<data\report-signing-secret.txt
+set VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1
 
 set APP_PORT=8000
 set "MTK=MITAKO"
@@ -760,6 +892,16 @@ if %ERRORLEVEL% EQU 2 (
 call install-runtime-windows.bat
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
+if not exist data mkdir data
+if not exist data\report-signing-secret.txt venv\Scripts\python.exe -c "import secrets,pathlib; pathlib.Path(r'data\report-signing-secret.txt').write_text(secrets.token_hex(32), encoding='ascii')"
+if not exist data\report-signing-secret.txt (
+  echo [ERROR] Failed to create the persistent report signing secret.
+  pause
+  exit /b 1
+)
+set /p VISUAL_REPORT_SIGNING_SECRET=<data\report-signing-secret.txt
+set VISUAL_REQUIRE_PERSISTENT_SIGNING_SECRET=1
+
 set VISUAL_WORKBENCH_PORT=7861
 set "MTK=MITAKO"
 set "DATA_KIND=MO"
@@ -786,14 +928,51 @@ endlocal
 '@
 $WorkbenchBat | Set-Content -LiteralPath (Join-Path $Stage "visual_review_workbench\start-workbench-windows.bat") -Encoding UTF8
 
+$customerEvidenceFiles = @(
+    "docs\delivery\openapi.yaml",
+    "docs\delivery\review-advisory-api.md",
+    "docs\delivery\after-sales-agent-integration.md",
+    "甲方沟通交付文档\0814四场景审核业务理解与功能验收说明.html",
+    "runtime\app_runtime.zip",
+    "sample_data.json",
+    "start-windows.bat"
+)
+$customerEvidenceFiles += $customerDemoVideos.Values | ForEach-Object { "visual_review_workbench\sample_videos\$($_.destination)" }
+$customerEvidence = @()
+foreach ($relativePath in $customerEvidenceFiles) {
+    $evidencePath = Join-Path $Stage $relativePath
+    if (-not (Test-Path -LiteralPath $evidencePath)) {
+        throw "Customer package missing evidence file: $relativePath"
+    }
+    $customerEvidence += [ordered]@{
+        path = $relativePath.Replace("\", "/")
+        sha256 = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+$customerManifest = [ordered]@{
+    generated_at = (Get-Date).ToString("s")
+    git_commit = $GitCommit
+    delivery_mode = "customer_demo_preview"
+    runtime_python_version = $RuntimePythonVersion
+    auth_mode = "demo_bypass"
+    evidence = $customerEvidence
+    includes = @("compiled runtime", "public OpenAPI and delivery docs", "demo data", "visual review workbench", "small demo videos")
+    excludes = @("API keys", "environment files", "databases", "Python source", "internal development docs", "blind-test labels", "customer production integrations")
+    integration_boundary = "Enterprise WeChat, Feishu, CRM/CDP, order, inventory, payment and fulfillment remain contract-ready demonstrations until customer-side credentials, callbacks and test environments are provided."
+}
+$customerManifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $Stage "customer-package-manifest.json") -Encoding UTF8
+
 Write-Host "[5/6] Run customer package gate ..."
 Assert-NoCustomerLeak $Stage
 
 Write-Host "[6/6] Create ZIP ..."
+New-Item -ItemType Directory -Path $DeliveryDir -Force | Out-Null
 if (Test-Path $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
 Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $ZipPath -CompressionLevel Optimal
+Copy-Item -LiteralPath $CustomerHtmlSource -Destination $CustomerHtmlPath -Force
 Remove-Item -LiteralPath $Stage -Recurse -Force
 
 $sizeMb = [math]::Round((Get-Item $ZipPath).Length / 1MB, 2)
 Write-Host ("[OK] Created " + $ZipPath + " (" + $sizeMb + " MB)") -ForegroundColor Green
+Write-Host ("[OK] Customer HTML: " + $CustomerHtmlPath) -ForegroundColor Green
 Write-Host "Customer package gate passed." -ForegroundColor Yellow

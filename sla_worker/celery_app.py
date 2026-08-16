@@ -10,6 +10,7 @@ _broker = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")
 _backend = os.getenv("CELERY_RESULT_BACKEND", _broker)
 
 celery_app = Celery("mitako_sla", broker=_broker, backend=_backend)
+celery_app.conf.imports = ("sla_worker.tasks",)
 celery_app.conf.beat_schedule = {
     "process-sla-timeouts-every-30s": {
         "task": "sla_worker.tasks.process_sla_timeouts_task",

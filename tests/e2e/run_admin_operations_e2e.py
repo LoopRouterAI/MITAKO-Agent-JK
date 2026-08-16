@@ -19,13 +19,13 @@ async def run_admin_ops_suite() -> list[CaseResult]:
     results: list[CaseResult] = []
     async with httpx.AsyncClient(timeout=30.0) as client:
         base = await discover_base(client, None)
-        lr = await client.post(f"{base}/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+        lr = await client.post(f"{base}/api/v1/auth/login", json={"username": "admin", "password": "admin123", "tenant_id": "mitako"})
         token = lr.json().get("token", "")
         headers = {"Authorization": f"Bearer {token}"} if token else {}
-        desk_login = await client.post(f"{base}/api/v1/auth/login", json={"username": "desk0816", "password": "desk123"})
+        desk_login = await client.post(f"{base}/api/v1/auth/login", json={"username": "desk0816", "password": "desk123", "tenant_id": "mitako"})
         desk_token = desk_login.json().get("token", "")
         desk_headers = {"Authorization": f"Bearer {desk_token}"} if desk_token else headers
-        sr = await client.post(f"{base}/api/v1/auth/login", json={"username": "supervisor", "password": "super123"})
+        sr = await client.post(f"{base}/api/v1/auth/login", json={"username": "supervisor", "password": "super123", "tenant_id": "mitako"})
         supervisor_token = sr.json().get("token", "")
         supervisor_headers = {"Authorization": f"Bearer {supervisor_token}"} if supervisor_token else headers
         approval_sid = f"admin_e2e_sess_{int(time.time())}"

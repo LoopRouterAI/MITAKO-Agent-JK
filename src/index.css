@@ -59,6 +59,10 @@ body {
   border-radius: 8px;
 }
 
+.mitako-ppt-scope :is(button, a[role="button"], summary) {
+  min-height: 44px;
+}
+
 .mitako-ppt-scope :is([class*="rounded-full"]) {
   border-radius: 8px !important;
 }

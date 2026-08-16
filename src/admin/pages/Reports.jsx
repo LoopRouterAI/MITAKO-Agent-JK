@@ -82,7 +82,7 @@ export default function Reports() {
           <p className="mt-1 text-sm text-slate-500">给客服 Leader 看的北极星指标：处理量、VIP客服介入、结案、等待和业务动作。</p>
         </div>
         <div className="flex items-center gap-2">
-          <select value={days} onChange={e => setDays(Number(e.target.value))} className={inputClass}>
+          <select aria-label={t('admin.reportPeriodFilter')} value={days} onChange={e => setDays(Number(e.target.value))} className={inputClass}>
             <option value={7}>7 {t('admin.reportDays')}</option>
             <option value={14}>14 {t('admin.reportDays')}</option>
             <option value={30}>30 {t('admin.reportDays')}</option>

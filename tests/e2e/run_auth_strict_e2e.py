@@ -39,6 +39,18 @@ async def run_auth_strict_suite() -> list[CaseResult]:
             ))
             return results
 
+        cleanup_login = await client.post(
+            f"{base}/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123", "tenant_id": "mitako"},
+        )
+        cleanup_token = str(cleanup_login.json().get("token") or "")
+        if cleanup_token:
+            await client.post(
+                f"{base}/api/v1/handoff/reset",
+                params={"session_id": "session_usr_001"},
+                headers={"Authorization": f"Bearer {cleanup_token}"},
+            )
+
         # 无 token → 401（含 desk 读接口）
         mutating = [
             ("POST", f"{base}/api/v1/admin/approvals", {"amount": 10, "reason": "t"}),
@@ -134,7 +146,7 @@ async def run_auth_strict_suite() -> list[CaseResult]:
 
         # 有效 token → 200
         t0 = time.time()
-        lr = await client.post(f"{base}/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+        lr = await client.post(f"{base}/api/v1/auth/login", json={"username": "admin", "password": "admin123", "tenant_id": "mitako"})
         token = lr.json().get("token", "")
         headers = {"Authorization": f"Bearer {token}"}
         ar = await client.get(f"{base}/api/v1/admin/agents", headers=headers)

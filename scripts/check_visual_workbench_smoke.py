@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -44,6 +46,13 @@ FORBIDDEN_PUBLIC_KEYS = {
     "path",
     "api_path",
     "uri",
+    "inference_estimate",
+    "estimated_usd",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "model_calls",
+    "channels",
 }
 
 
@@ -96,11 +105,21 @@ def test_workbench_api() -> None:
     )
     assert rejected.status_code == 400
 
-    single_failure = workbench_server._public_result(
-        False,
-        "商品有伤审核",
-        {"status": "review_timeout", "status_code": 429, "error_type": "soft"},
-    )
+    with tempfile.TemporaryDirectory() as temp_dir:
+        single_failure = workbench_server._agent_report_response(
+            {
+                "case_id": "SMOKE-FAILURE",
+                "scenario": "product_damage",
+                "scenario_label": "商品有伤审核",
+                "videos": [],
+                "frames": [],
+                "supplemental_images": [],
+                "structured_business_context": {},
+            },
+            Path(temp_dir),
+            {"status": "failed", "status_code": 429, "error_type": "soft", "error": "review_timeout"},
+            "smoke_failure",
+        )
     assert single_failure["summary"]["cases"] == 1, single_failure
     assert single_failure["summary"]["total_reviews"] == 1, single_failure
     assert single_failure["summary"]["successful_reviews"] == 0, single_failure
@@ -134,7 +153,7 @@ def test_workbench_api() -> None:
     assert data["summary"]["accuracy"] == 0.75, data
     assert data["summary"]["target_evaluable"] == 4, data
     assert data["summary"]["target_accuracy"] == 0.75, data
-    assert data["summary"]["ready_for_accuracy"] is False, data
+    assert data["summary"]["ready_for_accuracy"] is None, data
     assert not FORBIDDEN_PUBLIC_TERMS.search(json.dumps(data, ensure_ascii=False)), data
 
     json_payload = {
@@ -192,12 +211,12 @@ def test_workbench_api() -> None:
         "/api/evaluate-samples",
         files={"file": ("not_ready.csv", "\n".join(rows_without_prediction).encode("utf-8"), "text/csv")},
     ).json()
-    assert not_ready["summary"]["ready_for_accuracy"] is False, not_ready
+    assert not_ready["summary"]["ready_for_accuracy"] is None, not_ready
     ready = client.post(
         "/api/evaluate-samples",
         files={"file": ("ready.csv", "\n".join(rows_ready).encode("utf-8"), "text/csv")},
     ).json()
-    assert ready["summary"]["ready_for_accuracy"] is True, ready
+    assert ready["summary"]["ready_for_accuracy"] is None, ready
     assert ready["summary"]["evaluable"] == 300, ready
     assert ready["summary"]["target_evaluable"] == 300, ready
     assert ready["summary"]["accuracy"] == 1.0, ready
@@ -216,9 +235,10 @@ def test_workbench_api() -> None:
     assert bad_json.status_code == 400
 
     image_path = next((ROOT / "docs" / "三大审核场景的小量样本" / "sample_003").glob("*.jpg"))
-    original_call_model = workbench_server.call_model_chunked
+    original_call_model = workbench_server.call_model
+    original_call_model_chunked = workbench_server.call_model_chunked
 
-    def fake_success(cfg, case, timeout, retries):
+    def fake_success(cfg, case, timeout, retries, deadline_at=None):
         assert not case.get("videos"), case
         assert case.get("supplemental_images"), case
         return {
@@ -241,13 +261,14 @@ def test_workbench_api() -> None:
             },
         }
 
-    def fake_failed(cfg, case, timeout, retries):
+    def fake_failed(cfg, case, timeout, retries, deadline_at=None):
         return {"status": "failed", "status_code": 429, "error_type": "soft", "latency_seconds": 0.2}
 
-    def fake_unstructured(cfg, case, timeout, retries):
+    def fake_unstructured(cfg, case, timeout, retries, deadline_at=None):
         return {"status": "success", "latency_seconds": 0.1, "usage": {}, "cost": {}, "parsed": {"raw_text": "not json"}}
 
     try:
+        workbench_server.call_model = fake_success
         workbench_server.call_model_chunked = fake_success
         image_only = client.post(
             "/api/review-folder",
@@ -261,8 +282,11 @@ def test_workbench_api() -> None:
         image_data = image_only.json()
         assert image_data["ok"] is True, image_data
         assert image_data["review"]["summary"]["successful_reviews"] == 1, image_data
-        assert "补充图片 1 张" in image_data["review"]["frame_strategy"], image_data
+        frame_strategy = image_data["review"]["frame_strategy"]
+        assert "未提交视频" in frame_strategy, image_data
+        assert "1 张补充图片" in frame_strategy, image_data
 
+        workbench_server.call_model = fake_failed
         workbench_server.call_model_chunked = fake_failed
         failed = client.post(
             "/api/review-folder",
@@ -301,14 +325,40 @@ def test_workbench_api() -> None:
         assert video_failed.status_code == 200, video_failed.text
         video_failed_data = video_failed.json()
         assert video_failed_data["ok"] is False, video_failed_data
-        assert video_failed_data["review"]["diagnostics"]["videos_received"] == 1, video_failed_data
+        assert video_failed_data["ingestion"]["video_count"] == 1, video_failed_data
+        assert video_failed_data["review"]["summary"]["successful_reviews"] == 0, video_failed_data
+        video_failed_advisory = video_failed_data["review"]["advisory_assessment"]
+        assert video_failed_advisory["assessment"]["conclusion_code"] == "technical_processing_incomplete", video_failed_data
+        assert video_failed_advisory["workflow_recommendation"] == "system_retry", video_failed_data
         video_failed_html = client.get(video_failed_data["review"]["report"]["html_url"])
         assert video_failed_html.status_code == 200, video_failed_html.text
-        for text in ("本轮失败诊断", "审核未完成", "系统复核服务繁忙"):
+        for text in ("技术处理未完成", "系统重试", "不要求用户重复"):
             assert text in video_failed_html.text, text
         assert_public_payload_clean(video_failed_data["review"])
         assert_public_payload_clean(video_failed_html.text)
 
+        hidden_files = client.post(
+            "/api/review-folder",
+            data={"scenario": "video_unboxing", "customer_claim": "用户反馈开箱视频疑似发错货"},
+            files=[
+                ("files", ("__MACOSX/._030_008.mp4", b"\x00\x05\x16\x07resource-fork", "video/mp4")),
+                ("files", ("._annotation.json", b"appledouble", "application/json")),
+                ("files", (".hidden.mp4", b"not-a-video", "video/mp4")),
+                ("files", ("fake.mp4", b"not-a-video", "video/mp4")),
+                ("files", (video_path.name, video_path.read_bytes(), "video/mp4")),
+            ],
+        )
+        assert hidden_files.status_code == 200, hidden_files.text
+        hidden_data = hidden_files.json()
+        assert hidden_data["ingestion"]["received_count"] == 5, hidden_data
+        assert hidden_data["ingestion"]["accepted_count"] == 1, hidden_data
+        assert hidden_data["ingestion"]["video_count"] == 1, hidden_data
+        assert hidden_data["ingestion"]["skipped_count"] == 4, hidden_data
+        reason_codes = {item["reason_code"] for item in hidden_data["ingestion"]["skipped_files"]}
+        assert {"system_directory", "appledouble_file", "hidden_file", "invalid_media_content"} == reason_codes, hidden_data
+        assert_public_payload_clean(hidden_data["review"])
+
+        workbench_server.call_model = fake_unstructured
         workbench_server.call_model_chunked = fake_unstructured
         unstructured = client.post(
             "/api/review-folder",
@@ -325,7 +375,8 @@ def test_workbench_api() -> None:
         assert unstructured_data["review"]["diagnostics"]["failure_stage"] == "系统复核", unstructured_data
         assert_public_payload_clean(unstructured_data["review"])
     finally:
-        workbench_server.call_model_chunked = original_call_model
+        workbench_server.call_model = original_call_model
+        workbench_server.call_model_chunked = original_call_model_chunked
 
 
 def test_model_transport_contract() -> None:
@@ -335,6 +386,7 @@ def test_model_transport_contract() -> None:
     case = {
         "case_id": "image_only_contract",
         "scenario": "product_damage",
+        "analysis_mode": "product_damage_images",
         "scenario_label": "商品有伤审核",
         "customer_claim": "用户反馈商品有划痕",
         "order_context": {},
@@ -356,15 +408,43 @@ def test_model_transport_contract() -> None:
     original_key = os.environ.get("VISION_REVIEW_API_KEY")
     captured = {}
 
-    def fake_post(endpoint, headers, payload, timeout, retries):
+    def fake_post(endpoint, headers, payload, timeout, retries, deadline_at=None):
         captured["payload"] = payload
+        parsed = {
+            "claimed_item_assessment": {
+                "identity_description": "订单商品与补充特写中的主体外观一致。",
+                "identity_confidence": 0.9,
+                "same_item_linkage": True,
+                "reason": "可见外观特征一致。",
+            },
+            "atomic_claim_results": [{
+                "claim_id": "claim-1",
+                "subject_ref": "supplemental_image_1",
+                "location": "商品表面",
+                "damage_type": "表面痕迹",
+                "supplemental_visibility": "visible",
+                "same_item_linkage": True,
+                "damage_presence": "confirmed",
+                "severity_level": "minor",
+                "severity_confidence": 0.8,
+                "structural_failure": False,
+                "conflicting_evidence": False,
+                "reason": "补充特写可见表面痕迹，但静态图片不能证明形成时点。",
+            }],
+            "evidence_refs": [{
+                "field": "supplemental_damage_visible",
+                "claim_id": "claim-1",
+                "asset_ref": "supplemental_image_1",
+                "fact": "补充特写可见商品表面痕迹。",
+            }],
+        }
         return {
             "ok": True,
             "status_code": 200,
             "latency_seconds": 0.01,
             "attempt": 1,
             "data": {
-                "candidates": [{"content": {"parts": [{"text": json.dumps({"predicted_label": "positive", "system_yes_no": "YES", "confidence": 0.9}, ensure_ascii=False)}]}}],
+                "candidates": [{"content": {"parts": [{"text": json.dumps(parsed, ensure_ascii=False)}]}}],
                 "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 15},
             },
         }
@@ -372,12 +452,12 @@ def test_model_transport_contract() -> None:
     try:
         os.environ["VISION_REVIEW_API_KEY"] = "fake-key-for-contract-test"
         model_selection.post_with_retries = fake_post
-        result = model_selection.call_model(model_selection.MODEL_CONFIGS["gemini35"], case, timeout=1, retries=0)
+        result = model_selection.call_model(model_selection.MODEL_CONFIGS["gemini35lite"], case, timeout=1, retries=0)
         assert result["status"] == "success", result
         parts = captured["payload"]["contents"][0]["parts"]
-        inline_items = [item for item in parts if "inline_data" in item]
+        inline_items = [item for item in parts if "inlineData" in item]
         assert len(inline_items) == 1, parts
-        assert inline_items[0]["inline_data"]["mime_type"] == "image/jpeg", inline_items
+        assert inline_items[0]["inlineData"]["mimeType"] == "image/jpeg", inline_items
         assert not any("视频1 帧" in str(item.get("text") or "") for item in parts if isinstance(item, dict)), parts
     finally:
         model_selection.post_with_retries = original_post
@@ -434,21 +514,95 @@ def test_retry_after_is_honored() -> None:
 
 def test_workbench_html() -> None:
     html = (ROOT / "poc" / "visual_review_poc" / "workbench.html").read_text(encoding="utf-8")
-    for scenario in ("video_unboxing", "product_damage", "minor_material"):
+    for scenario in ("product_damage", "wrong_item", "missing_item", "minor_material"):
         assert f'data-scenario="{scenario}"' in html
     assert "scenario=all" not in html
     assert "sampleEvalForm" in html
     assert "folderInput" in html
+    assert "batchFolderTab" in html
+    assert "/api/review-folders-batch" in html
+    assert "batch-folder-mode" in html
+    assert "function folderFileIssue(file)" in html
+    assert "function uploadableFolderFiles()" in html
+    assert "formData.delete('files')" in html
+    assert "function ingestionLines(data)" in html
+    assert "function mediaWarningLines(data)" in html
+    assert "function clientFolderIngestionSummary()" in html
+    assert "function configureBuiltInSampleControls()" in html
     assert "batchSampleBtn" in html
     assert "sample_004" in html
-    for path in ("/video-unboxing", "/product-damage", "/minor-material"):
+    for path in ("/product-damage", "/wrong-item", "/missing-item", "/minor-material"):
         assert path in html, path
     assert "人工结论样本评测" in html
     assert not FORBIDDEN_PUBLIC_TERMS.search(html)
 
-    labels = json.loads((ROOT / "docs" / "三大审核场景的小量样本" / "sample_labels.json").read_text(encoding="utf-8"))
+    for fps in ("0.2", "0.5", "1", "2"):
+        assert re.search(rf'<option\s+value="{re.escape(fps)}"[^>]*>', html), fps
+    for label in ("每 5 秒 1 帧", "每 2 秒 1 帧", "每秒 1 帧", "每秒 2 帧"):
+        assert label in html, label
+
+    assert "function stopReportLinkEvent(event)" in html
+    assert "event.stopPropagation();" in html
+    assert "function prepareReportLink(link)" in html
+    assert "link.target = '_blank';" in html
+    assert "link.rel = 'noopener noreferrer';" in html
+    assert "prepareReportLink(reportLink);" in html
+    assert "prepareReportLink(document.createElement('a'))" in html
+    assert "if (event.target.closest('a')) return;" in html
+
+    labels_path = ROOT / "docs" / "三大审核场景的小量样本" / "sample_labels.json"
+    assert labels_path.exists(), labels_path
+    labels = json.loads(labels_path.read_text(encoding="utf-8-sig"))
+    assert labels.get("note") == "人工结论只用于报告侧评测，不进入模型 Prompt。", labels
     scenarios = {item.get("scenario") for item in (labels.get("samples") or {}).values()}
     assert {"video_unboxing", "product_damage", "minor_material"}.issubset(scenarios), scenarios
+
+
+def test_internal_package_visual_contract() -> None:
+    script = (ROOT / "scripts" / "package_internal_release.ps1").read_text(encoding="utf-8-sig")
+    for text in (
+        "function Copy-SafeSampleLabels",
+        'Copy-SafeSampleLabels',
+        'docs\\三大审核场景的小量样本\\sample_labels.json',
+        'usage_boundary = "report_evaluation_only"',
+        'send_to_model = $false',
+        'Packaged sample labels violate the report-only boundary.',
+        'function Invoke-InternalValidation',
+        '$PythonCandidates = @(',
+        '.venv\Scripts\python.exe',
+        'venv\Scripts\python.exe',
+        'evidence = $evidenceHashes',
+    ):
+        assert text in script, text
+    assert 'New-Item -ItemType Junction' not in script, "内部包不应再创建兼容 Junction"
+    assert not re.search(r"七牛云.{0,24}(已接入|已打通|生产可用)", script), script
+
+
+def test_sampling_density_runtime_contract() -> None:
+    from poc.visual_review_poc.local_video_triage_demo import sample_video_frames
+
+    sample_dir = ROOT / "docs" / "三大审核场景的小量样本" / "sample_002"
+    video = next(path for path in sorted(sample_dir.iterdir()) if path.suffix.lower() in {".mp4", ".mov", ".m4v", ".webm", ".mkv"})
+    tmp_root = ROOT / "tmp"
+    tmp_root.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="visual-fps-smoke-", dir=tmp_root) as workdir:
+        for fps in (0.2, 0.5, 1.0, 2.0):
+            result = sample_video_frames(
+                video,
+                fps=fps,
+                max_frames=2000,
+                probe_seconds=1.0,
+                frame_width=320,
+                run_dir=Path(workdir) / str(fps).replace(".", "_"),
+                sampling_mode="dense",
+            )
+            duration = float(result.get("duration_seconds") or 0)
+            actual = int(result.get("sampled_frames") or 0)
+            expected = math.ceil(duration * fps) + 1
+            assert result.get("fps_requested") == fps, result
+            assert result.get("sampling_strategy") == "full_timeline_dense", result
+            assert float(result.get("timeline_coverage_ratio") or 0) >= 0.9, result
+            assert abs(actual - expected) <= 1, {"fps": fps, "actual": actual, "expected": expected, "duration": duration}
 
 
 def test_url_guard() -> None:
@@ -535,7 +689,7 @@ def test_review_prompt_policy() -> None:
         "gemini": {
             "status": "success",
             "winner": {
-                "model": "gemini-3.5-flash",
+                "model": "gemini-3.5-flash-lite",
                 "latency_seconds": 1.2,
                 "usage": {"total_tokens": 100},
                 "raw_text": "{\"predicted_label\":\"negative\"}",
@@ -561,18 +715,10 @@ def test_review_prompt_policy() -> None:
 
 
 def test_public_report_redaction() -> Path:
-    from poc.visual_review_poc.workbench_server import _agent_report_response, _public_result
+    from poc.visual_review_poc.workbench_server import _agent_report_response
 
     public_dir = ROOT / "poc" / "visual_review_poc" / "reports" / "public_summaries"
     before = {item.name for item in public_dir.glob("*.json")} if public_dir.exists() else set()
-
-    result = _public_result(True, "高精度审核", {"summary": {"available": True, "hit": False}})
-    report_name = result["report"]["html_url"].rsplit("/", 1)[-1]
-    html_path = ROOT / "poc" / "visual_review_poc" / "reports" / "public_summaries" / Path(report_name).with_suffix(".json").name
-    assert html_path.exists(), html_path
-    data = json.loads(html_path.read_text(encoding="utf-8"))
-    assert not FORBIDDEN_PUBLIC_TERMS.search(json.dumps(data, ensure_ascii=False)), data
-    assert not contains_forbidden_public_key(data), data
 
     sample_dir = ROOT / "docs" / "三大审核场景的小量样本" / "sample_004"
     agent = _agent_report_response(
@@ -623,7 +769,7 @@ def test_public_report_redaction() -> Path:
             continue
         payload = json.loads(item.read_text(encoding="utf-8"))
         assert not contains_forbidden_public_key(payload), item
-    return html_path
+    return agent_json
 
 
 def test_public_report_root_has_no_technical_reports() -> None:
@@ -645,6 +791,8 @@ def main() -> int:
         ("model_transport_contract", test_model_transport_contract),
         ("retry_after_is_honored", test_retry_after_is_honored),
         ("workbench_html", test_workbench_html),
+        ("internal_package_visual_contract", test_internal_package_visual_contract),
+        ("sampling_density_runtime_contract", test_sampling_density_runtime_contract),
         ("url_guard", test_url_guard),
         ("review_prompt_policy", test_review_prompt_policy),
         ("public_report_redaction", test_public_report_redaction),

@@ -1,0 +1,4410 @@
+{
+  "run_id": "20260717-final",
+  "generated_at": "2026-07-17 19:38:15",
+  "input_isolation": {
+    "sent": [
+      "中性文件名媒体",
+      "content.txt 原始诉求文本",
+      "本次 claim_scope",
+      "采样与连续性策略"
+    ],
+    "not_sent": [
+      "annotation.json",
+      "manifest.json",
+      "reply.json",
+      "人工结论",
+      "目录分类",
+      "评测标签"
+    ]
+  },
+  "checks": [
+    {
+      "name": "all_jobs_succeeded",
+      "ok": true
+    },
+    {
+      "name": "all_video_forensics_completed",
+      "ok": true
+    },
+    {
+      "name": "617341_versioned_policy_negative",
+      "ok": true
+    },
+    {
+      "name": "617341_policy_report_synchronized",
+      "ok": true
+    },
+    {
+      "name": "614176_initial_claim_only",
+      "ok": true
+    },
+    {
+      "name": "614176_disputed_scope_stays_review",
+      "ok": true
+    },
+    {
+      "name": "617911_no_unsafe_auto_negative",
+      "ok": true
+    },
+    {
+      "name": "618205_adaptive_not_positive",
+      "ok": true
+    },
+    {
+      "name": "618205_adaptive_global_timeline",
+      "ok": true
+    },
+    {
+      "name": "618205_strong_not_positive",
+      "ok": true
+    },
+    {
+      "name": "618205_strong_global_timeline",
+      "ok": true
+    }
+  ],
+  "results": [
+    {
+      "case_id": "617341",
+      "preset": "adaptive",
+      "job_id": "RJ-4A6AC314B69B4AD7",
+      "request_metadata_sha256": "5a5615ac83fa6faa1f97e05939d5b0bb3fd26bda1b87276aff1e003f83c991a3",
+      "assets": [
+        {
+          "neutral_name": "asset_001.jpg",
+          "bytes": 2236706,
+          "sha256": "6a16ef69cd3baec752da5fb7f636b39e9c35a28e23d94ac50d1281d1d833666d"
+        },
+        {
+          "neutral_name": "asset_002.jpg",
+          "bytes": 450024,
+          "sha256": "92be287373dceedc45126964391102a5eadbcf0aa08ba88f65d23db81a7088c7"
+        },
+        {
+          "neutral_name": "asset_003.jpg",
+          "bytes": 381745,
+          "sha256": "4dd827d218feeaef263a03a995603cc6d5713b1cea7708298804da75ea0ba206"
+        },
+        {
+          "neutral_name": "asset_004.jpg",
+          "bytes": 2767617,
+          "sha256": "15124853b64ad55cb2c94cf686074d429994db65d513652da9c721c718bb0161"
+        },
+        {
+          "neutral_name": "asset_005.jpg",
+          "bytes": 6015260,
+          "sha256": "99fec79c85ddc7844491a259796302d47a0a3bf1383319c2af3ca3ba0ea9be29"
+        },
+        {
+          "neutral_name": "asset_006.png",
+          "bytes": 250873,
+          "sha256": "8648ffe95413df362dd18f236c79c5d4fe398c7584c3af6d3fb86eb2ff7233ff"
+        },
+        {
+          "neutral_name": "asset_007.jpg",
+          "bytes": 6015260,
+          "sha256": "99fec79c85ddc7844491a259796302d47a0a3bf1383319c2af3ca3ba0ea9be29"
+        },
+        {
+          "neutral_name": "asset_008.jpg",
+          "bytes": 6015260,
+          "sha256": "99fec79c85ddc7844491a259796302d47a0a3bf1383319c2af3ca3ba0ea9be29"
+        }
+      ],
+      "total_bytes": 24132745,
+      "status": "SUCCEEDED",
+      "predicted_label": "negative",
+      "confidence": 0.99,
+      "media_forensics_status": "not_applicable",
+      "continuity": {},
+      "global_review_summary": {},
+      "aggregation_warnings": [],
+      "decision_policy_audit": {
+        "version": "2026-07-17.1",
+        "mode": "classification_recommendation",
+        "policy_ref": "MITAKO-PD-MISSING-OPENING@20260717.1",
+        "applied": true,
+        "rule_id": "PD-N-OPENING-VIDEO-REQUIRED",
+        "claim_scope": {
+          "claim_id": "",
+          "stage": "initial",
+          "issue_types": [],
+          "excluded_issue_types": [],
+          "active_claim_ids": [
+            "CLM-617341-INITIAL"
+          ],
+          "split_status": "resolved",
+          "ready": true
+        },
+        "evidence_gate": {
+          "video_present": false,
+          "continuity_verdict": "indeterminate",
+          "claimed_item_visibility_coverage": null,
+          "damage_presence": "confirmed",
+          "claim_support": "supported",
+          "damage_observability": "fully_observable",
+          "model_confidence": 0.69
+        },
+        "business_boundary": "该结果仅是审核分类建议，不自动执行拒绝、退款、补发、换货或最终定责。",
+        "reason": "甲方策略要求商品有伤必须提交开箱视频，本案未提交，当前材料不支持本次诉求。",
+        "evidence_verdict_before_policy": {
+          "predicted_label": "review",
+          "confidence": 0.69,
+          "conclusion": "商品（东云彰人拍立得）存在严重弯曲变形，且外包装快递盒有严重挤压破损痕迹。由于缺乏开箱视频，无法直接判定损伤确切发生节点，需转人工审核。"
+        }
+      },
+      "damage_observability": {
+        "status": "fully_observable",
+        "same_item_linkage": "confirmed",
+        "claimed_region_closeup": "provided",
+        "required_view_coverage": 1.0,
+        "conflicting_evidence": "none",
+        "missing_views": []
+      },
+      "overall_conclusion": "甲方策略要求商品有伤必须提交开箱视频，本案未提交，当前材料不支持本次诉求。",
+      "inference_estimate": {
+        "input_tokens": 13651,
+        "output_tokens": 6707,
+        "total_tokens": 20358,
+        "estimated_usd": 0.08084,
+        "total_model_calls": 1,
+        "segment_count": 1,
+        "channels": {},
+        "boundary": "估算值用于容量与成本比较，不等同于供应商最终账单。"
+      },
+      "diagnostics": {},
+      "workbench_transport": {
+        "attempts": [
+          {
+            "attempt": 1,
+            "status_code": 200,
+            "latency_seconds": 49.762
+          }
+        ],
+        "retry_count": 0
+      }
+    },
+    {
+      "case_id": "614176",
+      "preset": "adaptive",
+      "job_id": "RJ-87DB7A5DE6D84B4D",
+      "request_metadata_sha256": "eb9de5efad0db6085c51ba8f4dddc273c3e397fafe054092b2f51f56aa6eca2d",
+      "assets": [
+        {
+          "neutral_name": "asset_001.jpg",
+          "bytes": 26002,
+          "sha256": "18788380978f332d4a2545183ba323b72f8198d9e7429c5e82ba00b86ffab013"
+        },
+        {
+          "neutral_name": "asset_002.jpg",
+          "bytes": 38889,
+          "sha256": "05d6a7f12ba9deb9ddc20b9e1bc68bffcc5c9c98eebb4636e50a198f7467d3c5"
+        },
+        {
+          "neutral_name": "asset_003.jpg",
+          "bytes": 36287,
+          "sha256": "8322d8a2f69c5c065c6c01bacdbe8dcf0b913a6d4e9dc0f7f0ec6f3923f2005b"
+        },
+        {
+          "neutral_name": "asset_004.jpg",
+          "bytes": 32255,
+          "sha256": "fd67337409aed0eeba00a0aa23b6095dde765dc8e52900e600a13a7f071f2476"
+        },
+        {
+          "neutral_name": "asset_005.jpg",
+          "bytes": 4862447,
+          "sha256": "0c64acea577cb19437a4e1bbed8c62d6141cb4859e621de37dbb5e60d2fabb8d"
+        },
+        {
+          "neutral_name": "asset_006.jpg",
+          "bytes": 436787,
+          "sha256": "9d40b6f6359e73b2afd79cbcc13bd483b27c2edd33eb350ceca5c438b152ac07"
+        },
+        {
+          "neutral_name": "asset_007.jpg",
+          "bytes": 293501,
+          "sha256": "619cd67c4273720121dce8af5d5aab8a1478d829643c888d09d84bde2eada8f1"
+        },
+        {
+          "neutral_name": "asset_008.mp4",
+          "bytes": 602861197,
+          "sha256": "a4b9dfce0797a526c38ad5f39f021d9da36e6c4feb850f404facfe62c668f89b"
+        },
+        {
+          "neutral_name": "asset_009.jpg",
+          "bytes": 5956898,
+          "sha256": "898ba2c5b26cd52a1e51ac27158f5475a84e58ec1ffb2139bcbf6811caf9987d"
+        },
+        {
+          "neutral_name": "asset_010.jpg",
+          "bytes": 3899520,
+          "sha256": "e1e156c7a8402b0360228c5377d73ebb4b545ad7d2838d131e1fcb68bb96a287"
+        },
+        {
+          "neutral_name": "asset_011.jpg",
+          "bytes": 4767361,
+          "sha256": "a629a5135f3c920fa8b106dc3b1dbd7c5ffe1638273a08059da7773166b47064"
+        },
+        {
+          "neutral_name": "asset_012.jpg",
+          "bytes": 4862447,
+          "sha256": "0c64acea577cb19437a4e1bbed8c62d6141cb4859e621de37dbb5e60d2fabb8d"
+        },
+        {
+          "neutral_name": "asset_013.jpg",
+          "bytes": 4679223,
+          "sha256": "7e334d5a65a80595758b654e0b647c1b23a05ed8752c4607952758b26c2bb2e1"
+        },
+        {
+          "neutral_name": "asset_014.jpg",
+          "bytes": 4024360,
+          "sha256": "366ee5f946d160fd28876a280fc5051db2a1fb4174556f390771906afc5b21d0"
+        },
+        {
+          "neutral_name": "asset_015.jpg",
+          "bytes": 4681248,
+          "sha256": "6e31a6b2e03bd49bfc41549473a4e9df940f0372a41aeb5a3e309d46af1021d9"
+        },
+        {
+          "neutral_name": "asset_016.jpg",
+          "bytes": 4443201,
+          "sha256": "aaba85d7f34d9aef850c1b0113c6e40c3f7a00675f2cd24b6af55b5a7dec859b"
+        },
+        {
+          "neutral_name": "asset_017.jpg",
+          "bytes": 4455966,
+          "sha256": "12a39aeb72b6c5cd80de702f0b62f53884fdbf9a3f6b7fa2abb8624adce02875"
+        },
+        {
+          "neutral_name": "asset_018.jpg",
+          "bytes": 4373372,
+          "sha256": "68d83ba1d61f6a310b5d3b87c5d91a37bef62343b203cb63a14cb1aeff22ea5a"
+        },
+        {
+          "neutral_name": "asset_019.jpg",
+          "bytes": 4593131,
+          "sha256": "d3f0ab99f7da137e23e53e4f22370942b9e7940bf02bacd5289c3466304f98c0"
+        },
+        {
+          "neutral_name": "asset_020.jpg",
+          "bytes": 5552394,
+          "sha256": "15b8dc57993c7791f9fc8b313da5061c50765b46e3fdc90d23277e7fe436442c"
+        },
+        {
+          "neutral_name": "asset_021.jpg",
+          "bytes": 4508046,
+          "sha256": "688965724ffe24b00f3e284ee71e07cd5c2b4d231e5cbe95608e7f9ba13c338a"
+        },
+        {
+          "neutral_name": "asset_022.jpg",
+          "bytes": 4444409,
+          "sha256": "0af9371e4c0775e97546bea72836c97e1f75a50c2478b4d40015099f4878f464"
+        },
+        {
+          "neutral_name": "asset_023.png",
+          "bytes": 1258987,
+          "sha256": "55f8d93711867117cec4dffa0618c9c7f7fc6efa299044d07b63f250c69f4ffe"
+        }
+      ],
+      "total_bytes": 675087928,
+      "status": "SUCCEEDED",
+      "predicted_label": "review",
+      "confidence": 0.5955,
+      "media_forensics_status": "completed",
+      "continuity": {
+        "tracked_subjects": [
+          {
+            "subject_id": "shipping_package",
+            "video_index": 1,
+            "description": "快递包装",
+            "tracking_start": "00:00.00",
+            "tracking_end": "04:00.40",
+            "first_exposed_timestamp": "00:00.00",
+            "visibility_coverage": 0.938,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:33.90",
+                "end_timestamp": "00:35.90",
+                "local_start_timestamp": "00:33.90",
+                "local_end_timestamp": "00:35.90",
+                "duration_seconds": 2.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 32.93,
+                  "timestamp_label": "00:32.93",
+                  "local_timestamp": "00:32.93",
+                  "global_frame_index": 34,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 33.9,
+                  "timestamp_label": "00:33.90",
+                  "local_timestamp": "00:33.90",
+                  "global_frame_index": 35,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 35.9,
+                  "timestamp_label": "00:35.90",
+                  "local_timestamp": "00:35.90",
+                  "global_frame_index": 37,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "00:57.87",
+                "end_timestamp": "00:58.87",
+                "local_start_timestamp": "00:57.87",
+                "local_end_timestamp": "00:58.87",
+                "duration_seconds": 1.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 56.87,
+                  "timestamp_label": "00:56.87",
+                  "local_timestamp": "00:56.87",
+                  "global_frame_index": 58,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 57.87,
+                  "timestamp_label": "00:57.87",
+                  "local_timestamp": "00:57.87",
+                  "global_frame_index": 59,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 58.87,
+                  "timestamp_label": "00:58.87",
+                  "local_timestamp": "00:58.87",
+                  "global_frame_index": 60,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "01:02.83",
+                "end_timestamp": "01:05.83",
+                "local_start_timestamp": "01:02.83",
+                "local_end_timestamp": "01:05.83",
+                "duration_seconds": 3.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 61.83,
+                  "timestamp_label": "01:01.83",
+                  "local_timestamp": "01:01.83",
+                  "global_frame_index": 63,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 62.83,
+                  "timestamp_label": "01:02.83",
+                  "local_timestamp": "01:02.83",
+                  "global_frame_index": 64,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 65.83,
+                  "timestamp_label": "01:05.83",
+                  "local_timestamp": "01:05.83",
+                  "global_frame_index": 67,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "01:48.73",
+                "end_timestamp": "01:50.73",
+                "local_start_timestamp": "01:48.73",
+                "local_end_timestamp": "01:50.73",
+                "duration_seconds": 2.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 107.72999999999999,
+                  "timestamp_label": "01:47.73",
+                  "local_timestamp": "01:47.73",
+                  "global_frame_index": 109,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 108.72999999999999,
+                  "timestamp_label": "01:48.73",
+                  "local_timestamp": "01:48.73",
+                  "global_frame_index": 110,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 110.72999999999999,
+                  "timestamp_label": "01:50.73",
+                  "local_timestamp": "01:50.73",
+                  "global_frame_index": 112,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "02:36.60",
+                "end_timestamp": "02:42.60",
+                "local_start_timestamp": "02:36.60",
+                "local_end_timestamp": "02:42.60",
+                "duration_seconds": 6.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 155.6,
+                  "timestamp_label": "02:35.60",
+                  "local_timestamp": "02:35.60",
+                  "global_frame_index": 157,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 156.6,
+                  "timestamp_label": "02:36.60",
+                  "local_timestamp": "02:36.60",
+                  "global_frame_index": 158,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 162.6,
+                  "timestamp_label": "02:42.60",
+                  "local_timestamp": "02:42.60",
+                  "global_frame_index": 164,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 6.0,
+            "timeline_source": "frame_findings.subject_visibility"
+          },
+          {
+            "subject_id": "product_package",
+            "video_index": 1,
+            "description": "商品包装/承载物",
+            "tracking_start": "00:15.97",
+            "tracking_end": "04:00.40",
+            "first_exposed_timestamp": "00:15.97",
+            "visibility_coverage": 0.8805,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:57.87",
+                "end_timestamp": "00:58.87",
+                "local_start_timestamp": "00:57.87",
+                "local_end_timestamp": "00:58.87",
+                "duration_seconds": 1.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 56.87,
+                  "timestamp_label": "00:56.87",
+                  "local_timestamp": "00:56.87",
+                  "global_frame_index": 58,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 57.87,
+                  "timestamp_label": "00:57.87",
+                  "local_timestamp": "00:57.87",
+                  "global_frame_index": 59,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 58.87,
+                  "timestamp_label": "00:58.87",
+                  "local_timestamp": "00:58.87",
+                  "global_frame_index": 60,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "01:02.83",
+                "end_timestamp": "01:05.83",
+                "local_start_timestamp": "01:02.83",
+                "local_end_timestamp": "01:05.83",
+                "duration_seconds": 3.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 61.83,
+                  "timestamp_label": "01:01.83",
+                  "local_timestamp": "01:01.83",
+                  "global_frame_index": 63,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 62.83,
+                  "timestamp_label": "01:02.83",
+                  "local_timestamp": "01:02.83",
+                  "global_frame_index": 64,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 65.83,
+                  "timestamp_label": "01:05.83",
+                  "local_timestamp": "01:05.83",
+                  "global_frame_index": 67,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "01:22.80",
+                "end_timestamp": "01:23.80",
+                "local_start_timestamp": "01:22.80",
+                "local_end_timestamp": "01:23.80",
+                "duration_seconds": 1.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 81.8,
+                  "timestamp_label": "01:21.80",
+                  "local_timestamp": "01:21.80",
+                  "global_frame_index": 83,
+                  "state": "occluded"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 82.8,
+                  "timestamp_label": "01:22.80",
+                  "local_timestamp": "01:22.80",
+                  "global_frame_index": 84,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 83.8,
+                  "timestamp_label": "01:23.80",
+                  "local_timestamp": "01:23.80",
+                  "global_frame_index": 85,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "01:57.70",
+                "end_timestamp": "01:59.70",
+                "local_start_timestamp": "01:57.70",
+                "local_end_timestamp": "01:59.70",
+                "duration_seconds": 2.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 116.7,
+                  "timestamp_label": "01:56.70",
+                  "local_timestamp": "01:56.70",
+                  "global_frame_index": 118,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 117.7,
+                  "timestamp_label": "01:57.70",
+                  "local_timestamp": "01:57.70",
+                  "global_frame_index": 119,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 119.7,
+                  "timestamp_label": "01:59.70",
+                  "local_timestamp": "01:59.70",
+                  "global_frame_index": 121,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "03:01.53",
+                "end_timestamp": "03:11.53",
+                "local_start_timestamp": "03:01.53",
+                "local_end_timestamp": "03:11.53",
+                "duration_seconds": 10.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 180.53,
+                  "timestamp_label": "03:00.53",
+                  "local_timestamp": "03:00.53",
+                  "global_frame_index": 182,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 181.53,
+                  "timestamp_label": "03:01.53",
+                  "local_timestamp": "03:01.53",
+                  "global_frame_index": 183,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 191.53,
+                  "timestamp_label": "03:11.53",
+                  "local_timestamp": "03:11.53",
+                  "global_frame_index": 193,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "03:57.40",
+                "end_timestamp": "04:00.40",
+                "local_start_timestamp": "03:57.40",
+                "local_end_timestamp": "04:00.40",
+                "duration_seconds": 3.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 236.4,
+                  "timestamp_label": "03:56.40",
+                  "local_timestamp": "03:56.40",
+                  "global_frame_index": 238,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 237.4,
+                  "timestamp_label": "03:57.40",
+                  "local_timestamp": "03:57.40",
+                  "global_frame_index": 239,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": null,
+                "identity_reestablished": false,
+                "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 10.0,
+            "timeline_source": "frame_findings.subject_visibility"
+          },
+          {
+            "subject_id": "claimed_item",
+            "video_index": 1,
+            "description": "争议商品本体",
+            "tracking_start": "00:28.93",
+            "tracking_end": "04:00.40",
+            "first_exposed_timestamp": "00:28.93",
+            "visibility_coverage": 0.6854,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:32.93",
+                "end_timestamp": "00:33.90",
+                "local_start_timestamp": "00:32.93",
+                "local_end_timestamp": "00:33.90",
+                "duration_seconds": 0.97,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 31.93,
+                  "timestamp_label": "00:31.93",
+                  "local_timestamp": "00:31.93",
+                  "global_frame_index": 33,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 32.93,
+                  "timestamp_label": "00:32.93",
+                  "local_timestamp": "00:32.93",
+                  "global_frame_index": 34,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 33.9,
+                  "timestamp_label": "00:33.90",
+                  "local_timestamp": "00:33.90",
+                  "global_frame_index": 35,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "01:51.73",
+                "end_timestamp": "01:59.70",
+                "local_start_timestamp": "01:51.73",
+                "local_end_timestamp": "01:59.70",
+                "duration_seconds": 7.97,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 110.72999999999999,
+                  "timestamp_label": "01:50.73",
+                  "local_timestamp": "01:50.73",
+                  "global_frame_index": 112,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 111.72999999999999,
+                  "timestamp_label": "01:51.73",
+                  "local_timestamp": "01:51.73",
+                  "global_frame_index": 113,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 119.7,
+                  "timestamp_label": "01:59.70",
+                  "local_timestamp": "01:59.70",
+                  "global_frame_index": 121,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "03:13.53",
+                "end_timestamp": "03:18.50",
+                "local_start_timestamp": "03:13.53",
+                "local_end_timestamp": "03:18.50",
+                "duration_seconds": 4.97,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 192.53,
+                  "timestamp_label": "03:12.53",
+                  "local_timestamp": "03:12.53",
+                  "global_frame_index": 194,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 193.53,
+                  "timestamp_label": "03:13.53",
+                  "local_timestamp": "03:13.53",
+                  "global_frame_index": 195,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 198.5,
+                  "timestamp_label": "03:18.50",
+                  "local_timestamp": "03:18.50",
+                  "global_frame_index": 200,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "03:22.50",
+                "end_timestamp": "03:25.50",
+                "local_start_timestamp": "03:22.50",
+                "local_end_timestamp": "03:25.50",
+                "duration_seconds": 3.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 201.5,
+                  "timestamp_label": "03:21.50",
+                  "local_timestamp": "03:21.50",
+                  "global_frame_index": 203,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 202.5,
+                  "timestamp_label": "03:22.50",
+                  "local_timestamp": "03:22.50",
+                  "global_frame_index": 204,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 205.5,
+                  "timestamp_label": "03:25.50",
+                  "local_timestamp": "03:25.50",
+                  "global_frame_index": 207,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "03:48.43",
+                "end_timestamp": "03:55.40",
+                "local_start_timestamp": "03:48.43",
+                "local_end_timestamp": "03:55.40",
+                "duration_seconds": 6.97,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 227.43,
+                  "timestamp_label": "03:47.43",
+                  "local_timestamp": "03:47.43",
+                  "global_frame_index": 229,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 228.43,
+                  "timestamp_label": "03:48.43",
+                  "local_timestamp": "03:48.43",
+                  "global_frame_index": 230,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 235.4,
+                  "timestamp_label": "03:55.40",
+                  "local_timestamp": "03:55.40",
+                  "global_frame_index": 237,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "03:57.40",
+                "end_timestamp": "04:00.40",
+                "local_start_timestamp": "03:57.40",
+                "local_end_timestamp": "04:00.40",
+                "duration_seconds": 3.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 236.4,
+                  "timestamp_label": "03:56.40",
+                  "local_timestamp": "03:56.40",
+                  "global_frame_index": 238,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 237.4,
+                  "timestamp_label": "03:57.40",
+                  "local_timestamp": "03:57.40",
+                  "global_frame_index": 239,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": null,
+                "identity_reestablished": false,
+                "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 7.97,
+            "timeline_source": "frame_findings.subject_visibility"
+          }
+        ],
+        "continuity_verdict": "indeterminate",
+        "longest_out_of_frame_seconds": 10.0,
+        "total_unobserved_seconds": 60.88,
+        "segment_assessments": [
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              "在 00:00.00 至 00:06.00 期间，用户对未拆封的快递盒进行了多角度翻转展示，面单及各封口胶带完好。",
+              "在 00:06.97 处，用户开始使用蓝色美工刀对快递盒进行划线拆封。"
+            ],
+            "limitations": "本段截帧仅记录了视频前11秒的开箱准备与初步划箱动作。由于快递盒尚未完全打开，商品包装（product_package）与争议商品本体（claimed_item）在此期间均未显露，因此无法对后续主体的连续性及商品伤情进行评估。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "package_opened",
+                "timestamp": "00:15.97",
+                "description": "外层快递箱被完全打开，首次显露内部的商品包装（气泡膜及卡纸）。"
+              },
+              {
+                "event_type": "item_extracted",
+                "timestamp": "00:17.97",
+                "description": "商品包装（气泡膜包裹状态）被完全从快递箱中取出，全程在镜头内无离镜。"
+              }
+            ],
+            "limitations": "在本段截取的帧组中，商品本体（claimed_item）始终处于未拆封的纸盒及气泡膜内部，尚未显露，因此无法评估商品本体的连续性与外观状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "unwrapping",
+                "description": "在第25-27帧中，商品外盒（product_package）从气泡膜中被拆封取出，全程在镜头内连续展示。"
+              },
+              {
+                "event_type": "first_exposure",
+                "description": "在第30帧中，商品外盒旋转至正面，内部商品本体（claimed_item）首次通过透明视窗暴露在镜头前。"
+              },
+              {
+                "event_type": "temporary_occlusion",
+                "description": "在第31帧中，由于外盒翻转展示背面，内部商品本体被外盒不透明纸板暂时遮挡，随后在第32帧重新显露。"
+              },
+              {
+                "event_type": "extreme_close_up",
+                "description": "在第34-36帧中，镜头极度拉近对准外盒边缘瑕疵，导致背景快递箱（shipping_package）出镜，商品本体（claimed_item）移至画面边缘仅部分可见。"
+              }
+            ],
+            "limitations": "由于商品本体（claimed_item）始终未从商品外盒（product_package）中取出，其背面及被外盒遮挡的部分在视频中无法被直接观察到。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "unboxing_start",
+                "timestamp": "00:36.90",
+                "description": "用户开始撕开商品包装盒的封口贴纸。"
+              },
+              {
+                "event_type": "item_exposure",
+                "timestamp": "00:39.90",
+                "description": "商品包装盒被打开，商品本体（毛绒玩具）首次在镜头中露出。"
+              },
+              {
+                "event_type": "item_extraction",
+                "timestamp": "00:41.90",
+                "description": "商品本体被完全从包装盒中取出，开始进行近距离细节展示。"
+              }
+            ],
+            "limitations": "本段视频未展示最外层快递箱的开箱过程，视频开始时商品包装盒已处于已被拿出的状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "在 00:57.87 (帧59) 期间，由于镜头极度拉近进行局部缝线特写，无法看清商品全貌，但前后帧均保持了主体的连续性，未发生离镜或替换。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "shipping_package",
+                "start_timestamp": "01:02.83",
+                "end_timestamp": "01:04.83",
+                "duration_seconds": 3.0,
+                "description": "由于镜头拉近对商品进行特写，外层快递纸箱暂时移出画面，超出2.0秒警告阈值，但在01:05.83镜头拉远后重新出现，身份重建成功。"
+              },
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "product_package",
+                "start_timestamp": "01:02.83",
+                "end_timestamp": "01:04.83",
+                "duration_seconds": 3.0,
+                "description": "由于镜头拉近对商品进行特写，白色商品纸盒暂时移出画面，超出2.0秒警告阈值，但在01:05.83镜头拉远后重新出现，身份重建成功。"
+              }
+            ],
+            "limitations": "在01:02.83至01:04.83期间，由于镜头极度拉近展示商品细节，外层包装和商品包装暂时脱离画面，但此过程属于正常的特写展示，且商品本体（claimed_item）始终在镜头内未曾离镜，未发现剪辑或替换痕迹。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "frame_index": 76,
+                "timestamp": "01:14.80",
+                "description": "商品（claimed_item）首次从气泡袋中抽出并露出边缘，完成首次身份确立。"
+              },
+              {
+                "frame_index": 81,
+                "timestamp": "01:19.80",
+                "description": "商品（claimed_item）完全脱离气泡袋（product_package），实现独立主体展示。"
+              }
+            ],
+            "limitations": "本段视频中，商品在第76帧前一直处于半透明气泡袋内，无法直接观测其未拆封前的表面微观物理状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "item_exposure",
+                "timestamp": "01:27.77",
+                "global_frame_index": 89,
+                "description": "商品本体（亚克力板）首次从不透明的黑色包装袋中抽出并显露。"
+              }
+            ],
+            "limitations": "本帧组视频画面连续，无剪辑或跳切痕迹，商品在拆封和展示过程中始终处于镜头监控范围内。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "frame_index": 98,
+                "description": "商品（claimed_item）由白色的背面翻转至印有双人角色的正面，主体身份保持一致。"
+              },
+              {
+                "frame_index": 108,
+                "description": "视频末尾出现剧烈的运动模糊，但商品及包装袋并未完全离开画面。"
+              }
+            ],
+            "limitations": "最后一帧（帧108）由于镜头快速移动产生严重运动模糊，无法看清商品表面的细节特征。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              {
+                "event_type": "subject_out_of_frame",
+                "subject_id": "shipping_package",
+                "timestamp": "01:48.73",
+                "description": "由于镜头拉近特写卡片，快递纸箱暂时移出画面，后于01:50.73重新出现。"
+              },
+              {
+                "event_type": "subject_out_of_frame",
+                "subject_id": "claimed_item",
+                "timestamp": "01:51.73",
+                "description": "卡片商品本体在展示完毕后被移出画面，随后用户开始从纸箱中拿取其他商品，卡片本体在此后未再出现。"
+              },
+              {
+                "event_type": "subject_out_of_frame",
+                "subject_id": "product_package",
+                "timestamp": "01:57.70",
+                "description": "原卡片的透明塑料包装袋在被放置于纸箱上后，因镜头转向新拿出的商品而移出画面。"
+              }
+            ],
+            "limitations": "本段视频后半部分（01:51.73起）用户将注意力转向了纸箱内的其他商品（白色包装袋），因此无法确认原争议卡片商品在此期间的去向及状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "exposure",
+                "timestamp": "01:59.70",
+                "description": "商品本体（卡片周边）首次从商品包装（纸质收纳夹）中露出并被持续展示。"
+              }
+            ],
+            "limitations": "由于镜头主要聚焦于手部动作与商品细节，背景中的快递箱仅部分可见，但其空间位置未发生突变。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "item_extraction",
+                "timestamp": "02:11.67",
+                "description": "用户首次从灰色信封中抽出卡片进行展示。"
+              },
+              {
+                "event_type": "item_insertion",
+                "timestamp": "02:14.67",
+                "description": "用户将卡片收回灰色信封中。"
+              },
+              {
+                "event_type": "item_extraction",
+                "timestamp": "02:17.67",
+                "description": "用户再次从灰色信封中抽出卡片进行展示。"
+              },
+              {
+                "event_type": "item_insertion",
+                "timestamp": "02:19.67",
+                "description": "用户再次将卡片收回灰色信封中。"
+              },
+              {
+                "event_type": "item_extraction",
+                "timestamp": "02:22.63",
+                "description": "用户第三次从灰色信封中抽出卡片进行展示。"
+              }
+            ],
+            "limitations": "本分析仅限于视频1的02:11.67至02:22.63时间段，无法对该时间段之外的视频连续性及完整性做出评估。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "brief_occlusion",
+            "critical_events": [
+              {
+                "event_type": "subject_occlusion",
+                "subject_id": "claimed_item",
+                "start_timestamp": "02:26.63",
+                "end_timestamp": "02:30.63",
+                "description": "争议商品（角色卡片）在02:26.63至02:30.63期间被叠放在商品包装（灰色信封袋）后方，导致短暂被遮挡，随后在02:31.63重新移至前方并恢复可见，主体身份未发生改变。"
+              }
+            ],
+            "limitations": "本段视频中，快递纸箱始终作为背景部分可见，未进行完整展示。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "subject_out_of_frame",
+                "subject_id": "shipping_package",
+                "timestamp": "02:36.60",
+                "description": "由于镜头向下移动，快递纸箱暂时移出画面范围。"
+              },
+              {
+                "event_type": "subject_reestablished",
+                "subject_id": "shipping_package",
+                "timestamp": "02:42.60",
+                "description": "镜头拉远后，快递纸箱在背景中重新出现，其相对位置与特征保持一致。"
+              },
+              {
+                "event_type": "subject_occluded",
+                "subject_id": "claimed_item",
+                "timestamp": "02:45.60",
+                "description": "角色卡片被用户放回灰色信封袋中，导致其被商品包装遮挡。"
+              }
+            ],
+            "limitations": "本段视频中，快递纸箱在02:36.60至02:41.60期间移出画面，无法在此期间直接监控其状态，但商品包装与商品本体在此期间始终在镜头内连续展示，未发生离镜或替换。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "subject_retrieval",
+                "timestamp": "02:54.57",
+                "description": "主商品（claimed_item）及其包装（product_package）在经历短暂的手部抓取遮挡后，被连续地从快递箱（shipping_package）中取出并移至镜头前展示，期间无任何跳切或离镜。"
+              }
+            ],
+            "limitations": "本段视频中主商品始终处于未拆封的透明塑料包装袋内，无法直接接触并展示裸品细节。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "unpacking",
+                "timestamp": "03:00.53",
+                "description": "在帧182，用户将争议商品（claimed_item）从商品包装（product_package，即透明塑料保护袋）中抽出，此后商品包装被移出画面，商品本体持续在镜头内展示。"
+              }
+            ],
+            "limitations": "本帧组仅展示了商品从塑料保护袋中取出并进行翻阅展示的过程，无法确认塑料保护袋被移出画面后的具体去向。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "claimed_item",
+                "start_timestamp": "03:13.53",
+                "end_timestamp": "03:17.50",
+                "duration_seconds": 3.97,
+                "description": "争议商品（卡片）在03:13.53至03:17.50期间完全移出画面，离镜时长约4秒，超过了2.0秒的安全阈值。"
+              }
+            ],
+            "limitations": "由于争议商品（卡片）在视频中多次且长时间离开镜头范围，无法通过连续画面确保重新进入镜头的卡片与离镜前为同一实体。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "claimed_item_exposure",
+                "timestamp": "03:25.50",
+                "description": "商品卡片首次从灰色包装纸套中翻开露出。"
+              },
+              {
+                "event_type": "claimed_item_exposure",
+                "timestamp": "03:31.47",
+                "description": "第二张商品卡片从灰色包装纸套中翻开露出。"
+              }
+            ],
+            "limitations": "本帧组仅展示了商品卡片在包装纸套中反复翻开与合拢的过程，由于卡片在合拢时处于完全遮挡状态，无法通过肉眼直接穿透包装确认其在遮挡期间的微观物理状态变化。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "brief_occlusion",
+                "timestamp": "03:41.43",
+                "description": "争议商品（卡片）在帧223被短暂收回或完全遮挡，但在帧224重新抽出并持续在镜头内展示，未发生离镜或剪辑。"
+              }
+            ],
+            "limitations": "本帧组仅覆盖03:35.47至03:46.43时段，无法确认该时段前后的主体连续性状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "claimed_item",
+                "start_timestamp": "03:48.43",
+                "end_timestamp": "03:54.40",
+                "duration_seconds": 5.97,
+                "description": "争议商品本体（角色卡片）在展示其他包装时完全离开画面，时间超过2.0秒安全阈值。"
+              },
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "product_package",
+                "start_timestamp": "03:57.40",
+                "end_timestamp": "03:58.40",
+                "duration_seconds": 1.0,
+                "description": "商品包装随手部动作完全离开画面。"
+              }
+            ],
+            "limitations": "由于争议商品本体（角色卡片）在03:48.43至03:54.40期间长时间离开镜头，无法通过此段视频确认其在此期间是否被替换或发生物理改变。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              "自 03:57.40（帧239）起，争议商品（claimed_item）与商品包装（product_package）完全离开镜头中心，镜头转而俯拍空快递箱。至 04:00.40（帧242）已持续离镜达 3.0 秒，超过了 2.0 秒的警示阈值。"
+            ],
+            "limitations": "由于争议商品和商品包装在目标帧段内均已离镜，本段视频无法用于证实该商品在此时段内的连续性或任何伤情细节。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          }
+        ],
+        "timeline_derivation": "deterministic_frame_timeline",
+        "tracked_subject_defined": true,
+        "out_of_frame_events": [
+          {
+            "start_timestamp": "00:33.90",
+            "end_timestamp": "00:35.90",
+            "local_start_timestamp": "00:33.90",
+            "local_end_timestamp": "00:35.90",
+            "duration_seconds": 2.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 32.93,
+              "timestamp_label": "00:32.93",
+              "local_timestamp": "00:32.93",
+              "global_frame_index": 34,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 33.9,
+              "timestamp_label": "00:33.90",
+              "local_timestamp": "00:33.90",
+              "global_frame_index": 35,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 35.9,
+              "timestamp_label": "00:35.90",
+              "local_timestamp": "00:35.90",
+              "global_frame_index": 37,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:57.87",
+            "end_timestamp": "00:58.87",
+            "local_start_timestamp": "00:57.87",
+            "local_end_timestamp": "00:58.87",
+            "duration_seconds": 1.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 56.87,
+              "timestamp_label": "00:56.87",
+              "local_timestamp": "00:56.87",
+              "global_frame_index": 58,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 57.87,
+              "timestamp_label": "00:57.87",
+              "local_timestamp": "00:57.87",
+              "global_frame_index": 59,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 58.87,
+              "timestamp_label": "00:58.87",
+              "local_timestamp": "00:58.87",
+              "global_frame_index": 60,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:02.83",
+            "end_timestamp": "01:05.83",
+            "local_start_timestamp": "01:02.83",
+            "local_end_timestamp": "01:05.83",
+            "duration_seconds": 3.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 61.83,
+              "timestamp_label": "01:01.83",
+              "local_timestamp": "01:01.83",
+              "global_frame_index": 63,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 62.83,
+              "timestamp_label": "01:02.83",
+              "local_timestamp": "01:02.83",
+              "global_frame_index": 64,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 65.83,
+              "timestamp_label": "01:05.83",
+              "local_timestamp": "01:05.83",
+              "global_frame_index": 67,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:48.73",
+            "end_timestamp": "01:50.73",
+            "local_start_timestamp": "01:48.73",
+            "local_end_timestamp": "01:50.73",
+            "duration_seconds": 2.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 107.72999999999999,
+              "timestamp_label": "01:47.73",
+              "local_timestamp": "01:47.73",
+              "global_frame_index": 109,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 108.72999999999999,
+              "timestamp_label": "01:48.73",
+              "local_timestamp": "01:48.73",
+              "global_frame_index": 110,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 110.72999999999999,
+              "timestamp_label": "01:50.73",
+              "local_timestamp": "01:50.73",
+              "global_frame_index": 112,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "02:36.60",
+            "end_timestamp": "02:42.60",
+            "local_start_timestamp": "02:36.60",
+            "local_end_timestamp": "02:42.60",
+            "duration_seconds": 6.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 155.6,
+              "timestamp_label": "02:35.60",
+              "local_timestamp": "02:35.60",
+              "global_frame_index": 157,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 156.6,
+              "timestamp_label": "02:36.60",
+              "local_timestamp": "02:36.60",
+              "global_frame_index": 158,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 162.6,
+              "timestamp_label": "02:42.60",
+              "local_timestamp": "02:42.60",
+              "global_frame_index": 164,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:57.87",
+            "end_timestamp": "00:58.87",
+            "local_start_timestamp": "00:57.87",
+            "local_end_timestamp": "00:58.87",
+            "duration_seconds": 1.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 56.87,
+              "timestamp_label": "00:56.87",
+              "local_timestamp": "00:56.87",
+              "global_frame_index": 58,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 57.87,
+              "timestamp_label": "00:57.87",
+              "local_timestamp": "00:57.87",
+              "global_frame_index": 59,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 58.87,
+              "timestamp_label": "00:58.87",
+              "local_timestamp": "00:58.87",
+              "global_frame_index": 60,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:02.83",
+            "end_timestamp": "01:05.83",
+            "local_start_timestamp": "01:02.83",
+            "local_end_timestamp": "01:05.83",
+            "duration_seconds": 3.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 61.83,
+              "timestamp_label": "01:01.83",
+              "local_timestamp": "01:01.83",
+              "global_frame_index": 63,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 62.83,
+              "timestamp_label": "01:02.83",
+              "local_timestamp": "01:02.83",
+              "global_frame_index": 64,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 65.83,
+              "timestamp_label": "01:05.83",
+              "local_timestamp": "01:05.83",
+              "global_frame_index": 67,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:22.80",
+            "end_timestamp": "01:23.80",
+            "local_start_timestamp": "01:22.80",
+            "local_end_timestamp": "01:23.80",
+            "duration_seconds": 1.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 81.8,
+              "timestamp_label": "01:21.80",
+              "local_timestamp": "01:21.80",
+              "global_frame_index": 83,
+              "state": "occluded"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 82.8,
+              "timestamp_label": "01:22.80",
+              "local_timestamp": "01:22.80",
+              "global_frame_index": 84,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 83.8,
+              "timestamp_label": "01:23.80",
+              "local_timestamp": "01:23.80",
+              "global_frame_index": 85,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:57.70",
+            "end_timestamp": "01:59.70",
+            "local_start_timestamp": "01:57.70",
+            "local_end_timestamp": "01:59.70",
+            "duration_seconds": 2.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 116.7,
+              "timestamp_label": "01:56.70",
+              "local_timestamp": "01:56.70",
+              "global_frame_index": 118,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 117.7,
+              "timestamp_label": "01:57.70",
+              "local_timestamp": "01:57.70",
+              "global_frame_index": 119,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 119.7,
+              "timestamp_label": "01:59.70",
+              "local_timestamp": "01:59.70",
+              "global_frame_index": 121,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "03:01.53",
+            "end_timestamp": "03:11.53",
+            "local_start_timestamp": "03:01.53",
+            "local_end_timestamp": "03:11.53",
+            "duration_seconds": 10.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 180.53,
+              "timestamp_label": "03:00.53",
+              "local_timestamp": "03:00.53",
+              "global_frame_index": 182,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 181.53,
+              "timestamp_label": "03:01.53",
+              "local_timestamp": "03:01.53",
+              "global_frame_index": 183,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 191.53,
+              "timestamp_label": "03:11.53",
+              "local_timestamp": "03:11.53",
+              "global_frame_index": 193,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "03:57.40",
+            "end_timestamp": "04:00.40",
+            "local_start_timestamp": "03:57.40",
+            "local_end_timestamp": "04:00.40",
+            "duration_seconds": 3.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 236.4,
+              "timestamp_label": "03:56.40",
+              "local_timestamp": "03:56.40",
+              "global_frame_index": 238,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 237.4,
+              "timestamp_label": "03:57.40",
+              "local_timestamp": "03:57.40",
+              "global_frame_index": 239,
+              "state": "out_of_frame"
+            },
+            "after_evidence": null,
+            "identity_reestablished": false,
+            "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:32.93",
+            "end_timestamp": "00:33.90",
+            "local_start_timestamp": "00:32.93",
+            "local_end_timestamp": "00:33.90",
+            "duration_seconds": 0.97,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 31.93,
+              "timestamp_label": "00:31.93",
+              "local_timestamp": "00:31.93",
+              "global_frame_index": 33,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 32.93,
+              "timestamp_label": "00:32.93",
+              "local_timestamp": "00:32.93",
+              "global_frame_index": 34,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 33.9,
+              "timestamp_label": "00:33.90",
+              "local_timestamp": "00:33.90",
+              "global_frame_index": 35,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:51.73",
+            "end_timestamp": "01:59.70",
+            "local_start_timestamp": "01:51.73",
+            "local_end_timestamp": "01:59.70",
+            "duration_seconds": 7.97,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 110.72999999999999,
+              "timestamp_label": "01:50.73",
+              "local_timestamp": "01:50.73",
+              "global_frame_index": 112,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 111.72999999999999,
+              "timestamp_label": "01:51.73",
+              "local_timestamp": "01:51.73",
+              "global_frame_index": 113,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 119.7,
+              "timestamp_label": "01:59.70",
+              "local_timestamp": "01:59.70",
+              "global_frame_index": 121,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "03:13.53",
+            "end_timestamp": "03:18.50",
+            "local_start_timestamp": "03:13.53",
+            "local_end_timestamp": "03:18.50",
+            "duration_seconds": 4.97,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 192.53,
+              "timestamp_label": "03:12.53",
+              "local_timestamp": "03:12.53",
+              "global_frame_index": 194,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 193.53,
+              "timestamp_label": "03:13.53",
+              "local_timestamp": "03:13.53",
+              "global_frame_index": 195,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 198.5,
+              "timestamp_label": "03:18.50",
+              "local_timestamp": "03:18.50",
+              "global_frame_index": 200,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "03:22.50",
+            "end_timestamp": "03:25.50",
+            "local_start_timestamp": "03:22.50",
+            "local_end_timestamp": "03:25.50",
+            "duration_seconds": 3.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 201.5,
+              "timestamp_label": "03:21.50",
+              "local_timestamp": "03:21.50",
+              "global_frame_index": 203,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 202.5,
+              "timestamp_label": "03:22.50",
+              "local_timestamp": "03:22.50",
+              "global_frame_index": 204,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 205.5,
+              "timestamp_label": "03:25.50",
+              "local_timestamp": "03:25.50",
+              "global_frame_index": 207,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "03:48.43",
+            "end_timestamp": "03:55.40",
+            "local_start_timestamp": "03:48.43",
+            "local_end_timestamp": "03:55.40",
+            "duration_seconds": 6.97,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 227.43,
+              "timestamp_label": "03:47.43",
+              "local_timestamp": "03:47.43",
+              "global_frame_index": 229,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 228.43,
+              "timestamp_label": "03:48.43",
+              "local_timestamp": "03:48.43",
+              "global_frame_index": 230,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 235.4,
+              "timestamp_label": "03:55.40",
+              "local_timestamp": "03:55.40",
+              "global_frame_index": 237,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "03:57.40",
+            "end_timestamp": "04:00.40",
+            "local_start_timestamp": "03:57.40",
+            "local_end_timestamp": "04:00.40",
+            "duration_seconds": 3.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 236.4,
+              "timestamp_label": "03:56.40",
+              "local_timestamp": "03:56.40",
+              "global_frame_index": 238,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 237.4,
+              "timestamp_label": "03:57.40",
+              "local_timestamp": "03:57.40",
+              "global_frame_index": 239,
+              "state": "out_of_frame"
+            },
+            "after_evidence": null,
+            "identity_reestablished": false,
+            "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+            "source": "deterministic_frame_timeline"
+          }
+        ],
+        "policy": {
+          "out_of_frame_warning_seconds": 2.0,
+          "effect": "超过阈值转人工复核，不自动拒绝"
+        }
+      },
+      "global_review_summary": {
+        "sampled_start_seconds": 0.0,
+        "sampled_end_seconds": 240.4,
+        "source_duration_seconds": 240.43,
+        "claimed_item_first_exposed_timestamp": "00:28.93",
+        "opening_integrity": "indeterminate",
+        "continuity_verdict": "indeterminate",
+        "chunk_narratives_excluded_from_public_conclusion": true
+      },
+      "aggregation_warnings": [],
+      "decision_policy_audit": {
+        "version": "2026-07-17.1",
+        "mode": "conservative_review",
+        "policy_ref": "",
+        "applied": false,
+        "rule_id": "",
+        "claim_scope": {
+          "claim_id": "",
+          "stage": "initial",
+          "issue_types": [],
+          "excluded_issue_types": [
+            "later_supplemental_claims"
+          ],
+          "active_claim_ids": [
+            "CLM-614176-INITIAL"
+          ],
+          "split_status": "resolved",
+          "ready": true
+        },
+        "evidence_gate": {
+          "video_present": true,
+          "continuity_verdict": "indeterminate",
+          "claimed_item_visibility_coverage": 0.6854,
+          "damage_presence": "confirmed",
+          "claim_support": "insufficient",
+          "damage_observability": "unknown",
+          "model_confidence": 0.5955
+        },
+        "business_boundary": "该结果仅是审核分类建议，不自动执行拒绝、退款、补发、换货或最终定责。",
+        "reason": "未启用商品有伤规则分类建议。"
+      },
+      "damage_observability": {
+        "status": "unknown",
+        "same_item_linkage": false,
+        "claimed_region_closeup": false,
+        "required_view_coverage": 0.0,
+        "conflicting_evidence": false,
+        "missing_views": [
+          "模型未返回结构化可观察性结果"
+        ]
+      },
+      "overall_conclusion": "当前证据仍需复核。送审时间轴已覆盖至 04:00.40，源视频时长约 04:00.43；争议商品首次曝光于 00:28.93",
+      "inference_estimate": {},
+      "workbench_transport": {
+        "attempts": [
+          {
+            "attempt": 1,
+            "status_code": 200,
+            "latency_seconds": 963.047
+          }
+        ],
+        "retry_count": 0
+      },
+      "diagnostics": {}
+    },
+    {
+      "case_id": "618205",
+      "preset": "adaptive",
+      "job_id": "RJ-68793580CA6143BC",
+      "request_metadata_sha256": "e5115e829351fbc6834e122ee03110e2b8c2fdcedbdbe296d949751b5ee056de",
+      "assets": [
+        {
+          "neutral_name": "asset_001.png",
+          "bytes": 2113298,
+          "sha256": "0b2dd77528c37d64aceb7058678fe044f3ada662cdc83d7d7dc2d7664c41dc44"
+        },
+        {
+          "neutral_name": "asset_002.mp4",
+          "bytes": 22701040,
+          "sha256": "d4962a8f8c712339f74032be0816a737f8db0086a8419d77aa54e88bfd768372"
+        },
+        {
+          "neutral_name": "asset_003.png",
+          "bytes": 2031624,
+          "sha256": "5d4c0b19b73cc0168035f0b20a6f52e0a7203f9ae861433ecf822289ac9f6209"
+        },
+        {
+          "neutral_name": "asset_004.jpeg",
+          "bytes": 176509,
+          "sha256": "ee85fd255b3299de5eaa45c7ce02d047ee5bd4f3863b90c800f843f8b4aaab51"
+        },
+        {
+          "neutral_name": "asset_005.png",
+          "bytes": 2031624,
+          "sha256": "5d4c0b19b73cc0168035f0b20a6f52e0a7203f9ae861433ecf822289ac9f6209"
+        },
+        {
+          "neutral_name": "asset_006.png",
+          "bytes": 2031624,
+          "sha256": "5d4c0b19b73cc0168035f0b20a6f52e0a7203f9ae861433ecf822289ac9f6209"
+        },
+        {
+          "neutral_name": "asset_007.jpeg",
+          "bytes": 176509,
+          "sha256": "ee85fd255b3299de5eaa45c7ce02d047ee5bd4f3863b90c800f843f8b4aaab51"
+        }
+      ],
+      "total_bytes": 31262228,
+      "status": "SUCCEEDED",
+      "predicted_label": "review",
+      "confidence": 0.6425,
+      "media_forensics_status": "completed",
+      "continuity": {
+        "tracked_subjects": [
+          {
+            "subject_id": "shipping_package",
+            "video_index": 1,
+            "description": "快递包装",
+            "tracking_start": "00:00.00",
+            "tracking_end": "01:11.60",
+            "first_exposed_timestamp": "00:00.00",
+            "visibility_coverage": 0.9452,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:07.94",
+                "end_timestamp": "00:10.94",
+                "local_start_timestamp": "00:07.94",
+                "local_end_timestamp": "00:10.94",
+                "duration_seconds": 3.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 6.97,
+                  "timestamp_label": "00:06.97",
+                  "local_timestamp": "00:06.97",
+                  "global_frame_index": 8,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 7.94,
+                  "timestamp_label": "00:07.94",
+                  "local_timestamp": "00:07.94",
+                  "global_frame_index": 9,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 10.94,
+                  "timestamp_label": "00:10.94",
+                  "local_timestamp": "00:10.94",
+                  "global_frame_index": 12,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 3.0,
+            "timeline_source": "frame_findings.subject_visibility"
+          },
+          {
+            "subject_id": "product_package",
+            "video_index": 1,
+            "description": "商品包装/承载物",
+            "tracking_start": "00:00.00",
+            "tracking_end": "01:11.60",
+            "first_exposed_timestamp": "00:00.00",
+            "visibility_coverage": 0.6164,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:20.89",
+                "end_timestamp": "00:21.89",
+                "local_start_timestamp": "00:20.89",
+                "local_end_timestamp": "00:21.89",
+                "duration_seconds": 1.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 19.89,
+                  "timestamp_label": "00:19.89",
+                  "local_timestamp": "00:19.89",
+                  "global_frame_index": 21,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 20.89,
+                  "timestamp_label": "00:20.89",
+                  "local_timestamp": "00:20.89",
+                  "global_frame_index": 22,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 21.89,
+                  "timestamp_label": "00:21.89",
+                  "local_timestamp": "00:21.89",
+                  "global_frame_index": 23,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "00:22.89",
+                "end_timestamp": "00:23.86",
+                "local_start_timestamp": "00:22.89",
+                "local_end_timestamp": "00:23.86",
+                "duration_seconds": 0.97,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 21.89,
+                  "timestamp_label": "00:21.89",
+                  "local_timestamp": "00:21.89",
+                  "global_frame_index": 23,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 22.89,
+                  "timestamp_label": "00:22.89",
+                  "local_timestamp": "00:22.89",
+                  "global_frame_index": 24,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 23.86,
+                  "timestamp_label": "00:23.86",
+                  "local_timestamp": "00:23.86",
+                  "global_frame_index": 25,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "00:52.72",
+                "end_timestamp": "01:09.60",
+                "local_start_timestamp": "00:52.72",
+                "local_end_timestamp": "01:09.60",
+                "duration_seconds": 16.88,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 51.71,
+                  "timestamp_label": "00:51.71",
+                  "local_timestamp": "00:51.71",
+                  "global_frame_index": 53,
+                  "state": "occluded"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 52.72,
+                  "timestamp_label": "00:52.72",
+                  "local_timestamp": "00:52.72",
+                  "global_frame_index": 54,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 69.6,
+                  "timestamp_label": "01:09.60",
+                  "local_timestamp": "01:09.60",
+                  "global_frame_index": 71,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 16.88,
+            "timeline_source": "frame_findings.subject_visibility"
+          },
+          {
+            "subject_id": "claimed_item",
+            "video_index": 1,
+            "description": "争议商品本体",
+            "tracking_start": "00:52.72",
+            "tracking_end": "01:11.60",
+            "first_exposed_timestamp": "00:52.72",
+            "visibility_coverage": 0.9,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "01:10.60",
+                "end_timestamp": "01:11.60",
+                "local_start_timestamp": "01:10.60",
+                "local_end_timestamp": "01:11.60",
+                "duration_seconds": 1.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 69.6,
+                  "timestamp_label": "01:09.60",
+                  "local_timestamp": "01:09.60",
+                  "global_frame_index": 71,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 70.6,
+                  "timestamp_label": "01:10.60",
+                  "local_timestamp": "01:10.60",
+                  "global_frame_index": 72,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": null,
+                "identity_reestablished": false,
+                "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 1.0,
+            "timeline_source": "frame_findings.subject_visibility"
+          }
+        ],
+        "continuity_verdict": "indeterminate",
+        "longest_out_of_frame_seconds": 16.88,
+        "total_unobserved_seconds": 22.85,
+        "segment_assessments": [
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "subject_out_of_frame",
+                "subject_id": "shipping_package",
+                "timestamp": "00:07.94",
+                "description": "外层硬纸箱（shipping_package）在00:07.94至00:09.94期间因镜头拉近而暂时移出画面，随后在00:10.94重新部分出现。"
+              }
+            ],
+            "limitations": "由于商品本体（claimed_item）在整个视频片段中均未从绿色包装袋（product_package）中拆出，本段视频无法用于核验商品本体的连续性及其实物状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "brief_occlusion",
+            "critical_events": [
+              {
+                "event_type": "subject_exposure",
+                "subject_id": "product_package",
+                "timestamp": "00:17.88",
+                "global_frame_index": 19,
+                "description": "粉色气泡膜包装首次从纸箱中取出并显露"
+              },
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "product_package",
+                "timestamp": "00:20.89",
+                "global_frame_index": 22,
+                "description": "粉色气泡膜包装短暂移出画面，但在 00:21.89 重新进入，离镜时间约 1.0 秒，未触发 2.0 秒失联警报"
+              }
+            ],
+            "limitations": "在本组帧中，争议商品本体（claimed_item）始终包裹在粉色气泡膜内部，尚未拆封显露，因此无法评估商品本体的连续性与外观状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "product_package",
+                "start_timestamp": "00:27.86",
+                "end_timestamp": "00:31.83",
+                "description": "承载争议商品的粉色/橙色扭蛋壳在00:27.86至00:31.83期间完全离开视频画面，离镜时长约4秒，超过了2.0秒的安全阈值。"
+              }
+            ],
+            "limitations": "由于包含争议商品的扭蛋壳在00:27.86至00:31.83期间完全离开了镜头范围，且在此期间手部回到纸箱内进行了其他操作，无法通过连续画面绝对证实重新入镜的扭蛋壳与离镜前为同一物，存在主体替换的潜在风险。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "brief_occlusion",
+            "critical_events": [
+              {
+                "event_type": "subject_occluded",
+                "subject_id": "product_package",
+                "timestamp": "00:42.77",
+                "description": "在帧44中，用户手持说明书纸张移入画面，短暂遮挡了放置在纸箱内的扭蛋壳（商品包装），随后在帧45中重新显露，遮挡时间约1秒，未发生离镜或剪辑。"
+              }
+            ],
+            "limitations": "在本段视频帧组中，商品本体（claimed_item）始终处于未拆封/未显露状态（可能在绿袋内），因此无法对商品本体的连续性及表面伤情进行评估。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "item_exposure",
+                "global_frame_index": 54,
+                "timestamp": "00:52.72",
+                "description": "争议商品（炼狱杏寿郎手办）首次从包装/手部遮挡中显露并呈现于镜头前。"
+              }
+            ],
+            "limitations": "在第51帧至53帧期间，由于手部伸入纸箱并进行拿取动作，商品本体及部分内包装被手部短暂遮挡，无法直接观测到商品在离开包装瞬间的完整状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "brief_occlusion",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "claimed_item",
+                "start_timestamp": "01:09.60",
+                "end_timestamp": "01:10.60",
+                "description": "手办本体在01:09.60移至画面边缘，并在01:10.60完全移出画面，镜头转向展示纸箱内部的扭蛋壳。"
+              }
+            ],
+            "limitations": "本帧组在最后一帧（01:10.60）手办本体已完全离开画面，无法在本帧组内确认其后续是否重新建立身份。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "timestamp": "01:09.60",
+                "description": "争议商品本体（手办）被向画面上方移出，并在后续帧中持续处于画面外，导致主体连续性中断。"
+              }
+            ],
+            "limitations": "由于目标帧中争议商品本体已完全离开画面，且本帧组在 01:11.60 处截止，无法在本帧组内确认该商品后续是否重新入镜并重建身份一致性。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          }
+        ],
+        "timeline_derivation": "deterministic_frame_timeline",
+        "tracked_subject_defined": true,
+        "out_of_frame_events": [
+          {
+            "start_timestamp": "00:07.94",
+            "end_timestamp": "00:10.94",
+            "local_start_timestamp": "00:07.94",
+            "local_end_timestamp": "00:10.94",
+            "duration_seconds": 3.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 6.97,
+              "timestamp_label": "00:06.97",
+              "local_timestamp": "00:06.97",
+              "global_frame_index": 8,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 7.94,
+              "timestamp_label": "00:07.94",
+              "local_timestamp": "00:07.94",
+              "global_frame_index": 9,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 10.94,
+              "timestamp_label": "00:10.94",
+              "local_timestamp": "00:10.94",
+              "global_frame_index": 12,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:20.89",
+            "end_timestamp": "00:21.89",
+            "local_start_timestamp": "00:20.89",
+            "local_end_timestamp": "00:21.89",
+            "duration_seconds": 1.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 19.89,
+              "timestamp_label": "00:19.89",
+              "local_timestamp": "00:19.89",
+              "global_frame_index": 21,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 20.89,
+              "timestamp_label": "00:20.89",
+              "local_timestamp": "00:20.89",
+              "global_frame_index": 22,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 21.89,
+              "timestamp_label": "00:21.89",
+              "local_timestamp": "00:21.89",
+              "global_frame_index": 23,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:22.89",
+            "end_timestamp": "00:23.86",
+            "local_start_timestamp": "00:22.89",
+            "local_end_timestamp": "00:23.86",
+            "duration_seconds": 0.97,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 21.89,
+              "timestamp_label": "00:21.89",
+              "local_timestamp": "00:21.89",
+              "global_frame_index": 23,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 22.89,
+              "timestamp_label": "00:22.89",
+              "local_timestamp": "00:22.89",
+              "global_frame_index": 24,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 23.86,
+              "timestamp_label": "00:23.86",
+              "local_timestamp": "00:23.86",
+              "global_frame_index": 25,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:52.72",
+            "end_timestamp": "01:09.60",
+            "local_start_timestamp": "00:52.72",
+            "local_end_timestamp": "01:09.60",
+            "duration_seconds": 16.88,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 51.71,
+              "timestamp_label": "00:51.71",
+              "local_timestamp": "00:51.71",
+              "global_frame_index": 53,
+              "state": "occluded"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 52.72,
+              "timestamp_label": "00:52.72",
+              "local_timestamp": "00:52.72",
+              "global_frame_index": 54,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 69.6,
+              "timestamp_label": "01:09.60",
+              "local_timestamp": "01:09.60",
+              "global_frame_index": 71,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:10.60",
+            "end_timestamp": "01:11.60",
+            "local_start_timestamp": "01:10.60",
+            "local_end_timestamp": "01:11.60",
+            "duration_seconds": 1.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 69.6,
+              "timestamp_label": "01:09.60",
+              "local_timestamp": "01:09.60",
+              "global_frame_index": 71,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 70.6,
+              "timestamp_label": "01:10.60",
+              "local_timestamp": "01:10.60",
+              "global_frame_index": 72,
+              "state": "out_of_frame"
+            },
+            "after_evidence": null,
+            "identity_reestablished": false,
+            "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+            "source": "deterministic_frame_timeline"
+          }
+        ],
+        "policy": {
+          "out_of_frame_warning_seconds": 2.0,
+          "effect": "超过阈值转人工复核，不自动拒绝"
+        }
+      },
+      "global_review_summary": {
+        "sampled_start_seconds": 0.0,
+        "sampled_end_seconds": 71.6,
+        "source_duration_seconds": 71.63,
+        "claimed_item_first_exposed_timestamp": "00:52.72",
+        "opening_integrity": "indeterminate",
+        "continuity_verdict": "indeterminate",
+        "chunk_narratives_excluded_from_public_conclusion": true
+      },
+      "aggregation_warnings": [],
+      "decision_policy_audit": {
+        "version": "2026-07-17.1",
+        "mode": "conservative_review",
+        "policy_ref": "",
+        "applied": false,
+        "rule_id": "",
+        "claim_scope": {
+          "claim_id": "",
+          "stage": "initial",
+          "issue_types": [],
+          "excluded_issue_types": [],
+          "active_claim_ids": [
+            "CLM-618205-INITIAL"
+          ],
+          "split_status": "resolved",
+          "ready": true
+        },
+        "evidence_gate": {
+          "video_present": true,
+          "continuity_verdict": "indeterminate",
+          "claimed_item_visibility_coverage": 0.9,
+          "damage_presence": "confirmed",
+          "claim_support": "insufficient",
+          "damage_observability": "unknown",
+          "model_confidence": 0.6425
+        },
+        "business_boundary": "该结果仅是审核分类建议，不自动执行拒绝、退款、补发、换货或最终定责。",
+        "reason": "未启用商品有伤规则分类建议。"
+      },
+      "damage_observability": {
+        "status": "unknown",
+        "same_item_linkage": false,
+        "claimed_region_closeup": false,
+        "required_view_coverage": 0.0,
+        "conflicting_evidence": false,
+        "missing_views": [
+          "模型未返回结构化可观察性结果"
+        ]
+      },
+      "overall_conclusion": "当前证据仍需复核。送审时间轴已覆盖至 01:11.60，源视频时长约 01:11.63；争议商品首次曝光于 00:52.72",
+      "inference_estimate": {},
+      "workbench_transport": {},
+      "diagnostics": {}
+    },
+    {
+      "case_id": "618205",
+      "preset": "strong",
+      "job_id": "RJ-A91FEE6518B34FF2",
+      "request_metadata_sha256": "eb8d5f5fd632e38ea28023af6492d334ff190011165047d2a2d9da6d8dd64b8a",
+      "assets": [
+        {
+          "neutral_name": "asset_001.png",
+          "bytes": 2113298,
+          "sha256": "0b2dd77528c37d64aceb7058678fe044f3ada662cdc83d7d7dc2d7664c41dc44"
+        },
+        {
+          "neutral_name": "asset_002.mp4",
+          "bytes": 22701040,
+          "sha256": "d4962a8f8c712339f74032be0816a737f8db0086a8419d77aa54e88bfd768372"
+        },
+        {
+          "neutral_name": "asset_003.png",
+          "bytes": 2031624,
+          "sha256": "5d4c0b19b73cc0168035f0b20a6f52e0a7203f9ae861433ecf822289ac9f6209"
+        },
+        {
+          "neutral_name": "asset_004.jpeg",
+          "bytes": 176509,
+          "sha256": "ee85fd255b3299de5eaa45c7ce02d047ee5bd4f3863b90c800f843f8b4aaab51"
+        },
+        {
+          "neutral_name": "asset_005.png",
+          "bytes": 2031624,
+          "sha256": "5d4c0b19b73cc0168035f0b20a6f52e0a7203f9ae861433ecf822289ac9f6209"
+        },
+        {
+          "neutral_name": "asset_006.png",
+          "bytes": 2031624,
+          "sha256": "5d4c0b19b73cc0168035f0b20a6f52e0a7203f9ae861433ecf822289ac9f6209"
+        },
+        {
+          "neutral_name": "asset_007.jpeg",
+          "bytes": 176509,
+          "sha256": "ee85fd255b3299de5eaa45c7ce02d047ee5bd4f3863b90c800f843f8b4aaab51"
+        }
+      ],
+      "total_bytes": 31262228,
+      "status": "SUCCEEDED",
+      "predicted_label": "review",
+      "confidence": 0.65,
+      "media_forensics_status": "completed",
+      "continuity": {
+        "tracked_subjects": [
+          {
+            "subject_id": "shipping_package",
+            "video_index": 1,
+            "description": "快递包装",
+            "tracking_start": "00:00.00",
+            "tracking_end": "01:11.60",
+            "first_exposed_timestamp": "00:00.00",
+            "visibility_coverage": 1.0,
+            "out_of_frame_events": [],
+            "longest_out_of_frame_seconds": 0.0,
+            "timeline_source": "frame_findings.subject_visibility"
+          },
+          {
+            "subject_id": "product_package",
+            "video_index": 1,
+            "description": "商品包装/承载物",
+            "tracking_start": "00:00.00",
+            "tracking_end": "01:11.60",
+            "first_exposed_timestamp": "00:00.00",
+            "visibility_coverage": 0.5862,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:28.83",
+                "end_timestamp": "00:32.83",
+                "local_start_timestamp": "00:28.83",
+                "local_end_timestamp": "00:32.83",
+                "duration_seconds": 4.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 28.33,
+                  "timestamp_label": "00:28.33",
+                  "local_timestamp": "00:28.33",
+                  "global_frame_index": 58,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 28.83,
+                  "timestamp_label": "00:28.83",
+                  "local_timestamp": "00:28.83",
+                  "global_frame_index": 59,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 32.83,
+                  "timestamp_label": "00:32.83",
+                  "local_timestamp": "00:32.83",
+                  "global_frame_index": 67,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "00:59.66",
+                "end_timestamp": "01:05.63",
+                "local_start_timestamp": "00:59.66",
+                "local_end_timestamp": "01:05.63",
+                "duration_seconds": 5.97,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 59.16,
+                  "timestamp_label": "00:59.16",
+                  "local_timestamp": "00:59.16",
+                  "global_frame_index": 120,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 59.66,
+                  "timestamp_label": "00:59.66",
+                  "local_timestamp": "00:59.66",
+                  "global_frame_index": 121,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 65.63,
+                  "timestamp_label": "01:05.63",
+                  "local_timestamp": "01:05.63",
+                  "global_frame_index": 133,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 5.97,
+            "timeline_source": "frame_findings.subject_visibility"
+          },
+          {
+            "subject_id": "claimed_item",
+            "video_index": 1,
+            "description": "争议商品本体",
+            "tracking_start": "00:52.22",
+            "tracking_end": "01:11.60",
+            "first_exposed_timestamp": "00:52.22",
+            "visibility_coverage": 0.875,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:55.69",
+                "end_timestamp": "00:56.19",
+                "local_start_timestamp": "00:55.69",
+                "local_end_timestamp": "00:56.19",
+                "duration_seconds": 0.5,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 55.18,
+                  "timestamp_label": "00:55.18",
+                  "local_timestamp": "00:55.18",
+                  "global_frame_index": 112,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 55.69,
+                  "timestamp_label": "00:55.69",
+                  "local_timestamp": "00:55.69",
+                  "global_frame_index": 113,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 56.19,
+                  "timestamp_label": "00:56.19",
+                  "local_timestamp": "00:56.19",
+                  "global_frame_index": 114,
+                  "state": "partial"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "01:10.10",
+                "end_timestamp": "01:11.60",
+                "local_start_timestamp": "01:10.10",
+                "local_end_timestamp": "01:11.60",
+                "duration_seconds": 1.5,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 69.6,
+                  "timestamp_label": "01:09.60",
+                  "local_timestamp": "01:09.60",
+                  "global_frame_index": 141,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 70.1,
+                  "timestamp_label": "01:10.10",
+                  "local_timestamp": "01:10.10",
+                  "global_frame_index": 142,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": null,
+                "identity_reestablished": false,
+                "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 1.5,
+            "timeline_source": "frame_findings.subject_visibility"
+          }
+        ],
+        "continuity_verdict": "indeterminate",
+        "longest_out_of_frame_seconds": 5.97,
+        "total_unobserved_seconds": 11.97,
+        "segment_assessments": [
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "在本组帧（00:00.00 至 00:05.47）中，商品本体（claimed_item）始终处于未拆封的不透明绿色包装袋内，因此无法在此阶段确认商品本体的连续性与初始状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "subject_exposure",
+                "timestamp": "00:10.94",
+                "global_frame_index": 23,
+                "description": "快递袋翻转至透明背面，内部的商品气泡膜包装（product_package）首次显露并可见。"
+              }
+            ],
+            "limitations": "在本帧组（帧13至帧24）中，商品本体（claimed_item）始终处于未拆封且被气泡膜包裹的状态，无法直接确认其本体的连续性与初始状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              "在 00:16.92 (帧35) 至 00:17.42 (帧36) 期间，绿色快递袋被放入纸箱中，且被手部遮挡，状态转为部分可见 (partial)。"
+            ],
+            "limitations": "由于本段视频中绿色快递袋（shipping_package）尚未被拆封，商品包装（product_package）与商品本体（claimed_item）均处于未暴露状态，因此无法在本帧组内评估其连续性。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "本段视频中商品本体（claimed_item）尚未从不透明的商品包装或气泡膜中拆出，因此无法对商品本体的连续性及伤情进行实质性评估。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "indeterminate",
+            "critical_events": [
+              {
+                "event_type": "exposure",
+                "subject_id": "product_package",
+                "timestamp": "00:25.86",
+                "description": "扭蛋壳（商品包装）首次从气泡垫中取出并显露在镜头前"
+              },
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "product_package",
+                "timestamp": "00:28.83",
+                "description": "手部持扭蛋壳完全移出画面，此后至本段结束未再返回镜头"
+              }
+            ],
+            "limitations": "由于争议商品本体（claimed_item）在整个片段中始终包裹在不透明的扭蛋壳内部，本帧组无法确认商品本体的连续性及其实物状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "subject_exposure",
+                "subject_id": "product_package",
+                "timestamp": "00:32.83",
+                "global_frame_index": 67,
+                "description": "扭蛋壳（商品包装）首次被手部从快递纸箱中取出并暴露在镜头前，过程连贯无剪辑。"
+              }
+            ],
+            "limitations": "在本段视频帧（帧61-72）中，扭蛋壳尚未被完全打开，因此商品本体（claimed_item）始终处于未显露状态，无法在本段内评估其连续性。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              "在帧81（00:39.77）处，用户将拆开的粉色和橙色两半扭蛋壳（product_package）放置在快递纸箱（shipping_package）内的气泡垫上，实现了主体的空间关联定位。"
+            ],
+            "limitations": "由于商品本体（claimed_item）在此期间一直处于未拆封/未显露状态（可能在绿色包装袋或扭蛋壳内），本段视频仅能证实外包装的连续性，无法对商品本体的连续性及初始状态做出评估。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "brief_occlusion",
+                "timestamp": "00:42.77",
+                "description": "用户手持白色纸条展示，对箱内的绿色商品包装袋造成了短暂的部分遮挡，但包装袋未离开画面，且在 00:44.24 恢复完全可见。"
+              }
+            ],
+            "limitations": "由于商品本体（claimed_item）在此期间一直处于未拆封的绿色包装袋内，本段视频仅能证实包装袋和快递箱的连续性，无法对商品本体的连续性及初始状态做出评估。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "item_exposure",
+                "global_frame_index": 106,
+                "timestamp": "00:52.22",
+                "description": "争议商品本体（炼狱杏寿郎手办）首次从手部/包装中显露。"
+              }
+            ],
+            "limitations": "由于手部握持姿势，手办的下半部分及具体包装拆卸过程在帧组内被手部遮挡，无法完全看清。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "brief_occlusion",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "claimed_item",
+                "start_frame_index": 113,
+                "end_frame_index": 113,
+                "duration_seconds": 0.5,
+                "description": "手办本体在帧113完全移出画面，镜头对准纸箱内部展示，随后在帧114重新进入画面，离镜时间极短（约0.5秒），未超出2.0秒的预警阈值。"
+              }
+            ],
+            "limitations": "本段视频中手办本体存在短暂离镜（帧113），虽然时间极短且前后主体特征一致，但严格意义上存在短暂的视线中断。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "本段视频仅展示了已拆封的手办本体在手里的旋转展示过程，未包含完整的开箱及商品原始包装拆封过程，无法通过本段确认拆封前的初始状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "timestamp": "01:10.10",
+                "global_frame_index": 142,
+                "description": "争议商品（claimed_item）向上移出画面上边界，直至视频结束未再重新出现。"
+              }
+            ],
+            "limitations": "由于争议商品在01:10.10（帧142）之后完全移出画面且未再返回，本段视频后半部分无法对该商品的连续性及状态进行持续追踪。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "在本组帧中，争议商品本体尚未从其原始包装（扭蛋壳/包装袋）中拆出，因此无法评估商品本体的连续性，仅能确认外包装和快递箱的连续性。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          }
+        ],
+        "timeline_derivation": "deterministic_frame_timeline",
+        "tracked_subject_defined": true,
+        "out_of_frame_events": [
+          {
+            "start_timestamp": "00:28.83",
+            "end_timestamp": "00:32.83",
+            "local_start_timestamp": "00:28.83",
+            "local_end_timestamp": "00:32.83",
+            "duration_seconds": 4.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 28.33,
+              "timestamp_label": "00:28.33",
+              "local_timestamp": "00:28.33",
+              "global_frame_index": 58,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 28.83,
+              "timestamp_label": "00:28.83",
+              "local_timestamp": "00:28.83",
+              "global_frame_index": 59,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 32.83,
+              "timestamp_label": "00:32.83",
+              "local_timestamp": "00:32.83",
+              "global_frame_index": 67,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:59.66",
+            "end_timestamp": "01:05.63",
+            "local_start_timestamp": "00:59.66",
+            "local_end_timestamp": "01:05.63",
+            "duration_seconds": 5.97,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 59.16,
+              "timestamp_label": "00:59.16",
+              "local_timestamp": "00:59.16",
+              "global_frame_index": 120,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 59.66,
+              "timestamp_label": "00:59.66",
+              "local_timestamp": "00:59.66",
+              "global_frame_index": 121,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 65.63,
+              "timestamp_label": "01:05.63",
+              "local_timestamp": "01:05.63",
+              "global_frame_index": 133,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:55.69",
+            "end_timestamp": "00:56.19",
+            "local_start_timestamp": "00:55.69",
+            "local_end_timestamp": "00:56.19",
+            "duration_seconds": 0.5,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 55.18,
+              "timestamp_label": "00:55.18",
+              "local_timestamp": "00:55.18",
+              "global_frame_index": 112,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 55.69,
+              "timestamp_label": "00:55.69",
+              "local_timestamp": "00:55.69",
+              "global_frame_index": 113,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 56.19,
+              "timestamp_label": "00:56.19",
+              "local_timestamp": "00:56.19",
+              "global_frame_index": 114,
+              "state": "partial"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:10.10",
+            "end_timestamp": "01:11.60",
+            "local_start_timestamp": "01:10.10",
+            "local_end_timestamp": "01:11.60",
+            "duration_seconds": 1.5,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 69.6,
+              "timestamp_label": "01:09.60",
+              "local_timestamp": "01:09.60",
+              "global_frame_index": 141,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 70.1,
+              "timestamp_label": "01:10.10",
+              "local_timestamp": "01:10.10",
+              "global_frame_index": 142,
+              "state": "out_of_frame"
+            },
+            "after_evidence": null,
+            "identity_reestablished": false,
+            "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+            "source": "deterministic_frame_timeline"
+          }
+        ],
+        "policy": {
+          "out_of_frame_warning_seconds": 2.0,
+          "effect": "超过阈值转人工复核，不自动拒绝"
+        }
+      },
+      "global_review_summary": {
+        "sampled_start_seconds": 0.0,
+        "sampled_end_seconds": 71.6,
+        "source_duration_seconds": 71.63,
+        "claimed_item_first_exposed_timestamp": "00:52.22",
+        "opening_integrity": "indeterminate",
+        "continuity_verdict": "indeterminate",
+        "chunk_narratives_excluded_from_public_conclusion": true
+      },
+      "aggregation_warnings": [],
+      "decision_policy_audit": {
+        "version": "2026-07-17.1",
+        "mode": "conservative_review",
+        "policy_ref": "",
+        "applied": false,
+        "rule_id": "",
+        "claim_scope": {
+          "claim_id": "",
+          "stage": "initial",
+          "issue_types": [],
+          "excluded_issue_types": [],
+          "active_claim_ids": [
+            "CLM-618205-INITIAL"
+          ],
+          "split_status": "resolved",
+          "ready": true
+        },
+        "evidence_gate": {
+          "video_present": true,
+          "continuity_verdict": "indeterminate",
+          "claimed_item_visibility_coverage": 0.875,
+          "damage_presence": "confirmed",
+          "claim_support": "insufficient",
+          "damage_observability": "unknown",
+          "model_confidence": 0.65
+        },
+        "business_boundary": "该结果仅是审核分类建议，不自动执行拒绝、退款、补发、换货或最终定责。",
+        "reason": "未启用商品有伤规则分类建议。"
+      },
+      "damage_observability": {
+        "status": "unknown",
+        "same_item_linkage": false,
+        "claimed_region_closeup": false,
+        "required_view_coverage": 0.0,
+        "conflicting_evidence": false,
+        "missing_views": [
+          "模型未返回结构化可观察性结果"
+        ]
+      },
+      "overall_conclusion": "当前证据仍需复核。送审时间轴已覆盖至 01:11.60，源视频时长约 01:11.63；争议商品首次曝光于 00:52.22",
+      "inference_estimate": {},
+      "workbench_transport": {},
+      "diagnostics": {}
+    },
+    {
+      "case_id": "617911",
+      "preset": "adaptive",
+      "job_id": "RJ-6ADF9BA4F6034F9B",
+      "request_metadata_sha256": "6866ea5f9d6475f3edccf1a8a048b4324729a7ac858541b08d7f0b83cc628d33",
+      "assets": [
+        {
+          "neutral_name": "asset_001.jpg",
+          "bytes": 690829,
+          "sha256": "b351e47466891483fddee06fc8dc527226de4c893fa61aefa369c8b361d0e242"
+        },
+        {
+          "neutral_name": "asset_002.jpg",
+          "bytes": 890456,
+          "sha256": "c2ea1be7763352e57166faed38de23f6286ac5be5ed904452aaf125266191425"
+        },
+        {
+          "neutral_name": "asset_003.mp4",
+          "bytes": 263517272,
+          "sha256": "0aba89acb9efdefe08c39c9a965573597e4500f33877e2e4ca6b1209f61404ee"
+        },
+        {
+          "neutral_name": "asset_004.jpg",
+          "bytes": 2583304,
+          "sha256": "c1d5a836385bc797d4f59863def3d43742b74a1cbcb644108287393e3825a698"
+        },
+        {
+          "neutral_name": "asset_005.jpg",
+          "bytes": 2547483,
+          "sha256": "554923e29ba0a1679a6c7168e21c8370da5386a7b459cfdf79bbb7be6d455ea8"
+        },
+        {
+          "neutral_name": "asset_006.jpg",
+          "bytes": 1102666,
+          "sha256": "528828c95037037c35e5a4587bdb0af91847c29c8e1e07909b3e06d6948a9a79"
+        }
+      ],
+      "total_bytes": 271332010,
+      "status": "SUCCEEDED",
+      "predicted_label": "review",
+      "confidence": 0.5,
+      "media_forensics_status": "completed",
+      "continuity": {
+        "tracked_subjects": [
+          {
+            "subject_id": "shipping_package",
+            "video_index": 1,
+            "description": "快递包装",
+            "tracking_start": "00:02.00",
+            "tracking_end": "03:31.73",
+            "first_exposed_timestamp": "00:02.00",
+            "visibility_coverage": 0.0905,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:16.97",
+                "end_timestamp": "01:47.87",
+                "local_start_timestamp": "00:16.97",
+                "local_end_timestamp": "01:47.87",
+                "duration_seconds": 90.9,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 15.97,
+                  "timestamp_label": "00:15.97",
+                  "local_timestamp": "00:15.97",
+                  "global_frame_index": 17,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 16.97,
+                  "timestamp_label": "00:16.97",
+                  "local_timestamp": "00:16.97",
+                  "global_frame_index": 18,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 107.87,
+                  "timestamp_label": "01:47.87",
+                  "local_timestamp": "01:47.87",
+                  "global_frame_index": 109,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "01:50.87",
+                "end_timestamp": "03:31.73",
+                "local_start_timestamp": "01:50.87",
+                "local_end_timestamp": "03:31.73",
+                "duration_seconds": 100.86,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 109.87,
+                  "timestamp_label": "01:49.87",
+                  "local_timestamp": "01:49.87",
+                  "global_frame_index": 111,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 110.87,
+                  "timestamp_label": "01:50.87",
+                  "local_timestamp": "01:50.87",
+                  "global_frame_index": 112,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": null,
+                "identity_reestablished": false,
+                "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 100.86,
+            "timeline_source": "frame_findings.subject_visibility"
+          },
+          {
+            "subject_id": "product_package",
+            "video_index": 1,
+            "description": "商品包装/承载物",
+            "tracking_start": "00:10.00",
+            "tracking_end": "03:31.73",
+            "first_exposed_timestamp": "00:10.00",
+            "visibility_coverage": 0.2251,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "00:16.97",
+                "end_timestamp": "00:23.97",
+                "local_start_timestamp": "00:16.97",
+                "local_end_timestamp": "00:23.97",
+                "duration_seconds": 7.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 15.97,
+                  "timestamp_label": "00:15.97",
+                  "local_timestamp": "00:15.97",
+                  "global_frame_index": 17,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 16.97,
+                  "timestamp_label": "00:16.97",
+                  "local_timestamp": "00:16.97",
+                  "global_frame_index": 18,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 23.97,
+                  "timestamp_label": "00:23.97",
+                  "local_timestamp": "00:23.97",
+                  "global_frame_index": 25,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "00:35.97",
+                "end_timestamp": "00:39.93",
+                "local_start_timestamp": "00:35.97",
+                "local_end_timestamp": "00:39.93",
+                "duration_seconds": 3.96,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 34.97,
+                  "timestamp_label": "00:34.97",
+                  "local_timestamp": "00:34.97",
+                  "global_frame_index": 36,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 35.97,
+                  "timestamp_label": "00:35.97",
+                  "local_timestamp": "00:35.97",
+                  "global_frame_index": 37,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 39.93,
+                  "timestamp_label": "00:39.93",
+                  "local_timestamp": "00:39.93",
+                  "global_frame_index": 41,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "00:42.93",
+                "end_timestamp": "01:44.87",
+                "local_start_timestamp": "00:42.93",
+                "local_end_timestamp": "01:44.87",
+                "duration_seconds": 61.94,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 41.93,
+                  "timestamp_label": "00:41.93",
+                  "local_timestamp": "00:41.93",
+                  "global_frame_index": 43,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 42.93,
+                  "timestamp_label": "00:42.93",
+                  "local_timestamp": "00:42.93",
+                  "global_frame_index": 44,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 104.87,
+                  "timestamp_label": "01:44.87",
+                  "local_timestamp": "01:44.87",
+                  "global_frame_index": 106,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "02:06.83",
+                "end_timestamp": "03:31.73",
+                "local_start_timestamp": "02:06.83",
+                "local_end_timestamp": "03:31.73",
+                "duration_seconds": 84.9,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 125.83,
+                  "timestamp_label": "02:05.83",
+                  "local_timestamp": "02:05.83",
+                  "global_frame_index": 127,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 126.83,
+                  "timestamp_label": "02:06.83",
+                  "local_timestamp": "02:06.83",
+                  "global_frame_index": 128,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": null,
+                "identity_reestablished": false,
+                "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 84.9,
+            "timeline_source": "frame_findings.subject_visibility"
+          },
+          {
+            "subject_id": "claimed_item",
+            "video_index": 1,
+            "description": "争议商品本体",
+            "tracking_start": "00:39.93",
+            "tracking_end": "03:31.73",
+            "first_exposed_timestamp": "00:39.93",
+            "visibility_coverage": 0.8902,
+            "out_of_frame_events": [
+              {
+                "start_timestamp": "01:43.87",
+                "end_timestamp": "01:53.87",
+                "local_start_timestamp": "01:43.87",
+                "local_end_timestamp": "01:53.87",
+                "duration_seconds": 10.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 102.87,
+                  "timestamp_label": "01:42.87",
+                  "local_timestamp": "01:42.87",
+                  "global_frame_index": 104,
+                  "state": "partial"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 103.87,
+                  "timestamp_label": "01:43.87",
+                  "local_timestamp": "01:43.87",
+                  "global_frame_index": 105,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 113.87,
+                  "timestamp_label": "01:53.87",
+                  "local_timestamp": "01:53.87",
+                  "global_frame_index": 115,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "02:03.83",
+                "end_timestamp": "02:04.83",
+                "local_start_timestamp": "02:03.83",
+                "local_end_timestamp": "02:04.83",
+                "duration_seconds": 1.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 122.83,
+                  "timestamp_label": "02:02.83",
+                  "local_timestamp": "02:02.83",
+                  "global_frame_index": 124,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 123.83,
+                  "timestamp_label": "02:03.83",
+                  "local_timestamp": "02:03.83",
+                  "global_frame_index": 125,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 124.83,
+                  "timestamp_label": "02:04.83",
+                  "local_timestamp": "02:04.83",
+                  "global_frame_index": 126,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "02:06.83",
+                "end_timestamp": "02:11.83",
+                "local_start_timestamp": "02:06.83",
+                "local_end_timestamp": "02:11.83",
+                "duration_seconds": 5.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 125.83,
+                  "timestamp_label": "02:05.83",
+                  "local_timestamp": "02:05.83",
+                  "global_frame_index": 127,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 126.83,
+                  "timestamp_label": "02:06.83",
+                  "local_timestamp": "02:06.83",
+                  "global_frame_index": 128,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 131.83,
+                  "timestamp_label": "02:11.83",
+                  "local_timestamp": "02:11.83",
+                  "global_frame_index": 133,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              },
+              {
+                "start_timestamp": "03:23.73",
+                "end_timestamp": "03:24.73",
+                "local_start_timestamp": "03:23.73",
+                "local_end_timestamp": "03:24.73",
+                "duration_seconds": 1.0,
+                "visibility": "out_of_frame",
+                "before_evidence": {
+                  "video_index": 1,
+                  "timestamp": 202.73,
+                  "timestamp_label": "03:22.73",
+                  "local_timestamp": "03:22.73",
+                  "global_frame_index": 204,
+                  "state": "visible"
+                },
+                "out_of_frame_evidence": {
+                  "video_index": 1,
+                  "timestamp": 203.73,
+                  "timestamp_label": "03:23.73",
+                  "local_timestamp": "03:23.73",
+                  "global_frame_index": 205,
+                  "state": "out_of_frame"
+                },
+                "after_evidence": {
+                  "video_index": 1,
+                  "timestamp": 204.73,
+                  "timestamp_label": "03:24.73",
+                  "local_timestamp": "03:24.73",
+                  "global_frame_index": 206,
+                  "state": "visible"
+                },
+                "identity_reestablished": true,
+                "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+                "source": "deterministic_frame_timeline"
+              }
+            ],
+            "longest_out_of_frame_seconds": 10.0,
+            "timeline_source": "frame_findings.subject_visibility"
+          }
+        ],
+        "continuity_verdict": "indeterminate",
+        "longest_out_of_frame_seconds": 100.86,
+        "total_unobserved_seconds": 366.56,
+        "segment_assessments": [
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "timestamp": "00:02.00",
+                "event_type": "shipping_package_entry",
+                "description": "未拆封的快递纸箱首次进入画面，开始进行拆封操作。"
+              },
+              {
+                "timestamp": "00:10.00",
+                "event_type": "product_package_exposure",
+                "description": "快递箱被打开，内部的商品包装（泡泡纸及绿色包装袋）首次显露。"
+              }
+            ],
+            "limitations": "在本段视频帧中，争议商品本体（claimed_item）始终包裹在商品包装内，尚未被取出或展示，因此无法评估商品本体的连续性及伤情。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              {
+                "timestamp": "00:16.97",
+                "global_frame_index": 18,
+                "event_type": "out_of_frame",
+                "description": "The camera pans away from the shipping box and the green product package, causing both to go completely out of frame."
+              },
+              {
+                "timestamp": "00:19.97",
+                "global_frame_index": 21,
+                "event_type": "reappearance_attempt",
+                "description": "The bubble-wrapped item is brought back into the frame on a checkered mat, but the green product package and shipping box remain out of frame."
+              }
+            ],
+            "limitations": "The green product package goes out of frame at 00:16.97 and does not reappear for the rest of the sequence (exceeding the 2.0-second warning threshold). The claimed item remains unexposed inside the bubble wrap throughout this entire segment, so its identity and condition cannot be verified.",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "tool_usage",
+                "timestamp": "00:25.97",
+                "description": "用户使用美工刀对气泡袋（商品包装）进行切割拆封。"
+              }
+            ],
+            "limitations": "在本组帧（25-36帧）中，商品本体（claimed_item）始终包裹在气泡袋内，尚未完全脱离或显露，因此无法在此阶段评估商品本体的连续性与外观状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "brief_occlusion",
+            "critical_events": [
+              {
+                "timestamp": "00:35.97",
+                "event_description": "在帧37，气泡纸包裹（内含商品包装及商品本体）曾短暂移出画面约1秒，随后在帧38重新进入画面，主体身份得以重新确立。"
+              },
+              {
+                "timestamp": "00:39.93",
+                "event_description": "在帧41，商品包装（透明密封袋）及商品本体（白色塑料模型零件）首次从气泡纸中取出并显露。"
+              },
+              {
+                "timestamp": "00:42.93",
+                "event_description": "在帧44，商品本体被从透明密封袋中倒出，直接暴露在镜头下，商品包装随后被移出画面。"
+              }
+            ],
+            "limitations": "本段视频未包含最外层快递箱/快递袋（shipping_package）的拆封过程。商品本体在帧41之前一直处于不透明的气泡纸包裹中，无法确认其在气泡纸内部时的初始状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "item_part_out_of_frame",
+                "timestamp": "00:53.93",
+                "global_frame_index": 55,
+                "description": "骷髅玩具的头部组件被右手移向右侧，并在第56帧完全移出画面，此后仅躯干部分持续在画面中展示。"
+              }
+            ],
+            "limitations": "本帧组仅展示了商品的组装过程，未包含快递外包装及商品原包装的拆封过程，无法确认拆封前的初始状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "本视频片段仅展示了商品的组装过程，未包含开箱及拆封过程，无法核验初始开箱状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "本视频片段仅展示了商品本体（白色骷髅玩具）的组装过程，未包含快递包装和商品原包装的拆封过程，因此无法核验开箱过程的完整性。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "item_disassembly",
+                "timestamp": "01:29.90",
+                "global_frame_index": 91,
+                "description": "用户将骷髅玩具的头部与身体部分拆开，但两部分均持续保留在画面中，未发生离镜。"
+              }
+            ],
+            "limitations": "本段视频中未包含快递外包装（shipping_package）和商品原包装（product_package），商品在视频开始前已处于完全拆封状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              {
+                "event_type": "subject_out_of_frame",
+                "subject_id": "claimed_item",
+                "timestamp": "01:43.87",
+                "description": "商品本体（白色骷髅玩具）在帧105被完全移出画面，随后在帧106引入了商品包装（气泡袋），商品本体在此后未再重新出现。"
+              }
+            ],
+            "limitations": "由于商品本体在帧105移出画面，且后续帧中仅展示了商品包装（气泡袋），本段视频无法实现商品本体与商品包装在同一画面内的持续性关联绑定。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "package_opening",
+                "timestamp": "01:48.87",
+                "description": "外层气泡袋（shipping_package）被移开，首次露出内部的商品包装（product_package）。"
+              },
+              {
+                "event_type": "item_exposure",
+                "timestamp": "01:53.87",
+                "description": "用户撕开红色盲抽袋，首次将商品本体卡片（claimed_item）取出并暴露在镜头中。"
+              }
+            ],
+            "limitations": "本段视频展示了连续的拆封过程，未发现任何剪辑、跳切或主体离镜后无法重新确认身份的情况。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "long_absence",
+            "critical_events": [
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "claimed_item",
+                "timestamp": "02:06.83",
+                "description": "争议商品（明信片）在展示完毕后被完全移出画面，直至视频结束（02:10.83）未再出现，离镜时长达4.0秒，超过了2.0秒的预警阈值。"
+              },
+              {
+                "event_type": "out_of_frame",
+                "subject_id": "product_package",
+                "timestamp": "02:06.83",
+                "description": "商品包装袋在02:06.83被完全移出画面，直至视频结束未再出现。"
+              }
+            ],
+            "limitations": "本段视频后半部分（02:06.83至02:10.83）商品及包装完全脱离镜头，无法确认后续是否存在替换、二次受损或操作变化。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "frame_index": 133,
+                "timestamp": "02:11.83",
+                "event_type": "item_appearance",
+                "description": "争议商品（白色塑料玩具部件）首次由手部带入画面并放置在格子布上。"
+              },
+              {
+                "frame_index": 136,
+                "timestamp": "02:14.83",
+                "event_type": "item_manipulation",
+                "description": "双手开始对争议商品进行拿取和组装操作。"
+              },
+              {
+                "frame_index": 143,
+                "timestamp": "02:21.83",
+                "event_type": "item_placement",
+                "description": "部分组装好的商品部件被放置在格子布上，随后在144帧中引入了新的躯干部件。"
+              }
+            ],
+            "limitations": "本帧组仅展示了争议商品部分零件的组装过程，未包含快递外箱拆封及商品从原始包装中取出的完整过程。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "本视频片段仅展示了商品的组装过程，未包含完整的开箱过程（快递外箱拆封及商品首次从密封包装中取出的画面未在当前帧组中完整呈现）。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "本帧组仅展示了商品本体（claimed_item）被取出后的组装/操作过程，未包含快递包装（shipping_package）和商品包装（product_package）的拆封过程。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "item_placed_and_released",
+                "timestamp": "02:52.77",
+                "description": "用户将白色玩具骨架主体静置在格子布上并移开双手，商品持续在镜头内，未发生离镜。"
+              },
+              {
+                "event_type": "component_assembly",
+                "timestamp": "02:55.77",
+                "description": "角色头部配件首次出现在格子布上，并于随后的帧中与骨架主体完成组装，整个过程商品主体均在镜头内保持连续可见。"
+              }
+            ],
+            "limitations": "本帧组仅展示了商品骨架主体的调整、头部配件的引入以及两者的组装过程，未包含更早期的拆封或从原始包装中取出的过程。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              "在第184帧（03:02.77），用户将争议商品头部暂时放置在左下角格子布上，并继续在镜头前组装白色配件，主体未离镜。",
+              "在第189帧（03:07.77），用户重新拿起头部进行组合，主体持续在镜头内。"
+            ],
+            "limitations": "本视频片段仅展示了商品的组装与把玩过程，未包含快递箱拆封及商品从原始包装中取出的过程，无法确认拆封前的初始状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [],
+            "limitations": "本组帧中未包含快递外包装（shipping_package）和商品原包装（product_package），无法评估其连续性。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          },
+          {
+            "continuity_verdict": "continuous",
+            "critical_events": [
+              {
+                "event_type": "appearance",
+                "subject_id": "claimed_item",
+                "timestamp": "03:24.73",
+                "description": "争议的角色头部商品本体在帧206首次由右手拿持进入画面，此后至帧213均保持在镜头内，未发生离镜或跳切。"
+              }
+            ],
+            "limitations": "本段截帧未包含快递外包装（shipping_package）和商品原包装（product_package）的拆封过程，无法通过本段确认商品在拆封前的初始状态。",
+            "tracked_subjects": [],
+            "tracked_subject_defined": false,
+            "longest_out_of_frame_seconds": 0.0,
+            "total_unobserved_seconds": 0.0,
+            "out_of_frame_events": []
+          }
+        ],
+        "timeline_derivation": "deterministic_frame_timeline",
+        "tracked_subject_defined": true,
+        "out_of_frame_events": [
+          {
+            "start_timestamp": "00:16.97",
+            "end_timestamp": "01:47.87",
+            "local_start_timestamp": "00:16.97",
+            "local_end_timestamp": "01:47.87",
+            "duration_seconds": 90.9,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 15.97,
+              "timestamp_label": "00:15.97",
+              "local_timestamp": "00:15.97",
+              "global_frame_index": 17,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 16.97,
+              "timestamp_label": "00:16.97",
+              "local_timestamp": "00:16.97",
+              "global_frame_index": 18,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 107.87,
+              "timestamp_label": "01:47.87",
+              "local_timestamp": "01:47.87",
+              "global_frame_index": 109,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:50.87",
+            "end_timestamp": "03:31.73",
+            "local_start_timestamp": "01:50.87",
+            "local_end_timestamp": "03:31.73",
+            "duration_seconds": 100.86,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 109.87,
+              "timestamp_label": "01:49.87",
+              "local_timestamp": "01:49.87",
+              "global_frame_index": 111,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 110.87,
+              "timestamp_label": "01:50.87",
+              "local_timestamp": "01:50.87",
+              "global_frame_index": 112,
+              "state": "out_of_frame"
+            },
+            "after_evidence": null,
+            "identity_reestablished": false,
+            "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:16.97",
+            "end_timestamp": "00:23.97",
+            "local_start_timestamp": "00:16.97",
+            "local_end_timestamp": "00:23.97",
+            "duration_seconds": 7.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 15.97,
+              "timestamp_label": "00:15.97",
+              "local_timestamp": "00:15.97",
+              "global_frame_index": 17,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 16.97,
+              "timestamp_label": "00:16.97",
+              "local_timestamp": "00:16.97",
+              "global_frame_index": 18,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 23.97,
+              "timestamp_label": "00:23.97",
+              "local_timestamp": "00:23.97",
+              "global_frame_index": 25,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:35.97",
+            "end_timestamp": "00:39.93",
+            "local_start_timestamp": "00:35.97",
+            "local_end_timestamp": "00:39.93",
+            "duration_seconds": 3.96,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 34.97,
+              "timestamp_label": "00:34.97",
+              "local_timestamp": "00:34.97",
+              "global_frame_index": 36,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 35.97,
+              "timestamp_label": "00:35.97",
+              "local_timestamp": "00:35.97",
+              "global_frame_index": 37,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 39.93,
+              "timestamp_label": "00:39.93",
+              "local_timestamp": "00:39.93",
+              "global_frame_index": 41,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "00:42.93",
+            "end_timestamp": "01:44.87",
+            "local_start_timestamp": "00:42.93",
+            "local_end_timestamp": "01:44.87",
+            "duration_seconds": 61.94,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 41.93,
+              "timestamp_label": "00:41.93",
+              "local_timestamp": "00:41.93",
+              "global_frame_index": 43,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 42.93,
+              "timestamp_label": "00:42.93",
+              "local_timestamp": "00:42.93",
+              "global_frame_index": 44,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 104.87,
+              "timestamp_label": "01:44.87",
+              "local_timestamp": "01:44.87",
+              "global_frame_index": 106,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "02:06.83",
+            "end_timestamp": "03:31.73",
+            "local_start_timestamp": "02:06.83",
+            "local_end_timestamp": "03:31.73",
+            "duration_seconds": 84.9,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 125.83,
+              "timestamp_label": "02:05.83",
+              "local_timestamp": "02:05.83",
+              "global_frame_index": 127,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 126.83,
+              "timestamp_label": "02:06.83",
+              "local_timestamp": "02:06.83",
+              "global_frame_index": 128,
+              "state": "out_of_frame"
+            },
+            "after_evidence": null,
+            "identity_reestablished": false,
+            "reason": "主体离镜后直到最后一个送审帧仍未恢复。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "01:43.87",
+            "end_timestamp": "01:53.87",
+            "local_start_timestamp": "01:43.87",
+            "local_end_timestamp": "01:53.87",
+            "duration_seconds": 10.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 102.87,
+              "timestamp_label": "01:42.87",
+              "local_timestamp": "01:42.87",
+              "global_frame_index": 104,
+              "state": "partial"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 103.87,
+              "timestamp_label": "01:43.87",
+              "local_timestamp": "01:43.87",
+              "global_frame_index": 105,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 113.87,
+              "timestamp_label": "01:53.87",
+              "local_timestamp": "01:53.87",
+              "global_frame_index": 115,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "02:03.83",
+            "end_timestamp": "02:04.83",
+            "local_start_timestamp": "02:03.83",
+            "local_end_timestamp": "02:04.83",
+            "duration_seconds": 1.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 122.83,
+              "timestamp_label": "02:02.83",
+              "local_timestamp": "02:02.83",
+              "global_frame_index": 124,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 123.83,
+              "timestamp_label": "02:03.83",
+              "local_timestamp": "02:03.83",
+              "global_frame_index": 125,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 124.83,
+              "timestamp_label": "02:04.83",
+              "local_timestamp": "02:04.83",
+              "global_frame_index": 126,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "02:06.83",
+            "end_timestamp": "02:11.83",
+            "local_start_timestamp": "02:06.83",
+            "local_end_timestamp": "02:11.83",
+            "duration_seconds": 5.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 125.83,
+              "timestamp_label": "02:05.83",
+              "local_timestamp": "02:05.83",
+              "global_frame_index": 127,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 126.83,
+              "timestamp_label": "02:06.83",
+              "local_timestamp": "02:06.83",
+              "global_frame_index": 128,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 131.83,
+              "timestamp_label": "02:11.83",
+              "local_timestamp": "02:11.83",
+              "global_frame_index": 133,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          },
+          {
+            "start_timestamp": "03:23.73",
+            "end_timestamp": "03:24.73",
+            "local_start_timestamp": "03:23.73",
+            "local_end_timestamp": "03:24.73",
+            "duration_seconds": 1.0,
+            "visibility": "out_of_frame",
+            "before_evidence": {
+              "video_index": 1,
+              "timestamp": 202.73,
+              "timestamp_label": "03:22.73",
+              "local_timestamp": "03:22.73",
+              "global_frame_index": 204,
+              "state": "visible"
+            },
+            "out_of_frame_evidence": {
+              "video_index": 1,
+              "timestamp": 203.73,
+              "timestamp_label": "03:23.73",
+              "local_timestamp": "03:23.73",
+              "global_frame_index": 205,
+              "state": "out_of_frame"
+            },
+            "after_evidence": {
+              "video_index": 1,
+              "timestamp": 204.73,
+              "timestamp_label": "03:24.73",
+              "local_timestamp": "03:24.73",
+              "global_frame_index": 206,
+              "state": "visible"
+            },
+            "identity_reestablished": true,
+            "reason": "由逐帧主体状态的连续 out_of_frame 区间计算。",
+            "source": "deterministic_frame_timeline"
+          }
+        ],
+        "policy": {
+          "out_of_frame_warning_seconds": 2.0,
+          "effect": "超过阈值转人工复核，不自动拒绝"
+        }
+      },
+      "global_review_summary": {
+        "sampled_start_seconds": 0.0,
+        "sampled_end_seconds": 211.73,
+        "source_duration_seconds": 211.77,
+        "claimed_item_first_exposed_timestamp": "00:39.93",
+        "opening_integrity": "indeterminate",
+        "continuity_verdict": "indeterminate",
+        "chunk_narratives_excluded_from_public_conclusion": true
+      },
+      "aggregation_warnings": [],
+      "decision_policy_audit": {
+        "version": "2026-07-17.1",
+        "mode": "conservative_review",
+        "policy_ref": "",
+        "applied": false,
+        "rule_id": "",
+        "claim_scope": {
+          "claim_id": "",
+          "stage": "initial",
+          "issue_types": [],
+          "excluded_issue_types": [],
+          "active_claim_ids": [
+            "CLM-617911-INITIAL"
+          ],
+          "split_status": "resolved",
+          "ready": true
+        },
+        "evidence_gate": {
+          "video_present": true,
+          "continuity_verdict": "indeterminate",
+          "claimed_item_visibility_coverage": 0.8902,
+          "damage_presence": "uncertain",
+          "claim_support": "insufficient",
+          "damage_observability": "unknown",
+          "model_confidence": 0.5
+        },
+        "business_boundary": "该结果仅是审核分类建议，不自动执行拒绝、退款、补发、换货或最终定责。",
+        "reason": "未启用商品有伤规则分类建议。"
+      },
+      "damage_observability": {
+        "status": "unknown",
+        "same_item_linkage": false,
+        "claimed_region_closeup": false,
+        "required_view_coverage": 0.0,
+        "conflicting_evidence": false,
+        "missing_views": [
+          "模型未返回结构化可观察性结果"
+        ]
+      },
+      "overall_conclusion": "当前证据仍需复核。送审时间轴已覆盖至 03:31.73，源视频时长约 03:31.77；争议商品首次曝光于 00:39.93",
+      "inference_estimate": {},
+      "workbench_transport": {
+        "attempts": [
+          {
+            "attempt": 1,
+            "status_code": 200,
+            "latency_seconds": 952.923
+          }
+        ],
+        "retry_count": 0
+      },
+      "diagnostics": {}
+    }
+  ],
+  "ok": true
+}

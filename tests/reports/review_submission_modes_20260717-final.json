@@ -1,0 +1,89 @@
+{
+  "generated_at": "2026-07-29 22:06:47",
+  "blind_input_boundary": "未读取或上传 reply.json、人工标签和标准答案",
+  "batch_id": "submission-modes-final-20260729",
+  "api_jobs": {
+    "single": "RJ-84DCD24B53804D76",
+    "folder": "RJ-A208C27CD91E482A"
+  },
+  "api_statuses": {
+    "RJ-A208C27CD91E482A": "SUCCEEDED",
+    "RJ-84DCD24B53804D76": "SUCCEEDED"
+  },
+  "batch_summary": {
+    "total": 2,
+    "terminal": 2,
+    "complete": true,
+    "statuses": {
+      "SUCCEEDED": 2
+    },
+    "inference_total_tokens": 17353,
+    "inference_estimated_usd": 0.007538,
+    "returned": 2,
+    "offset": 0
+  },
+  "web_single": {
+    "http_status": 200,
+    "ok": true,
+    "source_status": "ready",
+    "review_status": "completed"
+  },
+  "web_folder": {
+    "http_status": 200,
+    "ok": true,
+    "source_status": "folder_ready",
+    "review_status": "completed",
+    "accepted_count": 6,
+    "rejected_count": null
+  },
+  "web_batch": {
+    "http_status": 200,
+    "ok": true,
+    "source_status": "folder_batch_ready",
+    "total": 2,
+    "success": 2,
+    "report_count": 2,
+    "case_ids": [
+      "case-a",
+      "case-b"
+    ]
+  },
+  "checks": [
+    {
+      "name": "API-single-asset",
+      "ok": true,
+      "detail": "job=RJ-84DCD24B53804D76 status=SUCCEEDED"
+    },
+    {
+      "name": "API-folder-multi-asset",
+      "ok": true,
+      "detail": "job=RJ-A208C27CD91E482A status=SUCCEEDED assets=2"
+    },
+    {
+      "name": "API-batch-query",
+      "ok": true,
+      "detail": "batch=submission-modes-final-20260729 total=2 complete=True"
+    },
+    {
+      "name": "Web-single-file",
+      "ok": true,
+      "detail": "{\"http_status\": 200, \"ok\": true, \"source_status\": \"ready\", \"review_status\": \"completed\"}"
+    },
+    {
+      "name": "Web-folder",
+      "ok": true,
+      "detail": "{\"http_status\": 200, \"ok\": true, \"source_status\": \"folder_ready\", \"review_status\": \"completed\", \"accepted_count\": 6, \"rejected_count\": null}"
+    },
+    {
+      "name": "Web-folder-batch",
+      "ok": true,
+      "detail": "{\"http_status\": 200, \"ok\": true, \"source_status\": \"folder_batch_ready\", \"total\": 2, \"success\": 2, \"report_count\": 2, \"case_ids\": [\"case-a\", \"case-b\"]}"
+    },
+    {
+      "name": "Web-UI-binding",
+      "ok": true,
+      "detail": "单文件、单工单文件夹和批量工单控件及请求路由均存在"
+    }
+  ],
+  "ok": true
+}

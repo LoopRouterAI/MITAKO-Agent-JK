@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MITAKO Agent 0714 交叉对抗式验收报告</title>
+  <style>
+    :root{--ink:#171914;--paper:#f5f7f2;--white:#fff;--lime:#c7f05a;--green:#246b45;--amber:#a76100;--red:#a33232;--line:#d8ded2;--muted:#5e665a}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,"Microsoft YaHei",Arial,sans-serif;line-height:1.65}
+    header{border-bottom:3px solid var(--ink);background:var(--white);padding:34px 24px}header>div,main>section{max-width:1180px;margin:auto}
+    .brand{display:inline-block;border:2px solid var(--ink);background:var(--lime);padding:6px 12px;font-weight:900}h1{margin:16px 0 6px;font-size:34px;line-height:1.2}h2{font-size:23px;margin:0 0 14px}h3{font-size:17px;margin:20px 0 8px}
+    .sub{color:var(--muted);margin:0}.meta{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;font-size:14px}.meta b{color:var(--green)}
+    main>section{padding:28px 24px;border-bottom:1px solid var(--line)}.summary{background:var(--ink);color:white}.summary h2{color:var(--lime)}
+    .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}.metric{border:1px solid #596052;padding:14px;background:#242820}.metric strong{display:block;color:var(--lime);font-size:25px}.metric span{font-size:13px;color:#d9dfd3}
+    table{width:100%;border-collapse:collapse;background:var(--white);font-size:14px}th,td{border:1px solid var(--line);padding:10px;vertical-align:top;text-align:left}th{background:#e9eee4}.pass{color:var(--green);font-weight:800}.pending{color:var(--amber);font-weight:800}.block{color:var(--red);font-weight:800}
+    .band{display:grid;grid-template-columns:220px 1fr;gap:24px}.label{font-size:13px;color:var(--muted);font-weight:800;text-transform:uppercase}.callout{border-left:5px solid var(--lime);background:var(--white);padding:14px 16px;margin:12px 0}.warning{border-left-color:#e3a126}.danger{border-left-color:#d65757}
+    code{background:#e8ece4;padding:2px 5px;border-radius:3px}ul{margin:8px 0;padding-left:22px}.footer{color:var(--muted);font-size:13px;padding-bottom:50px}
+    @media(max-width:760px){h1{font-size:27px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.band{grid-template-columns:1fr}table{display:block;overflow-x:auto;white-space:normal}header{padding:24px 16px}main>section{padding:24px 16px}}
+  </style>
+</head>
+<body>
+<header><div><span class="brand">MITAKO 0714</span><h1>客服 Agent、视觉审核与私域 Agent<br>交叉对抗式验收报告</h1><p class="sub">基于 0714 Word 截图、两份 MD 反馈、0709 历史回归、当前源码、真实浏览器与标准 API 的最终复验。</p><div class="meta"><span>生成时间：<b>2026-07-15</b></span><span>版本状态：<b>POC 可交付</b></span><span>外部系统：<b>待甲方联调</b></span></div></div></header>
+<main>
+  <section class="summary"><h2>结论</h2><p>0714 反馈中可由我方独立整改的代码、页面、接口、审核任务和发布门禁已完成并通过验收。系统现在可作为标准服务由 Java/Codex/自动化程序调用，也可通过用户端、VIP 客服工作台和视觉工作台演示。企业微信、飞书、真实订单/库存、CRM/CDP、甲方客服平台、对象存储和云转码仍是明确的联调项，不宣称已接入。</p><div class="metrics"><div class="metric"><strong>28/28</strong><span>0714 专项回归</span></div><div class="metric"><strong>54/54</strong><span>全链路与浏览器</span></div><div class="metric"><strong>13/13</strong><span>私有化 API</span></div><div class="metric"><strong>0.95</strong><span>sample_003 置信度</span></div></div></section>
+
+  <section class="band"><div><div class="label">对抗角色</div><h2>需求理解</h2></div><div><table><thead><tr><th>角色</th><th>核心质疑</th><th>验收判据</th></tr></thead><tbody>
+    <tr><td>二次元谷子用户</td><td>不要答非所问、错单、刷卡、上传即转人工。</td><td>具体意图优先；事实一次回答；每轮最多一主卡；附件不误转。</td></tr>
+    <tr><td>人工客服主管</td><td>接手前能否看懂用户、订单、审核状态和下一步。</td><td>简报完整；二次确认接手；排队可补充；首响真实计时。</td></tr>
+    <tr><td>产品经理</td><td>审核、业务审批、用户转人工是否被混成同一状态。</td><td>三个状态独立；跨端业务事实一致；错误状态不得口头掩盖。</td></tr>
+    <tr><td>CGO/甲方负责人</td><td>是不是降低人工成本的业务服务，而不只是聊天前端。</td><td>异步 API、批量审核、可观测、成本、报告、私域事件契约均可验。</td></tr>
+    <tr><td>Java/运维</td><td>能否私有化部署、自动测试、排障和扩展。</td><td>OpenAPI、幂等、鉴权、租户隔离、指标、诊断与发布门禁完整。</td></tr>
+  </tbody></table></div></section>
+
+  <section class="band"><div><div class="label">P0/P1 修复</div><h2>已关闭问题</h2></div><div><table><thead><tr><th>问题</th><th>根因</th><th>整改</th><th>状态</th></tr></thead><tbody>
+    <tr><td>跨用户/跨订单污染</td><td>旧 SSE、附件、人工轮询和页面焦点缺少统一失效代际。</td><td>会话 generation、AbortController、切换前同步清理、订单归属校验。</td><td class="pass">通过</td></tr>
+    <tr><td>抽赏问题误判物流</td><td>“发货时效”优先命中物流，概率/保底词不完整。</td><td>抽赏业务词优先；查询用户订单；从多订单定位活动。</td><td class="pass">通过</td></tr>
+    <tr><td>抽赏只答“看页面”</td><td>模型泛化答复覆盖确定性业务数据。</td><td>安全出口绑定奖池、概率、复核 SLA 和发货口径。</td><td class="pass">通过</td></tr>
+    <tr><td>附件上传误转人工</td><td>审核摘要中的“VIP 客服复审”被当作用户原话。</td><td>新增原始用户文本字段；机器附件上下文不参与会话转接判断。</td><td class="pass">通过</td></tr>
+    <tr><td>商品有伤不给角度</td><td>“外包装”误命中“外包”防泄漏子串，正确回复被降级。</td><td>后端和前端均改为明确身份短语匹配；材料清单确定性输出。</td><td class="pass">通过</td></tr>
+    <tr><td>人工审批等于会话转人工</td><td>业务动作与沟通状态共用一个 needs_human。</td><td>业务审批、审核复查、会话 handoff 三状态分离。</td><td class="pass">通过</td></tr>
+    <tr><td>管理员全队列 500</td><td>引用不存在的 <code>Role.TENANT_ADMIN</code>。</td><td>收敛为实际角色集合并加入 0714 接口回归。</td><td class="pass">通过</td></tr>
+    <tr><td>移动端品牌断字</td><td>窄屏标识缺少稳定宽度和不换行约束。</td><td>390×844 实机上下文检查无横向溢出，标签不再断字。</td><td class="pass">通过</td></tr>
+  </tbody></table></div></section>
+
+  <section class="band"><div><div class="label">视觉审核</div><h2>服务能力</h2></div><div>
+    <div class="callout"><b>标准入口：</b><code>POST /api/v1/review/jobs</code>。支持商品有伤、发错货、漏发货、未成年人退款；每案可带多图、多视频和完整业务 JSON，异步返回任务、批次、资产状态、置信度、证据、成本、诊断和 HTML 报告。</div>
+    <table><thead><tr><th>项目</th><th>sample_003 实测</th></tr></thead><tbody><tr><td>素材</td><td>16 个文件，105,994,053 字节</td></tr><tr><td>任务</td><td><code>RJ-4E088B19999F4804</code>，QUEUED → SUCCEEDED</td></tr><tr><td>结论</td><td>视觉证据支持商品有伤诉求，置信度 0.95</td></tr><tr><td>推理</td><td>43,759 Token，12 帧，估算 0.101039 美元</td></tr><tr><td>安全</td><td>人工标签未进入模型；公开报告无 Key、Prompt、模型渠道或原始响应</td></tr></tbody></table>
+    <h3>大视频与抽帧</h3><ul><li>后台支持 0.2、0.5、1、2 FPS；1 FPS 用于常规密集检查，2 FPS 用于严格取证。</li><li>452 秒视频在 1 FPS 约 452 帧，在 2 FPS 约 904 帧，按每次 24 帧分段并发。</li><li>543MB 或更大素材建议对象存储直传，再由七牛云或同类服务转码、压缩和生成故事板；当前适配状态为 <code>customer_integration_required</code>。</li><li>120GB 批次按案件拆分进入队列，不能合并为一个超大 HTTP 请求。</li></ul>
+  </div></section>
+
+  <section class="band"><div><div class="label">人工服务</div><h2>真实转接闭环</h2></div><div><ol><li>用户明确请求人工或命中 L5+/法律风险。</li><li>服务端持久化 handoff 状态并进入队列，排队期间用户仍可补充材料。</li><li>坐席读取用户、订单、历史、审核任务、意图、情绪和建议动作。</li><li>坐席二次确认接手后，用户端显示“VIP客服已接入”。</li><li>人工回复实时到达用户端；转交、升级、结案均有审计状态。</li></ol><p class="callout">本地坐席用于 POC 演示。对接甲方客服系统时，保留相同状态机和 OpenAPI/适配层，由甲方提供会话 ID、坐席组织、技能组、工单与 SLA。</p></div></section>
+
+  <section class="band"><div><div class="label">私域 Agent</div><h2>现在实现了什么</h2></div><div><table><thead><tr><th>能力</th><th>本地可验</th><th>甲方联调</th></tr></thead><tbody>
+    <tr><td>群消息接入</td><td>群 ID、用户、内容、风险、兴趣、许愿信号契约与演示事件。</td><td>企业微信/飞书回调、签名、群 ID、应用权限。</td></tr>
+    <tr><td>商品事件</td><td>IP、角色、库存、稀有度、跳转链接生成候选触达。</td><td>真实商品、库存、抽赏和活动系统。</td></tr>
+    <tr><td>舆情</td><td>不发货、退款、吞烫、投诉等风险快筛；高风险暂停营销并建客服任务。</td><td>真实群消息、告警渠道和客服工单。</td></tr>
+    <tr><td>规模</td><td>1 万群本地规则和存储规模检查通过。</td><td>生产消息吞吐、频控、合规和灰度。</td></tr>
+  </tbody></table><p class="callout warning">当前是 P0 事件服务和运营候选，不是已连接真实群聊的自动运营平台。所有演示群、商品和动作都必须标明演示来源。</p></div></section>
+
+  <section class="band"><div><div class="label">证据</div><h2>自动化结果</h2></div><div><table><thead><tr><th>门禁</th><th>结果</th><th>证据</th></tr></thead><tbody>
+    <tr><td>0714 专项</td><td class="pass">28/28</td><td><code>tests/reports/customer_agent_0714_regression_latest.json</code></td></tr>
+    <tr><td>0709 历史回归</td><td class="pass">10/10</td><td><code>tests/reports/customer_agent_0709_regression_latest.json</code></td></tr>
+    <tr><td>全链路</td><td class="pass">54/54</td><td><code>tests/reports/full_pipeline_20260715_020612.html</code></td></tr>
+    <tr><td>严格鉴权</td><td class="pass">12/12</td><td><code>tests/reports/auth_strict_20260715_020804.html</code></td></tr>
+    <tr><td>私有化 API</td><td class="pass">13/13</td><td><code>tests/reports/private_deployment_api_smoke_20260715_020526.json</code></td></tr>
+    <tr><td>视觉工作台</td><td class="pass">通过</td><td><code>tests/reports/visual_workbench_smoke_20260715_020543.md</code></td></tr>
+    <tr><td>sample_003</td><td class="pass">通过</td><td><code>tests/reports/review_service_batch_latest.json</code></td></tr>
+  </tbody></table></div></section>
+
+  <section class="band"><div><div class="label">外部边界</div><h2>尚未假装完成</h2></div><div><table><thead><tr><th>能力</th><th>当前状态</th><th>甲方需提供</th></tr></thead><tbody>
+    <tr><td>企微/飞书</td><td class="pending">契约与 Mock 完成</td><td>应用、回调、签名、群与成员映射、频控。</td></tr>
+    <tr><td>订单/库存/活动</td><td class="pending">演示数据完成</td><td>测试 API、鉴权、字段字典、状态映射。</td></tr>
+    <tr><td>客服系统/CRM/CDP</td><td class="pending">本地工作台完成</td><td>会话接管、坐席、工单、画像与授权触达。</td></tr>
+    <tr><td>对象存储/云转码</td><td class="pending">方案与返回契约完成</td><td>桶、签名、回调、转码模板、下载白名单。</td></tr>
+    <tr><td>120GB 准确率验收</td><td class="pending">工程接口 Ready</td><td>脱敏盲标集、双人人工结论、样本分布和验收阈值。</td></tr>
+    <tr><td>生产队列与数据库</td><td class="pending">SQLite/本地 worker</td><td>PostgreSQL、Redis/MQ、监控告警、备份与容量资源。</td></tr>
+  </tbody></table><div class="callout danger"><b>不可承诺：</b>在没有甲方真实接口和 120GB 真值评测前，不承诺生产准确率、节省人力比例、真实群触达或自动退款/补发/拒赔。</div></div></section>
+
+  <section class="footer"><p>本报告是 2026-07-15 代码和测试证据的快照。最终交付包还必须通过预发布脚本、ZIP 解压扫描、启动与复验，并记录 Git commit 和 SHA256。</p></section>
+</main>
+</body>
+</html>

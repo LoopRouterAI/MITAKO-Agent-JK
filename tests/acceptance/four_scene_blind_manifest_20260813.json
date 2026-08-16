@@ -1,0 +1,73 @@
+{
+  "manifest_version": "2026-08-13.1",
+  "label_state": "sealed",
+  "selection_method": "sha256_rank",
+  "selection_seed": "e4f7481aaf7f5549efcb1f1be07c5040d91dc75acabe1cdd1ca9b1980a7d064f|4b9ff1c2e1a040755fb1af6d26179e0eaa633802",
+  "product_scene_gold_source_sha256": "e4f7481aaf7f5549efcb1f1be07c5040d91dc75acabe1cdd1ca9b1980a7d064f",
+  "cases": [
+    {
+      "scenario": "product_damage",
+      "case_id": "602271",
+      "selection_rank_sha256": "22a0d8ec55c4d798e2e1f2712c5fa1071b339507513b32daf7f38a01327ee2bc",
+      "input_file_count": 11,
+      "input_total_bytes": 235993432,
+      "input_bundle_sha256": "5c6ea4ba786f14462712f3eb686bf1782b228df77f5b2f5e7897186abc27385e"
+    },
+    {
+      "scenario": "product_damage",
+      "case_id": "617695",
+      "selection_rank_sha256": "4b2283189ad316eaf3b7e3eae16421a84ca3768c5c4aec64f20ee615124f4660",
+      "input_file_count": 15,
+      "input_total_bytes": 321739282,
+      "input_bundle_sha256": "adf32f5f59461b4f53f92d55268a380e887a4eda744a8e083de623373ce389ea"
+    },
+    {
+      "scenario": "wrong_item",
+      "case_id": "517066",
+      "selection_rank_sha256": "20349c85ea548f700ad73e19fcceb54cbda51d87841f84e8674e5b366742f150",
+      "input_file_count": 8,
+      "input_total_bytes": 243793359,
+      "input_bundle_sha256": "f7769dbf50f2fa6a06bcfd38f47392a16291cff8885d91cb0d0433570fb5a095"
+    },
+    {
+      "scenario": "wrong_item",
+      "case_id": "81463",
+      "selection_rank_sha256": "4f0ada96be59101ecaa53380fc068c7cf8b7c2fe03c6b93e1b1f7b4525993165",
+      "input_file_count": 5,
+      "input_total_bytes": 6180047,
+      "input_bundle_sha256": "dd1a8c30f23f15ac73eb6619dc18c8a5aa4984e3c0268843c73c6c4986857444"
+    },
+    {
+      "scenario": "missing_item",
+      "case_id": "316353",
+      "selection_rank_sha256": "522942c79ac8c8739c3ba89dd7ecc9f9208d450b3f8ad1bfee3aad3f84876307",
+      "input_file_count": 4,
+      "input_total_bytes": 366706075,
+      "input_bundle_sha256": "919d2fa58adfc2022ac6235df68da475f0b07dc9e42dcaf94d487b62bf28e3ee"
+    },
+    {
+      "scenario": "missing_item",
+      "case_id": "542305",
+      "selection_rank_sha256": "74dbf3f47862b4cb01ce290d2c37519bcd8f0c8d94817d9ae80f1ace693263af",
+      "input_file_count": 9,
+      "input_total_bytes": 20578439,
+      "input_bundle_sha256": "ac668355da81c5bb36c4c192c67d43adb7cdb0f141567e993cdd4adea5bb4c75"
+    },
+    {
+      "scenario": "minor_refund",
+      "case_id": "546361",
+      "selection_rank_sha256": "00e6532926c6f5e88bd5d0de2390bb4dbd9ebaaf0a60d8aadf2467cc5630f4ee",
+      "input_file_count": 24,
+      "input_total_bytes": 45463474,
+      "input_bundle_sha256": "b59317fa8f7a9af7aa83a27a5380d35858a0bd3390b64c610482703c7561df5c"
+    },
+    {
+      "scenario": "minor_refund",
+      "case_id": "608267",
+      "selection_rank_sha256": "00ea08ef9cdc5a6c951a0f740cd3ab97009bf6f744882832d1ffff1d9efd4acb",
+      "input_file_count": 44,
+      "input_total_bytes": 59218929,
+      "input_bundle_sha256": "ea111bd2b12eb1165e570de648395f192ce7bac0d79d943abce8ddf7b0ac1376"
+    }
+  ]
+}

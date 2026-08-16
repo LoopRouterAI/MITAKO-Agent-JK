@@ -17,6 +17,7 @@ from private_domain import service, store
 
 
 REPORT = ROOT / "tests" / "reports" / "private_domain_10k_scale_latest.json"
+TEST_TENANT = "scale-test"
 
 
 def main() -> int:
@@ -29,12 +30,13 @@ def main() -> int:
             conn.executemany(
                 """
                 INSERT INTO private_groups(
-                  group_id, group_name, owner_id, member_count, status, risk_level,
+                  tenant_id, group_id, group_name, owner_id, member_count, status, risk_level,
                   fatigue_score, health_score, marketing_disabled_until, tags, metrics, updated_at
-                ) VALUES (?, ?, '', 200, ?, ?, 0, 100, 0, ?, '{}', ?)
+                ) VALUES (?, ?, ?, '', 200, ?, ?, 0, 100, 0, ?, '{}', ?)
                 """,
                 [
                     (
+                        TEST_TENANT,
                         f"scale-group-{index:05d}",
                         f"规模测试群 {index}",
                         "marketing_disabled" if index % 10 == 0 else "normal",
@@ -53,11 +55,15 @@ def main() -> int:
                 "item_id": "scale-item",
                 "ip_name": "蓝色监狱",
                 "stock": 100,
-            }
+            },
+            tenant_id=TEST_TENANT,
         )
         elapsed = round(time.perf_counter() - started, 3)
         with store._connect() as conn:
-            stored = int(conn.execute("SELECT COUNT(*) FROM private_campaign_candidates WHERE event_id=?", ("scale-event-10000",)).fetchone()[0])
+            stored = int(conn.execute(
+                "SELECT COUNT(*) FROM private_campaign_candidates WHERE tenant_id=? AND event_id=?",
+                (TEST_TENANT, "scale-event-10000"),
+            ).fetchone()[0])
         checks = {
             "all_groups_evaluated": len(result.get("candidates") or []) == 10000,
             "all_candidates_persisted": stored == 10000,

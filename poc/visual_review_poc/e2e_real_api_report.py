@@ -12,13 +12,14 @@ import struct
 import zlib
 from pathlib import Path
 from typing import Any, Dict, List
+from prompts.visual_review.diagnostics import build_real_api_fixture_prompt
 
 import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT_DIR = Path(__file__).resolve().parent / "reports"
+REPORT_DIR = Path(__file__).resolve().parent / "reports" / "internal_archive"
 ASSET_DIR = ROOT / "tmp" / "gemini_e2e_assets"
-DEFAULT_MODEL = "gemini-3.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -135,15 +136,7 @@ def _write_fallback_image(target: Path, sample: Dict[str, Any]) -> None:
 
 
 def build_prompt(sample: Dict[str, Any]) -> str:
-    return f"""你是客服视觉审核助手。请根据图片判断场景：{sample['scenario']}。
-样例标题：{sample['title']}。
-只输出 JSON，字段必须匹配 schema。
-业务边界：
-- 只做辅助初筛和人工复核建议。
-- 不自动定责、不自动拒赔、不自动退款、不自动补发。
-- 未成年人资料即使看起来完整，也必须 human_required=true。
-- 当前素材来自公开网络样例，不代表甲方真实样本。
-请把 mock_only 设为 false，boundary 写明“真实 Gemini API 调用结果，仍需甲方样本盲测和人工复核”。"""
+    return build_real_api_fixture_prompt(sample)
 
 
 def call_gemini(sample: Dict[str, Any], api_key: str, model: str) -> Dict[str, Any]:

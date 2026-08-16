@@ -9,12 +9,13 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from prompts.visual_review.diagnostics import build_public_video_prompt
 
 import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT_DIR = Path(__file__).resolve().parent / "reports"
-MODEL = "gemini-3.5-flash"
+REPORT_DIR = Path(__file__).resolve().parent / "reports" / "internal_archive"
+MODEL = "gemini-3.5-flash-lite"
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -77,19 +78,7 @@ def load_env() -> None:
 
 
 def build_prompt(case: Dict[str, Any]) -> str:
-    focus = "、".join(case["review_focus"])
-    return f"""你是电商客服视觉审核质检助手。请分析前面提供的公开 YouTube 视频，按甲方售后审核视角只输出严格 JSON，不要输出 Markdown。
-场景：{case['scenario']}
-标题：{case['title']}
-审核重点：{focus}
-必须输出字段：
-case_id, scenario, decision, confidence, issues, evidence, timestamps, next_step, human_required, boundary
-decision 只能是 pass/suspect/fail/manual_review/request_more_material。
-要求：
-- evidence 必须说明视频中能看到或看不到什么。
-- timestamps 尽量给出关键时间点；如果无法定位，返回空数组并说明原因。
-- 只做辅助初筛；不得自动定责、拒赔、退款、补发。
-- 公开 YouTube 视频不是甲方真实样本，boundary 必须写明仍需甲方脱敏样本盲测。"""
+    return build_public_video_prompt(case)
 
 
 def fetch_youtube_metadata(url: str) -> Dict[str, Any]:

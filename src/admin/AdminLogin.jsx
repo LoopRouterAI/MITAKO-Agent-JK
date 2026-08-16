@@ -81,18 +81,18 @@ export default function AdminLogin({ onSuccess }) {
             <p className="text-xs text-slate-500">{t('admin.loginSubtitle')}</p>
           </div>
         </div>
-        <label className="block text-xs font-bold text-slate-600 mb-1">{t('admin.tenantLabel')}</label>
-        <select value={tenantId} onChange={e => setTenantId(e.target.value)} className="w-full rounded-[8px] border-2 border-[var(--mitako-ink)] px-4 py-3 mb-4 text-sm focus:ring-2 focus:ring-[var(--mitako-lime)]/50 outline-none">
+        <label htmlFor="admin-tenant" className="block text-xs font-bold text-slate-600 mb-1">{t('admin.tenantLabel')}</label>
+        <select id="admin-tenant" value={tenantId} onChange={e => setTenantId(e.target.value)} className="w-full rounded-[8px] border-2 border-[var(--mitako-ink)] px-4 py-3 mb-4 text-sm focus:ring-2 focus:ring-[var(--mitako-lime)]/50 outline-none">
           {(tenants.length ? tenants : [{ tenant_id: 'mitako', name: 'MITAKO' }]).map(tn => (
             <option key={tn.tenant_id} value={tn.tenant_id}>{tn.name || tn.tenant_id}</option>
           ))}
         </select>
-        <label className="block text-xs font-bold text-slate-600 mb-1">{t('admin.username')}</label>
-        <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full rounded-[8px] border-2 border-[var(--mitako-ink)] px-4 py-3 mb-4 text-sm focus:ring-2 focus:ring-[var(--mitako-lime)]/50 outline-none" autoComplete="username" />
-        <label className="block text-xs font-bold text-slate-600 mb-1">{t('admin.password')}</label>
+        <label htmlFor="admin-username" className="block text-xs font-bold text-slate-600 mb-1">{t('admin.username')}</label>
+        <input id="admin-username" type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full rounded-[8px] border-2 border-[var(--mitako-ink)] px-4 py-3 mb-4 text-sm focus:ring-2 focus:ring-[var(--mitako-lime)]/50 outline-none" autoComplete="username" />
+        <label htmlFor="admin-password" className="block text-xs font-bold text-slate-600 mb-1">{t('admin.password')}</label>
         <div className="relative mb-4">
           <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full rounded-[8px] border-2 border-[var(--mitako-ink)] pl-10 pr-4 py-3 text-sm focus:ring-2 focus:ring-[var(--mitako-lime)]/50 outline-none" autoComplete="current-password" />
+          <input id="admin-password" type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full rounded-[8px] border-2 border-[var(--mitako-ink)] pl-10 pr-4 py-3 text-sm focus:ring-2 focus:ring-[var(--mitako-lime)]/50 outline-none" autoComplete="current-password" />
         </div>
         {error && <p className="text-sm text-rose-600 mb-3">{error}</p>}
         <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 rounded-[8px] bg-[var(--mitako-lime)] text-[var(--mitako-ink)] border-2 border-[var(--mitako-ink)] shadow-[4px_4px_0_rgba(17,20,17,.92)] font-black py-3 hover:-translate-y-0.5 disabled:opacity-60">

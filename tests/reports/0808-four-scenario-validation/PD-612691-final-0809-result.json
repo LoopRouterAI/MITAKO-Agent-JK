@@ -1,0 +1,255 @@
+{
+  "label_isolation": "推理阶段不读取 annotation、reply 原文件、管理员消息或人工标签；只使用盲测包内清洗后的用户本人消息，本文件不计算命中率。",
+  "base_url": "http://127.0.0.1:7864",
+  "scenario": "product_damage",
+  "fps": 1.0,
+  "out_of_frame_threshold_seconds": 2.0,
+  "results": [
+    {
+      "case_id": "CASE-8750E9A28B79",
+      "ok": true,
+      "predicted_label": "negative",
+      "confidence": 0.98,
+      "conclusion": "按照商品有伤 SOP，开箱过程完整且主视频在有效展示范围内未观察到本次诉求所述损伤，当前证据倾向不支持诉求；未通过的辅助技术项仅用于抽检提示，不抹掉该审核建议。",
+      "workflow_recommendation": "continue_by_customer_policy",
+      "human_review": {
+        "level": "not_required",
+        "reason_codes": [
+          "configured_thresholds_satisfied"
+        ],
+        "recommendation": "当前证据链与置信度达到本次配置门槛，可由甲方系统按自身业务规则继续处理。"
+      },
+      "minor_material_assessment": null,
+      "material_gaps": [],
+      "damage_causality_assessment": {
+        "damage_presence": "uncertain",
+        "damage_timing": "unknown",
+        "pre_opening_state_visible": false,
+        "opening_action_visible": false,
+        "damage_change_observed": false,
+        "most_likely_origin": "indeterminate",
+        "origin_confidence": 0.0,
+        "causal_evidence_level": "insufficient",
+        "claim_support": "insufficient",
+        "appearance_difference": "uncertain",
+        "business_defect_qualification": "indeterminate",
+        "special_product_rule": "not_required",
+        "possible_origins": [],
+        "alternative_explanations": [],
+        "before_action_evidence": [],
+        "action_evidence": [],
+        "after_action_evidence": []
+      },
+      "object_continuity_assessment": {
+        "tracked_subjects": [
+          {
+            "subject_id": "shipping_package",
+            "description": "快递外箱",
+            "tracking_start": "01:15",
+            "tracking_end": "01:40",
+            "first_exposed_timestamp": "01:15",
+            "visibility_coverage": 1.0,
+            "out_of_frame_events": [],
+            "longest_out_of_frame_seconds": 0.0
+          },
+          {
+            "subject_id": "product_package",
+            "description": "商品外包装及保护袋",
+            "tracking_start": "01:44",
+            "tracking_end": "02:22",
+            "first_exposed_timestamp": "01:44",
+            "visibility_coverage": 1.0,
+            "out_of_frame_events": [],
+            "longest_out_of_frame_seconds": 0.0
+          },
+          {
+            "subject_id": "claimed_item",
+            "description": "库洛米化妆包",
+            "tracking_start": "02:16",
+            "tracking_end": "02:23",
+            "first_exposed_timestamp": "02:16",
+            "visibility_coverage": 1.0,
+            "out_of_frame_events": [],
+            "longest_out_of_frame_seconds": 0.0
+          }
+        ],
+        "continuity_verdict": "continuous",
+        "longest_out_of_frame_seconds": 0.0,
+        "total_unobserved_seconds": 0.0,
+        "critical_events": [
+          {
+            "timestamp": "01:28",
+            "asset_ref": "native_video_100",
+            "fact": "开始拆封快递盒",
+            "global_frame_index": null,
+            "video_index": 1
+          },
+          {
+            "timestamp": "02:16",
+            "asset_ref": "native_video_100",
+            "fact": "取出库洛米化妆包",
+            "global_frame_index": null,
+            "video_index": 1
+          }
+        ],
+        "longest_out_of_frame_lower_bound_seconds": null,
+        "longest_out_of_frame_upper_bound_seconds": null,
+        "out_of_frame_events": [],
+        "policy": {
+          "out_of_frame_warning_seconds": 2.0
+        }
+      },
+      "continuity_guard_reason": null,
+      "causality_guard_reason": null,
+      "pass_integrity_status": null,
+      "specialized_pass_guard_reason": null,
+      "video_audit_conclusion": {
+        "continuity_score": 1.0,
+        "continuity_reason": "视频录制连续，未发现跳切和明显剪辑。",
+        "swap_risk_level": "low",
+        "edit_or_cut_risk": "无剪辑迹象",
+        "opening_integrity": "完整开箱",
+        "playback_speed": "normal",
+        "sampling_fps": null,
+        "speed_review_impact": {
+          "status": "none",
+          "critical_evidence_observable": true,
+          "affected_review_items": [],
+          "evidence_refs": [],
+          "reason": "播放速度正常，关键证据清晰可见。"
+        },
+        "opening_video_compliance": {
+          "sealed_start": false,
+          "waybill_visible": true,
+          "single_take_continuity": true,
+          "issue_visible_in_continuous_opening": false,
+          "evidence_refs": [
+            {
+              "timestamp": "01:25",
+              "global_frame_index": null,
+              "video_index": 1
+            },
+            {
+              "video_index": 1,
+              "global_frame_index": 1,
+              "timestamp": "00:00.00"
+            },
+            {
+              "video_index": 1,
+              "global_frame_index": 2,
+              "timestamp": "00:01.00"
+            }
+          ],
+          "result": "noncompliant",
+          "validated_fields": [
+            "sealed_start"
+          ],
+          "source": "hybrid_native_video_with_opening_start_verification"
+        }
+      },
+      "decision_policy_audit": {
+        "version": "2026-07-17.1",
+        "mode": "classification_recommendation",
+        "policy_ref": "MITAKO-PD-ADVISORY@20260806.1",
+        "policy_source": "server_approved_registry",
+        "requested_overrides_ignored": [],
+        "applied": true,
+        "rule_id": "PD-N-COMPLETE-NO-CLAIMED-DAMAGE",
+        "claim_scope": {
+          "claim_id": "",
+          "stage": "initial",
+          "issue_types": [
+            "product_damage"
+          ],
+          "excluded_issue_types": [],
+          "active_claim_ids": [],
+          "split_status": "single_legacy",
+          "ready": true
+        },
+        "evidence_gate": {
+          "video_present": true,
+          "continuity_verdict": "continuous",
+          "damage_presence": "uncertain",
+          "claim_support": "insufficient",
+          "damage_observability": "unknown",
+          "model_confidence": 0.98,
+          "media_forensics_status": "completed",
+          "media_forensics_risk_level": "none",
+          "supplemental_linkage_status": "not_provided"
+        },
+        "business_boundary": "该结果仅是审核分类建议，不自动执行拒绝、退款、补发、换货或最终定责。",
+        "failed_conditions": [
+          "sampling_boundary_covered",
+          "damage_observability"
+        ],
+        "reason": "按照商品有伤 SOP，开箱过程完整且主视频在有效展示范围内未观察到本次诉求所述损伤，当前证据倾向不支持诉求；未通过的辅助技术项仅用于抽检提示，不抹掉该审核建议。",
+        "evidence_verdict_before_policy": {
+          "predicted_label": "negative",
+          "confidence": 0.98,
+          "conclusion": "开箱起始专项复核确认视频并非从完整未拆封快递外包装开始，当前开箱材料不合规。"
+        }
+      },
+      "inference_estimate": {
+        "input_tokens": 56577,
+        "output_tokens": 2557,
+        "total_tokens": 59134,
+        "estimated_usd": 0.023366,
+        "cost_status": "estimated",
+        "unknown_cost_calls": 0,
+        "route_fallback_count": 0,
+        "route_attempts": [],
+        "channel_route_attempts": [
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          },
+          {
+            "channel": "baidu",
+            "model": "gemini-3.5-flash-lite",
+            "status_code": 200,
+            "decision": "selected"
+          }
+        ],
+        "total_frames": 0,
+        "main_review_frames": 0,
+        "total_model_calls": 2,
+        "segment_count": 1,
+        "concurrency": {},
+        "channels": {
+          "native_video": {
+            "model_calls": 1,
+            "repair_calls": 0,
+            "total_tokens": 0,
+            "estimated_usd": 0.0
+          },
+          "opening_start_verification": {
+            "model_calls": 1,
+            "repair_calls": 0,
+            "total_tokens": 0,
+            "estimated_usd": 0.0
+          }
+        },
+        "native_video": {
+          "status": "completed",
+          "technical_status": "success",
+          "status_code": 200,
+          "opening_start_verification_status": "success",
+          "transport": "inline_data",
+          "proxy_status": "ready",
+          "proxy_bytes": 11977683,
+          "proxy_elapsed_seconds": 18.604
+        },
+        "degraded_passes": {},
+        "boundary": "估算值用于容量与成本比较，不等同于供应商最终账单。"
+      },
+      "report": {
+        "requested": true,
+        "status": "ready",
+        "html_url": "/reports/agent_single_1786210105_1.html?expires=1786211005&sig=45fba612eb4c348a1b7bc5df74397a6efca5b1de17efcf114ccd6920152324d4"
+      },
+      "diagnostics": null
+    }
+  ]
+}

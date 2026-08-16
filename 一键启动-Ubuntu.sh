@@ -15,6 +15,13 @@ if [ ! -x "venv/bin/python" ]; then
   exit 1
 fi
 
+if ! command -v ffprobe >/dev/null 2>&1; then
+  echo "[错误] 未找到 ffprobe，Strong/Forensic 媒体取证不可用。"
+  echo "       Ubuntu 请执行: sudo apt-get update && sudo apt-get install -y ffmpeg"
+  exit 1
+fi
+echo "[OK] ffprobe: $(command -v ffprobe)"
+
 echo "[1/5] 构建前端 ..."
 npm run build
 
@@ -26,7 +33,7 @@ export HANDOFF_BACKEND=hybrid
 export CHATWOOT_MOCK=1
 export APP_PORT=8000
 export ALLOW_PORT_FALLBACK=0
-export MITAKO_JWT_SECRET="${MITAKO_JWT_SECRET:-mitako-local-poc-secret-change-before-production}"
+export MITAKO_JWT_SECRET="${MITAKO_JWT_SECRET:-$(venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(48))')}"
 export MITAKO_AUTH_REQUIRED=1
 export MITAKO_PROTECTED_API_AUTH_REQUIRED=1
 export MITAKO_DEV_AUTH_BYPASS=0

@@ -49,7 +49,7 @@ http://127.0.0.1:7861
 
 ## Gemini 3.5 Flash 单样本审核
 
-当前命令行 Demo 已收敛为单职责验证：本地视频输入、自建抽帧、同目录补充图片、用户诉求和工单上下文，只交给 `gemini-3.5-flash` 审核，并输出可复盘 HTML/JSON 报告。
+当前命令行 Demo 已收敛为单职责验证：本地视频输入、自建抽帧、同目录补充图片、用户诉求和工单上下文，默认交给 `gemini-3.5-flash-lite` 审核；仅在显式实验时可选择 `gemini-3.7-flash` 高质量候选，并输出可复盘 HTML/JSON 报告。
 
 ```bat
 poc\visual_review_poc\一键运行本地视频三路审核Demo-Windows.bat D:\demo\sample.mp4

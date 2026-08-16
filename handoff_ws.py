@@ -70,7 +70,12 @@ class HandoffHub:
                 continue
 
     async def connect(self, session_id: str, ws: WebSocket) -> None:
-        await ws.accept()
+        requested = ws.headers.get("sec-websocket-protocol") or ""
+        subprotocol = next(
+            (item.strip() for item in requested.split(",") if item.strip().startswith("handoff.")),
+            None,
+        )
+        await ws.accept(subprotocol=subprotocol)
         async with self._lock:
             self._rooms.setdefault(session_id, set()).add(ws)
             self._connection_count += 1

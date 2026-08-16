@@ -57,6 +57,8 @@ class ReviewTask(BaseModel):
     session_id: str
     tenant_id: str = "mitako"
     source: str = "customer_upload"
+    client_case_id: str = ""
+    order_id: str = ""
     scenario: str
     file_name: str
     stored_name: str
@@ -64,6 +66,7 @@ class ReviewTask(BaseModel):
     size: int
     status: str
     boundary: str = ""
+    context: Dict[str, Any] = Field(default_factory=dict)
     result: Dict[str, Any] = Field(default_factory=dict)
     reviewed_at: float = 0
     created_at: float

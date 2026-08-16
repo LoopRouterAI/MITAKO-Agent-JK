@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import json
+import os
 import time
 from pathlib import Path
 from typing import List
@@ -30,18 +32,48 @@ def _case(layer: str, role: str, name: str, ok: bool, detail: str, ms: int, scre
 
 def _cleanup_sessions(client: httpx.Client, base: str) -> None:
     try:
-        ls = client.get(f"{base}/api/v1/desk/sessions").json()
+        login = client.post(
+            f"{base}/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123", "tenant_id": "mitako"},
+        ).json()
+        token = str(login.get("token") or "")
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        ls = client.get(f"{base}/api/v1/desk/sessions", params={"scope": "all"}, headers=headers).json()
         for s in ls.get("sessions", []):
             sid = s.get("session_id", "")
             if sid.startswith(("e2e_", "chain_", "role_", "comm_", "admin_", "browser_")):
-                client.post(f"{base}/api/v1/handoff/reset", params={"session_id": sid})
+                client.post(f"{base}/api/v1/handoff/reset", params={"session_id": sid}, headers=headers)
+        client.post(f"{base}/api/v1/handoff/reset", params={"session_id": SESSION_ID}, headers=headers)
     except Exception:
         pass
-    client.post(f"{base}/api/v1/handoff/reset", params={"session_id": SESSION_ID})
 
 
 def _handoff_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _staff_login(client: httpx.Client, base: str, username: str, password: str) -> dict:
+    response = client.post(
+        f"{base}/api/v1/auth/login",
+        json={"username": username, "password": password, "tenant_id": "mitako"},
+    )
+    data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+    if response.status_code != 200 or not data.get("ok") or not data.get("token"):
+        raise RuntimeError(f"浏览器 E2E 登录失败：username={username}, status={response.status_code}")
+    return data
+
+
+def _authenticated_context(browser, session: dict, viewport: dict):
+    context = browser.new_context(viewport=viewport, locale="zh-CN")
+    payload = json.dumps({"token": session["token"], "user": session["user"]}, ensure_ascii=False)
+    context.add_init_script(
+        f"""(() => {{
+          const {{ token, user }} = {payload};
+          window.sessionStorage.setItem('mitako_auth_token_v1', token);
+          window.sessionStorage.setItem('mitako_auth_user_v1', JSON.stringify(user));
+        }})()"""
+    )
+    return context
 
 
 def _wait_handoff_status(base: str, want: str, token: str = "", timeout_s: float = 20.0) -> bool:
@@ -84,13 +116,27 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
     results: List[CaseResult] = []
     with httpx.Client(timeout=30.0) as client:
         _cleanup_sessions(client, base)
+        desk_session = _staff_login(
+            client,
+            base,
+            os.getenv("E2E_DESK_USERNAME", "desk0816"),
+            os.getenv("E2E_DESK_PASSWORD", "desk123"),
+        )
+        admin_session = _staff_login(
+            client,
+            base,
+            os.getenv("E2E_ADMIN_USERNAME", "admin"),
+            os.getenv("E2E_ADMIN_PASSWORD", "admin123"),
+        )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
-        customer = ctx.new_page()
-        desk = ctx.new_page()
-        admin = ctx.new_page()
+        customer_ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
+        desk_ctx = _authenticated_context(browser, desk_session, {"width": 1440, "height": 900})
+        admin_ctx = _authenticated_context(browser, admin_session, {"width": 1440, "height": 900})
+        customer = customer_ctx.new_page()
+        desk = desk_ctx.new_page()
+        admin = admin_ctx.new_page()
 
         # ── 客户：输入真实高风险售后诉求，触发后端硬路由转VIP客服 ──
         t0 = time.time()
@@ -105,12 +151,12 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
                   if (!el) return false;
                   const text = el.innerText || '';
                   return !text.includes('已接入')
-                    && (text.includes('繁忙') || text.includes('联系人工') || text.includes('排队') || text.includes('转接'));
+                    && (text.includes('繁忙') || text.includes('联系人工') || text.includes('联系VIP客服') || text.includes('排队') || text.includes('转接') || text.includes('请稍候'));
                 }""",
                 timeout=20000,
             )
             banner = customer.locator('[data-testid="handoff-status-banner"]').inner_text()
-            ok = ("繁忙" in banner or "联系人工" in banner or "排队" in banner or "转接" in banner) and "已接入" not in banner
+            ok = any(word in banner for word in ("繁忙", "联系人工", "联系VIP客服", "排队", "转接", "请稍候")) and "已接入" not in banner
             b64 = _shot(customer, "01_customer_queuing")
             results.append(_case("BROWSER", "customer", "B-customer-queue-banner", ok, banner[:120], int((time.time() - t0) * 1000), b64))
             results.append(_case("BROWSER", "customer", "B-customer-ui-queuing", True, "UI 已进入排队状态", 0))
@@ -198,14 +244,17 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
             )
             b64 = _shot(admin, "06_admin_saved")
             results.append(_case("BROWSER", "admin", "B-admin-save-routing", True, "SLA=178", int((time.time() - t0) * 1000), b64))
-            # 恢复默认 SLA
-            token = admin.evaluate("() => sessionStorage.getItem('mitako_auth_token_v1') || ''")
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
-            cfg = httpx.get(f"{base}/api/v1/admin/handoff/routing", headers=headers, timeout=10).json().get("config", {})
-            cfg.setdefault("sla", {})["first_response_seconds"] = 180
-            httpx.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=cfg, timeout=10)
         except Exception as e:
             results.append(_case("BROWSER", "admin", "B-admin-save-routing", False, str(e)[:160], int((time.time() - t0) * 1000)))
+        finally:
+            headers = _handoff_headers(str(admin_session.get("token") or ""))
+            try:
+                cfg = httpx.get(f"{base}/api/v1/admin/handoff/routing", headers=headers, timeout=10).json().get("config", {})
+                if cfg:
+                    cfg.setdefault("sla", {})["first_response_seconds"] = 180
+                    httpx.put(f"{base}/api/v1/admin/handoff/routing", headers=headers, json=cfg, timeout=10)
+            except Exception:
+                pass
 
         # ── Admin 运维大屏 ──
         t0 = time.time()
@@ -229,12 +278,38 @@ def run_browser_e2e(base: str) -> tuple[List[CaseResult], bool]:
             rm_page.goto(f"{base}/", wait_until="domcontentloaded", timeout=30000)
             rm_page.wait_for_selector("#root", timeout=10000)
             motion = rm_page.evaluate("() => window.matchMedia('(prefers-reduced-motion: reduce)').matches")
+            mobile_layout = rm_page.evaluate(
+                """() => ({
+                    innerWidth: window.innerWidth,
+                    bodyScrollWidth: document.body.scrollWidth,
+                    rootScrollWidth: document.documentElement.scrollWidth,
+                    hasChatInput: Boolean(document.querySelector('textarea, input[type="text"]')),
+                })"""
+            )
             b64 = _shot(rm_page, "07_reduced_motion")
             rm_ctx.close()
             results.append(_case("BROWSER", "customer", "B-reduced-motion", motion is True, "prefers-reduced-motion", int((time.time() - t0) * 1000), b64))
+            mobile_ok = (
+                mobile_layout.get("innerWidth") == 390
+                and mobile_layout.get("bodyScrollWidth", 9999) <= 391
+                and mobile_layout.get("rootScrollWidth", 9999) <= 391
+                and mobile_layout.get("hasChatInput") is True
+            )
+            results.append(_case(
+                "BROWSER",
+                "customer",
+                "B-mobile-390-no-overflow",
+                mobile_ok,
+                str(mobile_layout),
+                int((time.time() - t0) * 1000),
+                b64,
+            ))
         except Exception as e:
             results.append(_case("BROWSER", "customer", "B-reduced-motion", False, str(e)[:160], int((time.time() - t0) * 1000)))
 
+        customer_ctx.close()
+        desk_ctx.close()
+        admin_ctx.close()
         browser.close()
 
     return results, True

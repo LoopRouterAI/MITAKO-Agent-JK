@@ -1,0 +1,213 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+import argparse
+import json
+import mimetypes
+import os
+import subprocess
+import time
+from contextlib import ExitStack
+from datetime import datetime, timezone
+from pathlib import Path
+
+import httpx
+
+
+ROOT = Path(__file__).resolve().parents[1]
+REPORT = ROOT / "tests" / "reports" / "dynamic_material_capacity_http_latest.json"
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+
+
+def release_gate_result(checks: dict, assessment: dict) -> dict[str, bool]:
+    capacity_ok = all(
+        checks.get(key) is True
+        for key in ("all_assets_saved", "expanded_capacity", "all_images_accepted")
+    )
+    model_processing_ok = all(
+        checks.get(key) is True
+        for key in ("job_succeeded", "all_images_processed", "coverage_complete")
+    )
+    safe_external_failure = (
+        not model_processing_ok
+        and assessment.get("processing_status") == "technical_processing_incomplete"
+        and assessment.get("system_action") == "system_retry"
+    )
+    return {
+        "model_processing_ok": model_processing_ok,
+        "safe_external_failure": safe_external_failure,
+        "release_gate_ok": capacity_ok and (model_processing_ok or safe_external_failure),
+    }
+
+
+def capacity_checks_from_public_job(job: dict, assessment: dict, requested_count: int) -> dict[str, bool]:
+    saved_count = len(job.get("assets") or [])
+    accepted_count = assessment.get("accepted_image_count")
+    return {
+        "job_succeeded": job.get("status") == "SUCCEEDED",
+        "all_assets_saved": saved_count == requested_count,
+        "expanded_capacity": requested_count <= 40 or (
+            saved_count == requested_count and accepted_count == requested_count
+        ),
+        "all_images_accepted": accepted_count == requested_count,
+        "all_images_processed": assessment.get("processed_image_count") == requested_count,
+        "coverage_complete": assessment.get("coverage_complete") is True,
+    }
+
+
+def git_commit() -> str:
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+    ).strip()
+
+
+def args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="真实 HTTP 单案动态资料容量回归")
+    parser.add_argument("--base-url", default=os.getenv("E2E_BASE_URL", "http://127.0.0.1:8000"))
+    parser.add_argument("--count", type=int, default=62)
+    parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--case-folder", type=Path, help="真实工单目录；仅上传其中的图片，不读取人工标签或客服结论")
+    parser.add_argument(
+        "--image",
+        type=Path,
+        default=ROOT / "docs" / "三大审核场景的小量样本" / "sample_004" / "frame_001.jpg",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    options = args()
+    source_images = []
+    if options.case_folder:
+        case_folder = options.case_folder.resolve()
+        if not case_folder.is_dir():
+            raise FileNotFoundError(f"工单目录不存在：{case_folder}")
+        source_images = [
+            path for path in sorted(case_folder.iterdir())
+            if path.is_file() and not path.name.startswith("._") and path.suffix.lower() in IMAGE_SUFFIXES
+        ]
+        options.count = len(source_images)
+    if not source_images and not options.image.is_file():
+        candidates = sorted((options.image.parent).glob("*.*"))
+        options.image = next(
+            (path for path in candidates if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}),
+            options.image,
+        )
+    if not source_images and not options.image.is_file():
+        raise FileNotFoundError(f"缺少回归图片：{options.image}")
+    if options.count < 1:
+        raise ValueError("count 必须大于 0")
+
+    base_url = options.base_url.rstrip("/")
+    with httpx.Client(timeout=httpx.Timeout(180, connect=30, write=180, read=180)) as client:
+        login = client.post(
+            f"{base_url}/api/v1/auth/login",
+            json={
+                "username": os.getenv("E2E_ADMIN_USERNAME", "admin"),
+                "password": os.getenv("E2E_ADMIN_PASSWORD", "admin123"),
+                "tenant_id": os.getenv("E2E_TENANT_ID", "mitako"),
+            },
+        )
+        login.raise_for_status()
+        headers = {
+            "Authorization": f"Bearer {login.json()['token']}",
+            "Idempotency-Key": f"dynamic-material-{options.count}-{int(time.time())}",
+        }
+        metadata = {
+            "client_case_id": f"dynamic-material-{options.count}-{int(time.time())}",
+            "scenario": "minor_refund",
+            "source": "dynamic_material_capacity_http_e2e",
+            "customer_claim": "未成年人退款资料审核",
+            "output_options": {"include_html_report": False},
+            "claim_scope": {
+                "split_status": "resolved",
+                "stage": "combined",
+                "active_claim_ids": ["CLM-MATERIAL"],
+                "claims": [{"claim_id": "CLM-MATERIAL", "issue_type": "material_completeness"}],
+            },
+            "sop_context": {"policy_ref": "minor_refund_2_0"},
+            "minor_refund_policy": {
+                "review_mode": "standard",
+                "authoritative_verification": "disabled",
+            },
+        }
+        with ExitStack() as stack:
+            paths = source_images or [options.image] * options.count
+            files = [
+                (
+                    "files",
+                    (
+                        f"material_{index:03d}{path.suffix.lower()}",
+                        stack.enter_context(path.open("rb")),
+                        mimetypes.guess_type(path.name)[0] or "image/jpeg",
+                    ),
+                )
+                for index, path in enumerate(paths, start=1)
+            ]
+            submitted = client.post(
+                f"{base_url}/api/v1/review/jobs",
+                headers=headers,
+                data={"metadata": json.dumps(metadata, ensure_ascii=False)},
+                files=files,
+            )
+        submitted.raise_for_status()
+        job = submitted.json()["job"]
+        job_id = job["job_id"]
+        deadline = time.time() + options.timeout
+        while time.time() < deadline:
+            response = client.get(
+                f"{base_url}/api/v1/review/jobs/{job_id}",
+                headers={"Authorization": headers["Authorization"]},
+            )
+            response.raise_for_status()
+            job = response.json()["job"]
+            if job["status"] in {"SUCCEEDED", "FAILED"}:
+                break
+            time.sleep(2)
+
+    ingestion = job.get("metadata", {}).get("ingestion", {})
+    assessment = (
+        job.get("result", {})
+        .get("review", {})
+        .get("agent_report", {})
+        .get("parsed", {})
+        .get("minor_material_assessment", {})
+    )
+    checks = capacity_checks_from_public_job(job, assessment, options.count)
+    gate = release_gate_result(checks, assessment)
+    report = {
+        "ok": all(checks.values()),
+        **gate,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": git_commit(),
+        "job_id": job_id,
+        "status": job.get("status"),
+        "requested_count": options.count,
+        "input_mode": "real_case_images" if source_images else "repeated_capacity_fixture",
+        "blind_input_boundary": "未读取或上传 annotation.json、reply.json、manifest.json 和目录人工标签",
+        "ingestion": ingestion,
+        "assessment": {
+            key: assessment.get(key)
+            for key in (
+                "declared_image_count",
+                "accepted_image_count",
+                "processed_image_count",
+                "coverage_ratio",
+                "coverage_complete",
+                "processing_status",
+                "system_action",
+            )
+        },
+        "checks": checks,
+    }
+    REPORT.parent.mkdir(parents=True, exist_ok=True)
+    REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["release_gate_ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

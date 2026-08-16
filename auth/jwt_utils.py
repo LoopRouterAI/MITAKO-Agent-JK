@@ -16,7 +16,9 @@ def _secret_literal(*parts: str) -> str:
 FORBIDDEN_SECRET_VALUES = {
     _secret_literal("mitako", "dev", "change", "me", "in", "production"),
     _secret_literal("mitako", "local", "demo", "secret", "change", "before", "production"),
+    _secret_literal("mitako", "local", "poc", "secret", "change", "before", "production"),
 }
+MIN_PRODUCTION_SECRET_LENGTH = 32
 RUNTIME_SECRET = secrets.token_urlsafe(48)
 ALGORITHM = "HS256"
 DEFAULT_TTL_SECONDS = 86400 * 7
@@ -46,7 +48,7 @@ def dev_auth_bypass_enabled() -> bool:
 def production_secret_ok() -> bool:
     """生产环境是否配置了非默认 JWT 密钥"""
     secret = os.getenv("MITAKO_JWT_SECRET", "").strip()
-    return bool(secret) and secret not in FORBIDDEN_SECRET_VALUES
+    return len(secret) >= MIN_PRODUCTION_SECRET_LENGTH and secret not in FORBIDDEN_SECRET_VALUES
 
 
 def enforce_jwt_secret_boundary() -> None:
@@ -66,7 +68,7 @@ def create_token(
     role: str,
     agent_id: str = "",
     display_name: str = "",
-    tenant_id: str = "mitako",
+    tenant_id: str,
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
     extra: Optional[Dict[str, Any]] = None,
 ) -> str:
@@ -86,7 +88,7 @@ def create_token(
     return jwt.encode(payload, _secret(), algorithm=ALGORITHM)
 
 
-def create_handoff_user_token(*, session_id: str, user_id: str, tenant_id: str = "mitako") -> str:
+def create_handoff_user_token(*, session_id: str, user_id: str, tenant_id: str) -> str:
     from auth.roles import Role
 
     return create_token(

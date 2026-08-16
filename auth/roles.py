@@ -23,6 +23,12 @@ ADMIN_MUTATE_ROLES: FrozenSet[str] = frozenset({
     Role.BPO_MANAGER.value,
 })
 
+# 业务规则会直接影响审核结论，仅允许高级客服主管与超级管理员维护。
+PROMPT_GOVERNANCE_ROLES: FrozenSet[str] = frozenset({
+    Role.SUPER_ADMIN.value,
+    Role.SUPERVISOR.value,
+})
+
 # 补偿审批职责分离：一线客服发起，主管/超级管理员裁决；管理角色不能绕过服务单代发起。
 APPROVAL_CREATE_ROLES: FrozenSet[str] = frozenset({
     Role.DESK_AGENT.value,

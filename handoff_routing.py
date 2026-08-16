@@ -86,5 +86,6 @@ def save_routing_config(config: Dict[str, Any], tenant_id: str | None = None) ->
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
+        f.write("\n")
     _cached[tenant] = merged
     return merged

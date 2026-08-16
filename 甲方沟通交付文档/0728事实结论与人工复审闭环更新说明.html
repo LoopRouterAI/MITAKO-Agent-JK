@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MITAKO 0728 事实结论与人工复审闭环更新说明</title>
+  <style>
+    :root{color-scheme:light;--ink:#172019;--muted:#607066;--line:#d9e2dc;--paper:#fff;--wash:#f3f6f4;--lime:#c8f249;--green:#17633d;--blue:#246ca8;--orange:#aa5c13;--soft-green:#f1f8f3;--soft-blue:#f1f7fb;--soft-orange:#fff5e9;font-family:"Microsoft YaHei","Noto Sans SC",Arial,sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:var(--wash);color:var(--ink)}main{width:min(1160px,calc(100% - 32px));margin:auto;padding:28px 0 54px}header,section{background:var(--paper);border:1px solid var(--line);border-radius:8px}header{padding:42px;border-top:8px solid var(--lime)}.tag{display:inline-block;padding:6px 10px;border-radius:4px;background:#eff9ce;color:#3c530f;font-size:13px;font-weight:800}h1{margin:18px 0 14px;max-width:920px;font-size:40px;line-height:1.2;letter-spacing:0}.lead{max-width:920px;margin:0;color:var(--muted);font-size:17px;line-height:1.85}.badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}.badges span{padding:7px 10px;border:1px solid #cad5cd;border-radius:4px;font-size:13px;font-weight:800}section{margin-top:18px;padding:28px}h2{margin:0 0 16px;font-size:23px;letter-spacing:0}h3{margin:0 0 8px;font-size:17px}p,li{line-height:1.75}.summary{padding:19px 21px;border-left:5px solid var(--green);background:var(--soft-green);font-size:16px}.summary strong{color:var(--green)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{padding:18px;border:1px solid var(--line);border-radius:6px;background:#fbfcfb}.card p{margin:0;color:var(--muted);font-size:14px}.num{margin-bottom:12px;color:var(--green);font-size:26px;font-weight:900}.flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.step{padding:16px;border-top:4px solid var(--blue);background:var(--soft-blue)}.step strong{display:block;margin-bottom:7px}.step span{color:var(--muted);font-size:13px;line-height:1.7}table{width:100%;border-collapse:collapse}th,td{padding:13px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted);font-size:13px}td{font-size:14px;line-height:1.65}.yes{color:var(--green);font-weight:800}.limited{color:var(--orange);font-weight:800}.notice{border-left:5px solid var(--orange);background:var(--soft-orange)}code{padding:2px 5px;border-radius:3px;background:#edf1ee;font-family:Consolas,monospace;font-size:.92em}footer{padding:22px 4px 0;color:var(--muted);font-size:12px;line-height:1.7}@media(max-width:800px){main{width:min(100% - 20px,1160px);padding-top:10px}header,section{padding:22px}h1{font-size:30px}.grid,.flow{grid-template-columns:1fr}table{display:block;overflow-x:auto}}@media print{body{background:#fff}main{width:100%;padding:0}header,section{break-inside:avoid}}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="tag">2026-07-28 甲方沟通版</span>
+    <h1>审核 Agent 不再把“有疑点”一律等同于“必须转人工”</h1>
+    <p class="lead">本轮针对“结果普遍落在 0.5-0.7、全部不确定、报告前后矛盾”的反馈完成了机制修正。系统现在分别回答：证据支持什么事实、成因与责任能否确定、是否需要人工复审、甲方业务系统下一步可怎样处理。</p>
+    <div class="badges"><span>事实与责任分层</span><span>三级人工复审</span><span>补件不占人工席位</span><span>API / HTML 同一结论源</span><span>真实请求回归</span></div>
+  </header>
+
+  <section>
+    <h2>先说结论</h2>
+    <div class="summary"><strong>代码能力已经更新，不是只改了报告文案。</strong>明确看见商品有伤时，系统可以给出“证据支持有伤”的事实建议；即使暂时无法判断伤是在出厂、运输还是用户操作中形成，也不会因此把事实结论强行改成“不确定”。离镜、轻度连续性疑点等非阻断信号进入风险说明或可抽检，不再默认要求 VIP 客服逐案复核。</div>
+  </section>
+
+  <section>
+    <h2>本轮实际改了什么</h2>
+    <div class="grid">
+      <article class="card"><div class="num">01</div><h3>“看见有伤”与“谁造成的”分开</h3><p>伤情清晰可见时可以输出事实 positive；形成时间、原因和责任另给倾向与置信度。成因不确定不再覆盖已经成立的伤情事实。</p></article>
+      <article class="card"><div class="num">02</div><h3>补充照片可以成为有效证据</h3><p>只有照片确实进入审核、证据分达到门槛且与争议商品建立同物关联时，才用于确认可见伤情；它不会被进一步推断为平台责任。</p></article>
+      <article class="card"><div class="num">03</div><h3>减少无意义的全量人工复核</h3><p>服务失败、实质冲突、权威核验待完成仍为必须复审；结论明确但有轻度疑点改为可抽检；缺材料优先请用户补件，不先占用客服席位。</p></article>
+      <article class="card"><div class="num">04</div><h3>报告各位置使用同一结论</h3><p>报告标题、事实结论、人工建议和流程建议统一读取同一份审核建议对象，修复“上面说需复核、下面又说无需复核”等矛盾。</p></article>
+      <article class="card"><div class="num">05</div><h3>视频论证改为四个独立维度</h3><p>分别说明抽帧首尾覆盖、媒体技术取证、开箱过程完整性、争议商品连续性，避免把其中一个维度写成整段视频已经确定完整。</p></article>
+      <article class="card"><div class="num">06</div><h3>API 与网页保持同一业务口径</h3><p>正式 API 返回结构化字段；需要人工阅读时可生成同一任务的 HTML。网页工作台用于 UAT 和报告查看，不要求甲方在生产中手填订单。</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>新版结果应该怎样理解</h2>
+    <table>
+      <thead><tr><th>输出层</th><th>回答的问题</th><th>甲方建议用法</th></tr></thead>
+      <tbody>
+        <tr><td><strong>事实结论</strong></td><td><code>positive / negative / review</code>：当前证据是否支持用户本次事实诉求。</td><td>作为审核建议使用，不等同于退款、补发、换货或拒绝。</td></tr>
+        <tr><td><strong>证据分数</strong></td><td>当前证据链的强弱，不是经过大规模黄金集校准后的客观正确率。</td><td>黄金集冻结后再按场景校准阈值。</td></tr>
+        <tr><td><strong>成因与责任</strong></td><td>问题更可能在哪个阶段形成、哪方责任倾向更高。</td><td>与事实结论分开消费；证据不足时允许保持不确定。</td></tr>
+        <tr><td><strong>人工复审</strong></td><td><code>required / optional / not_required</code> 或先补材料。</td><td>按甲方风险偏好设置抽检比例，不再把所有疑点都送人工。</td></tr>
+        <tr><td><strong>经营处置</strong></td><td>退款、补发、换货、补偿或拒绝。</td><td>由甲方 SOP、授权人员和业务系统决定，本服务不越权执行。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>真实请求验证</h2>
+    <table>
+      <thead><tr><th>验证项</th><th>结果</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>真实案件 API 盲测</td><td class="yes">通过</td><td>任务 <code>RJ-765B0EA12FB04FE9</code> 返回 positive / 0.65、伤情 confirmed、成因 indeterminate、人工复审 optional，并生成可读 HTML。</td></tr>
+        <tr><td>标签隔离</td><td class="yes">通过</td><td>请求只使用用户诉求、用户媒体和安全订单快照，没有把目录正负标签、人工结论或最终处置送入审核。</td></tr>
+        <tr><td>视觉审核自动回归</td><td class="yes">145 / 145</td><td>覆盖伤情、连续性、报告聚合、媒体取证、履约对账和材料审核。</td></tr>
+        <tr><td>审核服务自动回归</td><td class="yes">79 / 79</td><td>覆盖统一建议对象、人工复审分级、任务、批次和报告。</td></tr>
+        <tr><td>私有化 HTTP 验收</td><td class="yes">14 / 14</td><td>覆盖 OpenAPI、鉴权、任务提交、报告与可观测接口。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>甲方建议这样测试</h2>
+    <div class="flow">
+      <div class="step"><strong>1. 单案复测</strong><span>分别提交明确支持、明确不支持和证据不足案件，核对事实、成因和复审等级是否分开。</span></div>
+      <div class="step"><strong>2. 批量盲测</strong><span>每案独立任务、共享 batch_id；请求中不出现人工标签和最终处理答案。</span></div>
+      <div class="step"><strong>3. 对照报告</strong><span>核对标题、事实结论、人工建议、流程建议和证据帧是否一致，不允许局部矛盾。</span></div>
+      <div class="step"><strong>4. 冻结黄金集</strong><span>四个视觉场景各 25 案，另建未成年人材料集，再校准阈值与人工复审率。</span></div>
+    </div>
+  </section>
+
+  <section class="notice">
+    <h2>仍需双方继续完成的部分</h2>
+    <ul>
+      <li>当前回归证明工程机制和接口闭环，不能替代 100 案黄金集的生产准确率评测。</li>
+      <li>真实订单、SKU、包裹与商品映射、仓储结论、身份真实性、对象存储和回调仍需甲方接口联调。</li>
+      <li>企业微信、飞书、CRM/CDP、库存和真实客服系统尚未伪装成已接入；正式接入以双方确认的接口和测试环境为准。</li>
+      <li>交付 ZIP 的确切代码版本以包内清单中的 <code>git_commit</code> 为准，甲方包不含密钥、数据库、内部研发文档或人工评测答案。</li>
+    </ul>
+  </section>
+
+  <footer>文档版本：2026-07-28。本文面向甲方业务、测试和项目人员；0724 文档保留为历史记录，不再代表最新能力。</footer>
+</main>
+</body>
+</html>

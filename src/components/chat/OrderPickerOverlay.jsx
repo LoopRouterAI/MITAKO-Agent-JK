@@ -227,8 +227,8 @@ export function OrderQuickBar({ order, memberLabel, onOpenPicker }) {
             {order.status_label}
           </span>
         </div>
-        <p className="text-xs font-semibold text-slate-700 truncate mt-0.5">{getOrderDisplayName(order)}</p>
-        <p className="text-[10px] text-slate-400 font-mono truncate">{formatPublicOrderRef(order.order_id)} · {t('order.tapToSwitch')}</p>
+        <p className="mt-0.5 line-clamp-2 break-words text-xs font-semibold text-slate-700">{getOrderDisplayName(order)}</p>
+        <p className="break-words font-mono text-[11px] text-slate-500">{formatPublicOrderRef(order.order_id)} · {t('order.tapToSwitch')}</p>
       </div>
       <CheckCircle2 className="w-4 h-4 text-slate-300 flex-shrink-0" aria-hidden="true" />
     </button>

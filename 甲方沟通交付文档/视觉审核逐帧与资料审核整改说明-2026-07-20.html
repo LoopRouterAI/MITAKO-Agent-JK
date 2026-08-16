@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>视觉审核逐帧与资料审核整改说明</title>
+  <style>
+    :root{--ink:#17231d;--muted:#607067;--line:#d9e2dc;--paper:#f4f7f4;--white:#fff;--green:#176b43;--lime:#c9f34b;--amber:#9a5b00;--red:#a53731}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.72 "Microsoft YaHei","Segoe UI",sans-serif}main{max-width:1120px;margin:auto;padding:28px 18px 64px}header,section{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:22px;margin:0 0 14px}header{border-top:6px solid var(--lime)}h1{font-size:30px;line-height:1.25;margin:0 0 8px}h2{font-size:20px;margin:0 0 12px}h3{font-size:16px;margin:0 0 7px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.metric,.item{border:1px solid var(--line);border-radius:6px;padding:13px;background:#fbfdfb}.metric small{display:block;color:var(--muted)}.metric b{font-size:22px}.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}table{width:100%;border-collapse:collapse}th,td{text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid #e4e9e5}th{background:#eef3ef}code{background:#edf2ee;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere;word-break:break-word}.callout{border-left:4px solid var(--lime);padding:10px 14px;background:#f8fce9}.boundary{border-left-color:#f0a42c;background:#fff9ed}@media(max-width:640px){main{padding:14px 10px 40px}header,section{padding:16px}h1{font-size:24px}table{display:block;overflow:auto}}
+  </style>
+</head>
+<body><main>
+  <header>
+    <p class="muted">2026-07-20 · 面向甲方项目、客服与测试人员</p>
+    <h1>视觉审核逐帧与未成年人资料审核整改说明</h1>
+    <p>本轮不是只改提示词。我们修改了模型输入方式、材料状态模型、报告字段、接口采样计划和回归门禁，并用 617911、144989 及七种提交方式重新发起真实请求。</p>
+  </header>
+
+  <section>
+    <h2>先说清楚：为什么不再用拼图审核</h2>
+    <div class="callout"><b>拼图只适合人浏览，不适合做严肃审核证据。</b> 多帧缩在一张图里会损失折痕、撕拉片、包装边缘等局部细节，也容易让帧号、时间戳与画面对应关系变弱。</div>
+    <p>当前代码已经删除模型审核链路中的拼图分支。视频在服务端本地抽帧后，每一帧以独立 JPEG、独立帧号和独立时间戳送审；HTML 报告仍可把关键帧排成缩略图列表，缩略图只方便客服查看，不参与结论。</p>
+  </section>
+
+  <section>
+    <h2>现在怎么审视频</h2>
+    <div class="grid">
+      <div class="item"><h3>抽帧强度可配置</h3><p>普通、Strict、Strong 和自定义档继续支持不同 FPS。1 FPS/2 FPS 决定时间轴密度。</p></div>
+      <div class="item"><h3>每次最多 24 张独立帧</h3><p>24 是单次请求分段上限，不是整段视频只审 24 张。长视频会拆成多个连续分段。</p></div>
+      <div class="item"><h3>三条证据通道</h3><p>主审核看全局诉求，连续性通道看离镜/重入镜，损伤成因通道看动作前、中、后的同物证据。</p></div>
+      <div class="item"><h3>非 AI 媒体取证</h3><p>ffprobe 检查容器、码流、时间线等技术信号；它不能单独证明造假，但可作为风险门禁。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>617911 真实复测</h2>
+    <div class="grid">
+      <div class="metric"><small>正式任务</small><b>RJ-51F5E65338A449E5</b></div>
+      <div class="metric"><small>抽样时间轴</small><b>213 帧</b></div>
+      <div class="metric"><small>媒体取证</small><b class="ok">完成</b></div>
+      <div class="metric"><small>审核结论</small><b class="warn">复核 / 0.50</b></div>
+    </div>
+    <p>运行时连续性分段最大为 24 帧，证明新版本没有再走旧的 48 帧拼图路径。系统没有因为“视频中未看出商品有伤”就直接自动判负，因为同物关联、主张部位特写和完整视角仍未同时满足。</p>
+    <div class="callout boundary"><b>未完成得不够完美的部分：</b>有 8 个连续性分段没有返回完整逐帧结构化观察。系统已列出缺口并强制转复核，而不是把缺失输出冒充“商品没有离镜”。因此本轮证明了工程安全和可追溯性，但不宣称 617911 已能自动替代客服裁决。</div>
+  </section>
+
+  <section>
+    <h2>144989 未成年人资料复测</h2>
+    <div class="grid">
+      <div class="metric"><small>正式任务</small><b>RJ-2E0B44A7C5C942E6</b></div>
+      <div class="metric"><small>图片覆盖</small><b class="ok">20 / 20</b></div>
+      <div class="metric"><small>材料类别</small><b class="ok">5 / 5</b></div>
+      <div class="metric"><small>自动验收</small><b class="ok">14 / 14</b></div>
+    </div>
+    <p>新版把“用户提交了材料”和“材料清晰、字段一致、具备法定真实性”拆成三层。即使承诺书部分可读，也会记为“已提交 + 质量待确认”，不会误报缺失，也不会跳过后续字段核对。</p>
+    <table><thead><tr><th>检查项</th><th>本轮结果</th><th>解释</th></tr></thead><tbody>
+      <tr><td>身份与年龄</td><td class="ok">未发现明显矛盾</td><td>只表示图片可见字段之间未见冲突。</td></tr>
+      <tr><td>监护关系</td><td class="warn">不确定</td><td>继续由授权人员按证据图片复核。</td></tr>
+      <tr><td>承诺书签署主体</td><td class="warn">不确定</td><td>签字真实性不能由视觉模型最终确认。</td></tr>
+      <tr><td>订单与支付</td><td class="warn">不确定</td><td>需接甲方订单、支付流水进行权威核对。</td></tr>
+      <tr><td>手机号实名归属</td><td class="warn">不确定</td><td>需接运营商或甲方实名能力。</td></tr>
+    </tbody></table>
+    <p>最终仍为 <code>review / 0.69</code>，不会自动退款、通过或拒绝。</p>
+  </section>
+
+  <section>
+    <h2>API 和网页端是否都支持单个与批量</h2>
+    <table><thead><tr><th>入口</th><th>结果</th><th>验收证据</th></tr></thead><tbody>
+      <tr><td>正式 API 单附件案件</td><td class="ok">通过</td><td>异步任务成功</td></tr>
+      <tr><td>正式 API 多附件案件</td><td class="ok">通过</td><td>图片与视频同案提交成功</td></tr>
+      <tr><td>正式 API 同批次查询</td><td class="ok">通过</td><td>2 个任务汇总完成</td></tr>
+      <tr><td>网页单文件</td><td class="ok">通过</td><td>生成完成报告</td></tr>
+      <tr><td>网页单工单文件夹</td><td class="ok">通过</td><td>服务端接收 6 个有效文件</td></tr>
+      <tr><td>网页批量父目录</td><td class="ok">通过</td><td>2 个子案件、2 份报告</td></tr>
+      <tr><td>网页控件与路由绑定</td><td class="ok">通过</td><td>单文件、文件夹、批量路由均已绑定</td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>甲方还需要提供什么</h2>
+    <ul>
+      <li>身份、运营商实名、订单、支付和退款系统的测试接口，才能完成未成年人资料的权威真伪与业务动作闭环。</li>
+      <li>商品 SKU、规格、主图、包装标准、应发清单和包裹关系，才能提高发错货、漏发货和商品有伤的对照能力。</li>
+      <li>冻结标签的盲测集，用于比较不同 FPS、分段大小和候选模型的召回率、误判率、成本与时延。</li>
+    </ul>
+    <div class="callout boundary">当前测试数据、订单快照和企微/订单/库存事件均属于演示或契约级能力；尚未伪装成已经接入甲方生产系统。</div>
+  </section>
+
+  <section>
+    <h2>复测证据</h2>
+    <p><code>tests/reports/review_0717_four_samples_20260720-617911-independent24-final.html</code></p>
+    <p><code>tests/reports/minor_refund_144989_20260720_224208.html</code></p>
+    <p><code>tests/reports/review_submission_modes_20260717-final.html</code></p>
+  </section>
+</main></body></html>

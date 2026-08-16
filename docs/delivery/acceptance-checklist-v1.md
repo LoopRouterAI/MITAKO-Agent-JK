@@ -11,7 +11,7 @@
 | # | 交付物 | 路径/说明 | 确认 |
 |---|---|---|---|
 | D1 | 客户验证包 | `MITAKO_Agent-customer-preview-YYYYMMDD.zip` | ☐ |
-| D2 | 新版本交付说明 | `甲方沟通交付文档/新版本交付说明-2026-07-11.md` | ☐ |
+| D2 | 新版本交付说明 | `甲方沟通交付文档/未成年人资料字段一致性审核升级说明-2026-07-20.html` | ☐ |
 | D3 | 完整复核报告 | `docs/delivery/mitako-full-requirement-reaudit-20260711.html` | ☐ |
 | D4 | OpenAPI 契约 | `docs/delivery/openapi.yaml` | ☐ |
 | D5 | Java 调用示例 | `docs/delivery/java-client-sample.md` | ☐ |

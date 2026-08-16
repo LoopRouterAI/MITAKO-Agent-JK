@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>0717 四样本审核工程整改与验收报告</title>
+  <style>
+    :root{color-scheme:light;--ink:#172126;--muted:#607078;--line:#d9e1e4;--paper:#fff;--bg:#f3f6f7;--green:#087a4b;--green-bg:#eaf7f0;--amber:#9a5a00;--amber-bg:#fff5dc;--red:#b4232f;--blue:#1769aa}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 Inter,"Microsoft YaHei",Arial,sans-serif;letter-spacing:0}main{max-width:1180px;margin:auto;padding:34px 24px 70px}header{padding:28px 0 24px;border-bottom:1px solid var(--line)}h1{font-size:34px;line-height:1.25;margin:10px 0 12px}h2{font-size:22px;margin:0 0 14px}h3{font-size:17px;margin:18px 0 8px}p{margin:8px 0}.eyebrow{font-weight:700;color:var(--blue)}.lead{max-width:920px;font-size:17px;color:#34444b}.status{display:inline-flex;align-items:center;min-height:30px;padding:3px 10px;border-radius:4px;background:var(--green-bg);color:var(--green);font-weight:700}.warn{background:var(--amber-bg);color:var(--amber)}section{padding:27px 0;border-bottom:1px solid var(--line)}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-top:22px}.summary article{background:var(--paper);padding:18px}.summary b{display:block;font-size:28px}.summary small{color:var(--muted)}table{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--line)}th,td{text-align:left;vertical-align:top;padding:11px 12px;border-bottom:1px solid var(--line)}th{background:#edf2f3;font-size:13px}code{font-family:Consolas,monospace;color:#144d70}.pass{color:var(--green);font-weight:700}.partial{color:var(--amber);font-weight:700}.fail{color:var(--red);font-weight:700}.callout{border-left:4px solid var(--blue);padding:12px 16px;background:#eef6fb;margin:14px 0}.evidence{border-left-color:var(--green);background:var(--green-bg)}ul{padding-left:22px}.two{display:grid;grid-template-columns:1fr 1fr;gap:28px}.foot{color:var(--muted);font-size:13px;margin-top:26px}@media(max-width:820px){main{padding:22px 14px 50px}h1{font-size:28px}.summary{grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}table{display:block;overflow-x:auto;white-space:normal}}
+  </style>
+</head>
+<body><main>
+  <header>
+    <div class="eyebrow">MITAKO 客服 Agent · 视觉审核服务</div>
+    <h1>0717 四样本审核工程整改与验收报告</h1>
+    <p class="lead">本报告回答三个问题：甲方 0717 反馈是否读懂；代码是否真的整改；四个原始样本通过正式异步 API 重新提交后是否可复验。结论不以演示页面截图代替 API 证据。</p>
+    <p><span class="status">本轮缺陷闭环通过</span> <span class="status warn">生产性能与甲方真实网关仍待联调</span></p>
+    <div class="summary">
+      <article><b>5/5</b><small>正式 API 任务最终成功</small></article>
+      <article><b>4/4</b><small>视频任务 ffprobe 完成</small></article>
+      <article><b>11/11</b><small>最终盲测门槛通过</small></article>
+      <article><b>675 MB</b><small>最大案件实际提交规模</small></article>
+    </div>
+  </header>
+
+  <section>
+    <h2>用人话说明这次改了什么</h2>
+    <div class="two">
+      <div>
+        <h3>普通审核不再只看十来帧</h3>
+        <p>商品有伤普通档现在至少按 1 FPS 审查完整时间轴，并执行主体连续性与损伤成因专项通道。618205 普通档从旧版的错误 <code>positive / 0.95</code> 改为 <code>review / 0.6425</code>。</p>
+        <h3>Strong 统一为 2 FPS</h3>
+        <p>Strong 用于离镜、动作前后和争议时点强化复核，最多 1800 帧。618205 Strong 识别到争议商品约在 <code>00:52.22</code> 首次曝光，并保持复核结论。</p>
+      </div>
+      <div>
+        <h3>报告不再把一个分段当完整视频</h3>
+        <p>每个分段明确知道自己只是局部；公开结论改由完整帧注册表和全局时长生成。原报告“00:11.44 视频结束，但 00:52.22 才出现商品”的矛盾已消除。</p>
+        <h3>可自动分类，但不能自动拒赔</h3>
+        <p>只有甲方批准并带版本号的规则才能把“缺必需开箱视频”等情况输出为 <code>negative</code>。这只是审核分类建议，退款、拒绝、补发、换货和最终定责仍由甲方系统及授权人员执行。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>四样本正式 API 结果</h2>
+    <table>
+      <thead><tr><th>样本 / 档位</th><th>最终结果</th><th>关键证据</th><th>本轮判断</th></tr></thead>
+      <tbody>
+        <tr><td><code>617341 / adaptive</code><br><code>RJ-4A6AC314B69B4AD7</code></td><td class="pass">SUCCEEDED<br>negative / 0.99</td><td>无视频；24,132,745 字节图片材料。命中甲方版本化“商品有伤必须有开箱视频”规则。</td><td>规则性不支持，不等同于视觉证明商品无伤。报告正文已同步，不再一边判负一边建议支持。</td></tr>
+        <tr><td><code>614176 / adaptive</code><br><code>RJ-87DB7A5DE6D84B4D</code></td><td class="pass">SUCCEEDED<br>review / 0.5955</td><td>675,087,928 字节；视频 240.433 秒；首次曝光约 00:28.93；最长不可观察 10 秒。</td><td>只审核初始诉求，后增撕拉片问题不进入本次结论。人工总标签存在范围争议，因此保持复核合理。</td></tr>
+        <tr><td><code>618205 / adaptive</code><br><code>RJ-68793580CA6143BC</code></td><td class="pass">SUCCEEDED<br>review / 0.6425</td><td>时间轴覆盖至 01:11.60；首次曝光约 00:52.72；最长不可观察 16.88 秒。</td><td>普通档已不再误判 positive，证明 1 FPS 质量底线有效。</td></tr>
+        <tr><td><code>618205 / strong</code><br><code>RJ-A91FEE6518B34FF2</code></td><td class="pass">SUCCEEDED<br>review / 0.65</td><td>2 FPS；首次曝光约 00:52.22；最长不可观察 5.97 秒；ffprobe 完成。</td><td>强化审核继续识别开箱完整性风险，且公开报告没有局部分段时间矛盾。</td></tr>
+        <tr><td><code>617911 / adaptive</code><br><code>RJ-6ADF9BA4F6034F9B</code></td><td class="pass">SUCCEEDED<br>review / 0.50</td><td>271,332,010 字节；视频 211.77 秒；最长不可观察 100.86 秒；缺主张部位特写。</td><td>当前不能安全自动判负。只有同物关联、部位特写、必检视角完整、无冲突、无离镜全部满足后，才允许“完整未见伤”规则判负。</td></tr>
+      </tbody>
+    </table>
+    <div class="callout evidence"><b>盲测隔离：</b>提交给模型的只有中性文件名媒体、原始诉求文本、本次 claim scope 和审核策略。没有上传 <code>annotation.json</code>、<code>reply.json</code>、<code>manifest.json</code>、人工结论、正负样本目录名或标准答案。</div>
+  </section>
+
+  <section>
+    <h2>甲方反馈逐条闭环</h2>
+    <table>
+      <thead><tr><th>反馈</th><th>代码整改</th><th>验收状态</th></tr></thead>
+      <tbody>
+        <tr><td>618205 普通档漏掉长时间出框</td><td>商品有伤普通档改为 1 FPS 完整时间轴，并自动开启连续性与成因专项通道。</td><td class="pass">已完成</td></tr>
+        <tr><td>Strong 有效，但 ffprobe 不可用</td><td>新增固定路径、Docker 系统依赖、Windows 安装脚本和 readiness。618205、614176、617911 真实媒体取证均为 completed。</td><td class="pass">已完成</td></tr>
+        <tr><td>617341 可否直接判负</td><td>新增版本化策略。甲方明确“开箱视频必需且缺失为 negative”后可自动分类；视觉事实与规则资格分别记录。</td><td class="pass">已完成</td></tr>
+        <tr><td>617911 完整视频未见伤可否判负</td><td>增加严格可观察性门槛。当前样本缺特写且长时间不可观察，继续 review，避免错误拒绝。</td><td class="pass">安全边界完成</td></tr>
+        <tr><td>614176 初始诉求与后增诉求混杂</td><td>新增原子 claim、active_claim_ids、提出阶段、对象、部位和证据绑定。</td><td class="pass">已完成</td></tr>
+        <tr><td>Strong 报告局部文本矛盾</td><td>禁止拼接局部分段结论；新增全局时间轴摘要和矛盾警告。</td><td class="pass">已完成</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>真实测试发现并修复的工程问题</h2>
+    <h3>1. 内部请求被代理转发，固定约 602 秒返回 503</h3>
+    <p>首轮大样本盲测真实捕获 614176、617911 的 503。三次尝试分别约 602 秒，网络连接显示内部 <code>127.0.0.1:7861</code> 请求先进入本机代理端口，代理超时后工作台仍继续推理，形成孤儿请求。</p>
+    <p>整改后内部服务调用强制绕过环境代理并直连 7861；清理孤儿进程后复用原 job 重试。614176 单次直连约 963.047 秒成功，617911 单次直连约 952.923 秒成功，重试次数均为 0。</p>
+    <h3>2. 成本统计被公开报告脱敏逻辑误删</h3>
+    <p>公开 HTML 不应展示模型、Token 和成本，但受保护的审核 API 必须保留内部运维统计。本轮已拆分两条输出路径。复验任务返回 20,358 Token、估算 0.08084 美元、1 次模型调用；估算仅用于容量和方案比较，不等同于供应商账单。</p>
+    <h3>3. 600MB 级上传与媒体取证</h3>
+    <p>614176 单视频为 602,861,197 字节，整案 675,087,928 字节；正式 API 提交成功，ffprobe 在真实文件上完成容器、音视频流、帧率和 packet timeline 检查。Nginx 参考配置已统一为审核入口 800MB，并关闭请求缓冲。</p>
+  </section>
+
+  <section>
+    <h2>当前 Ready 与未完成边界</h2>
+    <div class="two">
+      <div>
+        <h3 class="pass">本地 POC / 私有化服务候选已 Ready</h3>
+        <ul>
+          <li>正式异步审核 API、幂等任务、批次查询、HTML 报告。</li>
+          <li>普通 1 FPS、Strong 2 FPS、自定义 0.1-2 FPS。</li>
+          <li>全局连续性、损伤成因、claim scope、版本化分类策略。</li>
+          <li>ffprobe、readiness、Docker、Nginx 大文件基线、内部 5xx 重试。</li>
+          <li>受保护 API 的 Token、调用数和估算成本汇总。</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="partial">仍需甲方或双方联调</h3>
+        <ul>
+          <li>甲方 Java 网关的真实 800MB 限制、超时、日志和多实例一致性。</li>
+          <li>对象存储直传、七牛云或其他转码服务、回调与下载白名单。</li>
+          <li>甲方批准的策略 ID、版本、适用场景和自动分类边界。</li>
+          <li>真实订单、SKU、工单、客服系统与人工结论回写。</li>
+          <li>120GB 冻结盲测集上的准确率、召回率、P95 延迟和真实账单成本。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout"><b>性能判断：</b>质量路径已经通过，但 4 分钟长视频的三通道审核约 16 分钟，仍不属于理想生产延迟。下一阶段建议先用 ffprobe、镜头变化和主体可见性做低成本预筛，再把疑点窗口升级到 1-2 FPS；本报告不宣称长视频性能已生产就绪。</div>
+  </section>
+
+  <section>
+    <h2>可回溯证据</h2>
+    <ul>
+      <li>最终盲测 JSON：<code>tests/reports/review_0717_four_samples_20260717-final.json</code></li>
+      <li>最终盲测 HTML：<code>tests/reports/review_0717_four_samples_20260717-final.html</code></li>
+      <li>运行依赖探针：<code>scripts/check_review_runtime_dependencies.py</code></li>
+      <li>四样本盲测器：<code>scripts/check_review_0717_four_samples.py</code></li>
+      <li>部署配置：<code>Dockerfile</code>、<code>docker-compose.yml</code>、<code>deploy/nginx/mitako-review.conf.example</code></li>
+      <li>内部升级日志：<code>我方内部开发文档/升级日志-2026-07-17-四样本审核.md</code></li>
+    </ul>
+    <p class="foot">报告日期：2026-07-17。四个定向样本用于缺陷回归，不用于宣称总体准确率、负样本召回率或生产统计显著性。</p>
+  </section>
+</main></body></html>

@@ -96,7 +96,7 @@ export default function AuditLog() {
       <div>
         <div className="flex items-center justify-between gap-3 mb-4">
           <h1 className="text-xl font-bold text-[var(--mitako-ink)]">{t('admin.navAudit')}</h1>
-          <select value={eventType} onChange={e => setEventType(e.target.value)} className="rounded-[8px] border-2 border-[var(--mitako-ink)] bg-white px-3 py-2 text-xs font-bold shadow-[3px_3px_0_#111]">
+          <select aria-label={t('admin.auditFilter')} value={eventType} onChange={e => setEventType(e.target.value)} className="rounded-[8px] border-2 border-[var(--mitako-ink)] bg-white px-3 py-2 text-xs font-bold shadow-[3px_3px_0_#111]">
             <option value="">{t('admin.auditAll')}</option>
             <option value="sop_branch">{t('admin.auditSopBranch')}</option>
             <option value="service_after_sales_card">{t('admin.auditAfterSalesCard')}</option>

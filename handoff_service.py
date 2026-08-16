@@ -2,6 +2,7 @@
 """VIP客服排队与移交简报 — SQLite 持久化 + 可配置路由"""
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -307,6 +308,7 @@ def build_handoff_brief(state: Dict[str, Any], reason: Optional[str] = None) -> 
         ],
         "sop_state": state.get("sop_state") or {},
         "business_cards": state.get("business_cards") or [],
+        "review_tasks": state.get("review_tasks") or [],
         "user_id": state.get("user_id"),
         "session_id": state.get("session_id"),
     }
@@ -429,6 +431,8 @@ def build_human_welcome(agent: Dict[str, str], brief: Optional[Dict[str, Any]] =
     safe_brief = brief or {}
     summary = _sanitize_customer_text(safe_brief.get("summary") or "").strip()
     order = _sanitize_customer_text((safe_brief.get("orders") or [""])[0]).strip()
+    if order and not re.search(r"(?:ORD[_-]?\d|订单\s*#?\d|#\d{5,8})", order, re.IGNORECASE):
+        order = ""
     known = summary[:80] if summary else "刚才的服务记录"
     if order:
         known = f"{known}；关联订单 {order[:80]}"
@@ -679,14 +683,14 @@ async def post_user_message(
     attachments: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     entry = _get_entry(session_id)
-    if not entry or entry.get("status") != "connected":
-        return {"ok": False, "error": "not_connected"}
+    if not entry or entry.get("status") not in {"queuing", "escalated", "transferring", "connected"}:
+        return {"ok": False, "error": "handoff_not_active"}
     session_user = entry.get("user_id") or (entry.get("brief") or {}).get("user_id") or ""
     if session_user and user_id and user_id != session_user:
         return {"ok": False, "error": "user_mismatch"}
     meta = {"attachments": attachments or []} if attachments else None
     added = [store.append_message(session_id, "user", content, meta=meta)]
-    if entry.get("observer_mode") and is_observer_request(content):
+    if entry.get("status") == "connected" and entry.get("observer_mode") and is_observer_request(content):
         recent = store.get_messages_since(session_id, 0)[-12:]
         reply = await generate_observer_reply(content, entry.get("brief"), recent)
         obs_msg = store.append_message(session_id, "observer", reply, meta={"kind": "observer"})
@@ -774,6 +778,7 @@ def build_desk_brief(brief: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         ],
         "sop_state": _public_nested(sop_state),
         "business_cards": _public_nested(business_cards),
+        "review_tasks": _public_nested(src.get("review_tasks") or []),
         "required_tier": src.get("required_tier"),
         "user_id": src.get("user_id"),
         "session_id": src.get("session_id"),
@@ -820,10 +825,20 @@ def process_sla_timeouts() -> List[Dict[str, Any]]:
     return results
 
 
-def list_desk_sessions(tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_desk_sessions(
+    tenant_id: Optional[str] = None,
+    agent_id: str = "",
+    scope: str = "available",
+) -> List[Dict[str, Any]]:
     rows = []
     now = time.time()
     for index, entry in enumerate(store.list_active_sessions(tenant_id=tenant_id), start=1):
+        assigned_id = (entry.get("assigned_agent") or {}).get("agent_id") or ""
+        pending_id = (entry.get("pending_agent") or {}).get("agent_id") or ""
+        if scope == "mine" and agent_id and agent_id not in {assigned_id, pending_id}:
+            continue
+        if scope == "available" and agent_id and assigned_id and assigned_id != agent_id:
+            continue
         brief = entry.get("brief") or {}
         enqueued_at = entry.get("enqueued_at") or entry.get("created_at") or entry.get("updated_at") or now
         rows.append({
@@ -842,6 +857,7 @@ def list_desk_sessions(tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
             "position": index,
             "suggested_next_step": (brief.get("recommended_actions") or ["先阅读服务记录，再确认接手或转交"])[0],
             "message_count": len(store.get_messages_since(entry["session_id"], 0)),
+            "queue_scope": scope,
         })
     return rows
 

@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
 import re
 import socket
+import ssl
 import subprocess
 import sys
 import time
 from pathlib import Path
+from threading import RLock, get_ident
 from typing import Any, Dict, Optional
-from urllib.parse import unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import unquote, urljoin, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -39,6 +41,11 @@ ALLOWED_HOST_SUFFIXES = (
 )
 DIRECT_VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".m4v", ".mkv")
 DIRECT_VIDEO_MAX_BYTES = 200 * 1024 * 1024
+DIRECT_REDIRECT_CODES = {301, 302, 303, 307, 308}
+DIRECT_REDIRECT_LIMIT = 5
+
+
+_MANIFEST_LOCK = RLock()
 
 URL_PATTERNS = [
     ("douyin", re.compile(r"https?://v\.douyin\.com/[\w-]+/?")),
@@ -109,18 +116,79 @@ def _is_private_host(host: str, *, resolve_dns: bool = True) -> bool:
     return False
 
 
+def _resolve_public_ip(host: str, port: int) -> str:
+    addresses = []
+    try:
+        addresses = [item[4][0] for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
+    except OSError as exc:
+        raise ValueError("公开视频直链域名无法解析") from exc
+    if not addresses or any(_is_private_host(address, resolve_dns=False) for address in addresses):
+        raise ValueError("公开视频直链不允许访问内网或本机地址")
+    return addresses[0]
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, pinned_ip: str, *, port: int, timeout: int) -> None:
+        super().__init__(host, port=port, timeout=timeout, context=ssl.create_default_context())
+        self._pinned_ip = pinned_ip
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+class _DirectResponse:
+    def __init__(self, response: http.client.HTTPResponse, connection: _PinnedHTTPSConnection, url: str) -> None:
+        self._response = response
+        self._connection = connection
+        self._url = url
+        self.headers = response.headers
+        self.status = response.status
+
+    def read(self, size: int = -1) -> bytes:
+        return self._response.read(size)
+
+    def geturl(self) -> str:
+        return self._url
+
+    def close(self) -> None:
+        self._response.close()
+        self._connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
+        return False
+
+
 def validate_public_video_url(url: str) -> Dict[str, Any]:
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     if parsed.scheme not in {"http", "https"} or not host:
         return {"ok": False, "status": "invalid_url", "error": "只支持公开视频链接"}
+    if parsed.scheme != "https":
+        return {"ok": False, "status": "insecure_url", "error": "公开视频仅支持 HTTPS"}
     if _is_private_host(host, resolve_dns=False):
         return {"ok": False, "status": "blocked_private_host", "error": "不支持内网或本机地址"}
     platform_allowed = any(host == suffix or host.endswith(f".{suffix}") for suffix in ALLOWED_HOST_SUFFIXES)
     if not platform_allowed and not _is_direct_video_url(url):
         return {"ok": False, "status": "unsupported_platform", "error": "暂不支持该视频平台"}
+    if platform_allowed and os.getenv("VISUAL_ALLOW_PLATFORM_URL_DOWNLOAD", "0").strip().lower() not in {
+        "1", "true", "yes"
+    }:
+        return {
+            "ok": False,
+            "status": "platform_download_disabled",
+            "error": "当前部署未启用受网络隔离保护的平台视频下载，请改用本地上传或 HTTPS 视频直链",
+        }
     strict_dns = os.getenv("VISUAL_URL_STRICT_DNS_GUARD", "1").strip().lower() in {"1", "true", "yes"}
-    if strict_dns and not platform_allowed and _is_private_host(host):
+    if strict_dns and _is_private_host(host):
         return {"ok": False, "status": "blocked_private_host", "error": "不支持内网或本机地址"}
     return {"ok": True}
 
@@ -135,17 +203,31 @@ def _url_key(url: str) -> str:
 
 
 def _load_manifest() -> Dict[str, Any]:
-    if not MANIFEST_PATH.exists():
-        return {"items": {}}
-    try:
-        return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {"items": {}}
+    with _MANIFEST_LOCK:
+        if not MANIFEST_PATH.exists():
+            return {"items": {}}
+        try:
+            return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return {"items": {}}
 
 
 def _save_manifest(manifest: Dict[str, Any]) -> None:
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _MANIFEST_LOCK:
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        temporary = MANIFEST_PATH.with_name(f".manifest.{os.getpid()}.{get_ident()}.tmp")
+        try:
+            temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.replace(MANIFEST_PATH)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def _update_manifest_item(key: str, item: Dict[str, Any]) -> None:
+    with _MANIFEST_LOCK:
+        manifest = _load_manifest()
+        manifest.setdefault("items", {})[key] = item
+        _save_manifest(manifest)
 
 
 def _cookies_args() -> list[str]:
@@ -177,12 +259,58 @@ def _direct_headers() -> Dict[str, str]:
     return {"User-Agent": "MITAKO-VisualReview/1.0"}
 
 
+def _validate_direct_request_target(url: str) -> None:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host:
+        raise ValueError("公开视频直链及其跳转目标必须使用 HTTPS")
+    if _is_private_host(host):
+        raise ValueError("公开视频直链不允许访问内网或本机地址")
+
+
+def _open_pinned_https(url: str, *, method: str, timeout: int) -> _DirectResponse:
+    parsed = urlparse(url)
+    host = str(parsed.hostname or "")
+    port = parsed.port or 443
+    pinned_ip = _resolve_public_ip(host, port)
+    connection = _PinnedHTTPSConnection(host, pinned_ip, port=port, timeout=timeout)
+    target = parsed.path or "/"
+    if parsed.params:
+        target += f";{parsed.params}"
+    if parsed.query:
+        target += f"?{parsed.query}"
+    try:
+        connection.request(method, target, headers=_direct_headers())
+        return _DirectResponse(connection.getresponse(), connection, url)
+    except Exception:
+        connection.close()
+        raise
+
+
+def _open_public_direct_url(url: str, *, method: str, timeout: int):
+    current_url = url
+    for _ in range(DIRECT_REDIRECT_LIMIT + 1):
+        _validate_direct_request_target(current_url)
+        response = _open_pinned_https(current_url, method=method, timeout=timeout)
+        if response.status in DIRECT_REDIRECT_CODES:
+            location = response.headers.get("Location")
+            response.close()
+            if not location:
+                raise ValueError("公开视频直链跳转缺少目标地址")
+            current_url = urljoin(current_url, location)
+            continue
+        if response.status >= 400:
+            response.close()
+            raise ValueError(f"公开视频直链请求失败：HTTP {response.status}")
+        return response
+    raise ValueError("公开视频直链跳转次数过多")
+
+
 def _fetch_direct_metadata(url: str) -> Dict[str, Any]:
     started = time.time()
     title = _direct_video_title(url)
     try:
-        req = Request(url, headers=_direct_headers(), method="HEAD")
-        with urlopen(req, timeout=20) as resp:
+        with _open_public_direct_url(url, method="HEAD", timeout=20) as resp:
             size = int(resp.headers.get("Content-Length") or 0)
             content_type = resp.headers.get("Content-Type") or ""
     except Exception:
@@ -214,11 +342,11 @@ def _download_direct_video_url(url: str) -> Dict[str, Any]:
     if suffix not in DIRECT_VIDEO_EXTENSIONS:
         suffix = ".mp4"
     target = DOWNLOAD_DIR / f"{key}_{_safe_stem(parsed.netloc)}{suffix}"
+    temp_target = target.with_name(f".{target.name}.{get_ident()}.{time.time_ns()}.part")
     limit = _direct_video_max_bytes()
     total = 0
     try:
-        req = Request(url, headers=_direct_headers())
-        with urlopen(req, timeout=300) as resp, target.open("wb") as f:
+        with _open_public_direct_url(url, method="GET", timeout=300) as resp, temp_target.open("wb") as f:
             expected = int(resp.headers.get("Content-Length") or 0)
             if expected > limit:
                 return {
@@ -237,7 +365,7 @@ def _download_direct_video_url(url: str) -> Dict[str, Any]:
                 total += len(chunk)
                 if total > limit:
                     try:
-                        target.unlink(missing_ok=True)
+                        temp_target.unlink(missing_ok=True)
                     except OSError:
                         pass
                     return {
@@ -252,7 +380,7 @@ def _download_direct_video_url(url: str) -> Dict[str, Any]:
                 f.write(chunk)
     except Exception:
         try:
-            target.unlink(missing_ok=True)
+            temp_target.unlink(missing_ok=True)
         except OSError:
             pass
         return {
@@ -264,7 +392,9 @@ def _download_direct_video_url(url: str) -> Dict[str, Any]:
             "latency_seconds": round(time.time() - started, 2),
         }
     if total <= 0:
+        temp_target.unlink(missing_ok=True)
         return {"ok": False, "status": "direct_empty_file", "url": url, "platform": "direct_video", "metadata": metadata}
+    temp_target.replace(target)
     item = {
         "url": url,
         "platform": "direct_video",
@@ -273,9 +403,7 @@ def _download_direct_video_url(url: str) -> Dict[str, Any]:
         "metadata": metadata,
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
-    manifest = _load_manifest()
-    manifest.setdefault("items", {})[key] = item
-    _save_manifest(manifest)
+    _update_manifest_item(key, item)
     return {"ok": True, "status": "downloaded", "latency_seconds": round(time.time() - started, 2), **item}
 
 
@@ -413,9 +541,7 @@ def download_video_url(text: str, seconds: int = 60) -> Dict[str, Any]:
                 "metadata": metadata,
                 "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
-            manifest = _load_manifest()
-            manifest.setdefault("items", {})[key] = item
-            _save_manifest(manifest)
+            _update_manifest_item(key, item)
             result.update(item)
             return result
     result.update({"ok": False, "status": "download_missing_output"})
@@ -427,13 +553,18 @@ def self_check() -> None:
     assert extract_video_url(sample) == "https://youtu.be/abc_DEF-123"
     assert detect_platform("https://www.bilibili.com/video/BV1xx411c7mD") == "bilibili"
     assert detect_platform("https://v.douyin.com/abc/") == "douyin"
-    assert validate_public_video_url("https://www.youtube.com/watch?v=abc_DEF-123")["ok"]
+    platform_result = validate_public_video_url("https://www.youtube.com/watch?v=abc_DEF-123")
+    if os.getenv("VISUAL_ALLOW_PLATFORM_URL_DOWNLOAD", "0").strip().lower() not in {"1", "true", "yes"}:
+        assert not platform_result["ok"]
+        assert platform_result["status"] == "platform_download_disabled"
     assert not validate_public_video_url("http://127.0.0.1:7861/")["ok"]
-    assert validate_public_video_url("http://127.0.0.1:7861/")["status"] == "blocked_private_host"
-    assert validate_public_video_url("http://localhost:7861/")["status"] == "blocked_private_host"
+    assert validate_public_video_url("http://127.0.0.1:7861/")["status"] == "insecure_url"
+    assert validate_public_video_url("https://127.0.0.1:7861/")["status"] == "blocked_private_host"
+    assert validate_public_video_url("https://localhost:7861/")["status"] == "blocked_private_host"
     assert not validate_public_video_url("https://example.com/video")["ok"]
-    assert validate_public_video_url("https://cdn.example.com/path/sample.mp4")["ok"]
-    assert detect_platform("https://cdn.example.com/path/sample.mp4") == "direct_video"
+    direct_url = "https://1.1.1.1/path/sample.mp4"
+    assert validate_public_video_url(direct_url)["ok"]
+    assert detect_platform(direct_url) == "direct_video"
 
 
 def main() -> int:

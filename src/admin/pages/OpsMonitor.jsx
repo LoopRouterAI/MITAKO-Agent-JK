@@ -118,6 +118,20 @@ export default function OpsMonitor() {
           <p className="text-xs text-slate-500">
             公开报告扫描 {snap.public_report_safety?.checked_files || 0} 份，风险 {snap.public_report_safety?.unsafe_files || 0} 份。
           </p>
+          {(snap.public_report_safety?.risks || []).length > 0 && (
+            <details className="rounded-[8px] border border-amber-300 bg-amber-50 p-2 text-xs">
+              <summary className="cursor-pointer font-bold text-amber-900">查看风险明细与处理建议</summary>
+              <ul className="mt-2 space-y-2">
+                {snap.public_report_safety.risks.map((risk) => (
+                  <li key={risk.file} className="rounded-[8px] border border-amber-200 bg-white p-2">
+                    <p className="font-mono font-bold text-slate-800 break-all">{sanitizePublicText(risk.file)}</p>
+                    <p className="mt-1 text-slate-600">{(risk.categories || []).map(sanitizePublicText).join('、')}</p>
+                    <p className="mt-1 font-semibold text-amber-800">{sanitizePublicText(risk.action)}</p>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       </div>
     </div>

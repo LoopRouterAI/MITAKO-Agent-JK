@@ -166,17 +166,24 @@ def _run_visual_review(task: Dict[str, Any], raw: bytes) -> Dict[str, Any]:
     payload = _with_agent_brief(task, payload, ok)
     status = "REVIEW_COMPLETED" if ok else "REVIEW_FAILED"
     boundary = "视觉审核已完成初筛，仍需VIP客服结合订单与售后规则确认。" if ok else "视觉审核未完成，需VIP客服人工复核或稍后重试。"
-    return store.update_review_task_result(task["task_id"], status=status, result=payload, boundary=boundary)
+    return store.update_review_task_result(
+        task["task_id"],
+        tenant_id=str(task["tenant_id"]),
+        status=status,
+        result=payload,
+        boundary=boundary,
+    )
 
 
-def run_visual_review_for_task(task_id: str) -> Dict[str, Any]:
-    task = store.get_review_task(task_id)
+def run_visual_review_for_task(task_id: str, tenant_id: str) -> Dict[str, Any]:
+    task = store.get_review_task(task_id, tenant_id=tenant_id)
     if not task:
         return {}
     path = store.upload_dir() / str(task.get("stored_name") or "")
     if not path.exists():
         return store.update_review_task_result(
             task_id,
+            tenant_id=tenant_id,
             status="REVIEW_FAILED",
             result=_review_failure("material_file_missing", "stored material file not found"),
             boundary="视觉审核未完成，需VIP客服人工复核或重新上传材料。",
@@ -481,7 +488,7 @@ def _qa_reply(text: str, risk_level: int) -> str:
     return ""
 
 
-def process_group_message(payload: Dict[str, Any]) -> Dict[str, Any]:
+def process_group_message(payload: Dict[str, Any], *, tenant_id: str) -> Dict[str, Any]:
     group_id = (payload.get("group_id") or "").strip()
     if not group_id:
         raise ValueError("group_id_required")
@@ -495,6 +502,7 @@ def process_group_message(payload: Dict[str, Any]) -> Dict[str, Any]:
     disabled_until = now + (12 * 3600 if risk_level == 2 else 72 * 3600 if risk_level >= 3 else 0)
     status = "marketing_disabled" if risk_level >= 2 else "normal"
     group = store.upsert_group({
+        "tenant_id": tenant_id,
         "group_id": group_id,
         "group_name": payload.get("group_name") or group_id,
         "owner_id": payload.get("owner_id") or "",
@@ -509,12 +517,13 @@ def process_group_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             "last_negative": risk_level > 0,
             "last_wish": bool(tags["wish"]),
         },
-    })
+    }, tenant_id=tenant_id)
 
     issue_type = _risk_type(content)
     task = None
     if risk_level >= 2:
         task = store.create_customer_service_task({
+            "tenant_id": tenant_id,
             "task_id": f"PD-CS-{uuid4().hex[:10].upper()}",
             "user_id": payload.get("user_id") or "",
             "external_user_id": payload.get("external_user_id") or "",
@@ -525,7 +534,7 @@ def process_group_message(payload: Dict[str, Any]) -> Dict[str, Any]:
             "evidence_messages": [content],
             "priority": "urgent" if risk_level >= 3 else "high",
             "required_action": "群内极简安抚，暂停营销，并转 1 对 1 客服核实。",
-        })
+        }, tenant_id=tenant_id)
 
     result = {
         "group": group,
@@ -539,16 +548,23 @@ def process_group_message(payload: Dict[str, Any]) -> Dict[str, Any]:
         "customer_service_task": task,
         "boundary": "规则快筛结果仅用于 POC 流程验证；真实生产需接入企微会话存档、上下文窗口和人工复核。",
     }
-    store.add_event("group_message", payload, result, group_id=group_id, user_id=payload.get("user_id") or "")
+    store.add_event(
+        "group_message",
+        payload,
+        result,
+        group_id=group_id,
+        user_id=payload.get("user_id") or "",
+        tenant_id=tenant_id,
+    )
     return result
 
 
-def process_product_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+def process_product_event(payload: Dict[str, Any], *, tenant_id: str) -> Dict[str, Any]:
     event_id = (payload.get("event_id") or f"PD-EVT-{uuid4().hex[:8].upper()}").strip()
     event = {**payload, "event_id": event_id}
-    store.save_product_event(event)
+    store.save_product_event(event, tenant_id=tenant_id)
     candidates: List[Dict[str, Any]] = []
-    for group in store.list_groups(limit=10000):
+    for group in store.list_groups(limit=10000, tenant_id=tenant_id):
         tags = group.get("tags") or {}
         group_ips = set(tags.get("ip") or [])
         score = 0
@@ -572,14 +588,14 @@ def process_product_event(payload: Dict[str, Any]) -> Dict[str, Any]:
         reason = "、".join(reasons) if reasons else "缺少可解释匹配信号"
         candidates.append({"group_id": group["group_id"], "match_score": score, "decision": decision, "reason": reason})
 
-    store.add_campaign_candidates(event_id, candidates)
+    store.add_campaign_candidates(event_id, candidates, tenant_id=tenant_id)
     result = {
         "event": event,
         "candidates": candidates,
         "review_required": True,
         "boundary": "吃谷雷达 P0 只生成待审核推送建议，不直接群发。",
     }
-    store.add_event("product_event", event, result)
+    store.add_event("product_event", event, result, tenant_id=tenant_id)
     return result
 
 
@@ -592,6 +608,10 @@ def create_review_task_from_upload(
     mime_type: str,
     raw: bytes,
     source: str = "customer_upload",
+    client_case_id: str = "",
+    order_id: str = "",
+    scenario: str = "",
+    context: Dict[str, Any] | None = None,
     run_review: bool = True,
 ) -> Dict[str, Any]:
     if not raw:
@@ -607,39 +627,58 @@ def create_review_task_from_upload(
     stored_name = f"{task_id}{ext}"
     path = store.upload_dir() / stored_name
     path.write_bytes(raw)
-    scenario = "video_unboxing" if mime_type.startswith("video/") else "product_damage"
+    supported_scenarios = {"product_damage", "wrong_item", "missing_item", "minor_refund", "video_unboxing"}
+    resolved_scenario = scenario.strip() if scenario else ""
+    if resolved_scenario and resolved_scenario not in supported_scenarios:
+        raise ValueError("unsupported_review_scenario")
+    if not resolved_scenario:
+        resolved_scenario = "video_unboxing" if mime_type.startswith("video/") else "product_damage"
     task = store.create_review_task({
         "task_id": task_id,
         "user_id": user_id,
         "session_id": session_id,
         "tenant_id": tenant_id,
         "source": source,
-        "scenario": scenario,
+        "client_case_id": client_case_id,
+        "order_id": order_id,
+        "scenario": resolved_scenario,
         "file_name": safe_name,
         "stored_name": stored_name,
         "mime_type": mime_type,
         "size": len(raw),
         "status": "MATERIAL_READY",
+        "context": context or {},
         "boundary": "材料已接收并生成审核任务；当前不自动定责，需视觉审核工作台或人工客服继续处理。",
-    })
+    }, tenant_id=tenant_id)
     return _run_visual_review(task, raw) if run_review else task
 
 
-def clear_demo_data() -> Dict[str, Any]:
-    removed = store.clear_all_private_domain_data()
+def clear_demo_data(*, tenant_id: str) -> Dict[str, Any]:
+    removed = store.clear_all_private_domain_data(tenant_id=tenant_id)
     return {
         "removed": removed,
-        "snapshot": store.snapshot(),
+        "snapshot": store.snapshot(tenant_id=tenant_id),
         "demo_ready": False,
     }
 
 
-def load_demo_data() -> Dict[str, Any]:
-    clear_demo_data()
-    group_results = [process_group_message(payload) for payload in DEMO_GROUP_MESSAGES]
-    product_results = [process_product_event(payload) for payload in DEMO_PRODUCT_EVENTS]
-    review_tasks = [store.create_review_task(task) for task in DEMO_REVIEW_TASKS]
-    snapshot = store.snapshot()
+def load_demo_data(*, tenant_id: str) -> Dict[str, Any]:
+    clear_demo_data(tenant_id=tenant_id)
+    group_results = [
+        process_group_message(payload, tenant_id=tenant_id)
+        for payload in DEMO_GROUP_MESSAGES
+    ]
+    product_results = [
+        process_product_event(payload, tenant_id=tenant_id)
+        for payload in DEMO_PRODUCT_EVENTS
+    ]
+    review_tasks = [
+        store.create_review_task(
+            {**task, "tenant_id": tenant_id}, tenant_id=tenant_id
+        )
+        for task in DEMO_REVIEW_TASKS
+    ]
+    snapshot = store.snapshot(tenant_id=tenant_id)
     return {
         "snapshot": snapshot,
         "demo_ready": snapshot.get("group_count", 0) > 0,
@@ -648,22 +687,28 @@ def load_demo_data() -> Dict[str, Any]:
             "product_events": len(product_results),
             "review_tasks": len(review_tasks),
             "customer_service_tasks": snapshot.get("pending_task_count", 0),
-            "campaign_candidates": len(store.list_campaign_candidates(limit=200)),
+            "campaign_candidates": len(
+                store.list_campaign_candidates(limit=200, tenant_id=tenant_id)
+            ),
         },
         "demo_script": demo_script(),
         "integration_contracts": integration_contracts(),
     }
 
 
-def dashboard_payload() -> Dict[str, Any]:
-    snapshot = store.snapshot()
+def dashboard_payload(*, tenant_id: str) -> Dict[str, Any]:
+    snapshot = store.snapshot(tenant_id=tenant_id)
     return {
         "snapshot": snapshot,
-        "groups": store.list_groups(limit=20),
-        "events": store.list_events(limit=20),
-        "customer_service_tasks": store.list_customer_service_tasks(limit=20),
-        "review_tasks": store.list_review_tasks(limit=20),
-        "campaign_candidates": store.list_campaign_candidates(limit=30),
+        "groups": store.list_groups(limit=20, tenant_id=tenant_id),
+        "events": store.list_events(limit=20, tenant_id=tenant_id),
+        "customer_service_tasks": store.list_customer_service_tasks(
+            limit=20, tenant_id=tenant_id
+        ),
+        "review_tasks": store.list_review_tasks(limit=20, tenant_id=tenant_id),
+        "campaign_candidates": store.list_campaign_candidates(
+            limit=30, tenant_id=tenant_id
+        ),
         "demo_ready": snapshot.get("group_count", 0) > 0 or snapshot.get("event_count", 0) > 0,
         "demo_script": demo_script(),
         "integration_contracts": integration_contracts(),

@@ -17,6 +17,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/contracts:
     get:
       tags:
@@ -30,6 +32,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ContractsResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/demo/load:
     post:
       tags:
@@ -43,6 +47,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DemoLoadResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/demo/clear:
     post:
       tags:
@@ -56,6 +62,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DemoClearResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/group-message:
     post:
       tags:
@@ -81,6 +89,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/product-event:
     post:
       tags:
@@ -106,6 +116,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/private-domain/review-tasks:
     post:
       tags:
@@ -113,11 +125,11 @@ paths:
       summary: Review Task Upload
       operationId: review_task_upload_api_v1_private_domain_review_tasks_post
       requestBody:
+        required: true
         content:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/Body_review_task_upload_api_v1_private_domain_review_tasks_post'
-        required: true
       responses:
         '200':
           description: Successful Response
@@ -125,6 +137,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewTaskUploadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - private-domain
+      summary: Review Task List
+      operationId: review_task_list_api_v1_private_domain_review_tasks_get
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: User Id
+      - name: session_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: order_id
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Order Id
+      - name: client_case_id
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Client Case Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
         '422':
           description: Validation Error
           content:
@@ -170,12 +226,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewContractResponse'
+      security:
+      - HTTPBearer: []
   /api/v1/review/batches/{batch_id}:
     get:
       tags:
       - review-service
       summary: Batch Detail
       operationId: batch_detail_api_v1_review_batches__batch_id__get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: batch_id
         in: path
@@ -238,6 +298,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/review/sampling-plan:
     post:
       tags:
@@ -263,12 +325,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/review/jobs:
     post:
       tags:
       - review-service
       summary: Create Job
       operationId: create_job_api_v1_review_jobs_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: Idempotency-Key
         in: header
@@ -290,17 +356,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewJobResponse'
-        '422':
-          description: Validation Error
+        '400':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Bad Request
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Conflict
+        '413':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Request Entity Too Large
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Unsupported Media Type
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Unprocessable Entity
     get:
       tags:
       - review-service
       summary: List Jobs
       operationId: list_jobs_api_v1_review_jobs_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: status
         in: query
@@ -346,6 +438,8 @@ paths:
       - review-service
       summary: Job Detail
       operationId: job_detail_api_v1_review_jobs__job_id__get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: job_id
         in: path
@@ -372,6 +466,8 @@ paths:
       - review-service
       summary: Job Report
       operationId: job_report_api_v1_review_jobs__job_id__report_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: job_id
         in: path
@@ -386,6 +482,124 @@ paths:
             text/html:
               schema:
                 type: string
+        '404':
+          content:
+            text/html:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            text/html:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Conflict
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/review/jobs/{job_id}/media/{media_id}:
+    get:
+      tags:
+      - review-service
+      summary: Job Media
+      operationId: job_media_api_v1_review_jobs__job_id__media__media_id__get
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: media_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Media Id
+      - name: expires
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Expires
+      - name: sig
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Sig
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+            video/webm:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+            video/webm:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          description: Range 分段媒体响应
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Not Found
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewErrorResponse'
+          description: Bad Gateway
         '422':
           description: Validation Error
           content:
@@ -398,6 +612,8 @@ paths:
       - review-service
       summary: Retry Job
       operationId: retry_job_api_v1_review_jobs__job_id__retry_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: job_id
         in: path
@@ -431,6 +647,128 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewMetricsResponse'
+      security:
+      - HTTPBearer: []
+  /api/v1/review/readiness:
+    get:
+      tags:
+      - review-service
+      summary: Review Readiness
+      operationId: review_readiness_api_v1_review_readiness_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/business-rules:
+    get:
+      tags:
+      - business-rule-governance
+      summary: List Rules
+      operationId: list_rules_api_v1_admin_business_rules_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /api/v1/admin/business-rules/{prompt_key}/versions:
+    get:
+      tags:
+      - business-rule-governance
+      summary: Get Versions
+      operationId: get_versions_api_v1_admin_business_rules__prompt_key__versions_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: prompt_key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Prompt Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - business-rule-governance
+      summary: Publish
+      operationId: publish_api_v1_admin_business_rules__prompt_key__versions_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: prompt_key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Prompt Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/admin/business-rules/{prompt_key}/rollback:
+    post:
+      tags:
+      - business-rule-governance
+      summary: Rollback
+      operationId: rollback_api_v1_admin_business_rules__prompt_key__rollback_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: prompt_key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Prompt Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /:
     get:
       summary: Get Index
@@ -658,6 +996,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/auth/status:
     get:
       summary: Auth Status
@@ -678,6 +1018,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
     post:
       summary: Admin Upsert Agent
       operationId: admin_upsert_agent_api_v1_admin_agents_post
@@ -699,10 +1041,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/admin/agents/{agent_id}:
     delete:
       summary: Admin Delete Agent
       operationId: admin_delete_agent_api_v1_admin_agents__agent_id__delete
+      security:
+      - HTTPBearer: []
       parameters:
       - name: agent_id
         in: path
@@ -732,6 +1078,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/admin/demo/status:
     get:
       summary: Admin Demo Status
@@ -742,6 +1090,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/admin/demo/load:
     post:
       summary: Admin Demo Load
@@ -752,6 +1102,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/admin/demo/clear:
     post:
       summary: Admin Demo Clear
@@ -762,10 +1114,14 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/admin/queue/{session_id}/reassign:
     post:
       summary: Admin Reassign
       operationId: admin_reassign_api_v1_admin_queue__session_id__reassign_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -795,6 +1151,8 @@ paths:
     get:
       summary: Admin Audit Events
       operationId: admin_audit_events_api_v1_admin_audit_events_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: limit
         in: query
@@ -826,6 +1184,8 @@ paths:
     get:
       summary: Admin Transcript
       operationId: admin_transcript_api_v1_admin_audit_sessions__session_id__transcript_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -849,6 +1209,8 @@ paths:
     get:
       summary: Admin Observer Qc
       operationId: admin_observer_qc_api_v1_admin_qc_observer_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: flagged_only
         in: query
@@ -873,6 +1235,8 @@ paths:
     get:
       summary: Admin List Approvals
       operationId: admin_list_approvals_api_v1_admin_approvals_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: status
         in: query
@@ -896,6 +1260,8 @@ paths:
     post:
       summary: Admin Create Approval
       operationId: admin_create_approval_api_v1_admin_approvals_post
+      security:
+      - HTTPBearer: []
       requestBody:
         required: true
         content:
@@ -918,6 +1284,8 @@ paths:
     post:
       summary: Admin Decide Approval
       operationId: admin_decide_approval_api_v1_admin_approvals__approval_id__decide_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: approval_id
         in: path
@@ -947,6 +1315,8 @@ paths:
     get:
       summary: Admin Reports Summary
       operationId: admin_reports_summary_api_v1_admin_reports_summary_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: days
         in: query
@@ -971,6 +1341,8 @@ paths:
     get:
       summary: Admin Reports Export
       operationId: admin_reports_export_api_v1_admin_reports_export_csv_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: days
         in: query
@@ -995,6 +1367,8 @@ paths:
     post:
       summary: Handoff Close
       operationId: handoff_close_api_v1_handoff_close_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: query
@@ -1031,6 +1405,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /metrics/prometheus:
     get:
       summary: Metrics Prometheus
@@ -1042,6 +1418,8 @@ paths:
             text/plain:
               schema:
                 type: string
+      security:
+      - HTTPBearer: []
   /api/v1/models:
     get:
       summary: Get Models
@@ -1073,6 +1451,30 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ImageGenerateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/handoff/offer:
+    post:
+      summary: Create Handoff Offer
+      operationId: create_handoff_offer_api_v1_handoff_offer_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffOfferRequest'
         required: true
       responses:
         '200':
@@ -1200,6 +1602,8 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
     put:
       summary: Admin Update Routing
       operationId: admin_update_routing_api_v1_admin_handoff_routing_put
@@ -1223,6 +1627,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /admin:
     get:
       summary: Get Admin
@@ -1296,20 +1702,40 @@ paths:
           content:
             application/json:
               schema: {}
+      security:
+      - HTTPBearer: []
   /api/v1/desk/sessions:
     get:
       summary: Desk Sessions
       operationId: desk_sessions_api_v1_desk_sessions_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          type: string
+          default: available
+          title: Scope
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/desk/session/{session_id}:
     get:
       summary: Desk Session Detail
       operationId: desk_session_detail_api_v1_desk_session__session_id__get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1333,6 +1759,8 @@ paths:
     post:
       summary: Desk Session Reply
       operationId: desk_session_reply_api_v1_desk_session__session_id__reply_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1362,6 +1790,8 @@ paths:
     post:
       summary: Desk Session Accept
       operationId: desk_session_accept_api_v1_desk_session__session_id__accept_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1391,6 +1821,8 @@ paths:
     post:
       summary: Desk Session Escalate
       operationId: desk_session_escalate_api_v1_desk_session__session_id__escalate_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1420,6 +1852,8 @@ paths:
     post:
       summary: Desk Session Transfer
       operationId: desk_session_transfer_api_v1_desk_session__session_id__transfer_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: session_id
         in: path
@@ -1544,12 +1978,15 @@ components:
           title: Password
         tenant_id:
           type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^\S+$
           title: Tenant Id
-          default: mitako
       type: object
       required:
       - username
       - password
+      - tenant_id
       title: AuthLoginRequest
     Body_create_job_api_v1_review_jobs_post:
       properties:
@@ -1579,6 +2016,22 @@ components:
           type: string
           title: Source
           default: customer_upload
+        client_case_id:
+          type: string
+          title: Client Case Id
+          default: ''
+        order_id:
+          type: string
+          title: Order Id
+          default: ''
+        scenario:
+          type: string
+          title: Scenario
+          default: ''
+        context_json:
+          type: string
+          title: Context Json
+          default: '{}'
         async_review:
           type: boolean
           title: Async Review
@@ -2036,6 +2489,27 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HandoffOfferRequest:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        session_id:
+          type: string
+          title: Session Id
+        reason:
+          type: string
+          title: Reason
+          default: AI建议用户选择是否转接VIP客服
+        tenant_id:
+          type: string
+          title: Tenant Id
+          default: mitako
+      type: object
+      required:
+      - user_id
+      - session_id
+      title: HandoffOfferRequest
     HandoffRequest:
       properties:
         user_id:
@@ -2072,6 +2546,14 @@ components:
           type: string
           title: Tenant Id
           default: mitako
+        offer_id:
+          type: string
+          title: Offer Id
+          default: ''
+        active_order_id:
+          type: string
+          title: Active Order Id
+          default: ''
       type: object
       required:
       - user_id
@@ -2246,6 +2728,27 @@ components:
       - review_required
       - boundary
       title: ProductEventResponse
+    PublishBody:
+      properties:
+        mode:
+          type: string
+          title: Mode
+        content:
+          type: string
+          title: Content
+        reason:
+          type: string
+          title: Reason
+        expected_active_version:
+          type: integer
+          title: Expected Active Version
+      type: object
+      required:
+      - mode
+      - content
+      - reason
+      - expected_active_version
+      title: PublishBody
     ReassignBody:
       properties:
         to_agent_id:
@@ -2259,40 +2762,194 @@ components:
       required:
       - to_agent_id
       title: ReassignBody
-    ReviewAsset:
+    ReviewAdvisoryAssessment:
       properties:
-        asset_id:
+        scenario:
           type: string
-          title: Asset Id
-        original_name:
+          title: Scenario
+        assessment:
+          $ref: '#/components/schemas/ReviewAssessmentDetails'
+        sop_recommendation:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewSopRecommendation'
+          - type: 'null'
+        human_review:
+          $ref: '#/components/schemas/ReviewHumanReviewAdvice'
+        workflow_recommendation:
           type: string
-          title: Original Name
-        stored_name:
+          enum:
+          - human_review
+          - request_more_material
+          - continue_by_customer_policy
+          - system_retry
+          title: Workflow Recommendation
+        evidence_attention:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewEvidenceAttention'
+          - type: 'null'
+        signals:
+          items:
+            $ref: '#/components/schemas/ReviewAdvisorySignal'
+          type: array
+          title: Signals
+        policy:
+          $ref: '#/components/schemas/ReviewAdvisoryPolicy'
+      type: object
+      required:
+      - scenario
+      - assessment
+      - human_review
+      - workflow_recommendation
+      - policy
+      title: ReviewAdvisoryAssessment
+    ReviewAdvisoryPolicy:
+      properties:
+        policy_ref:
           type: string
-          title: Stored Name
-        mime_type:
+          title: Policy Ref
+        effective_thresholds:
+          additionalProperties:
+            type: number
+          type: object
+          title: Effective Thresholds
+        advisory_only:
+          type: boolean
+          const: true
+          title: Advisory Only
+          default: true
+        business_action_allowed:
+          type: boolean
+          const: false
+          title: Business Action Allowed
+          default: false
+        boundary:
           type: string
-          title: Mime Type
-        size:
-          type: integer
-          title: Size
-        sha256:
+          title: Boundary
+      additionalProperties: true
+      type: object
+      required:
+      - policy_ref
+      - boundary
+      title: ReviewAdvisoryPolicy
+    ReviewAdvisorySignal:
+      properties:
+        code:
           type: string
-          title: Sha256
-        fields:
+          title: Code
+        severity:
+          type: string
+          enum:
+          - info
+          - warning
+          - critical
+          title: Severity
+        effect:
+          type: string
+          title: Effect
+      additionalProperties: true
+      type: object
+      required:
+      - code
+      - severity
+      - effect
+      title: ReviewAdvisorySignal
+    ReviewAssessmentDetails:
+      properties:
+        conclusion_code:
+          type: string
+          enum:
+          - evidence_supports_claim
+          - evidence_does_not_support_claim
+          - evidence_inconclusive
+          - severe_structural_damage_follow_up
+          - technical_processing_incomplete
+          title: Conclusion Code
+        conclusion:
+          type: string
+          title: Conclusion
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+        confidence_level:
+          type: string
+          enum:
+          - high
+          - medium
+          - low
+          - unavailable
+          title: Confidence Level
+        calibration_status:
+          type: string
+          enum:
+          - uncalibrated_evidence_score
+          - not_applicable_processing_incomplete
+          title: Calibration Status
+      type: object
+      required:
+      - conclusion_code
+      - conclusion
+      - confidence_level
+      - calibration_status
+      title: ReviewAssessmentDetails
+    ReviewAtomicClaim:
+      properties:
+        claim_id:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Claim Id
+        role:
+          type: string
+          enum:
+          - primary
+          - additional
+          title: Role
+          default: primary
+        subject_ref:
+          type: string
+          maxLength: 160
+          title: Subject Ref
+          default: ''
+        issue_type:
+          type: string
+          maxLength: 160
+          title: Issue Type
+          default: unspecified
+        location:
+          type: string
+          maxLength: 240
+          title: Location
+          default: unspecified
+        first_asserted_at:
+          type: string
+          maxLength: 80
+          title: First Asserted At
+          default: ''
+        turn_id:
+          type: string
+          maxLength: 160
+          title: Turn Id
+          default: ''
+        evidence_asset_ids:
           items:
             type: string
           type: array
-          title: Fields
+          maxItems: 80
+          title: Evidence Asset Ids
+        required_views:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Required Views
       type: object
       required:
-      - asset_id
-      - original_name
-      - stored_name
-      - mime_type
-      - size
-      - sha256
-      title: ReviewAsset
+      - claim_id
+      title: ReviewAtomicClaim
     ReviewAttachment:
       properties:
         id:
@@ -2421,6 +3078,7 @@ components:
           default: ''
         customer_claim:
           type: string
+          maxLength: 4000
           title: Customer Claim
           default: ''
         complaint_stage:
@@ -2437,6 +3095,12 @@ components:
             type: object
           type: array
           title: Order Items
+        fulfillment_baseline:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewFulfillmentBaseline'
+          - type: 'null'
+        evidence_coverage:
+          $ref: '#/components/schemas/ReviewEvidenceCoverage'
         product_master_data:
           additionalProperties: true
           type: object
@@ -2446,15 +3110,15 @@ components:
           type: object
           title: Warehouse Master Data
         logistics:
-          additionalProperties: true
-          type: object
-          title: Logistics
+          $ref: '#/components/schemas/ReviewLogisticsContext'
         conversation_history:
           items:
             additionalProperties: true
             type: object
           type: array
           title: Conversation History
+        customer_risk_context:
+          $ref: '#/components/schemas/ReviewCustomerRiskContext'
         sop_context:
           additionalProperties: true
           type: object
@@ -2470,14 +3134,174 @@ components:
           additionalProperties: true
           type: object
           title: Source Record
+        claim_scope:
+          $ref: '#/components/schemas/ReviewClaimScope'
+        decision_policy:
+          $ref: '#/components/schemas/ReviewDecisionPolicy'
         sampling_policy:
           $ref: '#/components/schemas/ReviewSamplingPolicy'
+        continuity_policy:
+          $ref: '#/components/schemas/ReviewContinuityPolicy'
+        damage_causality_policy:
+          $ref: '#/components/schemas/ReviewDamageCausalityPolicy'
+        output_options:
+          $ref: '#/components/schemas/ReviewOutputOptions'
+        review_routing_policy:
+          $ref: '#/components/schemas/ReviewRoutingPolicy'
+        minor_refund_policy:
+          $ref: '#/components/schemas/ReviewMinorRefundPolicy'
       additionalProperties: true
       type: object
       required:
       - client_case_id
       - scenario
       title: ReviewCaseMetadata
+    ReviewClaimExpectedItemResolution:
+      properties:
+        claimed_item:
+          type: string
+          maxLength: 500
+          minLength: 1
+          title: Claimed Item
+        is_expected:
+          type: boolean
+          title: Is Expected
+        baseline_version:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Baseline Version
+        source:
+          type: string
+          enum:
+          - order_system
+          - product_master
+          - versioned_activity_rule
+          title: Source
+        resolution_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          pattern: ^[A-Za-z0-9_.:-]+$
+          title: Resolution Ref
+        reason:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Reason
+        required_received_item_refs:
+          items:
+            type: string
+          type: array
+          maxItems: 100
+          minItems: 1
+          title: Required Received Item Refs
+      additionalProperties: false
+      type: object
+      required:
+      - claimed_item
+      - is_expected
+      - baseline_version
+      - source
+      - resolution_ref
+      - reason
+      - required_received_item_refs
+      title: ReviewClaimExpectedItemResolution
+      description: 可信业务系统对用户主张项是否属于应发项的版本化解析。
+    ReviewClaimScope:
+      properties:
+        claim_id:
+          type: string
+          maxLength: 160
+          title: Claim Id
+          default: ''
+        scope_version:
+          type: string
+          maxLength: 40
+          title: Scope Version
+          default: '1'
+        split_status:
+          type: string
+          enum:
+          - resolved
+          - single_legacy
+          - ambiguous
+          - unresolved
+          title: Split Status
+          default: unresolved
+        stage:
+          type: string
+          enum:
+          - initial
+          - supplemental
+          - appeal
+          - combined
+          title: Stage
+          default: initial
+        claim_text:
+          type: string
+          maxLength: 4000
+          title: Claim Text
+          default: ''
+        issue_types:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Issue Types
+        item_refs:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Item Refs
+        evidence_asset_names:
+          items:
+            type: string
+          type: array
+          maxItems: 80
+          title: Evidence Asset Names
+        excluded_issue_types:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Excluded Issue Types
+        active_claim_ids:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Active Claim Ids
+        claims:
+          items:
+            $ref: '#/components/schemas/ReviewAtomicClaim'
+          type: array
+          maxItems: 40
+          title: Claims
+      type: object
+      title: ReviewClaimScope
+      description: 本次审核实际覆盖的诉求，避免把后续追加问题混入当前结论。
+    ReviewContinuityPolicy:
+      properties:
+        require_identity_reestablishment:
+          type: boolean
+          title: Require Identity Reestablishment
+          default: true
+        force_dense_scan:
+          type: boolean
+          title: Force Dense Scan
+          default: false
+        scan_fps:
+          anyOf:
+          - type: number
+            maximum: 2.0
+            minimum: 0.2
+          - type: 'null'
+          title: Scan Fps
+      additionalProperties: false
+      type: object
+      title: ReviewContinuityPolicy
     ReviewContractResponse:
       properties:
         ok:
@@ -2492,21 +3316,436 @@ components:
       required:
       - contract
       title: ReviewContractResponse
+    ReviewCustomerRiskContext:
+      properties:
+        source:
+          type: string
+          maxLength: 160
+          pattern: ^[A-Za-z0-9_.:-]+$
+          title: Source
+          default: customer_risk_service
+        snapshot_at:
+          type: string
+          maxLength: 80
+          title: Snapshot At
+          default: ''
+        lookback_days:
+          type: integer
+          maximum: 3650.0
+          minimum: 1.0
+          title: Lookback Days
+          default: 180
+        prior_after_sales_count:
+          type: integer
+          maximum: 100000.0
+          minimum: 0.0
+          title: Prior After Sales Count
+          default: 0
+        prior_upheld_count:
+          type: integer
+          maximum: 100000.0
+          minimum: 0.0
+          title: Prior Upheld Count
+          default: 0
+        prior_rejected_count:
+          type: integer
+          maximum: 100000.0
+          minimum: 0.0
+          title: Prior Rejected Count
+          default: 0
+        same_scenario_count:
+          type: integer
+          maximum: 100000.0
+          minimum: 0.0
+          title: Same Scenario Count
+          default: 0
+        risk_level:
+          type: string
+          enum:
+          - unknown
+          - low
+          - medium
+          - high
+          title: Risk Level
+          default: unknown
+        reason_codes:
+          items:
+            type: string
+          type: array
+          maxItems: 40
+          title: Reason Codes
+      type: object
+      title: ReviewCustomerRiskContext
+      description: 甲方系统生成的脱敏统计摘要；不接收历史对话或用户隐私原文。
+    ReviewDamageCausalityPolicy:
+      properties:
+        force_action_scan:
+          type: boolean
+          title: Force Action Scan
+          default: false
+        dedicated_chunk_frames:
+          type: integer
+          maximum: 24.0
+          minimum: 8.0
+          title: Dedicated Chunk Frames
+          default: 20
+        context_frames:
+          type: integer
+          maximum: 8.0
+          minimum: 2.0
+          title: Context Frames
+          default: 6
+      additionalProperties: false
+      type: object
+      title: ReviewDamageCausalityPolicy
+    ReviewDecisionPolicy:
+      properties:
+        mode:
+          type: string
+          enum:
+          - conservative_review
+          - classification_recommendation
+          title: Mode
+          default: classification_recommendation
+        recommendation_gate_mode:
+          type: string
+          enum:
+          - strict
+          - core_sop
+          title: Recommendation Gate Mode
+          default: strict
+        policy_ref:
+          type: string
+          maxLength: 160
+          title: Policy Ref
+          default: MITAKO-FOUR-SCENE@20260814.1
+        opening_video_required:
+          type: boolean
+          title: Opening Video Required
+          default: false
+        missing_required_opening_video:
+          type: string
+          enum:
+          - review
+          - negative
+          title: Missing Required Opening Video
+          default: review
+        noncompliant_opening_video:
+          type: string
+          enum:
+          - review
+          - negative
+          title: Noncompliant Opening Video
+          default: review
+        complete_video_no_claimed_damage:
+          type: string
+          enum:
+          - review
+          - negative
+          title: Complete Video No Claimed Damage
+          default: review
+        require_claim_scope:
+          type: boolean
+          title: Require Claim Scope
+          default: true
+        minimum_visibility_coverage:
+          type: number
+          maximum: 1.0
+          minimum: 0.5
+          title: Minimum Visibility Coverage
+          default: 0.85
+        minimum_required_view_coverage:
+          type: number
+          maximum: 1.0
+          minimum: 0.5
+          title: Minimum Required View Coverage
+          default: 1.0
+        minimum_confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.5
+          title: Minimum Confidence
+          default: 0.8
+        require_continuity_complete:
+          type: boolean
+          title: Require Continuity Complete
+          default: true
+        require_fully_observable:
+          type: boolean
+          title: Require Fully Observable
+          default: true
+        require_claimed_region_closeup:
+          type: boolean
+          title: Require Claimed Region Closeup
+          default: true
+        require_same_item_linkage:
+          type: boolean
+          title: Require Same Item Linkage
+          default: true
+        require_media_forensics:
+          type: boolean
+          title: Require Media Forensics
+          default: true
+        maximum_forensic_risk:
+          type: string
+          enum:
+          - none
+          - low
+          - medium
+          title: Maximum Forensic Risk
+          default: low
+      additionalProperties: false
+      type: object
+      title: ReviewDecisionPolicy
+      description: 甲方可选的规则判定策略；默认不把证据不足自动判为不支持。
+    ReviewErrorResponse:
+      properties:
+        detail:
+          title: Detail
+      type: object
+      required:
+      - detail
+      title: ReviewErrorResponse
+    ReviewEvidenceAttention:
+      properties:
+        level:
+          type: string
+          enum:
+          - green
+          - orange
+          - red
+          - gray
+          title: Level
+        headline:
+          type: string
+          title: Headline
+        customer_focus:
+          items:
+            type: string
+          type: array
+          title: Customer Focus
+        disagreements:
+          items:
+            type: string
+          type: array
+          title: Disagreements
+        missing_evidence:
+          items:
+            type: string
+          type: array
+          title: Missing Evidence
+      type: object
+      required:
+      - level
+      - headline
+      title: ReviewEvidenceAttention
+    ReviewEvidenceCoverage:
+      properties:
+        submitted_package_refs:
+          items:
+            type: string
+          type: array
+          title: Submitted Package Refs
+        submitted_tracking_nos:
+          items:
+            type: string
+          type: array
+          title: Submitted Tracking Nos
+        all_packages_uploaded:
+          type: boolean
+          title: All Packages Uploaded
+          default: false
+        all_items_displayed:
+          type: boolean
+          title: All Items Displayed
+          default: false
+        coverage_notes:
+          type: string
+          title: Coverage Notes
+          default: ''
+      additionalProperties: true
+      type: object
+      title: ReviewEvidenceCoverage
+    ReviewExpectedItem:
+      properties:
+        item_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Item Ref
+        sku:
+          type: string
+          title: Sku
+          default: ''
+        product_name:
+          type: string
+          title: Product Name
+          default: ''
+        specification:
+          type: string
+          title: Specification
+          default: ''
+        expected_quantity:
+          type: integer
+          maximum: 10000.0
+          minimum: 1.0
+          title: Expected Quantity
+        item_type:
+          type: string
+          enum:
+          - paid_item
+          - bundle_component
+          - gift
+          - bonus
+          - insert
+          - other
+          title: Item Type
+          default: paid_item
+        item_form:
+          type: string
+          enum:
+          - flat_paper
+          - other
+          - unknown
+          title: Item Form
+          default: unknown
+        master_image_urls:
+          items:
+            type: string
+          type: array
+          title: Master Image Urls
+        packaging_identifiers:
+          items:
+            type: string
+          type: array
+          title: Packaging Identifiers
+      additionalProperties: true
+      type: object
+      required:
+      - item_ref
+      - expected_quantity
+      title: ReviewExpectedItem
+    ReviewExpectedPackage:
+      properties:
+        package_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Package Ref
+        tracking_no:
+          type: string
+          title: Tracking No
+          default: ''
+        expected_item_refs:
+          items:
+            type: string
+          type: array
+          title: Expected Item Refs
+        shipment_status:
+          type: string
+          title: Shipment Status
+          default: ''
+      additionalProperties: true
+      type: object
+      required:
+      - package_ref
+      title: ReviewExpectedPackage
+    ReviewFulfillmentBaseline:
+      properties:
+        baseline_version:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Baseline Version
+        expected_items:
+          items:
+            $ref: '#/components/schemas/ReviewExpectedItem'
+          type: array
+          title: Expected Items
+        expected_package_count:
+          type: integer
+          maximum: 100.0
+          minimum: 1.0
+          title: Expected Package Count
+          default: 1
+        packages:
+          items:
+            $ref: '#/components/schemas/ReviewExpectedPackage'
+          type: array
+          title: Packages
+        split_shipment:
+          type: boolean
+          title: Split Shipment
+          default: false
+        benefit_rules:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Benefit Rules
+        benefit_rules_complete:
+          type: boolean
+          title: Benefit Rules Complete
+          default: false
+        selection_rules:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Selection Rules
+        selection_rules_complete:
+          type: boolean
+          title: Selection Rules Complete
+          default: false
+        standard_packing_list:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Standard Packing List
+        warehouse_verification:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewWarehouseVerification'
+          - type: 'null'
+        claim_expected_item_resolution:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewClaimExpectedItemResolution'
+          - type: 'null'
+      additionalProperties: true
+      type: object
+      required:
+      - baseline_version
+      title: ReviewFulfillmentBaseline
+    ReviewHumanReviewAdvice:
+      properties:
+        level:
+          type: string
+          enum:
+          - required
+          - optional
+          - not_required
+          title: Level
+        reason_codes:
+          items:
+            type: string
+          type: array
+          title: Reason Codes
+        recommendation:
+          type: string
+          title: Recommendation
+      type: object
+      required:
+      - level
+      - recommendation
+      title: ReviewHumanReviewAdvice
     ReviewJob:
       properties:
         job_id:
           type: string
           title: Job Id
-        tenant_id:
-          type: string
-          title: Tenant Id
         client_case_id:
           type: string
           title: Client Case Id
-        idempotency_key:
-          type: string
-          title: Idempotency Key
-          default: ''
         scenario:
           type: string
           enum:
@@ -2518,23 +3757,13 @@ components:
         status:
           type: string
           title: Status
-        metadata:
-          additionalProperties: true
-          type: object
-          title: Metadata
         assets:
           items:
-            $ref: '#/components/schemas/ReviewAsset'
+            $ref: '#/components/schemas/ReviewPublicAsset'
           type: array
           title: Assets
         result:
-          additionalProperties: true
-          type: object
-          title: Result
-        diagnostics:
-          additionalProperties: true
-          type: object
-          title: Diagnostics
+          $ref: '#/components/schemas/ReviewJobResult'
         attempts:
           type: integer
           title: Attempts
@@ -2553,14 +3782,13 @@ components:
         updated_at:
           type: number
           title: Updated At
+      additionalProperties: false
       type: object
       required:
       - job_id
-      - tenant_id
       - client_case_id
       - scenario
       - status
-      - metadata
       - assets
       - created_at
       - updated_at
@@ -2596,6 +3824,242 @@ components:
       required:
       - job
       title: ReviewJobResponse
+    ReviewJobResult:
+      properties:
+        client_case_id:
+          type: string
+          title: Client Case Id
+          default: ''
+        scenario:
+          type: string
+          title: Scenario
+          default: ''
+        scenario_label:
+          type: string
+          title: Scenario Label
+          default: ''
+        source_status:
+          type: string
+          title: Source Status
+          default: ''
+        media_forensics:
+          additionalProperties: true
+          type: object
+          title: Media Forensics
+        input_readiness:
+          additionalProperties: true
+          type: object
+          title: Input Readiness
+        material_readiness:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewMaterialReadiness'
+          - type: 'null'
+        boundary:
+          type: string
+          title: Boundary
+          default: ''
+        review:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewPayload'
+          - type: 'null'
+        recommended_escalation:
+          additionalProperties: true
+          type: object
+          title: Recommended Escalation
+      additionalProperties: false
+      type: object
+      title: ReviewJobResult
+    ReviewLogisticsContext:
+      properties:
+        source:
+          type: string
+          maxLength: 160
+          title: Source
+          default: customer_logistics_system
+        snapshot_at:
+          type: string
+          maxLength: 80
+          title: Snapshot At
+          default: ''
+        packages:
+          items:
+            $ref: '#/components/schemas/ReviewLogisticsPackage'
+          type: array
+          maxItems: 100
+          title: Packages
+        all_packages_delivered:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: All Packages Delivered
+      additionalProperties: true
+      type: object
+      title: ReviewLogisticsContext
+    ReviewLogisticsEvent:
+      properties:
+        status:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Status
+        occurred_at:
+          type: string
+          maxLength: 80
+          title: Occurred At
+          default: ''
+        location:
+          type: string
+          maxLength: 240
+          title: Location
+          default: ''
+      additionalProperties: true
+      type: object
+      required:
+      - status
+      title: ReviewLogisticsEvent
+    ReviewLogisticsPackage:
+      properties:
+        package_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Package Ref
+        tracking_ref:
+          type: string
+          maxLength: 240
+          title: Tracking Ref
+          default: ''
+        carrier:
+          type: string
+          maxLength: 160
+          title: Carrier
+          default: ''
+        shipment_status:
+          type: string
+          maxLength: 80
+          title: Shipment Status
+          default: ''
+        events:
+          items:
+            $ref: '#/components/schemas/ReviewLogisticsEvent'
+          type: array
+          maxItems: 200
+          title: Events
+      additionalProperties: true
+      type: object
+      required:
+      - package_ref
+      title: ReviewLogisticsPackage
+    ReviewMaterialCheck:
+      properties:
+        requirement_id:
+          type: string
+          title: Requirement Id
+        label:
+          type: string
+          title: Label
+        required:
+          type: boolean
+          title: Required
+          default: true
+        status:
+          type: string
+          enum:
+          - present
+          - missing
+          - invalid
+          - unknown
+          - not_applicable
+          title: Status
+        source:
+          type: string
+          enum:
+          - metadata
+          - model
+          - trusted_system
+          title: Source
+        confidence:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Confidence
+        evidence_refs:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Evidence Refs
+        reason:
+          type: string
+          minLength: 1
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - requirement_id
+      - label
+      - status
+      - source
+      - confidence
+      - evidence_refs
+      - reason
+      title: ReviewMaterialCheck
+    ReviewMaterialReadiness:
+      properties:
+        scenario:
+          type: string
+          enum:
+          - product_damage
+          - wrong_item
+          - missing_item
+          - minor_refund
+          title: Scenario
+        status:
+          type: string
+          enum:
+          - complete
+          - incomplete
+          - indeterminate
+          - not_required
+          title: Status
+        confidence:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+        reason:
+          type: string
+          minLength: 1
+          title: Reason
+        checklist:
+          items:
+            $ref: '#/components/schemas/ReviewMaterialCheck'
+          type: array
+          minItems: 1
+          title: Checklist
+        missing_items:
+          items:
+            type: string
+          type: array
+          title: Missing Items
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+      additionalProperties: false
+      type: object
+      required:
+      - scenario
+      - status
+      - confidence
+      - reason
+      - checklist
+      - missing_items
+      - warnings
+      title: ReviewMaterialReadiness
     ReviewMetadataValidationResponse:
       properties:
         ok:
@@ -2604,9 +4068,14 @@ components:
           default: true
         metadata:
           $ref: '#/components/schemas/ReviewCaseMetadata'
+        readiness:
+          additionalProperties: true
+          type: object
+          title: Readiness
       type: object
       required:
       - metadata
+      - readiness
       title: ReviewMetadataValidationResponse
     ReviewMetricsResponse:
       properties:
@@ -2622,6 +4091,145 @@ components:
       required:
       - metrics
       title: ReviewMetricsResponse
+    ReviewMinorRefundPolicy:
+      properties:
+        review_mode:
+          type: string
+          enum:
+          - standard
+          - strict
+          title: Review Mode
+          default: standard
+        authoritative_verification:
+          type: string
+          enum:
+          - disabled
+          - advisory
+          - required
+          title: Authoritative Verification
+          default: disabled
+      type: object
+      title: ReviewMinorRefundPolicy
+      description: 未成年人资料视觉初审策略；权威验真未接入时默认不阻断。
+    ReviewOutputOptions:
+      properties:
+        include_html_report:
+          type: boolean
+          title: Include Html Report
+          default: true
+      type: object
+      title: ReviewOutputOptions
+    ReviewPayload:
+      properties:
+        review_label:
+          type: string
+          title: Review Label
+          default: ''
+        summary:
+          additionalProperties: true
+          type: object
+          title: Summary
+        frame_strategy:
+          type: string
+          title: Frame Strategy
+          default: ''
+        media_warnings:
+          items: {}
+          type: array
+          title: Media Warnings
+        agent_brief:
+          additionalProperties: true
+          type: object
+          title: Agent Brief
+        agent_report:
+          additionalProperties: true
+          type: object
+          title: Agent Report
+        media_forensics:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Media Forensics
+        material_readiness:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewMaterialReadiness'
+          - type: 'null'
+        advisory_assessment:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewAdvisoryAssessment'
+          - type: 'null'
+        report:
+          anyOf:
+          - $ref: '#/components/schemas/ReviewReportReference'
+          - type: 'null'
+        sampling:
+          additionalProperties: true
+          type: object
+          title: Sampling
+        media_preflight_execution:
+          additionalProperties: true
+          type: object
+          title: Media Preflight Execution
+      additionalProperties: false
+      type: object
+      title: ReviewPayload
+    ReviewPublicAsset:
+      properties:
+        asset_id:
+          type: string
+          title: Asset Id
+        mime_type:
+          type: string
+          title: Mime Type
+        size:
+          type: integer
+          title: Size
+          default: 0
+        fields:
+          items:
+            type: string
+          type: array
+          title: Fields
+      additionalProperties: false
+      type: object
+      required:
+      - asset_id
+      - mime_type
+      title: ReviewPublicAsset
+    ReviewReportReference:
+      properties:
+        requested:
+          type: boolean
+          title: Requested
+        status:
+          type: string
+          enum:
+          - ready
+          - not_requested
+          - unavailable
+          title: Status
+        html_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Html Url
+      type: object
+      required:
+      - requested
+      - status
+      title: ReviewReportReference
+    ReviewRoutingPolicy:
+      properties:
+        policy_ref:
+          type: string
+          const: MITAKO-ROUTING@20260815.1
+          title: Policy Ref
+          default: MITAKO-ROUTING@20260815.1
+      additionalProperties: false
+      type: object
+      title: ReviewRoutingPolicy
+      description: 工单只能选择已批准的服务端路由策略，不能自行改写阈值。
     ReviewSamplingPlanRequest:
       properties:
         duration_seconds:
@@ -2639,8 +4247,22 @@ components:
           minimum: 1.0
           title: Video Count
           default: 1
+        scenario:
+          anyOf:
+          - type: string
+            enum:
+            - product_damage
+            - wrong_item
+            - missing_item
+            - minor_refund
+          - type: 'null'
+          title: Scenario
         sampling_policy:
           $ref: '#/components/schemas/ReviewSamplingPolicy'
+        continuity_policy:
+          $ref: '#/components/schemas/ReviewContinuityPolicy'
+        damage_causality_policy:
+          $ref: '#/components/schemas/ReviewDamageCausalityPolicy'
       type: object
       required:
       - duration_seconds
@@ -2666,6 +4288,7 @@ components:
           type: string
           enum:
           - adaptive
+          - strong
           - strict
           - forensic
           - custom
@@ -2690,8 +4313,53 @@ components:
           minimum: 1.0
           title: Frames Per Model Call
           default: 24
+        auto_escalate:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Auto Escalate
+          default: false
+        forensic_checks:
+          anyOf:
+          - type: boolean
+          - items:
+              type: string
+              enum:
+              - container_integrity
+              - timeline_consistency
+              - stream_consistency
+              - frame_rate_consistency
+              - packet_timeline
+              - editor_metadata
+            type: array
+          - type: 'null'
+          title: Forensic Checks
+      additionalProperties: false
       type: object
       title: ReviewSamplingPolicy
+    ReviewSopRecommendation:
+      properties:
+        code:
+          type: string
+          enum:
+          - support_claim
+          - not_support_claim
+          - request_more_material
+          - further_assessment
+          - system_retry
+          title: Code
+        recommendation:
+          type: string
+          title: Recommendation
+        basis:
+          type: string
+          title: Basis
+      type: object
+      required:
+      - code
+      - recommendation
+      - basis
+      title: ReviewSopRecommendation
     ReviewTask:
       properties:
         task_id:
@@ -2711,6 +4379,14 @@ components:
           type: string
           title: Source
           default: customer_upload
+        client_case_id:
+          type: string
+          title: Client Case Id
+          default: ''
+        order_id:
+          type: string
+          title: Order Id
+          default: ''
         scenario:
           type: string
           title: Scenario
@@ -2733,6 +4409,10 @@ components:
           type: string
           title: Boundary
           default: ''
+        context:
+          additionalProperties: true
+          type: object
+          title: Context
         result:
           additionalProperties: true
           type: object
@@ -2788,6 +4468,119 @@ components:
       - review_task
       - attachment
       title: ReviewTaskUploadResponse
+    ReviewWarehouseShippedItem:
+      properties:
+        item_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Item Ref
+        shipped_quantity:
+          type: integer
+          maximum: 10000.0
+          minimum: 0.0
+          title: Shipped Quantity
+      additionalProperties: false
+      type: object
+      required:
+      - item_ref
+      - shipped_quantity
+      title: ReviewWarehouseShippedItem
+    ReviewWarehouseVerification:
+      properties:
+        status:
+          type: string
+          enum:
+          - confirmed_missing
+          - confirmed_not_missing
+          title: Status
+        source:
+          type: string
+          const: customer_warehouse
+          title: Source
+        verification_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          pattern: ^[A-Za-z0-9_.:-]+$
+          title: Verification Ref
+        baseline_version:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Baseline Version
+        verified_at:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Verified At
+        snapshot_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          pattern: ^[A-Za-z0-9_.:-]+$
+          title: Snapshot Ref
+        packages:
+          items:
+            $ref: '#/components/schemas/ReviewWarehouseVerifiedPackage'
+          type: array
+          maxItems: 100
+          minItems: 1
+          title: Packages
+      additionalProperties: false
+      type: object
+      required:
+      - status
+      - source
+      - verification_ref
+      - baseline_version
+      - verified_at
+      - snapshot_ref
+      - packages
+      title: ReviewWarehouseVerification
+      description: 甲方仓库系统提供的可追溯实发快照；视觉模型不得生成。
+    ReviewWarehouseVerifiedPackage:
+      properties:
+        package_ref:
+          type: string
+          maxLength: 160
+          minLength: 1
+          title: Package Ref
+        tracking_no:
+          type: string
+          maxLength: 160
+          title: Tracking No
+          default: ''
+        actual_shipped_items:
+          items:
+            $ref: '#/components/schemas/ReviewWarehouseShippedItem'
+          type: array
+          maxItems: 1000
+          minItems: 1
+          title: Actual Shipped Items
+      additionalProperties: false
+      type: object
+      required:
+      - package_ref
+      - actual_shipped_items
+      title: ReviewWarehouseVerifiedPackage
+    RollbackBody:
+      properties:
+        target_version:
+          type: integer
+          title: Target Version
+        reason:
+          type: string
+          title: Reason
+        expected_active_version:
+          type: integer
+          title: Expected Active Version
+      type: object
+      required:
+      - target_version
+      - reason
+      - expected_active_version
+      title: RollbackBody
     SsoCallbackBody:
       properties:
         tenant_id:
@@ -2831,3 +4624,7 @@ components:
       - msg
       - type
       title: ValidationError
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer

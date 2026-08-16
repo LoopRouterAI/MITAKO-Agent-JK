@@ -379,7 +379,7 @@ export const HandoffQueueCard = defineComponent({
               <p className="mt-0.5 text-[10px] text-slate-500">{t('cards.transferConnectedDesc')}</p>
             )}
             {reason && !connected && (
-              <p className="mt-1 truncate text-[9px] text-slate-600">原因：{publicText(reason)}</p>
+                <p className="mt-1 line-clamp-2 break-words text-xs leading-snug text-slate-600">原因：{publicText(reason)}</p>
             )}
           </div>
         </div>

@@ -36,6 +36,17 @@ def has_private_result_key(value: Any) -> bool:
     return False
 
 
+def public_submission_evidence(job: Dict[str, Any], submitted: Dict[str, Any]) -> Dict[str, bool]:
+    assets = [item for item in (job.get("assets") or []) if isinstance(item, dict)]
+    return {
+        "source_case_preserved": job.get("client_case_id") == submitted.get("client_case_id"),
+        "submitted_assets_preserved": (
+            len(assets) == submitted.get("file_count")
+            and sum(int(item.get("size") or 0) for item in assets) == submitted.get("bytes")
+        ),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=os.getenv("E2E_BASE_URL", "http://127.0.0.1:8015"))
@@ -74,7 +85,7 @@ def metadata_for(sample_id: str, batch_id: str = "", sampling_preset: str = "ada
         "order_items": read_json(sample_dir / "order_items.json", manifest.get("order_items") or []),
         "product_master_data": read_json(sample_dir / "product_master.json", manifest.get("product_master_data") or {}),
         "warehouse_master_data": read_json(sample_dir / "warehouse_master.json", manifest.get("warehouse_master_data") or {}),
-        "conversation_history": read_json(sample_dir / "reply.json", []),
+        "conversation_history": read_json(sample_dir / "conversation_predecision.json", []),
         "sop_context": {
             "summary": {
                 "product_damage": "核验开箱连续性、未拆封包装/面单、瑕疵位置与严重程度；只输出证据建议，业务动作由人工执行。",
@@ -150,6 +161,7 @@ def submit(base_url: str, token: str, sample_id: str, timeout: int, run_id: str,
     body = response.json()
     return {
         "sample_id": sample_id,
+        "client_case_id": metadata["client_case_id"],
         "file_count": len(paths),
         "bytes": sum(path.stat().st_size for path in paths),
         "created": body.get("created"),
@@ -210,15 +222,23 @@ def main() -> int:
         review = (job.get("result") or {}).get("review") or {}
         brief = review.get("agent_brief") or {}
         report = review.get("agent_report") or {}
-        inference = report.get("inference_estimate") or {}
         videos = (report.get("evidence_package") or {}).get("videos") or []
         gallery_frames = (report.get("media_gallery") or {}).get("frames") or []
         all_videos_represented = not videos or {
             int(item.get("video_index")) for item in videos if item.get("video_index") is not None
         }.issubset({int(item.get("video_index")) for item in gallery_frames if item.get("video_index") is not None})
-        expected_strategy = "full_timeline_adaptive" if args.sampling_preset == "adaptive" else "full_timeline_dense"
-        timeline_ok = all(item.get("sampling_strategy") == expected_strategy for item in videos)
-        source_fields_ok = (job.get("metadata") or {}).get("source_record") == read_json(SAMPLE_ROOT / item["sample_id"] / "manifest.json", {})
+        allowed_strategies = (
+            {"full_timeline_adaptive", "full_timeline_dense"}
+            if args.sampling_preset == "adaptive"
+            else {"full_timeline_dense"}
+        )
+        timeline_ok = all(
+            item.get("sampling_strategy") in allowed_strategies
+            and float(item.get("timeline_coverage_ratio") or 0) >= 0.9
+            and int(item.get("sampled_frames") or 0) > 0
+            for item in videos
+        )
+        submission_evidence = public_submission_evidence(job, item)
         report_url = (review.get("report") or {}).get("html_url") or ""
         with httpx.Client(timeout=30) as client:
             html_response = client.get(base_url + report_url, headers={"Authorization": f"Bearer {token}"}) if report_url else None
@@ -231,11 +251,10 @@ def main() -> int:
             job.get("status") == "SUCCEEDED"
             and bool(brief)
             and bool(report)
-            and bool(inference)
             and timeline_ok
             and html_ok
             and safe_result
-            and source_fields_ok
+            and all(submission_evidence.values())
             and all_videos_represented
         )
         results.append(
@@ -245,11 +264,10 @@ def main() -> int:
                 "ok": ok,
                 "confidence": brief.get("confidence"),
                 "conclusion": brief.get("conclusion"),
-                "inference_estimate": inference,
                 "full_timeline_sampling": timeline_ok,
                 "html_report": html_ok,
                 "public_result_safe": safe_result,
-                "source_manifest_preserved": source_fields_ok,
+                **submission_evidence,
                 "all_videos_represented": all_videos_represented,
                 "diagnostics": job.get("diagnostics") or {},
             }
@@ -273,6 +291,7 @@ def main() -> int:
         and paged_response.status_code == 200
         and batch_summary.get("total") == len(sample_ids)
         and batch_summary.get("complete") is True
+        and int(batch_summary.get("inference_total_tokens") or 0) > 0
         and paged_summary.get("total") == len(sample_ids)
         and paged_summary.get("returned") == 1
         and len(paged_body.get("jobs") or []) == 1
