@@ -639,6 +639,7 @@ $RuntimeFiles = @(
     "poc\visual_review_poc\internal_review_ledger.py",
     "poc\visual_review_poc\native_video_proxy.py",
     "poc\visual_review_poc\native_video_perception.py",
+    "poc\visual_review_poc\sampled_video_perception.py",
     "poc\visual_review_poc\secure_media_tunnel.py",
     "poc\visual_review_poc\observability.py",
     "poc\visual_review_poc\minor_material_model_prompt.py",

@@ -422,6 +422,7 @@ class ReleaseLayoutTest(unittest.TestCase):
         for runtime_module in (
             '"review_public_safety.py"',
             '"poc\\visual_review_poc\\native_video_perception.py"',
+            '"poc\\visual_review_poc\\sampled_video_perception.py"',
             '"poc\\visual_review_poc\\secure_media_tunnel.py"',
             '"poc\\visual_review_poc\\internal_review_ledger.py"',
             '"poc\\visual_review_poc\\media_preflight.py"',
@@ -435,6 +436,7 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertIn("Cloudflare.cloudflared", customer_script)
         verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")
         self.assertIn('name.endswith("native_video_perception.pyc")', verifier)
+        self.assertIn('name.endswith("sampled_video_perception.pyc")', verifier)
         self.assertIn('name.endswith("secure_media_tunnel.pyc")', verifier)
         self.assertIn('name.endswith("internal_review_ledger.pyc")', verifier)
         self.assertIn('name.endswith("media_preflight.pyc")', verifier)
