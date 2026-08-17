@@ -110,7 +110,7 @@ export default function BusinessRules() {
   };
 
   const publish = async () => {
-    if (content.trim().length < 10 || reason.trim().length < 10) {
+    if (content.trim().length < 10 || reason.trim().length < 6) {
       setMessage(t('admin.rulesValidation'));
       return;
     }
@@ -143,7 +143,7 @@ export default function BusinessRules() {
   };
 
   const confirmRollback = async () => {
-    if (!rollback || rollback.prompt_key !== selectedKey || rollbackReason.trim().length < 10) {
+    if (!rollback || rollback.prompt_key !== selectedKey || rollbackReason.trim().length < 6) {
       setMessage(t('admin.rulesReasonRequired'));
       return;
     }

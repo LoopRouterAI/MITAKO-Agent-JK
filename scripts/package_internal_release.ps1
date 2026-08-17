@@ -185,6 +185,21 @@ Copy-Path "tests\reports\dynamic_material_capacity_http_latest.json"
 Copy-Path "tests\reports\dynamic_material_capacity_http_51_20260730.json"
 Copy-Path "tests\reports\dynamic_material_capacity_http_62_20260730.json"
 Copy-Path "tests\reports\review_0816_four_scenario_blind_results_latest.json"
+Copy-Path "甲方沟通交付文档\0817四场景审核业务理解与发布验收说明.html"
+Copy-Path "甲方沟通交付文档\0817四场景八份审核报告质量索引.html"
+Copy-Path "甲方沟通交付文档\0817甲方技术对接与私有化部署说明.html"
+Copy-Path "docs\delivery\甲方技术对接与私有化部署说明.html"
+$fourScenarioPublicReportDir = "甲方沟通交付文档\四场景审核报告"
+foreach ($reportName in @(
+    "review_0816_blind_product_damage_611941.html",
+    "review_0816_blind_product_damage_592717.html",
+    "review_0816_blind_wrong_item_515028.html",
+    "review_0816_blind_wrong_item_310508.html",
+    "review_0816_blind_missing_item_289433.html",
+    "review_0816_blind_missing_item_319303.html",
+    "review_0816_blind_minor_refund_554611.html",
+    "review_0816_blind_minor_refund_511007.html"
+)) { Copy-Path "$fourScenarioPublicReportDir\$reportName" }
 $fourScenarioAcceptance = Get-Content -LiteralPath $FourScenarioAcceptanceSource -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($case in $fourScenarioAcceptance.cases) {
     foreach ($propertyName in @("report_json", "report_html")) {
@@ -202,7 +217,10 @@ $evidenceFiles = @(
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
     "docs\product\四场景审核业务决策与报告契约-20260812.md",
-    "甲方沟通交付文档\0814四场景审核业务理解与功能验收说明.html",
+    "甲方沟通交付文档\0817四场景审核业务理解与发布验收说明.html",
+    "甲方沟通交付文档\0817四场景八份审核报告质量索引.html",
+    "甲方沟通交付文档\0817甲方技术对接与私有化部署说明.html",
+    "docs\delivery\甲方技术对接与私有化部署说明.html",
     "tests\reports\review_0816_four_scenario_blind_results_latest.json",
     "tests\reports\customer_order_info_sync_strict_verify_20260720.json",
     "tests\reports\customer_order_info_reconcile_applied_20260720.json",
@@ -212,7 +230,15 @@ $evidenceFiles = @(
     "tests\reports\dynamic_material_capacity_http_62_20260730.json",
     "tests\reports\full_pipeline_latest.html",
     "tests\reports\auth_strict_latest.html",
-    "tests\reports\private_deployment_api_smoke_latest.json"
+    "tests\reports\private_deployment_api_smoke_latest.json",
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_product_damage_611941.html",
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_product_damage_592717.html",
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_wrong_item_515028.html",
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_wrong_item_310508.html",
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_missing_item_289433.html",
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_missing_item_319303.html",
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_554611.html",
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_511007.html"
 )
 $evidenceHashes = @()
 foreach ($relativePath in $evidenceFiles) {
@@ -248,7 +274,10 @@ $required = @(
     "docs\delivery\after-sales-agent-integration.md",
     "docs\delivery\java-client-sample.md",
     "docs\product\四场景审核业务决策与报告契约-20260812.md",
-    "甲方沟通交付文档\0814四场景审核业务理解与功能验收说明.html",
+    "甲方沟通交付文档\0817四场景审核业务理解与发布验收说明.html",
+    "甲方沟通交付文档\0817四场景八份审核报告质量索引.html",
+    "甲方沟通交付文档\0817甲方技术对接与私有化部署说明.html",
+    "docs\delivery\甲方技术对接与私有化部署说明.html",
     "docs\三大审核场景的小量样本\sample_labels.json",
     "scripts\pre_release_internal_validation.ps1",
     "tests\reports\review_0816_four_scenario_blind_results_latest.json",

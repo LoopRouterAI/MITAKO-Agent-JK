@@ -545,9 +545,10 @@ Copy-Dir "templates"
 Copy-File "docs\delivery\openapi.yaml"
 Copy-File "docs\delivery\review-advisory-api.md"
 Copy-File "docs\delivery\after-sales-agent-integration.md"
+Copy-File "docs\delivery\甲方技术对接与私有化部署说明.html"
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
-$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0814四场景审核业务理解与功能验收说明.html"
+$CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0817四场景审核业务理解与发布验收说明.html"
 if (-not (Test-Path -LiteralPath $CustomerHtmlSource -PathType Leaf)) {
     throw "Customer delivery HTML is missing: $CustomerHtmlSource"
 }
@@ -560,7 +561,10 @@ $AcceptancePython = Resolve-PythonRuntime
 if ($LASTEXITCODE -ne 0) { throw "Four-scenario acceptance evidence is invalid." }
 if (Test-Path (Join-Path $Root $customerDocsName)) {
     Copy-File "$customerDocsName\README.md"
-    Copy-File "$customerDocsName\0814四场景审核业务理解与功能验收说明.html"
+    Copy-File "$customerDocsName\0817四场景审核业务理解与发布验收说明.html"
+    Copy-File "$customerDocsName\0817四场景八份审核报告质量索引.html"
+    Copy-File "$customerDocsName\0817甲方技术对接与私有化部署说明.html"
+    Copy-Dir "$customerDocsName\四场景审核报告"
 }
 
 Copy-File "config\handoff_routing.json"
@@ -934,11 +938,24 @@ $customerEvidenceFiles = @(
     "docs\delivery\openapi.yaml",
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
-    "甲方沟通交付文档\0814四场景审核业务理解与功能验收说明.html",
+    "docs\delivery\甲方技术对接与私有化部署说明.html",
+    "甲方沟通交付文档\0817四场景审核业务理解与发布验收说明.html",
+    "甲方沟通交付文档\0817四场景八份审核报告质量索引.html",
+    "甲方沟通交付文档\0817甲方技术对接与私有化部署说明.html",
     "runtime\app_runtime.zip",
     "sample_data.json",
     "start-windows.bat"
 )
+$customerEvidenceFiles += @(
+    "review_0816_blind_product_damage_611941.html",
+    "review_0816_blind_product_damage_592717.html",
+    "review_0816_blind_wrong_item_515028.html",
+    "review_0816_blind_wrong_item_310508.html",
+    "review_0816_blind_missing_item_289433.html",
+    "review_0816_blind_missing_item_319303.html",
+    "review_0816_blind_minor_refund_554611.html",
+    "review_0816_blind_minor_refund_511007.html"
+) | ForEach-Object { "甲方沟通交付文档\四场景审核报告\$_" }
 $customerEvidenceFiles += $customerDemoVideos.Values | ForEach-Object { "visual_review_workbench\sample_videos\$($_.destination)" }
 $customerEvidence = @()
 foreach ($relativePath in $customerEvidenceFiles) {

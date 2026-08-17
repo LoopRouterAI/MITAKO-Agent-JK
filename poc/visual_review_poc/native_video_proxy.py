@@ -213,8 +213,14 @@ def video_proxy_recommendation(
     max_fps: float = 24.0,
     max_bitrate_bps: float = 6_000_000.0,
     max_source_bytes: int = 100 * 1024 * 1024,
+    policy: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """只在原片明显超出审核上传质量预算时建议生成质量代理。"""
+    if isinstance(policy, dict):
+        max_long_edge = int(policy.get("video_max_long_edge") or max_long_edge)
+        max_fps = float(policy.get("video_max_fps") or max_fps)
+        max_bitrate_bps = float(policy.get("video_max_bitrate_mbps") or (max_bitrate_bps / 1_000_000)) * 1_000_000
+        max_source_bytes = int(policy.get("video_max_source_mb") or (max_source_bytes / (1024 * 1024))) * 1024 * 1024
     metadata = _video_metadata(source)
     recommendation = video_proxy_recommendation_from_metadata(
         {
@@ -225,6 +231,7 @@ def video_proxy_recommendation(
         max_fps=max_fps,
         max_bitrate_bps=max_bitrate_bps,
         max_source_bytes=max_source_bytes,
+        policy=policy,
     )
     return {**recommendation, "source_metadata": metadata}
 
@@ -236,8 +243,14 @@ def video_proxy_recommendation_from_metadata(
     max_fps: float = 24.0,
     max_bitrate_bps: float = 6_000_000.0,
     max_source_bytes: int = 100 * 1024 * 1024,
+    policy: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """用同一质量预算生成计划与执行决策。"""
+    if isinstance(policy, dict):
+        max_long_edge = int(policy.get("video_max_long_edge") or max_long_edge)
+        max_fps = float(policy.get("video_max_fps") or max_fps)
+        max_bitrate_bps = float(policy.get("video_max_bitrate_mbps") or (max_bitrate_bps / 1_000_000)) * 1_000_000
+        max_source_bytes = int(policy.get("video_max_source_mb") or (max_source_bytes / (1024 * 1024))) * 1024 * 1024
     reasons = []
     observations = []
     fps_above_budget = float(metadata.get("fps") or 0) > max_fps

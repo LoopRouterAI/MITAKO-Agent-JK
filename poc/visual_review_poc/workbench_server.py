@@ -43,6 +43,7 @@ from configs.model_governance import runtime_model_keys
 from prompts.governance import public_snapshot_metadata
 from prompts.visual_review.core import freeze_rule_snapshot
 from review_service.media_forensics import inspect_job_media
+from review_service.policy_governance import get_active_policy
 from review_service.service import ensure_label_isolation, normalize_frame_strategy, postprocess_review
 from review_service.decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
 from poc.visual_review_poc.internal_review_ledger import ReviewRequestLedger
@@ -1160,9 +1161,10 @@ def _native_video_source_context(
     video: Path,
     proxy_dir: Optional[Path] = None,
     recommendation: Optional[Dict[str, Any]] = None,
+    policy: Optional[Dict[str, Any]] = None,
 ):
     """视频优先通过受控 HTTPS URL 送审；隧道不可用时才回退内联。"""
-    recommendation = recommendation or video_proxy_recommendation(video)
+    recommendation = recommendation or video_proxy_recommendation(video, policy=policy)
     if recommendation.get("recommended") and proxy_dir:
         with _native_video_proxy_source_context(video, proxy_dir) as proxy_source:
             if proxy_source:
@@ -1243,19 +1245,20 @@ def _native_video_source_context(
 
 
 @contextmanager
-def _prepared_folder_video_sources(videos: List[Path], proxy_dir: Path):
+def _prepared_folder_video_sources(videos: List[Path], proxy_dir: Path, policy: Optional[Dict[str, Any]] = None):
     native_videos: List[Dict[str, Any]] = []
     execution: List[Dict[str, Any]] = []
     technical_processing_incomplete = False
     try:
         with ExitStack() as stack:
             for index, video in enumerate(videos, start=1):
-                recommendation = video_proxy_recommendation(video)
+                recommendation = video_proxy_recommendation(video, policy=policy)
                 reasons = [str(item) for item in recommendation.get("reasons") or [] if str(item)]
                 source = stack.enter_context(_native_video_source_context(
                     video,
                     proxy_dir / f"video_{index:03d}",
                     recommendation=recommendation,
+                    policy=policy,
                 ))
                 if not source:
                     technical_processing_incomplete = True
@@ -2047,10 +2050,12 @@ def _run_review(
     native_video_sources: Optional[List[Dict[str, Any]]] = None,
     preflight_result: Optional[Dict[str, Any]] = None,
     preflight_billing: Optional[Dict[str, Any]] = None,
+    policy_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     deadline_at = _new_review_deadline()
     profile = REVIEW_MODEL_PROFILES.get(review_model) or REVIEW_MODEL_PROFILES["standard"]
     load_visual_env()
+    policy = dict(policy_snapshot or get_active_policy(rule_tenant_id))
     effective_fps = fps
     effective_max_frames = max_frames
     if review_model == "fast":
@@ -2165,11 +2170,12 @@ def _run_review(
         and len(case_videos) == 1
         and case_videos[0].resolve() == video.resolve()
     ):
-        native_recommendation = video_proxy_recommendation(video)
+        native_recommendation = video_proxy_recommendation(video, policy=policy)
         native_context = _native_video_source_context(
             video,
             run_dir / "native_video_proxy",
             recommendation=native_recommendation,
+            policy=policy,
         )
 
     def call_native_review(current_case: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
@@ -2250,7 +2256,10 @@ def _run_review(
     native_success_needs_frames = (
         native_source
         and native_result.get("status") == "success"
-        and _one_fps_frame_fallback_enabled()
+        and (
+            _one_fps_frame_fallback_enabled()
+            or bool((policy or {}).get("one_fps_frame_fallback"))
+        )
         and _native_success_requires_frame_fallback(
             native_gaps,
             native_result.get("parsed") or {},
@@ -2797,6 +2806,11 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
 def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False, include_html_report: bool = True, defer_postprocess: bool = False, rule_tenant_id: str = "mitako") -> Dict[str, Any]:
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
+    policy = get_active_policy(rule_tenant_id)
+    fps = float(policy.get("native_sampling_fps") or fps)
+    max_frames = int(policy.get("max_frames") or max_frames)
+    api_frame_limit = int(policy.get("api_frame_limit") or api_frame_limit)
+    probe_seconds = int(policy.get("probe_seconds") or probe_seconds)
     videos, _ = discover_case_videos(folder_dir)
     if videos:
         selected_videos = list(videos)
@@ -2809,7 +2823,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
             "rows": [],
         }
         role_preflight_billing: Optional[Dict[str, Any]] = None
-        if len(videos) > 1 and not _opening_role_preflight_enabled():
+        if len(videos) > 1 and not (_opening_role_preflight_enabled() or bool(policy.get("opening_role_preflight"))):
             role_preflight.update({
                 "status": "disabled",
                 "strategy": "keep_all_until_deferred_review_is_complete",
@@ -2887,6 +2901,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
             _prepared_folder_video_sources(
                 selected_videos,
                 RUNTIME_MEDIA_DIR / f"folder_proxy_{folder_dir.name}_{time.time_ns()}",
+                policy=policy,
             )
             if len(selected_videos) > 1
             else nullcontext({
@@ -2956,6 +2971,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
                 native_video_sources=prepared_videos.get("native_videos") or None,
                 preflight_result=role_preflight,
                 preflight_billing=role_preflight_billing,
+                policy_snapshot=policy,
             )
             if prepared_videos["execution"]:
                 execution = dict(review.get("media_preflight_execution") or {})

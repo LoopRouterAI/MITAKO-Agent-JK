@@ -122,8 +122,8 @@ def _validate(tenant_id: str, prompt_key: str, reason: str, actor: str) -> tuple
     who = str(actor or "").strip()
     if not tenant:
         raise ValueError("租户不能为空")
-    if len(why) < 10 or len(why) > 500:
-        raise ValueError("修改原因必须填写 10 至 500 个字符")
+    if len(why) < 6 or len(why) > 500:
+        raise ValueError("修改原因必须填写 6 至 500 个字符")
     if not who:
         raise ValueError("修改账号不能为空")
     return tenant, key, why, who
