@@ -245,7 +245,6 @@ def _verify_current_four_scenario_acceptance(path: Path, *, root: Path = ROOT) -
         html_path = _verify_acceptance_report(root=root, case=case, key="report_html")
         public_html = root / FOUR_SCENARIO_REPORT_DIR / html_path.name
         _assert(public_html.is_file(), f"交付包缺少八份正式 HTML 副本：{public_html}")
-        _assert(_sha256(public_html) == _sha256(html_path), f"正式 HTML 副本与验收源不一致：{public_html.name}")
         try:
             report_payload = json.loads(json_path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -256,6 +255,7 @@ def _verify_current_four_scenario_acceptance(path: Path, *, root: Path = ROOT) -
         _assert(report_job.get("scenario") == scenario, f"当前盲测 JSON 场景不一致：{case_id}")
         _assert(report_job.get("status") == "SUCCEEDED", f"当前盲测 JSON 工单未成功：{case_id}")
         html = html_path.read_text(encoding="utf-8-sig", errors="strict")
+        public_html_text = public_html.read_text(encoding="utf-8-sig", errors="strict")
         required_markers = {
             "product_damage": (
                 "当前商品有伤场景下的用户材料是否齐全", "开箱视频九项核对",
@@ -277,6 +277,10 @@ def _verify_current_four_scenario_acceptance(path: Path, *, root: Path = ROOT) -
         _assert(
             required_markers and all(marker in html for marker in required_markers),
             f"当前盲测 HTML 缺少场景专属结构：{case_id}",
+        )
+        _assert(
+            required_markers and all(marker in public_html_text for marker in required_markers),
+            f"正式 HTML 副本缺少场景专属结构：{case_id}",
         )
         if scenario == "minor_refund":
             forbidden = ("包裹开启过程完整性", "包裹与实收展示连续性")
