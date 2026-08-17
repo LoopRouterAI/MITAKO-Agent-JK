@@ -54,6 +54,7 @@ FOUR_SCENARIO_CUSTOMER_GUIDE = "甲方沟通交付文档/0817四场景审核业�
 FOUR_SCENARIO_REPORT_INDEX = "甲方沟通交付文档/0817四场景八份审核报告质量索引.html"
 FOUR_SCENARIO_TECH_GUIDE = "甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html"
 FOUR_SCENARIO_REPORT_DIR = "甲方沟通交付文档/四场景审核报告"
+FOUR_SCENARIO_REPORT_MEDIA_MANIFEST = f"{FOUR_SCENARIO_REPORT_DIR}/media/manifest.json"
 FOUR_SCENARIO_REPORT_FILES = tuple(
     f"{FOUR_SCENARIO_REPORT_DIR}/review_0816_blind_{scenario}_{case_id}.html"
     for scenario, case_id in (
@@ -338,6 +339,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         FOUR_SCENARIO_REPORT_INDEX,
         FOUR_SCENARIO_TECH_GUIDE,
         *FOUR_SCENARIO_REPORT_FILES,
+        FOUR_SCENARIO_REPORT_MEDIA_MANIFEST,
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
         "tests/reports/dynamic_material_capacity_http_latest.json",
@@ -374,6 +376,17 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "动态素材证据不是当前验收提交的可信祖先，或相关审核实现已发生变化",
     )
     _verify_hashes(root, list(manifest.get("evidence") or []))
+    media_manifest_path = root / FOUR_SCENARIO_REPORT_MEDIA_MANIFEST
+    media_manifest = json.loads(media_manifest_path.read_text(encoding="utf-8-sig"))
+    _assert(media_manifest.get("scope") == "internal_review_only", "静态证据包必须标记为内部验收范围")
+    _assert(len(media_manifest.get("reports") or {}) == 8, "静态证据包必须覆盖八份报告")
+    media_assets = media_manifest.get("assets") or []
+    _assert(bool(media_assets), "静态证据包不得为空")
+    for asset in media_assets:
+        relative = str(asset.get("asset") or "")
+        asset_path = root / FOUR_SCENARIO_REPORT_DIR / relative.removeprefix("media/")
+        _assert(asset_path.is_file(), f"静态证据包缺少资产：{relative}")
+        _assert(_sha256(asset_path) == str(asset.get("sha256") or ""), f"静态证据包哈希不一致：{relative}")
     _verify_current_four_scenario_acceptance(root / FOUR_SCENARIO_ACCEPTANCE, root=root)
     return {"entries": len(names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
 

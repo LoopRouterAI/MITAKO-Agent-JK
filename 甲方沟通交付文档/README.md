@@ -17,6 +17,19 @@
 6. [四场景黄金审核经验](../docs/product/四场景黄金审核经验/README.md)：四份场景专属人工 SOP、禁止推断、材料齐全性、确定性决策和报告字段。
 7. [测试与验收指南](../docs/delivery/testing-guide.md)：正式 API、Web、密封盲测和发布门禁。
 
+## 八份验收报告
+
+以下报告是 2026-08-16 密封运行的每场景两案，索引页说明“代码实际做对了什么、哪里仍需人工关注”，不把样本结果包装成生产准确率。
+
+| 场景 | 报告 |
+|---|---|
+| 商品有伤 | [611941](四场景审核报告/review_0816_blind_product_damage_611941.html)、[592717](四场景审核报告/review_0816_blind_product_damage_592717.html) |
+| 发错货 | [515028](四场景审核报告/review_0816_blind_wrong_item_515028.html)、[310508](四场景审核报告/review_0816_blind_wrong_item_310508.html) |
+| 漏发货 | [289433](四场景审核报告/review_0816_blind_missing_item_289433.html)、[319303](四场景审核报告/review_0816_blind_missing_item_319303.html) |
+| 未成年人退款资料 | [554611](四场景审核报告/review_0816_blind_minor_refund_554611.html)、[511007](四场景审核报告/review_0816_blind_minor_refund_511007.html) |
+
+报告中的视频证据需要启动正式 API 才能使用签名 URL 跳转；内部研发目录另有 [离线 WebP 图片证据包](四场景审核报告/media/manifest.json)。图片包包含身份证、支付等敏感材料，客户 ZIP 有意不携带，避免未经授权复制个人信息。
+
 ## 历史资料
 
 本目录中的 0814、0812、0809、0807 及更早 HTML 均保留用于问题追溯，不再标记为 `CURRENT`，也不再作为发布门禁或当前业务结论。历史样本结果不得解释为生产准确率。

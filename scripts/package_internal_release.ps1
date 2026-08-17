@@ -33,7 +33,9 @@ function Assert-NoTrackedChanges([string]$Message) {
 function Assert-NoUntrackedCode([string]$Message) {
     $untracked = @(& git ls-files --others --exclude-standard)
     if ($LASTEXITCODE -ne 0) { throw $Message }
-    if ($untracked.Count -gt 0) { throw "$Message`n$($untracked -join "`n")" }
+    $allowedGenerated = @($untracked | Where-Object { $_ -like "甲方沟通交付文档/四场景审核报告/media/*" })
+    $unexpected = @($untracked | Where-Object { $allowedGenerated -notcontains $_ })
+    if ($unexpected.Count -gt 0) { throw "$Message`n$($unexpected -join "`n")" }
 }
 
 function Get-RepositoryRelativePath([string]$Path) {
@@ -200,6 +202,7 @@ foreach ($reportName in @(
     "review_0816_blind_minor_refund_554611.html",
     "review_0816_blind_minor_refund_511007.html"
 )) { Copy-Path "$fourScenarioPublicReportDir\$reportName" }
+Copy-Dir "$fourScenarioPublicReportDir\media"
 $fourScenarioAcceptance = Get-Content -LiteralPath $FourScenarioAcceptanceSource -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($case in $fourScenarioAcceptance.cases) {
     foreach ($propertyName in @("report_json", "report_html")) {
@@ -238,7 +241,8 @@ $evidenceFiles = @(
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_missing_item_289433.html",
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_missing_item_319303.html",
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_554611.html",
-    "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_511007.html"
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_511007.html",
+    "甲方沟通交付文档\四场景审核报告\media\manifest.json"
 )
 $evidenceHashes = @()
 foreach ($relativePath in $evidenceFiles) {
@@ -286,7 +290,8 @@ $required = @(
     "tests\reports\dynamic_material_capacity_http_62_20260730.json",
     "tests\reports\customer_order_info_sync_strict_verify_20260720.json",
     "tests\reports\customer_order_info_reconcile_applied_20260720.json",
-    "tests\reports\customer_order_info_integration_strict_final_20260720.json"
+    "tests\reports\customer_order_info_integration_strict_final_20260720.json",
+    "甲方沟通交付文档\四场景审核报告\media\manifest.json"
 )
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {

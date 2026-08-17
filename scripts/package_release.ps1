@@ -30,7 +30,9 @@ function Assert-NoTrackedChanges([string]$Message) {
 function Assert-NoUntrackedCode([string]$Message) {
     $untracked = @(& git ls-files --others --exclude-standard)
     if ($LASTEXITCODE -ne 0) { throw $Message }
-    if ($untracked.Count -gt 0) { throw "$Message`n$($untracked -join "`n")" }
+    $allowedGenerated = @($untracked | Where-Object { $_ -like "甲方沟通交付文档/四场景审核报告/media/*" })
+    $unexpected = @($untracked | Where-Object { $allowedGenerated -notcontains $_ })
+    if ($unexpected.Count -gt 0) { throw "$Message`n$($unexpected -join "`n")" }
 }
 
 function Get-RepositoryRelativePath([string]$Path) {
@@ -564,7 +566,16 @@ if (Test-Path (Join-Path $Root $customerDocsName)) {
     Copy-File "$customerDocsName\0817四场景审核业务理解与发布验收说明.html"
     Copy-File "$customerDocsName\0817四场景八份审核报告质量索引.html"
     Copy-File "$customerDocsName\0817甲方技术对接与私有化部署说明.html"
-    Copy-Dir "$customerDocsName\四场景审核报告"
+    foreach ($reportName in @(
+        "review_0816_blind_product_damage_611941.html",
+        "review_0816_blind_product_damage_592717.html",
+        "review_0816_blind_wrong_item_515028.html",
+        "review_0816_blind_wrong_item_310508.html",
+        "review_0816_blind_missing_item_289433.html",
+        "review_0816_blind_missing_item_319303.html",
+        "review_0816_blind_minor_refund_554611.html",
+        "review_0816_blind_minor_refund_511007.html"
+    )) { Copy-File "$customerDocsName\四场景审核报告\$reportName" }
 }
 
 Copy-File "config\handoff_routing.json"
