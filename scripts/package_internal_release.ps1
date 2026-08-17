@@ -203,7 +203,7 @@ foreach ($reportName in @(
     "review_0816_blind_minor_refund_554611.html",
     "review_0816_blind_minor_refund_511007.html"
 )) { Copy-Path "$fourScenarioPublicReportDir\$reportName" }
-Copy-Dir "$fourScenarioPublicReportDir\media"
+Copy-Path "$fourScenarioPublicReportDir\media"
 $fourScenarioAcceptance = Get-Content -LiteralPath $FourScenarioAcceptanceSource -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($case in $fourScenarioAcceptance.cases) {
     foreach ($propertyName in @("report_json", "report_html")) {
