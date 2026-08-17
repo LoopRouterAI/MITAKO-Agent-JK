@@ -55,6 +55,10 @@ FOUR_SCENARIO_REPORT_INDEX = "甲方沟通交付文档/0817四场景八份审核
 FOUR_SCENARIO_TECH_GUIDE = "甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html"
 FOUR_SCENARIO_REPORT_DIR = "甲方沟通交付文档/四场景审核报告"
 FOUR_SCENARIO_REPORT_MEDIA_MANIFEST = f"{FOUR_SCENARIO_REPORT_DIR}/media/manifest.json"
+FOUR_SCENARIO_EVIDENCE_MANIFEST = "evidence-package-manifest.json"
+CUSTOMER_RELEASE_NOTES = "docs/release/2026-08-18-customer-update-notes.md"
+DEVELOPER_RELEASE_NOTES = "docs/release/2026-08-18-developer-release-notes.md"
+PACKAGE_LAYOUT_GUIDE = "docs/release/2026-08-18-package-layout.md"
 FOUR_SCENARIO_REPORT_FILES = tuple(
     f"{FOUR_SCENARIO_REPORT_DIR}/review_0816_blind_{scenario}_{case_id}.html"
     for scenario, case_id in (
@@ -321,7 +325,7 @@ class _LocalLinkCollector(HTMLParser):
                 self.links.append(value.strip())
 
 
-def _verify_local_html_links(root: Path) -> None:
+def _verify_local_html_links(root: Path, *, allow_missing_media: bool = False) -> None:
     root = root.resolve()
     missing: list[str] = []
     for html_path in root.rglob("*.html"):
@@ -332,14 +336,14 @@ def _verify_local_html_links(root: Path) -> None:
             if not split.path or split.scheme or split.netloc or split.path.startswith("/"):
                 continue
             # 客户包不携带身份证/支付等静态证据；这类相对路径只在内部离线包中解析，正式查看走授权 API。
-            if split.path.replace("\\", "/").startswith("media/"):
+            if allow_missing_media and split.path.replace("\\", "/").startswith("media/"):
                 continue
-            if split.path.replace("\\", "/") == "四场景审核报告/media/manifest.json":
+            if allow_missing_media and split.path.replace("\\", "/") == "四场景审核报告/media/manifest.json":
                 continue
             target = (html_path.parent / unquote(split.path)).resolve()
             if root not in target.parents or not target.is_file():
                 missing.append(f"{html_path.relative_to(root).as_posix()} -> {raw}")
-    _assert(not missing, f"甲方包 HTML 存在离线断链：{missing[:20]}")
+    _assert(not missing, f"HTML 存在离线断链：{missing[:20]}")
 
 
 def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[str, Any]:
@@ -355,7 +359,9 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         FOUR_SCENARIO_REPORT_INDEX,
         FOUR_SCENARIO_TECH_GUIDE,
         *FOUR_SCENARIO_REPORT_FILES,
-        FOUR_SCENARIO_REPORT_MEDIA_MANIFEST,
+        CUSTOMER_RELEASE_NOTES,
+        DEVELOPER_RELEASE_NOTES,
+        PACKAGE_LAYOUT_GUIDE,
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
         "tests/reports/dynamic_material_capacity_http_latest.json",
@@ -392,17 +398,6 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "动态素材证据不是当前验收提交的可信祖先，或相关审核实现已发生变化",
     )
     _verify_hashes(root, list(manifest.get("evidence") or []))
-    media_manifest_path = root / FOUR_SCENARIO_REPORT_MEDIA_MANIFEST
-    media_manifest = json.loads(media_manifest_path.read_text(encoding="utf-8-sig"))
-    _assert(media_manifest.get("scope") == "internal_review_only", "静态证据包必须标记为内部验收范围")
-    _assert(len(media_manifest.get("reports") or {}) == 8, "静态证据包必须覆盖八份报告")
-    media_assets = media_manifest.get("assets") or []
-    _assert(bool(media_assets), "静态证据包不得为空")
-    for asset in media_assets:
-        relative = str(asset.get("asset") or "")
-        asset_path = _media_asset_path(root, relative)
-        _assert(asset_path.is_file(), f"静态证据包缺少资产：{relative}")
-        _assert(_sha256(asset_path) == str(asset.get("sha256") or ""), f"静态证据包哈希不一致：{relative}")
     _verify_current_four_scenario_acceptance(root / FOUR_SCENARIO_ACCEPTANCE, root=root)
     return {"entries": len(names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
 
@@ -421,6 +416,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/openapi.yaml",
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
+        CUSTOMER_RELEASE_NOTES,
+        PACKAGE_LAYOUT_GUIDE,
         "甲方沟通交付文档/README.md",
         FOUR_SCENARIO_CUSTOMER_GUIDE,
         FOUR_SCENARIO_REPORT_INDEX,
@@ -443,7 +440,7 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     )
     _assert(not blocked, f"甲方包包含内部或敏感文件：{blocked[:20]}")
     _verify_customer_text_boundary(root)
-    _verify_local_html_links(root)
+    _verify_local_html_links(root, allow_missing_media=True)
 
     manifest = json.loads((root / "customer-package-manifest.json").read_text(encoding="utf-8-sig"))
     _assert(manifest.get("git_commit") == expected_commit, "甲方包提交号不是当前验收提交")
@@ -510,6 +507,48 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     workbench_html = (root / "visual_review_workbench" / "workbench.html").read_text(encoding="utf-8-sig")
     _assert("/api/review-folders-batch" in workbench_html and "batchFolderTab" in workbench_html, "甲方工作台缺少批量工单入口")
     return {"entries": len(names), "runtime_entries": len(runtime_names), "manifest_commit": manifest.get("git_commit"), "evidence": len(manifest.get("evidence") or [])}
+
+
+def _verify_evidence(zip_path: Path, root: Path, expected_commit: str) -> dict[str, Any]:
+    """验收独立离线证据包，确保报告、图片和 manifest 同一提交且未被篡改。"""
+    names = _zip_names(zip_path)
+    required = {
+        "甲方沟通交付文档/0817四场景审核业务理解与发布验收说明.html",
+        "甲方沟通交付文档/0817四场景八份审核报告质量索引.html",
+        "甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html",
+        FOUR_SCENARIO_REPORT_MEDIA_MANIFEST,
+        FOUR_SCENARIO_EVIDENCE_MANIFEST,
+        "证据包说明.md",
+        *FOUR_SCENARIO_REPORT_FILES,
+    }
+    missing = sorted(required - names)
+    _assert(not missing, f"验收证据包缺少文件：{missing}")
+    manifest = json.loads((root / FOUR_SCENARIO_EVIDENCE_MANIFEST).read_text(encoding="utf-8-sig"))
+    _assert(manifest.get("package_type") == "four_scenario_offline_evidence", "验收证据包类型不正确")
+    _assert(manifest.get("git_commit") == expected_commit, "验收证据包提交号不是当前验收提交")
+    _assert(manifest.get("report_count") == 8, "验收证据包必须包含 8 份报告")
+    media_manifest_path = root / FOUR_SCENARIO_REPORT_MEDIA_MANIFEST
+    media_manifest = json.loads(media_manifest_path.read_text(encoding="utf-8-sig"))
+    _assert(media_manifest.get("scope") == "internal_review_only", "验收证据包必须标记内部范围")
+    _assert(len(media_manifest.get("reports") or {}) == 8, "验收媒体 manifest 必须覆盖 8 份报告")
+    media_assets = media_manifest.get("assets") or []
+    _assert(len(media_assets) == manifest.get("media_asset_count"), "验收媒体数量与包 manifest 不一致")
+    for asset in media_assets:
+        relative = str(asset.get("asset") or "")
+        asset_path = _media_asset_path(root, relative)
+        _assert(asset_path.is_file(), f"验收证据包缺少媒体：{relative}")
+        _assert(_sha256(asset_path) == str(asset.get("sha256") or ""), f"验收媒体哈希不一致：{relative}")
+    _assert(
+        _sha256(media_manifest_path) == str(manifest.get("media_manifest_sha256") or ""),
+        "验收媒体 manifest 哈希不一致",
+    )
+    _verify_local_html_links(root)
+    return {
+        "entries": len(names),
+        "manifest_commit": manifest.get("git_commit"),
+        "reports": manifest.get("report_count"),
+        "media_assets": manifest.get("media_asset_count"),
+    }
 
 
 def _free_port() -> int:
@@ -811,14 +850,16 @@ def main() -> int:
     date = time.strftime("%Y%m%d")
     parser = argparse.ArgumentParser(description="MITAKO 发布包解压后验收")
     parser.add_argument("--internal-zip", type=Path, default=ROOT / "dist" / f"MITAKO_Agent-internal-dev-{date}.zip")
+    parser.add_argument("--evidence-zip", type=Path, default=ROOT / "dist" / f"MITAKO_Agent-four-scenario-evidence-{date}.zip")
     parser.add_argument("--customer-zip", type=Path, default=ROOT / "dist" / f"MITAKO_Agent-customer-preview-{date}.zip")
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     args = parser.parse_args()
 
     internal_zip = args.internal_zip.resolve()
+    evidence_zip = args.evidence_zip.resolve()
     customer_zip = args.customer_zip.resolve()
     python = args.python.resolve()
-    for path in (internal_zip, customer_zip, python):
+    for path in (internal_zip, evidence_zip, customer_zip, python):
         _assert(path.exists(), f"文件不存在：{path}")
     expected_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
 
@@ -826,10 +867,13 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="mitako-release-verify-") as temp:
         temp_root = Path(temp)
         internal_root = temp_root / "internal"
+        evidence_root = temp_root / "evidence"
         customer_root = temp_root / "customer"
         _extract(internal_zip, internal_root)
+        _extract(evidence_zip, evidence_root)
         _extract(customer_zip, customer_root)
         internal = _verify_internal(internal_zip, internal_root, expected_commit)
+        evidence = _verify_evidence(evidence_zip, evidence_root, expected_commit)
         customer = _verify_customer(customer_zip, customer_root, expected_commit)
         _verify_internal_python(internal_root, python)
         runtime = _verify_runtime(customer_root, python)
@@ -840,10 +884,12 @@ def main() -> int:
         "git_commit": expected_commit,
         "duration_seconds": round(time.time() - started, 3),
         "internal_zip": {"path": str(internal_zip), "bytes": internal_zip.stat().st_size, "sha256": _sha256(internal_zip), **internal},
+        "evidence_zip": {"path": str(evidence_zip), "bytes": evidence_zip.stat().st_size, "sha256": _sha256(evidence_zip), **evidence},
         "customer_zip": {"path": str(customer_zip), "bytes": customer_zip.stat().st_size, "sha256": _sha256(customer_zip), **customer},
         "extracted_runtime": runtime,
         "boundaries": {
-            "internal_package": "包含源码、内部文档与验收证据；默认不含 Key、运行数据库或用户附件，仅限我方研发。",
+            "internal_package": "包含源码、必要内部文档和小型演示素材；不含大体量样本视频或离线敏感图片，仅限我方研发。",
+            "evidence_package": "包含八份 HTML 与离线 WebP 图片证据，含敏感用户材料，仅限授权验收人员。",
             "customer_package": "仅含演示运行时和公开文档，不含 Key、数据库、源码、内部文档或盲测标签。",
         },
     }
