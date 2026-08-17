@@ -169,6 +169,13 @@ def _verify_hashes(root: Path, entries: list[dict[str, Any]]) -> None:
         _assert(_sha256(file_path) == expected, f"证据哈希不一致：{relative}")
 
 
+def _media_asset_path(root: Path, relative: str) -> Path:
+    """按 manifest 原路径解析静态证据，并拒绝绝对路径和目录穿越。"""
+    asset = Path(relative.replace("/", os.sep))
+    _assert(not asset.is_absolute() and ".." not in asset.parts, f"静态证据路径非法：{relative}")
+    return root / FOUR_SCENARIO_REPORT_DIR / asset
+
+
 def _resolve_acceptance_artifact(root: Path, relative: str) -> Path:
     _assert(bool(relative) and not Path(relative).is_absolute(), f"当前盲测报告路径无效：{relative or '-'}")
     resolved_root = root.resolve()
@@ -388,7 +395,7 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(bool(media_assets), "静态证据包不得为空")
     for asset in media_assets:
         relative = str(asset.get("asset") or "")
-        asset_path = root / FOUR_SCENARIO_REPORT_DIR / relative.removeprefix("media/")
+        asset_path = _media_asset_path(root, relative)
         _assert(asset_path.is_file(), f"静态证据包缺少资产：{relative}")
         _assert(_sha256(asset_path) == str(asset.get("sha256") or ""), f"静态证据包哈希不一致：{relative}")
     _verify_current_four_scenario_acceptance(root / FOUR_SCENARIO_ACCEPTANCE, root=root)
