@@ -30,10 +30,13 @@ REQUIRED_FILES = (
     "docs/delivery/java-client-sample.md",
     "docs/delivery/review-advisory-api.md",
     "docs/delivery/after-sales-agent-integration.md",
+    "docs/delivery/甲方技术对接与私有化部署说明.html",
     "docs/delivery/openapi.yaml",
     "甲方沟通交付文档/README.md",
     "甲方沟通交付文档/index.html",
-    "甲方沟通交付文档/0814四场景审核业务理解与功能验收说明.html",
+    "甲方沟通交付文档/0817四场景审核业务理解与发布验收说明.html",
+    "甲方沟通交付文档/0817四场景八份审核报告质量索引.html",
+    "甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html",
     "我方内部开发文档/README.md",
     "我方内部开发文档/index.html",
     "我方内部开发文档/工程师入门.md",
@@ -160,7 +163,8 @@ def main() -> int:
     if "我方内部开发文档" in package_script:
         errors.append("打包脚本出现内部文档明文，请确认未复制到客户包")
     for marker in (
-        "0814四场景审核业务理解与功能验收说明.html",
+        "0817四场景审核业务理解与发布验收说明.html",
+        "0817四场景八份审核报告质量索引.html",
         "review_0816_four_scenario_blind_results_latest.json",
         "_verify_current_four_scenario_acceptance",
     ):
@@ -181,7 +185,8 @@ def main() -> int:
     internal_package_script = (ROOT / "scripts/package_internal_release.ps1").read_text(encoding="utf-8")
     for marker in (
         "四场景审核业务决策与报告契约-20260812.md",
-        "0814四场景审核业务理解与功能验收说明.html",
+        "0817四场景审核业务理解与发布验收说明.html",
+        "0817四场景八份审核报告质量索引.html",
         "review_0816_four_scenario_blind_results_latest.json",
         "_verify_current_four_scenario_acceptance",
     ):

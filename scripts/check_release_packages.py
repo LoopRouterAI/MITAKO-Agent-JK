@@ -50,7 +50,19 @@ DYNAMIC_CAPACITY_EVIDENCE_PATHS = (
 )
 FOUR_SCENARIO_ACCEPTANCE = "tests/reports/review_0816_four_scenario_blind_results_latest.json"
 FOUR_SCENARIO_CONTRACT = "docs/product/四场景审核业务决策与报告契约-20260812.md"
-FOUR_SCENARIO_CUSTOMER_GUIDE = "甲方沟通交付文档/0814四场景审核业务理解与功能验收说明.html"
+FOUR_SCENARIO_CUSTOMER_GUIDE = "甲方沟通交付文档/0817四场景审核业务理解与发布验收说明.html"
+FOUR_SCENARIO_REPORT_INDEX = "甲方沟通交付文档/0817四场景八份审核报告质量索引.html"
+FOUR_SCENARIO_TECH_GUIDE = "甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html"
+FOUR_SCENARIO_REPORT_DIR = "甲方沟通交付文档/四场景审核报告"
+FOUR_SCENARIO_REPORT_FILES = tuple(
+    f"{FOUR_SCENARIO_REPORT_DIR}/review_0816_blind_{scenario}_{case_id}.html"
+    for scenario, case_id in (
+        ("product_damage", "611941"), ("product_damage", "592717"),
+        ("wrong_item", "515028"), ("wrong_item", "310508"),
+        ("missing_item", "289433"), ("missing_item", "319303"),
+        ("minor_refund", "554611"), ("minor_refund", "511007"),
+    )
+)
 
 
 def _sha256(path: Path) -> str:
@@ -230,6 +242,9 @@ def _verify_current_four_scenario_acceptance(path: Path, *, root: Path = ROOT) -
         _assert(bool(job_id), f"当前盲测 case 缺少 job_id：{case_id}")
         json_path = _verify_acceptance_report(root=root, case=case, key="report_json")
         html_path = _verify_acceptance_report(root=root, case=case, key="report_html")
+        public_html = root / FOUR_SCENARIO_REPORT_DIR / html_path.name
+        _assert(public_html.is_file(), f"交付包缺少八份正式 HTML 副本：{public_html}")
+        _assert(_sha256(public_html) == _sha256(html_path), f"正式 HTML 副本与验收源不一致：{public_html.name}")
         try:
             report_payload = json.loads(json_path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -269,6 +284,12 @@ def _verify_current_four_scenario_acceptance(path: Path, *, root: Path = ROOT) -
         len(cases) == len(SCENARIOS) * REQUIRED_CASES_PER_SCENE
         and all(count == REQUIRED_CASES_PER_SCENE for count in counts.values()),
         "当前四场景盲测必须恰好包含每场景 2 个密封 Case",
+    )
+    for required_doc in (FOUR_SCENARIO_CUSTOMER_GUIDE, FOUR_SCENARIO_REPORT_INDEX, FOUR_SCENARIO_TECH_GUIDE):
+        _assert((root / required_doc).is_file(), f"当前发布缺少交付说明：{required_doc}")
+    _assert(
+        (root / FOUR_SCENARIO_REPORT_INDEX).read_text(encoding="utf-8-sig").count("打开 HTML") == 8,
+        "八份报告索引未列满 8 案",
     )
 
 
@@ -313,6 +334,10 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "我方内部开发文档/Java开发部署与联调指南.md",
         FOUR_SCENARIO_CONTRACT,
         FOUR_SCENARIO_ACCEPTANCE,
+        FOUR_SCENARIO_CUSTOMER_GUIDE,
+        FOUR_SCENARIO_REPORT_INDEX,
+        FOUR_SCENARIO_TECH_GUIDE,
+        *FOUR_SCENARIO_REPORT_FILES,
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
         "tests/reports/dynamic_material_capacity_http_latest.json",
@@ -369,6 +394,9 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/after-sales-agent-integration.md",
         "甲方沟通交付文档/README.md",
         FOUR_SCENARIO_CUSTOMER_GUIDE,
+        FOUR_SCENARIO_REPORT_INDEX,
+        FOUR_SCENARIO_TECH_GUIDE,
+        *FOUR_SCENARIO_REPORT_FILES,
         "visual_review_workbench/workbench.html",
     }
     missing = sorted(required - names)
@@ -431,6 +459,14 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(
         any(name.endswith("review_service/media_processing.pyc") for name in runtime_names),
         "customer runtime is missing the persistent review media processing module",
+    )
+    _assert(
+        any(name.endswith("review_service/policy_governance.pyc") for name in runtime_names),
+        "customer runtime is missing the review policy governance module",
+    )
+    _assert(
+        any(name.endswith("review_service/policy_governance_router.pyc") for name in runtime_names),
+        "customer runtime is missing the review policy governance API",
     )
     installer = (root / "install-runtime-windows.bat").read_text(encoding="utf-8-sig")
     _assert(

@@ -17,6 +17,7 @@ import OpsMonitor from './pages/OpsMonitor.jsx';
 import PrivateDomainAgent from './pages/PrivateDomainAgent.jsx';
 import BusinessRules from './pages/BusinessRules.jsx';
 import ReviewModels from './pages/ReviewModels.jsx';
+import ReviewPolicies from './pages/ReviewPolicies.jsx';
 
 const NAV = [
   { id: 'dashboard', icon: LayoutDashboard, labelKey: 'admin.navDashboard', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
@@ -28,6 +29,7 @@ const NAV = [
   { id: 'approvals', icon: ClipboardCheck, labelKey: 'admin.navApprovals', roles: ['super_admin', 'supervisor'] },
   { id: 'businessRules', icon: BookOpenCheck, labelKey: 'admin.navBusinessRules', roles: ['super_admin', 'supervisor'] },
   { id: 'reviewModels', icon: Cpu, labelKey: 'admin.navReviewModels', roles: ['super_admin'] },
+  { id: 'reviewPolicies', icon: Shield, labelKey: 'admin.navReviewPolicies', roles: ['super_admin', 'supervisor'] },
   { id: 'reports', icon: BarChart3, labelKey: 'admin.navReports', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'privateDomain', icon: Network, labelKey: 'admin.navPrivateDomain', roles: ['super_admin', 'supervisor', 'bpo_manager'] },
   { id: 'ops', icon: Monitor, labelKey: 'admin.navOps', roles: ['super_admin'] },
@@ -151,6 +153,7 @@ export default function AdminShell({ user, legacyRouting }) {
         {tab === 'approvals' && <Approvals user={user} />}
         {tab === 'businessRules' && <BusinessRules />}
         {tab === 'reviewModels' && <ReviewModels />}
+        {tab === 'reviewPolicies' && <ReviewPolicies />}
         {tab === 'reports' && <Reports />}
         {tab === 'privateDomain' && <PrivateDomainAgent />}
         {tab === 'ops' && <OpsMonitor />}

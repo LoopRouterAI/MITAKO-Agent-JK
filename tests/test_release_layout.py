@@ -62,6 +62,8 @@ def _scene_contract(scenario: str) -> dict:
 def _write_current_acceptance(root: Path) -> tuple[Path, dict]:
     report_dir = root / "tests" / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
+    public_report_dir = root / "甲方沟通交付文档" / "四场景审核报告"
+    public_report_dir.mkdir(parents=True, exist_ok=True)
     markers = {
         "product_damage": "当前商品有伤场景下的用户材料是否齐全 开箱视频九项核对 主视频损伤存在性 诉求支持度",
         "wrong_item": "当前发错货场景下的用户材料是否齐全 发错货应收与实收核对 身份定义属性 同包裹证据",
@@ -80,6 +82,7 @@ def _write_current_acceptance(root: Path) -> tuple[Path, dict]:
                 "job": {"job_id": job_id, "scenario": scenario, "status": "SUCCEEDED"},
             }), encoding="utf-8")
             html_path.write_text(markers[scenario], encoding="utf-8")
+            (public_report_dir / html_path.name).write_text(markers[scenario], encoding="utf-8")
             cases.append({
                 "case_id": case_id,
                 "scenario": scenario,
@@ -114,6 +117,11 @@ def _write_current_acceptance(root: Path) -> tuple[Path, dict]:
     }
     path = report_dir / "review_0816_four_scenario_blind_results_latest.json"
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    customer_docs = root / "甲方沟通交付文档"
+    customer_docs.mkdir(parents=True, exist_ok=True)
+    (customer_docs / "0817四场景审核业务理解与发布验收说明.html").write_text("<html>guide</html>", encoding="utf-8")
+    (customer_docs / "0817甲方技术对接与私有化部署说明.html").write_text("<html>tech</html>", encoding="utf-8")
+    (customer_docs / "0817四场景八份审核报告质量索引.html").write_text("<html>" + " ".join(["打开 HTML"] * 8) + "</html>", encoding="utf-8")
     return path, payload
 
 
@@ -233,7 +241,8 @@ class ReleaseLayoutTest(unittest.TestCase):
             self.assertIn("_verify_current_four_scenario_acceptance", script)
             self.assertNotIn("review_0812_four_scenario_acceptance_latest.json", script)
             self.assertNotIn("_verify_0812_four_scenario_acceptance", script)
-            self.assertIn("0814四场景审核业务理解与功能验收说明.html", script)
+            self.assertIn("0817四场景审核业务理解与发布验收说明.html", script)
+            self.assertIn("0817四场景八份审核报告质量索引.html", script)
 
         self.assertNotIn('Copy-Dir "docs\\delivery"', customer)
         self.assertNotIn('Copy-Dir $customerDocsName $customerDocsName', customer)
@@ -290,7 +299,7 @@ class ReleaseLayoutTest(unittest.TestCase):
 
         customer_required = verifier.split("def _verify_customer(zip_path", 1)[1].split("missing = sorted", 1)[0]
         self.assertIn(
-            'FOUR_SCENARIO_CUSTOMER_GUIDE = "甲方沟通交付文档/0814四场景审核业务理解与功能验收说明.html"',
+            'FOUR_SCENARIO_CUSTOMER_GUIDE = "甲方沟通交付文档/0817四场景审核业务理解与发布验收说明.html"',
             verifier,
         )
         self.assertIn("FOUR_SCENARIO_CUSTOMER_GUIDE", customer_required)

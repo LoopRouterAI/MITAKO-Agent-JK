@@ -207,8 +207,8 @@ def publish_config(
     why = str(reason or "").strip()
     who = str(actor or "").strip()
     role = str(actor_role or "").strip()
-    if len(why) < 10 or len(why) > 500:
-        raise ValueError("修改原因必须填写 10 至 500 个字符")
+    if len(why) < 6 or len(why) > 500:
+        raise ValueError("修改原因必须填写 6 至 500 个字符")
     if not who or not role:
         raise ValueError("修改账号和角色不能为空")
     config = _normalize_config(default_model, enabled_models)

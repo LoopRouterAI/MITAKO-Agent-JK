@@ -89,6 +89,7 @@ from private_domain.router import router as private_domain_router
 from private_domain import store as private_domain_store
 from review_service.router import router as review_service_router
 from review_service.model_governance_router import router as review_model_governance_router
+from review_service.policy_governance_router import router as review_policy_governance_router
 from review_service import service as review_service_core
 from prompts.router import router as business_rules_router
 
@@ -115,6 +116,7 @@ if _business_demo_enabled():
 app.include_router(private_domain_router)
 app.include_router(review_service_router)
 app.include_router(review_model_governance_router)
+app.include_router(review_policy_governance_router)
 app.include_router(business_rules_router)
 
 

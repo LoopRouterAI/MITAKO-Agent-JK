@@ -56,7 +56,7 @@ export default function ReviewModels() {
   };
 
   const publish = async () => {
-    if (reason.trim().length < 10) {
+    if (reason.trim().length < 6) {
       setMessage(t('admin.modelReasonRequired'));
       return;
     }
@@ -105,7 +105,7 @@ export default function ReviewModels() {
   };
 
   const confirmRollback = async () => {
-    if (!rollback || rollbackReason.trim().length < 10) {
+    if (!rollback || rollbackReason.trim().length < 6) {
       setMessage(t('admin.modelReasonRequired'));
       return;
     }

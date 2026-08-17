@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>发错货审核报告</title>
+  <style>
+:root {
+  color-scheme:light;
+  --ink:#10131f; --ink-2:#252a38; --muted:#687083; --line:#e8ecdf;
+  --card:#fff; --lime:#c8ec5f; --gold:#ffd43d; --rose:#ff75a8;
+  --violet:#8b5cf6; --cyan:#12d6c7; --shadow:0 20px 52px rgba(16,19,31,.10);
+  font-family:system-ui,"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+}
+* { box-sizing:border-box; }
+:where(h1,h2,h3,h4,p,li,td,th,summary,button,a,b,span,figcaption) { overflow-wrap:anywhere; word-break:normal; }
+body {
+  margin:0; color:var(--ink);
+  background:#f5f7f3;
+}
+a { color:inherit; }
+button { font:inherit; color:inherit; cursor:pointer; }
+summary { min-height:44px; }
+.shell { width:min(1180px,calc(100vw - 32px)); margin:0 auto; padding:26px 0 56px; }
+.hero > *, .panel, .metric, .evidence-card, .media-tile { min-width:0; }
+.hero {
+  position:relative; display:grid; grid-template-columns:minmax(0,1fr) 220px;
+  gap:22px; align-items:stretch; overflow:hidden; padding:30px;
+  border:1px solid rgba(16,19,31,.08); border-radius:8px;
+  background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(248,255,230,.92));
+  box-shadow:var(--shadow);
+}
+.hero.simple { display:block; }
+.hero::after { content:""; position:absolute; inset:auto 0 0; height:10px; background:var(--gold); }
+.hero.tone-green::after { background:#2eaf5d; }
+.hero.tone-amber::after { background:#f0a31a; }
+.hero.tone-red::after { background:#df4b4b; }
+.hero.tone-gray::after { background:#6b7280; }
+.hero.tone-green .verdict-card { background:#e9f8ee; border-color:#78c895; }
+.hero.tone-amber .verdict-card { background:#fff5d9; border-color:#e8bd59; }
+.hero.tone-red .verdict-card { background:#fff0f0; border-color:#e29292; }
+.hero.tone-gray .verdict-card { background:#f1f3f5; border-color:#aeb4bd; }
+.badge {
+  display:inline-flex; align-items:center; min-height:31px; padding:6px 11px;
+  border:1px solid rgba(16,19,31,.10); border-radius:8px;
+  background:linear-gradient(90deg,var(--lime),#efffb2);
+  box-shadow:0 10px 24px rgba(139,214,0,.18); font-size:12px; font-weight:950;
+}
+.severity-flag {
+  display:grid; grid-template-columns:auto 1fr; align-items:center; width:min(100%,620px);
+  margin-top:14px; padding:12px 14px; border:2px solid #8c94a3; border-radius:8px; background:#f4f5f7;
+}
+.severity-flag small { grid-column:1 / -1; color:var(--muted); font-weight:900; }
+.severity-flag b { font-size:34px; line-height:1; }
+.severity-flag span { padding-left:14px; color:var(--ink-2); font-size:13px; line-height:1.55; }
+.severity-yes { border-color:#d63636; background:#fff0f0; }
+.severity-yes b { color:#b21f1f; }
+.opening-evidence-banner {
+  display:grid; grid-template-columns:minmax(150px,220px) 1fr; gap:16px; align-items:center;
+  margin-top:14px; padding:14px 16px; border:2px solid #d39b24; border-radius:8px; background:#fff8e7;
+}
+.opening-evidence-banner div { display:grid; gap:3px; }
+.opening-evidence-banner small { color:var(--muted); font-weight:900; }
+.opening-evidence-banner b { color:#8c6208; font-size:25px; }
+.opening-evidence-banner p { margin:0; }
+.opening-evidence-banner span { display:block; color:var(--muted); font-size:12px; }
+.opening-pass { border-color:#52a66d; background:#effaf2; }
+.opening-pass b { color:#22743c; }
+h1 { max-width:850px; margin:16px 0 0; font-size:clamp(30px,3.6vw,42px); line-height:1.08; letter-spacing:0; text-wrap:pretty; overflow-wrap:anywhere; }
+h2 { margin:0 0 12px; font-size:22px; line-height:1.2; }
+h3 { margin:20px 0 10px; font-size:16px; }
+p { line-height:1.75; }
+.lead { max-width:850px; margin:16px 0 0; color:var(--ink-2); font-size:17px; }
+.verdict-card {
+  display:grid; align-content:center; gap:8px; min-height:190px; padding:20px;
+  border:1px solid rgba(16,19,31,.10); border-radius:8px; box-shadow:0 18px 42px rgba(16,19,31,.14);
+}
+.verdict-card small, .metric small, .evidence-card small, .muted, .section-head p { color:var(--muted); }
+.fine-print { margin:10px 0; color:var(--muted); font-size:12px; line-height:1.6; }
+.verdict-card b { font-size:clamp(36px,4vw,44px); line-height:1; }
+.verdict-card span { font-weight:900; }
+.panel, .metric { border:1px solid rgba(16,19,31,.08); border-radius:8px; background:var(--card); box-shadow:var(--shadow); }
+.panel { margin-top:16px; padding:22px; }
+.failure-panel { background:linear-gradient(135deg,#fff2e7,#fff 74%); border-color:rgba(255,138,31,.35); }
+.technical-details > summary, .summary-signals > summary, .summary-review-details > summary { display:flex; min-height:44px; align-items:center; cursor:pointer; font-weight:900; list-style-position:inside; }
+.technical-details-body { margin-top:16px; }
+.table-wrap { width:100%; max-width:100%; overflow-x:auto; overscroll-behavior-inline:contain; }
+.table-wrap table { width:100%; border-collapse:collapse; }
+.summary-review-details { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:8px; background:#fbfdf8; }
+.summary-review-details-body { margin-top:12px; }
+.technical-details-body > .panel { box-shadow:none; border-color:var(--line); }
+.summary-attention, .summary-reason, .summary-gaps, .human-action { margin-top:12px; padding:14px; border-radius:8px; background:#f7faef; }
+.summary-attention h3, .summary-reason h3, .summary-gaps h3, .human-action h3 { margin-top:0; }
+.attention-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+.attention-grid article { min-width:0; }
+.attention-grid h4 { margin:0 0 8px; }
+.summary-signals { margin-top:14px; }
+.metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:12px; margin-top:16px; }
+.causality-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin:14px 0; }
+.causality-grid article { min-width:0; padding:14px; border:1px solid var(--line); border-radius:8px; background:#f8fff0; }
+.causality-grid small { display:block; color:var(--muted); margin-bottom:7px; }
+.causality-grid b { display:block; overflow-wrap:anywhere; }
+.material-readiness-summary { border-left:5px solid #6b7280 !important; }
+.material-readiness-summary.status-green { border-left-color:#2eaf5d !important; background:#f2fbf5; }
+.material-readiness-summary.status-amber { border-left-color:#f0a31a !important; background:#fffaf0; }
+.material-readiness-summary.status-red { border-left-color:#df4b4b !important; background:#fff5f5; }
+.material-readiness-summary span { display:block; margin-top:7px; color:var(--muted); font-size:12px; }
+.material-readiness-details { margin-top:14px; padding:14px; border-radius:8px; }
+.material-readiness-details summary { cursor:pointer; font-weight:900; }
+.causality-panel { border-left:5px solid var(--cyan); }
+.metric { min-height:112px; padding:16px; }
+.metric.hot { background:linear-gradient(135deg,var(--lime),#fff7a6); }
+.metric b { display:block; margin-top:8px; font-size:24px; line-height:1.15; }
+.lead, .metric b, .evidence-card p, .media-tile figcaption { overflow-wrap:anywhere; word-break:break-word; }
+.section-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:14px; }
+.section-head p { max-width:520px; margin:0; font-size:13px; }
+.evidence-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; }
+.evidence-card { min-height:210px; padding:13px; border:1px solid var(--line); border-radius:8px; background:linear-gradient(135deg,#fff,#fbfff0); }
+.evidence-card p { margin:10px 0; font-size:14px; }
+.evidence-card .evidence-impact { display:grid; gap:3px; padding:9px 10px; border-left:4px solid var(--cyan); border-radius:8px; background:#effcf9; color:var(--ink-2); }
+.evidence-impact strong { font-size:12px; }
+.evidence-card b { display:inline-flex; max-width:100%; padding:5px 9px; border-radius:8px; background:linear-gradient(90deg,var(--lime),var(--gold)); font-size:12px; }
+.risk-panel { border-top:4px solid #d76543; background:#fffaf7; }
+.issue-panel { border-top:4px solid var(--cyan); background:#f7fcfd; }
+.boundary-panel { border-top:4px solid #75a43a; background:#fbfdf8; }
+.boundary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; }
+.boundary-card { min-width:0; padding:16px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.boundary-card h3 { margin-top:0; }
+.boundary-card p { margin:0; overflow-wrap:anywhere; }
+.status-card { border-left:6px solid #d3d8df; }
+.status-green { border-left-color:#2eaf5d; background:#f2fbf5; }
+.status-amber { border-left-color:#f0a31a; background:#fffaf0; }
+.status-red { border-left-color:#df4b4b; background:#fff5f5; }
+.status-gray { border-left-color:#6b7280; background:#f4f5f6; }
+.evidence-link { display:inline-flex; max-width:100%; min-height:44px; align-items:center; margin:2px 4px 2px 0; padding:6px 9px; border:1px solid #9bc7bd; border-radius:8px; color:#11665b; font-weight:800; text-decoration:none; }
+.evidence-link:hover, .evidence-link:focus-visible { background:#e8f8f4; outline:2px solid #12a895; outline-offset:2px; }
+.human-action { margin-top:16px; padding:18px; border:1px solid var(--line); border-left-width:8px; border-radius:8px; }
+.human-action h3 { margin:0 0 6px; }
+.human-action p { margin:0; font-size:17px; font-weight:750; }
+.inference-channels-panel summary { cursor:pointer; margin-bottom:12px; font-size:18px; font-weight:900; }
+.minor-report .video-only, .minor-report .product-only { display:none !important; }
+.boundary-list { margin:0; padding-left:20px; }
+.boundary-list li { margin:7px 0; line-height:1.65; overflow-wrap:anywhere; }
+.evidence-media { display:grid; gap:8px; margin:8px 0 10px; }
+.thumb { display:block; width:100%; min-height:44px; padding:0; overflow:hidden; border:1px solid rgba(16,19,31,.12); border-radius:8px; background:#10131f; }
+.thumb img, .media-tile img { display:block; width:100%; aspect-ratio:16/10; object-fit:contain; background:#10131f; }
+.jump { display:inline-flex; width:max-content; max-width:100%; min-height:44px; align-items:center; padding:8px 10px; border:1px solid rgba(16,19,31,.12); border-radius:8px; background:#fff; text-decoration:none; font-size:12px; font-weight:950; white-space:normal; }
+.inline-preview { display:inline-flex; width:max-content; min-height:44px; align-items:center; padding:6px 0; border:0; background:transparent; color:var(--ink); text-align:left; font-weight:950; }
+.proof { background:linear-gradient(135deg,#fff,#fff7da); }
+.media-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:12px; }
+.media-tile { margin:0; overflow:hidden; border:1px solid var(--line); border-radius:8px; background:#fff; box-shadow:0 12px 28px rgba(16,19,31,.08); }
+.media-tile > button { display:block; width:100%; min-height:44px; padding:0; border:0; background:#10131f; }
+.media-tile figcaption { display:grid; gap:4px; padding:9px; color:var(--muted); font-size:12px; }
+.media-tile figcaption a { color:var(--ink); font-weight:950; }
+.lightbox:not([open]) { display:none; }
+.lightbox[open] { position:fixed; inset:0; z-index:50; display:grid; width:100vw; max-width:none; height:100dvh; max-height:none; margin:0; place-items:center; padding:22px; border:0; background:transparent; }
+.lightbox::backdrop { background:rgba(16,19,31,.72); backdrop-filter:blur(10px); }
+.lightbox-panel { position:relative; z-index:1; width:min(1080px,100%); max-height:92vh; overflow:hidden; border:1px solid rgba(255,255,255,.34); border-radius:8px; background:#fff; box-shadow:0 28px 72px rgba(0,0,0,.32); }
+.lightbox-panel header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); background:linear-gradient(90deg,var(--lime),#fff8bd); }
+.lightbox-panel header button { min-width:44px; min-height:44px; padding:8px 12px; border:1px solid rgba(16,19,31,.16); border-radius:8px; background:#fff; font-weight:950; }
+.lightbox-body { display:grid; place-items:center; max-height:calc(92vh - 62px); padding:12px; background:#10131f; }
+.lightbox-body img, .lightbox-body video { display:block; max-width:100%; max-height:calc(92vh - 86px); border-radius:8px; object-fit:contain; }
+@media (max-width:760px) {
+  .shell { width:min(100% - 20px,1180px); padding-top:12px; }
+  .hero { grid-template-columns:1fr; padding:18px; border-radius:8px; }
+  h1, p, .lead { overflow-wrap:anywhere; word-break:normal; }
+  h1 { font-size:30px; }
+  .metrics { grid-template-columns:1fr; }
+  .metric { min-height:auto; }
+  .verdict-card { min-height:130px; }
+  .verdict-card b { font-size:38px; }
+  .section-head { display:block; }
+  .panel { padding:16px; border-radius:8px; }
+}
+@media (max-width:520px) {
+  .shell { width:calc(100% - 20px); max-width:370px; margin-inline:auto; }
+}
+</style>
+</head>
+<body class="fulfillment-report scene-wrong-item">
+<main class="shell">
+  <section class="hero tone-amber">
+    <div>
+      <span class="badge">发错货审核报告</span>
+      
+      <h1>现有证据尚不足以判断</h1>
+      
+    </div>
+    <aside class="verdict-card">
+      <small>审核建议</small>
+      <b>待确认</b>
+      <span>证据分数 69%</span>
+    </aside>
+  </section>
+
+  
+    <section class="panel advisory-panel decision-evidence_inconclusive">
+    <div class="section-head"><h2>客服审核摘要</h2><p>先看结论、材料状态和下一步，需要时再展开证据。</p></div>
+    <div class="causality-grid"><article class="material-readiness-summary status-red"><small>当前发错货场景下的用户材料是否齐全</small><b>不齐全</b><span>材料状态确定性 100%</span></article></div>
+    
+    <div class="human-action status-green">
+      <h3>建议下一步</h3><p>按报告中的材料缺口补充连续材料或其他缺失证据，材料齐备后重新送审。</p>
+    </div>
+    <details class="summary-review-details"><summary>查看判断依据与关键证据</summary><div class="summary-review-details-body"><div class="summary-reason"><h3>证据结论</h3><p>当前证据或业务基准不足，建议先补充所列材料，再形成明确事实判断。</p><p class="fine-print"><b>处理口径：</b>按照 SOP，只补充报告明确列出的缺失或看不清材料。</p></div><p class="fine-print">证据分数表示本轮证据充分程度，不是客观正确率。</p>
+    <section class="summary-attention status-card status-amber">
+      <h3>复核顺序</h3>
+      <p><b>请先补充标黄材料</b></p>
+      <div class="attention-grid"><article><h4>优先核对</h4><ul class="boundary-list"><li>先对齐订单 SKU、商品名称和规格基准，再核对实收商品的型号、颜色、尺寸或关键外观。</li><li>随机款、赠品或可替代规格必须按订单规则单独核验，不能仅凭外观不同判定错发。</li></ul></article><article><h4>材料缺口</h4><ul class="boundary-list"><li>实收商品身份证据</li><li>实收商品与订单包裹的关联证据</li></ul></article></div>
+    </section><div class="summary-gaps"><h3>需要补什么</h3><p>实收商品身份证据；实收商品与订单包裹的关联证据</p></div><div class="summary-reason"><h3>人工复核说明</h3><p>当前可直接向用户补充收集材料，无需仅因材料缺口先占用人工审核席位。</p></div><h3>关键证据</h3><div class="evidence-grid"><article class="evidence-card"><small>补充图片 · 证据 1</small><div class="evidence-media"><button class="thumb preview-trigger" type="button" data-preview-kind="image" aria-label="预览查看补充图片 1" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/36c0e980fa82045101fb7872bf3ea333?expires=1786891443&amp;sig=b94e6109ec36d3ca2849928142e76865f7bf80394802ad5f4c4c8d4751ca0e68" data-preview-title="查看补充图片 1"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/36c0e980fa82045101fb7872bf3ea333?expires=1786891443&amp;sig=b94e6109ec36d3ca2849928142e76865f7bf80394802ad5f4c4c8d4751ca0e68" alt="查看补充图片 1"></button></div><p>补充图片1为订单详情截图，未展示包裹或开箱实物。</p><b>已采信</b></article></div><p class="fine-print summary-boundary"><b>业务边界：</b>本服务负责输出明确的证据结论和SOP处理建议；退款、补发、换货等业务动作由甲方系统执行，是否需要人工复核由单独的复核等级决定。</p><details class="summary-signals"><summary>查看其他风险信号</summary><div class="boundary-grid"><article class="boundary-card"><h3>材料缺口</h3><p>缺失材料应优先补齐；增加抽帧或改用更强模型不能替代缺失的业务证据。</p></article></div></details>
+    <details class="material-readiness-details status-card status-red">
+      <summary>当前发错货场景下的用户材料是否齐全：不齐全</summary>
+      <p>当前发错货场景仍缺少必要材料或已有材料不满足审核要求。</p>
+      <p class="fine-print">系统收到 4 份文件：视频 0、图片 4、文档 0。</p>
+      <div class="table-wrap"><table><thead><tr><th>材料要求</th><th>级别</th><th>状态</th><th>说明</th></tr></thead><tbody><tr><td>版本化应收商品身份与数量</td><td>必需</td><td>已具备</td><td>已取得满足本项要求的可核验材料。</td></tr><tr><td>实收商品身份证据</td><td>必需</td><td>已有但不可用</td><td>应发基准、包裹关联、合规开箱视频或静态三类材料尚未形成完整路径，应先补齐可获得的材料再复核。</td></tr><tr><td>实收商品与订单包裹的关联证据</td><td>必需</td><td>已有但不可用</td><td>已收到相关材料，但当前证据不满足本项要求。</td></tr><tr><td>随机款、隐藏款或选择规则</td><td>必需</td><td>已具备</td><td>已取得满足本项要求的可核验材料。</td></tr></tbody></table></div>
+      <p class="fine-print">材料齐全性不等于履约差异成立；差异由版本化应收基线与实收事实确定性比对。</p>
+    </details></div></details>
+  </section>
+
+
+	<details class="panel technical-details">
+	  <summary>展开完整技术分析</summary>
+	  <div class="technical-details-body">
+	  <section class="metrics">
+		    <div class="metric hot"><small>视觉质检</small><b>需要补充缺失材料</b></div>
+	    
+	    <div class="metric"><small>本次审核用时</small><b>15.01 秒</b></div>
+	    <div class="metric"><small>补充图片</small><b>4</b></div>
+	    <div class="metric product-only"><small>官方参考图</small><b>6</b></div>
+	    
+		    <div class="metric"><small>报告用途</small><b>客服审核建议</b></div>
+		  </section>
+		  <details class="panel inference-channels-panel" hidden>
+			    <summary>系统处理明细</summary>
+		    <p><b>本次总用时：</b>15.01 秒；<b>各次识别累计用时：</b>14.99 秒（并行任务会重叠）。</p>
+		    <div class="boundary-grid"><p class="muted">本轮没有分通道统计。</p></div>
+		  </details>
+		  
+		  <section class="panel media-preflight-panel"><div class="section-head"><h2>送审前媒体处理</h2><p>这里只展示本轮实际执行结果，不展示内部地址或调试参数。</p></div><ul class="boundary-list"><li>图片：4 张图片逐张 WebP 送审，最长边不超过 2560 像素，未拼接大图。</li></ul></section>
+		  
+	  
+
+	  <section class="panel">
+	    <div class="section-head"><h2>审核Agent采信的证据</h2><p>每张图都可以在本页放大查看；带时间点的帧可以直接预览原视频片段。</p></div>
+	    <div class="evidence-grid"><article class="evidence-card"><small>补充图片 · 证据 1</small><div class="evidence-media"><button class="thumb preview-trigger" type="button" data-preview-kind="image" aria-label="预览查看补充图片 1" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/36c0e980fa82045101fb7872bf3ea333?expires=1786891443&amp;sig=b94e6109ec36d3ca2849928142e76865f7bf80394802ad5f4c4c8d4751ca0e68" data-preview-title="查看补充图片 1"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/36c0e980fa82045101fb7872bf3ea333?expires=1786891443&amp;sig=b94e6109ec36d3ca2849928142e76865f7bf80394802ad5f4c4c8d4751ca0e68" alt="查看补充图片 1"></button></div><p>补充图片1为订单详情截图，未展示包裹或开箱实物。</p><b>已采信</b></article></div>
+	  </section>
+
+  
+  
+
+  
+  
+
+	  <section class="panel boundary-panel">
+	    <div class="section-head"><h2>置信度与已知边界</h2><p>帮助VIP客服理解分数依据、缺失材料和本轮视觉判断无法覆盖的范围。</p></div>
+	    <div class="boundary-grid">
+	      <article class="boundary-card"><h3>置信度理由</h3><p>当前证据或业务基准不足，建议先补充所列材料，再形成明确事实判断。</p></article>
+	      <article class="boundary-card"><h3>材料缺口</h3><ul class="boundary-list"><li>实收商品身份证据</li><li>实收商品与订单包裹的关联证据</li></ul></article>
+	      <article class="boundary-card"><h3>模型局限</h3><ul class="boundary-list"><li>本报告只说明送审证据支持什么结论，不能替代甲方的退款、换货、补偿或拒绝决定。</li><li>未接入的订单、仓库、物流或权威核验数据不会被假设为已核验。</li></ul></article>
+	    </div>
+	  </section>
+
+    
+    
+    
+  
+  
+  <section class="panel fulfillment-panel">
+    <div class="section-head"><h2>发错货应收与实收核对</h2><p>订单基准、实际识别和未确认项分开表达；证据不完整不直接下结论。</p></div>
+    <div class="causality-grid">
+      <article><small>基准版本</small><b>order_info_snapshot:8dc75f4f0419fc35</b></article>
+      <article><small>包裹是否全部提交</small><b>否/未确认</b></article>
+      <article><small>物品是否全部展示</small><b>否/未确认</b></article>
+      <article><small>物品观察自评分</small><b>1.0</b></article>
+      <article><small>对账置信度</small><b>0.0</b></article>
+      <article><small>实收证据路线</small><b>证据路径未齐</b></article>
+      <article><small>最终事实依据</small><b>尚未形成</b></article>
+      <article><small>用户材料</small><b>用户材料未齐或未确认</b></article>
+      
+      
+    </div>
+    <div class="boundary-grid">
+      <article class="boundary-card"><h3>应发清单</h3><ul class="boundary-list"><li>B款 盗墓笔记 2024刹海 徽章，应发 1 / 已识别 -</li><li>M款 盗墓笔记 2024刹海 徽章，应发 1 / 已识别 -</li><li>I款 盗墓笔记 2024刹海 徽章，应发 2 / 已识别 -</li><li>O款 盗墓笔记 2024刹海 徽章，应发 1 / 已识别 -</li><li>L款 盗墓笔记 2024刹海 徽章，应发 2 / 已识别 -</li><li>E款 盗墓笔记 2024刹海 徽章，应发 1 / 已识别 -</li><li>D款 盗墓笔记 2024刹海 徽章，应发 1 / 已识别 -</li><li>F款 盗墓笔记 2024刹海 徽章，应发 1 / 已识别 -</li><li>藏海花P 盗墓笔记 2024覆雪归途 收藏卡，应发 1 / 已识别 -</li><li>三日静寂E 盗墓笔记 2024覆雪归途 收藏卡，应发 1 / 已识别 -</li><li>藏海花C 盗墓笔记 2024覆雪归途 收藏卡，应发 1 / 已识别 -</li><li>印迹-横N 盗墓笔记 2024覆雪归途 收藏卡，应发 1 / 已识别 -</li><li>三日静寂I 盗墓笔记 2024覆雪归途 收藏卡，应发 1 / 已识别 -</li><li>藏海花L 盗墓笔记 2024覆雪归途 收藏卡，应发 1 / 已识别 -</li></ul></article>
+      <article class="boundary-card"><h3>实收商品</h3><ul class="boundary-list"><li>送审证据未形成可确认实收清单。</li></ul></article>
+      <article class="boundary-card"><h3>身份或规格差异</h3><ul class="boundary-list"><li>未形成确定差异项。</li></ul></article>
+      <article class="boundary-card"><h3>未确认项</h3><ul class="boundary-list"><li>无额外未确认项。</li></ul></article>
+    </div>
+    <div class="boundary-grid"><article class="boundary-card"><h3>身份定义属性</h3><ul class="boundary-list"><li>本轮未形成可确认的角色、系列、版本或形态属性。</li></ul></article><article class="boundary-card"><h3>描述性差异</h3><ul class="boundary-list"><li>本轮未记录页面尺寸或普通描述差异。</li></ul><p class="fine-print">描述性差异不能单独证明发错货。</p></article></div>
+    <h3>同包裹证据</h3><section class="package-observation"><h4>unassigned</h4><p><b>开箱过程：</b>未确认；<b>内容展示：</b>未全部铺开</p><div class="evidence-grid"><article class="evidence-card"><small>补充图片 · 证据 1</small><p>补充图片1为订单详情截图，未展示包裹或开箱实物。</p><p class="evidence-impact"><strong>证据作用</strong>用于复核实收商品是否来自同一受信包裹。</p><b>包裹证据</b></article></div></section>
+    
+    <p><b>包裹覆盖：</b>0/1 个应发包裹完成开箱并铺开展示</p>
+    
+    <p><b>判断边界：</b>应发基准、包裹关联、合规开箱视频或静态三类材料尚未形成完整路径，应先补齐可获得的材料再复核。</p>
+  </section>
+  
+
+  
+  <section class="panel product-only">
+    <div class="section-head"><h2>系统订单基线</h2><p>这里展示服务实际送审的受信任订单字段，不依赖模型复述。</p></div>
+    <p><b>基线版本：</b>order_info_snapshot:8dc75f4f0419fc35；<b>承运商：</b>圆通速递；<b>物流引用：</b>sha256:cf241f0339ceb3ec</p>
+    <p><b>抽赏规则：</b>完整；<b>赠品/特典规则：</b>完整；<b>分包映射：</b>single_package_from_order_snapshot</p>
+    <div class="table-wrap"><table><thead><tr><th>行项目</th><th>SKU</th><th>商品</th><th>规格</th><th>应发数量</th></tr></thead><tbody><tr><td>ORDER-LINE-001</td><td>ixedmchhz002</td><td>B款 盗墓笔记 2024刹海 徽章</td><td>75mm</td><td>1</td></tr><tr><td>ORDER-LINE-002</td><td>ixedmchhz013</td><td>M款 盗墓笔记 2024刹海 徽章</td><td>75mm</td><td>1</td></tr><tr><td>ORDER-LINE-003</td><td>ixedmchhz009</td><td>I款 盗墓笔记 2024刹海 徽章</td><td>75mm</td><td>2</td></tr><tr><td>ORDER-LINE-004</td><td>ixedmchhz015</td><td>O款 盗墓笔记 2024刹海 徽章</td><td>75mm</td><td>1</td></tr><tr><td>ORDER-LINE-005</td><td>ixedmchhz012</td><td>L款 盗墓笔记 2024刹海 徽章</td><td>75mm</td><td>2</td></tr><tr><td>ORDER-LINE-006</td><td>ixedmchhz005</td><td>E款 盗墓笔记 2024刹海 徽章</td><td>75mm</td><td>1</td></tr><tr><td>ORDER-LINE-007</td><td>ixedmchhz004</td><td>D款 盗墓笔记 2024刹海 徽章</td><td>75mm</td><td>1</td></tr><tr><td>ORDER-LINE-008</td><td>ixedmchhz006</td><td>F款 盗墓笔记 2024刹海 徽章</td><td>75mm</td><td>1</td></tr><tr><td>ORDER-LINE-009</td><td>ixedmfxsck016</td><td>藏海花P 盗墓笔记 2024覆雪归途 收藏卡</td><td>63×89mm</td><td>1</td></tr><tr><td>ORDER-LINE-010</td><td>ixedmfxsck037</td><td>三日静寂E 盗墓笔记 2024覆雪归途 收藏卡</td><td>63×89mm</td><td>1</td></tr><tr><td>ORDER-LINE-011</td><td>ixedmfxsck003</td><td>藏海花C 盗墓笔记 2024覆雪归途 收藏卡</td><td>63×89mm</td><td>1</td></tr><tr><td>ORDER-LINE-012</td><td>ixedmfxsck055</td><td>印迹-横N 盗墓笔记 2024覆雪归途 收藏卡</td><td>63×89mm</td><td>1</td></tr><tr><td>ORDER-LINE-013</td><td>ixedmfxsck041</td><td>三日静寂I 盗墓笔记 2024覆雪归途 收藏卡</td><td>63×89mm</td><td>1</td></tr><tr><td>ORDER-LINE-014</td><td>ixedmfxsck012</td><td>藏海花L 盗墓笔记 2024覆雪归途 收藏卡</td><td>63×89mm</td><td>1</td></tr></tbody></table></div>
+  </section>
+  
+  <section class="panel boundary-panel product-only">
+    <div class="section-head"><h2>官方商品参考图</h2><p>仅作为订单商品标准外观基准，不属于用户提交证据，也不能单独证明实际收货、漏发或损伤。</p></div>
+    <p><b>读取状态：</b>可用；请求 6 张，可用 6 张，失败 0 张；无需降级。</p>
+    <div class="media-grid"><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 1" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/e6392b7eb2718142ba39e7916e03ab2c?expires=1786891443&amp;sig=a3ded8789f7dae332595305b05f68129698c571a4f59cc18f72a20b69827d863" data-preview-title="官方商品参考图 1"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/e6392b7eb2718142ba39e7916e03ab2c?expires=1786891443&amp;sig=a3ded8789f7dae332595305b05f68129698c571a4f59cc18f72a20b69827d863" alt="官方商品参考图 1"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 1</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 2" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/e3bc07fa51d87ebe502926d2d2050427?expires=1786891443&amp;sig=a93eb0ebdae5e381a4897d46ed1c6a1db310206f9b970967d8520598401c47db" data-preview-title="官方商品参考图 2"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/e3bc07fa51d87ebe502926d2d2050427?expires=1786891443&amp;sig=a93eb0ebdae5e381a4897d46ed1c6a1db310206f9b970967d8520598401c47db" alt="官方商品参考图 2"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 2</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 3" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/11336ae1a49a9be5fc2bbf629d3f8b03?expires=1786891443&amp;sig=9dadf2592fbe3d58c62503c3667d0a555f783a0710bfc2147b3c1934c5a15c2b" data-preview-title="官方商品参考图 3"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/11336ae1a49a9be5fc2bbf629d3f8b03?expires=1786891443&amp;sig=9dadf2592fbe3d58c62503c3667d0a555f783a0710bfc2147b3c1934c5a15c2b" alt="官方商品参考图 3"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 3</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 4" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/625198efaad3194a8e62945500072ff7?expires=1786891443&amp;sig=8c59c3622a18b37b41ae49836b1b5139c878a6b2871b37f68a3177e3006ef34c" data-preview-title="官方商品参考图 4"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/625198efaad3194a8e62945500072ff7?expires=1786891443&amp;sig=8c59c3622a18b37b41ae49836b1b5139c878a6b2871b37f68a3177e3006ef34c" alt="官方商品参考图 4"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 4</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 5" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/0a72e13b530e28b96ad636742c56e386?expires=1786891443&amp;sig=1bce34b6b538468e17db933e256cd01cc158a45417bc34e31cb8f00a945c2373" data-preview-title="官方商品参考图 5"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/0a72e13b530e28b96ad636742c56e386?expires=1786891443&amp;sig=1bce34b6b538468e17db933e256cd01cc158a45417bc34e31cb8f00a945c2373" alt="官方商品参考图 5"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 5</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 6" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/f1de4f69dc473836c167fec71ce2276e?expires=1786891443&amp;sig=49be7abd45d8ab33e554700e41812c7de20f766e7d87a6ec79a30700ddc0d3cd" data-preview-title="官方商品参考图 6"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/f1de4f69dc473836c167fec71ce2276e?expires=1786891443&amp;sig=49be7abd45d8ab33e554700e41812c7de20f766e7d87a6ec79a30700ddc0d3cd" alt="官方商品参考图 6"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 6</span></figcaption></figure></div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><h2>送审证据画廊</h2><p>用于快速复核审核Agent看到的帧图和用户补充图片。</p></div>
+    
+    <h3>补充图片</h3>
+    <div class="media-grid"><figure class="media-tile" id="image-1"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览补充图片：补充图片 1" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/36c0e980fa82045101fb7872bf3ea333?expires=1786891443&amp;sig=b94e6109ec36d3ca2849928142e76865f7bf80394802ad5f4c4c8d4751ca0e68" data-preview-title="补充图片 1"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/36c0e980fa82045101fb7872bf3ea333?expires=1786891443&amp;sig=b94e6109ec36d3ca2849928142e76865f7bf80394802ad5f4c4c8d4751ca0e68" alt="补充图片 1"></button><figcaption><b>补充图片</b><span>补充图片 1</span></figcaption></figure><figure class="media-tile" id="image-2"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览补充图片：补充图片 2" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/4198c833f119b811a8faea8b650190e6?expires=1786891443&amp;sig=d44be7aa0ab7d309e3fdbf339285d38917927e76912bd1e348e6c50f73e1a693" data-preview-title="补充图片 2"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/4198c833f119b811a8faea8b650190e6?expires=1786891443&amp;sig=d44be7aa0ab7d309e3fdbf339285d38917927e76912bd1e348e6c50f73e1a693" alt="补充图片 2"></button><figcaption><b>补充图片</b><span>补充图片 2</span></figcaption></figure><figure class="media-tile" id="image-3"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览补充图片：补充图片 3" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/a63f8e3896e2f080eb54b1ada02715c9?expires=1786891443&amp;sig=21087c51a0b68811acbf41c7660c899645bfe9462649c7da39e60c428420552a" data-preview-title="补充图片 3"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/a63f8e3896e2f080eb54b1ada02715c9?expires=1786891443&amp;sig=21087c51a0b68811acbf41c7660c899645bfe9462649c7da39e60c428420552a" alt="补充图片 3"></button><figcaption><b>补充图片</b><span>补充图片 3</span></figcaption></figure><figure class="media-tile" id="image-4"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览补充图片：补充图片 4" data-preview-src="/api/v1/review/jobs/RJ-8702594F347646E2/media/1672a7390e69b3cb58f4a13bc236af9b?expires=1786891443&amp;sig=f61242b088376fa12830a806d9ebb4420a369befeda10c3a375dc72bfbdb32ed" data-preview-title="补充图片 4"><img src="/api/v1/review/jobs/RJ-8702594F347646E2/media/1672a7390e69b3cb58f4a13bc236af9b?expires=1786891443&amp;sig=f61242b088376fa12830a806d9ebb4420a369befeda10c3a375dc72bfbdb32ed" alt="补充图片 4"></button><figcaption><b>补充图片</b><span>补充图片 4</span></figcaption></figure></div>
+	  </section>
+	  </div>
+	</details>
+</main>
+
+<dialog class="lightbox" id="mediaLightbox" aria-labelledby="lightboxTitle">
+  <section class="lightbox-panel">
+    <header><b id="lightboxTitle">证据预览</b><button type="button" data-close-preview>关闭</button></header>
+    <div id="lightboxBody" class="lightbox-body"></div>
+  </section>
+</dialog>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  try {
+    var box = document.getElementById('mediaLightbox');
+    var body = document.getElementById('lightboxBody');
+    var title = document.getElementById('lightboxTitle');
+    var opener = null;
+    if (!box || !body || !title) return;
+    function closePreview() {
+      if (box.open) box.close();
+    }
+    function openPreview(button) {
+      var src = button.getAttribute('data-preview-src') || '';
+      var kind = button.getAttribute('data-preview-kind') || 'image';
+      title.textContent = button.getAttribute('data-preview-title') || '证据预览';
+      body.replaceChildren();
+      if (kind === 'video') {
+        var video = document.createElement('video');
+        var seekSeconds = Number(button.getAttribute('data-preview-seconds'));
+        video.src = src;
+        video.controls = true;
+        video.playsInline = true;
+        if (Number.isFinite(seekSeconds) && seekSeconds >= 0) {
+          video.addEventListener('loadedmetadata', function () {
+            video.currentTime = seekSeconds;
+          }, { once: true });
+        }
+        body.appendChild(video);
+      } else {
+        var img = document.createElement('img');
+        img.src = src;
+        img.alt = title.textContent;
+        body.appendChild(img);
+      }
+      opener = button;
+      box.showModal();
+      box.querySelector('[data-close-preview]').focus();
+    }
+    document.querySelectorAll('[data-preview-src]').forEach(function (button) {
+      button.addEventListener('click', function () { openPreview(button); });
+    });
+    document.querySelectorAll('[data-close-preview]').forEach(function (button) {
+      button.addEventListener('click', closePreview);
+    });
+    box.addEventListener('click', function (event) {
+      if (event.target === box) closePreview();
+    });
+    box.addEventListener('close', function () {
+      body.replaceChildren();
+      if (opener && opener.isConnected) opener.focus();
+      opener = null;
+    });
+  } catch (error) {
+    console.error('报告预览初始化失败', error);
+  }
+});
+</script>
+
+</body>
+</html>

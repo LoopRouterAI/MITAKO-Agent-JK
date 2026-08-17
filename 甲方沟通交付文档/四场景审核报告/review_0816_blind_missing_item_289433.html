@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>漏发货审核报告</title>
+  <style>
+:root {
+  color-scheme:light;
+  --ink:#10131f; --ink-2:#252a38; --muted:#687083; --line:#e8ecdf;
+  --card:#fff; --lime:#c8ec5f; --gold:#ffd43d; --rose:#ff75a8;
+  --violet:#8b5cf6; --cyan:#12d6c7; --shadow:0 20px 52px rgba(16,19,31,.10);
+  font-family:system-ui,"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+}
+* { box-sizing:border-box; }
+:where(h1,h2,h3,h4,p,li,td,th,summary,button,a,b,span,figcaption) { overflow-wrap:anywhere; word-break:normal; }
+body {
+  margin:0; color:var(--ink);
+  background:#f5f7f3;
+}
+a { color:inherit; }
+button { font:inherit; color:inherit; cursor:pointer; }
+summary { min-height:44px; }
+.shell { width:min(1180px,calc(100vw - 32px)); margin:0 auto; padding:26px 0 56px; }
+.hero > *, .panel, .metric, .evidence-card, .media-tile { min-width:0; }
+.hero {
+  position:relative; display:grid; grid-template-columns:minmax(0,1fr) 220px;
+  gap:22px; align-items:stretch; overflow:hidden; padding:30px;
+  border:1px solid rgba(16,19,31,.08); border-radius:8px;
+  background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(248,255,230,.92));
+  box-shadow:var(--shadow);
+}
+.hero.simple { display:block; }
+.hero::after { content:""; position:absolute; inset:auto 0 0; height:10px; background:var(--gold); }
+.hero.tone-green::after { background:#2eaf5d; }
+.hero.tone-amber::after { background:#f0a31a; }
+.hero.tone-red::after { background:#df4b4b; }
+.hero.tone-gray::after { background:#6b7280; }
+.hero.tone-green .verdict-card { background:#e9f8ee; border-color:#78c895; }
+.hero.tone-amber .verdict-card { background:#fff5d9; border-color:#e8bd59; }
+.hero.tone-red .verdict-card { background:#fff0f0; border-color:#e29292; }
+.hero.tone-gray .verdict-card { background:#f1f3f5; border-color:#aeb4bd; }
+.badge {
+  display:inline-flex; align-items:center; min-height:31px; padding:6px 11px;
+  border:1px solid rgba(16,19,31,.10); border-radius:8px;
+  background:linear-gradient(90deg,var(--lime),#efffb2);
+  box-shadow:0 10px 24px rgba(139,214,0,.18); font-size:12px; font-weight:950;
+}
+.severity-flag {
+  display:grid; grid-template-columns:auto 1fr; align-items:center; width:min(100%,620px);
+  margin-top:14px; padding:12px 14px; border:2px solid #8c94a3; border-radius:8px; background:#f4f5f7;
+}
+.severity-flag small { grid-column:1 / -1; color:var(--muted); font-weight:900; }
+.severity-flag b { font-size:34px; line-height:1; }
+.severity-flag span { padding-left:14px; color:var(--ink-2); font-size:13px; line-height:1.55; }
+.severity-yes { border-color:#d63636; background:#fff0f0; }
+.severity-yes b { color:#b21f1f; }
+.opening-evidence-banner {
+  display:grid; grid-template-columns:minmax(150px,220px) 1fr; gap:16px; align-items:center;
+  margin-top:14px; padding:14px 16px; border:2px solid #d39b24; border-radius:8px; background:#fff8e7;
+}
+.opening-evidence-banner div { display:grid; gap:3px; }
+.opening-evidence-banner small { color:var(--muted); font-weight:900; }
+.opening-evidence-banner b { color:#8c6208; font-size:25px; }
+.opening-evidence-banner p { margin:0; }
+.opening-evidence-banner span { display:block; color:var(--muted); font-size:12px; }
+.opening-pass { border-color:#52a66d; background:#effaf2; }
+.opening-pass b { color:#22743c; }
+h1 { max-width:850px; margin:16px 0 0; font-size:clamp(30px,3.6vw,42px); line-height:1.08; letter-spacing:0; text-wrap:pretty; overflow-wrap:anywhere; }
+h2 { margin:0 0 12px; font-size:22px; line-height:1.2; }
+h3 { margin:20px 0 10px; font-size:16px; }
+p { line-height:1.75; }
+.lead { max-width:850px; margin:16px 0 0; color:var(--ink-2); font-size:17px; }
+.verdict-card {
+  display:grid; align-content:center; gap:8px; min-height:190px; padding:20px;
+  border:1px solid rgba(16,19,31,.10); border-radius:8px; box-shadow:0 18px 42px rgba(16,19,31,.14);
+}
+.verdict-card small, .metric small, .evidence-card small, .muted, .section-head p { color:var(--muted); }
+.fine-print { margin:10px 0; color:var(--muted); font-size:12px; line-height:1.6; }
+.verdict-card b { font-size:clamp(36px,4vw,44px); line-height:1; }
+.verdict-card span { font-weight:900; }
+.panel, .metric { border:1px solid rgba(16,19,31,.08); border-radius:8px; background:var(--card); box-shadow:var(--shadow); }
+.panel { margin-top:16px; padding:22px; }
+.failure-panel { background:linear-gradient(135deg,#fff2e7,#fff 74%); border-color:rgba(255,138,31,.35); }
+.technical-details > summary, .summary-signals > summary, .summary-review-details > summary { display:flex; min-height:44px; align-items:center; cursor:pointer; font-weight:900; list-style-position:inside; }
+.technical-details-body { margin-top:16px; }
+.table-wrap { width:100%; max-width:100%; overflow-x:auto; overscroll-behavior-inline:contain; }
+.table-wrap table { width:100%; border-collapse:collapse; }
+.summary-review-details { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:8px; background:#fbfdf8; }
+.summary-review-details-body { margin-top:12px; }
+.technical-details-body > .panel { box-shadow:none; border-color:var(--line); }
+.summary-attention, .summary-reason, .summary-gaps, .human-action { margin-top:12px; padding:14px; border-radius:8px; background:#f7faef; }
+.summary-attention h3, .summary-reason h3, .summary-gaps h3, .human-action h3 { margin-top:0; }
+.attention-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+.attention-grid article { min-width:0; }
+.attention-grid h4 { margin:0 0 8px; }
+.summary-signals { margin-top:14px; }
+.metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:12px; margin-top:16px; }
+.causality-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin:14px 0; }
+.causality-grid article { min-width:0; padding:14px; border:1px solid var(--line); border-radius:8px; background:#f8fff0; }
+.causality-grid small { display:block; color:var(--muted); margin-bottom:7px; }
+.causality-grid b { display:block; overflow-wrap:anywhere; }
+.material-readiness-summary { border-left:5px solid #6b7280 !important; }
+.material-readiness-summary.status-green { border-left-color:#2eaf5d !important; background:#f2fbf5; }
+.material-readiness-summary.status-amber { border-left-color:#f0a31a !important; background:#fffaf0; }
+.material-readiness-summary.status-red { border-left-color:#df4b4b !important; background:#fff5f5; }
+.material-readiness-summary span { display:block; margin-top:7px; color:var(--muted); font-size:12px; }
+.material-readiness-details { margin-top:14px; padding:14px; border-radius:8px; }
+.material-readiness-details summary { cursor:pointer; font-weight:900; }
+.causality-panel { border-left:5px solid var(--cyan); }
+.metric { min-height:112px; padding:16px; }
+.metric.hot { background:linear-gradient(135deg,var(--lime),#fff7a6); }
+.metric b { display:block; margin-top:8px; font-size:24px; line-height:1.15; }
+.lead, .metric b, .evidence-card p, .media-tile figcaption { overflow-wrap:anywhere; word-break:break-word; }
+.section-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:14px; }
+.section-head p { max-width:520px; margin:0; font-size:13px; }
+.evidence-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; }
+.evidence-card { min-height:210px; padding:13px; border:1px solid var(--line); border-radius:8px; background:linear-gradient(135deg,#fff,#fbfff0); }
+.evidence-card p { margin:10px 0; font-size:14px; }
+.evidence-card .evidence-impact { display:grid; gap:3px; padding:9px 10px; border-left:4px solid var(--cyan); border-radius:8px; background:#effcf9; color:var(--ink-2); }
+.evidence-impact strong { font-size:12px; }
+.evidence-card b { display:inline-flex; max-width:100%; padding:5px 9px; border-radius:8px; background:linear-gradient(90deg,var(--lime),var(--gold)); font-size:12px; }
+.risk-panel { border-top:4px solid #d76543; background:#fffaf7; }
+.issue-panel { border-top:4px solid var(--cyan); background:#f7fcfd; }
+.boundary-panel { border-top:4px solid #75a43a; background:#fbfdf8; }
+.boundary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; }
+.boundary-card { min-width:0; padding:16px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.boundary-card h3 { margin-top:0; }
+.boundary-card p { margin:0; overflow-wrap:anywhere; }
+.status-card { border-left:6px solid #d3d8df; }
+.status-green { border-left-color:#2eaf5d; background:#f2fbf5; }
+.status-amber { border-left-color:#f0a31a; background:#fffaf0; }
+.status-red { border-left-color:#df4b4b; background:#fff5f5; }
+.status-gray { border-left-color:#6b7280; background:#f4f5f6; }
+.evidence-link { display:inline-flex; max-width:100%; min-height:44px; align-items:center; margin:2px 4px 2px 0; padding:6px 9px; border:1px solid #9bc7bd; border-radius:8px; color:#11665b; font-weight:800; text-decoration:none; }
+.evidence-link:hover, .evidence-link:focus-visible { background:#e8f8f4; outline:2px solid #12a895; outline-offset:2px; }
+.human-action { margin-top:16px; padding:18px; border:1px solid var(--line); border-left-width:8px; border-radius:8px; }
+.human-action h3 { margin:0 0 6px; }
+.human-action p { margin:0; font-size:17px; font-weight:750; }
+.inference-channels-panel summary { cursor:pointer; margin-bottom:12px; font-size:18px; font-weight:900; }
+.minor-report .video-only, .minor-report .product-only { display:none !important; }
+.boundary-list { margin:0; padding-left:20px; }
+.boundary-list li { margin:7px 0; line-height:1.65; overflow-wrap:anywhere; }
+.evidence-media { display:grid; gap:8px; margin:8px 0 10px; }
+.thumb { display:block; width:100%; min-height:44px; padding:0; overflow:hidden; border:1px solid rgba(16,19,31,.12); border-radius:8px; background:#10131f; }
+.thumb img, .media-tile img { display:block; width:100%; aspect-ratio:16/10; object-fit:contain; background:#10131f; }
+.jump { display:inline-flex; width:max-content; max-width:100%; min-height:44px; align-items:center; padding:8px 10px; border:1px solid rgba(16,19,31,.12); border-radius:8px; background:#fff; text-decoration:none; font-size:12px; font-weight:950; white-space:normal; }
+.inline-preview { display:inline-flex; width:max-content; min-height:44px; align-items:center; padding:6px 0; border:0; background:transparent; color:var(--ink); text-align:left; font-weight:950; }
+.proof { background:linear-gradient(135deg,#fff,#fff7da); }
+.media-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:12px; }
+.media-tile { margin:0; overflow:hidden; border:1px solid var(--line); border-radius:8px; background:#fff; box-shadow:0 12px 28px rgba(16,19,31,.08); }
+.media-tile > button { display:block; width:100%; min-height:44px; padding:0; border:0; background:#10131f; }
+.media-tile figcaption { display:grid; gap:4px; padding:9px; color:var(--muted); font-size:12px; }
+.media-tile figcaption a { color:var(--ink); font-weight:950; }
+.lightbox:not([open]) { display:none; }
+.lightbox[open] { position:fixed; inset:0; z-index:50; display:grid; width:100vw; max-width:none; height:100dvh; max-height:none; margin:0; place-items:center; padding:22px; border:0; background:transparent; }
+.lightbox::backdrop { background:rgba(16,19,31,.72); backdrop-filter:blur(10px); }
+.lightbox-panel { position:relative; z-index:1; width:min(1080px,100%); max-height:92vh; overflow:hidden; border:1px solid rgba(255,255,255,.34); border-radius:8px; background:#fff; box-shadow:0 28px 72px rgba(0,0,0,.32); }
+.lightbox-panel header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); background:linear-gradient(90deg,var(--lime),#fff8bd); }
+.lightbox-panel header button { min-width:44px; min-height:44px; padding:8px 12px; border:1px solid rgba(16,19,31,.16); border-radius:8px; background:#fff; font-weight:950; }
+.lightbox-body { display:grid; place-items:center; max-height:calc(92vh - 62px); padding:12px; background:#10131f; }
+.lightbox-body img, .lightbox-body video { display:block; max-width:100%; max-height:calc(92vh - 86px); border-radius:8px; object-fit:contain; }
+@media (max-width:760px) {
+  .shell { width:min(100% - 20px,1180px); padding-top:12px; }
+  .hero { grid-template-columns:1fr; padding:18px; border-radius:8px; }
+  h1, p, .lead { overflow-wrap:anywhere; word-break:normal; }
+  h1 { font-size:30px; }
+  .metrics { grid-template-columns:1fr; }
+  .metric { min-height:auto; }
+  .verdict-card { min-height:130px; }
+  .verdict-card b { font-size:38px; }
+  .section-head { display:block; }
+  .panel { padding:16px; border-radius:8px; }
+}
+@media (max-width:520px) {
+  .shell { width:calc(100% - 20px); max-width:370px; margin-inline:auto; }
+}
+</style>
+</head>
+<body class="fulfillment-report scene-missing-item">
+<main class="shell">
+  <section class="hero tone-red">
+    <div>
+      <span class="badge">漏发货审核报告</span>
+      
+      <h1>现有证据尚不足以判断</h1>
+      
+    </div>
+    <aside class="verdict-card">
+      <small>审核建议</small>
+      <b>待确认</b>
+      
+    </aside>
+  </section>
+
+  
+    <section class="panel advisory-panel decision-evidence_inconclusive">
+    <div class="section-head"><h2>客服审核摘要</h2><p>先看结论、材料状态和下一步，需要时再展开证据。</p></div>
+    <div class="causality-grid"><article class="material-readiness-summary status-red"><small>当前漏发货场景下的用户材料是否齐全</small><b>不齐全</b><span>材料状态确定性 80%</span></article></div>
+    
+    <div class="human-action status-red">
+      <h3>建议下一步</h3><p>请先查询甲方订单、拆单、物流签收与仓库实发数据；不要要求用户重复补交甲方系统本可取得的信息。</p>
+    </div>
+    <details class="summary-review-details"><summary>查看判断依据与关键证据</summary><div class="summary-review-details-body"><div class="summary-reason"><h3>证据结论</h3><p>当前用户证据与甲方内部履约数据尚未完成交叉核验，暂不形成漏发或发错事实结论；请先查询甲方内部订单、拆单、物流与仓库数据。</p><p class="fine-print"><b>处理口径：</b>当前尚未确认是否漏发，请核对报告中的应发商品、实收商品、分包、物流和仓库信息。</p></div>
+    <section class="summary-attention status-card status-red">
+      <h3>复核顺序</h3>
+      <p><b>存在关键冲突或必须复核项</b></p>
+      <div class="attention-grid"><article><h4>优先核对</h4><ul class="boundary-list"><li>先对齐订单应发清单与开箱全过程中的实收清单，再核对包裹、SKU、数量和在途拆分信息。</li><li>画面未出现某件商品不等于确定少件；视频覆盖不全或应发基准缺失时应先补证。</li></ul></article><article><h4>材料缺口</h4><ul class="boundary-list"><li>合规开箱视频或静态三类材料路径</li></ul></article></div>
+    </section><div class="summary-gaps"><h3>需要补什么</h3><p>合规开箱视频或静态三类材料路径</p></div><h3>关键证据</h3><div class="evidence-grid"><article class="evidence-card"><small>补充图片 · 证据 1</small><div class="evidence-media"><button class="thumb preview-trigger" type="button" data-preview-kind="image" aria-label="预览查看补充图片 2" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/6b639a2bbbc9ba5a9e83863d5b1a49e2?expires=1786891443&amp;sig=7515c52b52d55b68273725b0f1607d2b7343b0bc026d1b2a10bf2afaae07dfff" data-preview-title="查看补充图片 2"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/6b639a2bbbc9ba5a9e83863d5b1a49e2?expires=1786891443&amp;sig=7515c52b52d55b68273725b0f1607d2b7343b0bc026d1b2a10bf2afaae07dfff" alt="查看补充图片 2"></button></div><p>补充图片2中可见江户川柯南百鬼夜行徽章1个；补充图片2中可见牛岛若利下校系列徽章1个；补充图片2中可见山口忠星芒系列徽章1个；补充图片2中可见伏黑甚尔夏日系列Cafe徽章1个；补充图片2底部呈现一个红色扭蛋壳，内部物品遮挡无法辨识；补充图片2展示了实物全家福铺开状态</p><b>已采信</b></article></div><p class="fine-print summary-boundary"><b>业务边界：</b>本服务负责输出明确的证据结论和SOP处理建议；退款、补发、换货等业务动作由甲方系统执行，是否需要人工复核由单独的复核等级决定。</p><details class="summary-signals"><summary>查看其他风险信号</summary><div class="boundary-grid"><article class="boundary-card"><h3>材料缺口</h3><p>缺失材料应优先补齐；增加抽帧或改用更强模型不能替代缺失的业务证据。</p></article></div></details>
+    <details class="material-readiness-details status-card status-red">
+      <summary>当前漏发货场景下的用户材料是否齐全：不齐全</summary>
+      <p>当前漏发货场景仍缺少必要材料或已有材料不满足审核要求。</p>
+      <p class="fine-print">系统收到 2 份文件：视频 0、图片 2、文档 0。</p>
+      <div class="table-wrap"><table><thead><tr><th>材料要求</th><th>级别</th><th>状态</th><th>说明</th></tr></thead><tbody><tr><td>版本化应发商品与数量</td><td>必需</td><td>已具备</td><td>已取得满足本项要求的可核验材料。</td></tr><tr><td>订单商品与各包裹的分包映射</td><td>必需</td><td>已具备</td><td>已取得满足本项要求的可核验材料。</td></tr><tr><td>赠品、特典与选择规则</td><td>必需</td><td>已具备</td><td>已取得满足本项要求的可核验材料。</td></tr><tr><td>合规开箱视频或静态三类材料路径</td><td>必需</td><td>已有但不可用</td><td>应发基准、包裹关联、合规开箱视频或静态三类材料尚未形成完整路径，应先补齐可获得的材料再复核。</td></tr><tr><td>全部应到包裹已有可核验签收状态</td><td>辅助</td><td>缺少</td><td>甲方物流快照尚未覆盖全部应发包裹，请先查询拆单、在途与签收状态。</td></tr><tr><td>受信仓库终核事实</td><td>辅助</td><td>待确认</td><td>本案尚无受信仓库终核，按应发、分包、签收与实收证据审核。</td></tr></tbody></table></div>
+      <p class="fine-print">材料齐全性不等于履约差异成立；差异由版本化应收基线与实收事实确定性比对。</p>
+    </details></div></details>
+  </section>
+
+
+	<details class="panel technical-details">
+	  <summary>展开完整技术分析</summary>
+	  <div class="technical-details-body">
+	  <section class="metrics">
+		    <div class="metric hot"><small>视觉质检</small><b>证据不足，建议按流程补充或复核</b></div>
+	    
+	    <div class="metric"><small>本次审核用时</small><b>19.48 秒</b></div>
+	    <div class="metric"><small>补充图片</small><b>2</b></div>
+	    <div class="metric product-only"><small>官方参考图</small><b>6</b></div>
+	    
+		    <div class="metric"><small>报告用途</small><b>客服审核建议</b></div>
+		  </section>
+		  <details class="panel inference-channels-panel" hidden>
+			    <summary>系统处理明细</summary>
+		    <p><b>本次总用时：</b>19.48 秒；<b>各次识别累计用时：</b>19.46 秒（并行任务会重叠）。</p>
+		    <div class="boundary-grid"><p class="muted">本轮没有分通道统计。</p></div>
+		  </details>
+		  
+		  <section class="panel media-preflight-panel"><div class="section-head"><h2>送审前媒体处理</h2><p>这里只展示本轮实际执行结果，不展示内部地址或调试参数。</p></div><ul class="boundary-list"><li>图片：2 张图片逐张 WebP 送审，最长边不超过 2560 像素，未拼接大图。</li></ul></section>
+		  
+	  
+
+	  <section class="panel">
+	    <div class="section-head"><h2>审核Agent采信的证据</h2><p>每张图都可以在本页放大查看；带时间点的帧可以直接预览原视频片段。</p></div>
+	    <div class="evidence-grid"><article class="evidence-card"><small>补充图片 · 证据 1</small><div class="evidence-media"><button class="thumb preview-trigger" type="button" data-preview-kind="image" aria-label="预览查看补充图片 2" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/6b639a2bbbc9ba5a9e83863d5b1a49e2?expires=1786891443&amp;sig=7515c52b52d55b68273725b0f1607d2b7343b0bc026d1b2a10bf2afaae07dfff" data-preview-title="查看补充图片 2"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/6b639a2bbbc9ba5a9e83863d5b1a49e2?expires=1786891443&amp;sig=7515c52b52d55b68273725b0f1607d2b7343b0bc026d1b2a10bf2afaae07dfff" alt="查看补充图片 2"></button></div><p>补充图片2中可见江户川柯南百鬼夜行徽章1个；补充图片2中可见牛岛若利下校系列徽章1个；补充图片2中可见山口忠星芒系列徽章1个；补充图片2中可见伏黑甚尔夏日系列Cafe徽章1个；补充图片2底部呈现一个红色扭蛋壳，内部物品遮挡无法辨识；补充图片2展示了实物全家福铺开状态</p><b>已采信</b></article></div>
+	  </section>
+
+  
+  
+
+  
+  
+
+	  <section class="panel boundary-panel">
+	    <div class="section-head"><h2>置信度与已知边界</h2><p>帮助VIP客服理解分数依据、缺失材料和本轮视觉判断无法覆盖的范围。</p></div>
+	    <div class="boundary-grid">
+	      <article class="boundary-card"><h3>置信度理由</h3><p>当前用户证据与甲方内部履约数据尚未完成交叉核验，暂不形成漏发或发错事实结论。请先查询甲方内部订单、拆单、物流与仓库数据。</p></article>
+	      <article class="boundary-card"><h3>材料缺口</h3><ul class="boundary-list"><li>合规开箱视频或静态三类材料路径</li></ul></article>
+	      <article class="boundary-card"><h3>模型局限</h3><ul class="boundary-list"><li>本报告只说明送审证据支持什么结论，不能替代甲方的退款、换货、补偿或拒绝决定。</li><li>未接入的订单、仓库、物流或权威核验数据不会被假设为已核验。</li></ul></article>
+	    </div>
+	  </section>
+
+    
+    
+    
+  
+  
+  <section class="panel fulfillment-panel">
+    <div class="section-head"><h2>漏发货应发与实收核对</h2><p>订单基准、实际识别和未确认项分开表达；证据不完整不直接下结论。</p></div>
+    <div class="causality-grid">
+      <article><small>基准版本</small><b>order_info_snapshot:d72cd187569b86c9</b></article>
+      <article><small>包裹是否全部提交</small><b>否/未确认</b></article>
+      <article><small>物品是否全部展示</small><b>否/未确认</b></article>
+      <article><small>物品观察自评分</small><b>0.8</b></article>
+      <article><small>对账置信度</small><b>0.0</b></article>
+      <article><small>用户证据路线</small><b>证据路径未齐</b></article>
+      <article><small>最终事实依据</small><b>尚未形成</b></article>
+      <article><small>用户材料</small><b>用户材料未齐或未确认</b></article>
+      
+      
+    </div>
+    <div class="boundary-grid">
+      <article class="boundary-card"><h3>应发清单</h3><ul class="boundary-list"><li>江户川柯南B 名侦探柯南 百鬼夜行 徽章，应发 1 / 已识别 -</li><li>牛岛若利 排球少年 下校系列 徽章，应发 1 / 已识别 -</li><li>山口忠 排球少年 星芒系列 徽章，应发 1 / 已识别 -</li><li>伏黑甚尔 咒术回战 夏日系列 Cafe徽章（复刻），应发 1 / 已识别 -</li><li>泽村大地&amp;黑尾铁朗 排球少年 萌萌 可插立牌 Vol.2，应发 1 / 已识别 -</li><li>日向翔阳 排球少年 剧场版 徽章 Vol.1，应发 1 / 已识别 -</li></ul></article>
+      <article class="boundary-card"><h3>实收清单</h3><ul class="boundary-list"><li>江户川柯南B 名侦探柯南 百鬼夜行 徽章，应发 - / 已识别 1，证据 supplemental_image_2</li><li>牛岛若利 排球少年 下校系列 徽章，应发 - / 已识别 1，证据 supplemental_image_2</li><li>山口忠 排球少年 星芒系列 徽章，应发 - / 已识别 1，证据 supplemental_image_2</li><li>伏黑甚尔 咒术回战 夏日系列 Cafe徽章（复刻），应发 - / 已识别 1，证据 supplemental_image_2</li></ul></article>
+      <article class="boundary-card"><h3>数量差异</h3><ul class="boundary-list"><li>泽村大地&amp;黑尾铁朗 排球少年 萌萌 可插立牌 Vol.2，应发 1 / 已识别 0</li><li>日向翔阳 排球少年 剧场版 徽章 Vol.1，应发 1 / 已识别 0</li></ul></article>
+      <article class="boundary-card"><h3>未确认项</h3><ul class="boundary-list"><li>未命名项，证据 supplemental_image_2</li></ul></article>
+    </div>
+    
+    <h3>分包与内容展示证据</h3><section class="package-observation"><h4>ORDER-PACKAGE-001</h4><p><b>视频路径：</b>封箱起始 未确认；视频内面单 未确认；面单匹配订单 未确认；一镜到底 未确认；开箱完成 未确认；内容全部展示 是</p><p><b>静态路径：</b>实物全家福 是；绿色自封袋 否；清晰面单 未确认</p><div class="evidence-grid"><article class="evidence-card"><small>补充图片 · 证据 1</small><p>补充图片2展示了实物全家福铺开状态</p><p class="evidence-impact"><strong>证据作用</strong>用于复核分包是否完成开箱并铺开展示全部内容。</p><b>包裹证据</b></article></div></section>
+    
+    <p><b>包裹覆盖：</b>0/1 个应发包裹完成开箱并铺开展示</p>
+    
+    <p><b>判断边界：</b>应发基准、包裹关联、合规开箱视频或静态三类材料尚未形成完整路径，应先补齐可获得的材料再复核。</p>
+  </section>
+  
+
+  
+  <section class="panel product-only">
+    <div class="section-head"><h2>系统订单基线</h2><p>这里展示服务实际送审的受信任订单字段，不依赖模型复述。</p></div>
+    <p><b>基线版本：</b>order_info_snapshot:d72cd187569b86c9；<b>承运商：</b>圆通速递；<b>物流引用：</b>sha256:bc552c25e24cac57</p>
+    <p><b>抽赏规则：</b>完整；<b>赠品/特典规则：</b>完整；<b>分包映射：</b>single_package_from_order_snapshot</p>
+    <div class="table-wrap"><table><thead><tr><th>行项目</th><th>SKU</th><th>商品</th><th>规格</th><th>应发数量</th></tr></thead><tbody><tr><td>ORDER-LINE-001</td><td>ckjknbgyxh005</td><td>江户川柯南B 名侦探柯南 百鬼夜行 徽章</td><td>56mm</td><td>1</td></tr><tr><td>ORDER-LINE-002</td><td>enapqxxh009</td><td>牛岛若利 排球少年 下校系列 徽章</td><td>75mm</td><td>1</td></tr><tr><td>ORDER-LINE-003</td><td>iqepqsnxxlhz004</td><td>山口忠 排球少年 星芒系列 徽章</td><td>58mm</td><td>1</td></tr><tr><td>ORDER-LINE-004</td><td>krdzsxrcafe006</td><td>伏黑甚尔 咒术回战 夏日系列 Cafe徽章（复刻）</td><td>57mm</td><td>1</td></tr><tr><td>ORDER-LINE-005</td><td>fa1cmmkclpp009</td><td>泽村大地&amp;黑尾铁朗 排球少年 萌萌 可插立牌 Vol.2</td><td>54~58mm</td><td>1</td></tr><tr><td>ORDER-LINE-006</td><td>la1bpqsnjcbhzv1001</td><td>日向翔阳 排球少年 剧场版 徽章 Vol.1</td><td>50mm</td><td>1</td></tr></tbody></table></div>
+  </section>
+  
+  <section class="panel boundary-panel product-only">
+    <div class="section-head"><h2>官方商品参考图</h2><p>仅作为订单商品标准外观基准，不属于用户提交证据，也不能单独证明实际收货、漏发或损伤。</p></div>
+    <p><b>读取状态：</b>可用；请求 6 张，可用 6 张，失败 0 张；无需降级。</p>
+    <div class="media-grid"><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 1" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/a79a1e0e661ed2c2926123a82163beb1?expires=1786891443&amp;sig=8f6f43399f4af3725b35c06ddab5c842db799cb0d6dd56acdeeb59fdfe3f6934" data-preview-title="官方商品参考图 1"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/a79a1e0e661ed2c2926123a82163beb1?expires=1786891443&amp;sig=8f6f43399f4af3725b35c06ddab5c842db799cb0d6dd56acdeeb59fdfe3f6934" alt="官方商品参考图 1"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 1</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 2" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/b1c58cda6711477629f12d0b988f5b10?expires=1786891443&amp;sig=12b09d0580bc9d21701821b2b476918a661522af27b2fab2de69479061f6d137" data-preview-title="官方商品参考图 2"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/b1c58cda6711477629f12d0b988f5b10?expires=1786891443&amp;sig=12b09d0580bc9d21701821b2b476918a661522af27b2fab2de69479061f6d137" alt="官方商品参考图 2"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 2</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 3" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/6ac8caba3f5b7f3c35957812b9421da4?expires=1786891443&amp;sig=d4d69fe09cd5e9689d3c8b82b67f38ac19dd89db86ba1c32d69cab416bfee6dc" data-preview-title="官方商品参考图 3"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/6ac8caba3f5b7f3c35957812b9421da4?expires=1786891443&amp;sig=d4d69fe09cd5e9689d3c8b82b67f38ac19dd89db86ba1c32d69cab416bfee6dc" alt="官方商品参考图 3"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 3</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 4" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/88e04e515b4dce41bb650ca7173d62b6?expires=1786891443&amp;sig=a519b4d615ac0d9d4b4347d6c2ae41dabe65c19867ead896fea4d16a3fa4015c" data-preview-title="官方商品参考图 4"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/88e04e515b4dce41bb650ca7173d62b6?expires=1786891443&amp;sig=a519b4d615ac0d9d4b4347d6c2ae41dabe65c19867ead896fea4d16a3fa4015c" alt="官方商品参考图 4"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 4</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 5" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/a60ccf75e57a83482493c78a564022ec?expires=1786891443&amp;sig=1926f3d1545e1b64588144969e86bccc287bad9824d349179de1b00c600ec6d8" data-preview-title="官方商品参考图 5"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/a60ccf75e57a83482493c78a564022ec?expires=1786891443&amp;sig=1926f3d1545e1b64588144969e86bccc287bad9824d349179de1b00c600ec6d8" alt="官方商品参考图 5"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 5</span></figcaption></figure><figure class="media-tile"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览官方商品参考图：官方商品参考图 6" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/92209f8ca6939041d0c3c10333af0642?expires=1786891443&amp;sig=3f3e952b79c12135c4d3b24a4d7513515b916d8e5b84da87cfd871a5d117c2a5" data-preview-title="官方商品参考图 6"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/92209f8ca6939041d0c3c10333af0642?expires=1786891443&amp;sig=3f3e952b79c12135c4d3b24a4d7513515b916d8e5b84da87cfd871a5d117c2a5" alt="官方商品参考图 6"></button><figcaption><b>官方商品参考图</b><span>官方商品参考图 6</span></figcaption></figure></div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><h2>送审证据画廊</h2><p>用于快速复核审核Agent看到的帧图和用户补充图片。</p></div>
+    
+    <h3>补充图片</h3>
+    <div class="media-grid"><figure class="media-tile" id="image-1"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览补充图片：补充图片 1" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/a55516f2d1dd76aac80935de710cfc5d?expires=1786891443&amp;sig=3e7a146d7eee9f30264bbaf5335d5d4e92449da6226eb3559009d69af3d26330" data-preview-title="补充图片 1"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/a55516f2d1dd76aac80935de710cfc5d?expires=1786891443&amp;sig=3e7a146d7eee9f30264bbaf5335d5d4e92449da6226eb3559009d69af3d26330" alt="补充图片 1"></button><figcaption><b>补充图片</b><span>补充图片 1</span></figcaption></figure><figure class="media-tile" id="image-2"><button class="preview-trigger" type="button" data-preview-kind="image" aria-label="预览补充图片：补充图片 2" data-preview-src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/6b639a2bbbc9ba5a9e83863d5b1a49e2?expires=1786891443&amp;sig=7515c52b52d55b68273725b0f1607d2b7343b0bc026d1b2a10bf2afaae07dfff" data-preview-title="补充图片 2"><img src="/api/v1/review/jobs/RJ-72DDACD573AD4B4F/media/6b639a2bbbc9ba5a9e83863d5b1a49e2?expires=1786891443&amp;sig=7515c52b52d55b68273725b0f1607d2b7343b0bc026d1b2a10bf2afaae07dfff" alt="补充图片 2"></button><figcaption><b>补充图片</b><span>补充图片 2</span></figcaption></figure></div>
+	  </section>
+	  </div>
+	</details>
+</main>
+
+<dialog class="lightbox" id="mediaLightbox" aria-labelledby="lightboxTitle">
+  <section class="lightbox-panel">
+    <header><b id="lightboxTitle">证据预览</b><button type="button" data-close-preview>关闭</button></header>
+    <div id="lightboxBody" class="lightbox-body"></div>
+  </section>
+</dialog>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  try {
+    var box = document.getElementById('mediaLightbox');
+    var body = document.getElementById('lightboxBody');
+    var title = document.getElementById('lightboxTitle');
+    var opener = null;
+    if (!box || !body || !title) return;
+    function closePreview() {
+      if (box.open) box.close();
+    }
+    function openPreview(button) {
+      var src = button.getAttribute('data-preview-src') || '';
+      var kind = button.getAttribute('data-preview-kind') || 'image';
+      title.textContent = button.getAttribute('data-preview-title') || '证据预览';
+      body.replaceChildren();
+      if (kind === 'video') {
+        var video = document.createElement('video');
+        var seekSeconds = Number(button.getAttribute('data-preview-seconds'));
+        video.src = src;
+        video.controls = true;
+        video.playsInline = true;
+        if (Number.isFinite(seekSeconds) && seekSeconds >= 0) {
+          video.addEventListener('loadedmetadata', function () {
+            video.currentTime = seekSeconds;
+          }, { once: true });
+        }
+        body.appendChild(video);
+      } else {
+        var img = document.createElement('img');
+        img.src = src;
+        img.alt = title.textContent;
+        body.appendChild(img);
+      }
+      opener = button;
+      box.showModal();
+      box.querySelector('[data-close-preview]').focus();
+    }
+    document.querySelectorAll('[data-preview-src]').forEach(function (button) {
+      button.addEventListener('click', function () { openPreview(button); });
+    });
+    document.querySelectorAll('[data-close-preview]').forEach(function (button) {
+      button.addEventListener('click', closePreview);
+    });
+    box.addEventListener('click', function (event) {
+      if (event.target === box) closePreview();
+    });
+    box.addEventListener('close', function () {
+      body.replaceChildren();
+      if (opener && opener.isConnected) opener.focus();
+      opener = null;
+    });
+  } catch (error) {
+    console.error('报告预览初始化失败', error);
+  }
+});
+</script>
+
+</body>
+</html>
