@@ -4,6 +4,8 @@ MITAKO Agent 是供甲方客服、产品和 Java 后端研发验证的售后审�
 
 > 当前状态（2026-08-18）：四场景源码、自动回归、API/Web 技术链、JKAdmin 规则治理、媒体预处理和八案报告已进入可追溯发布版本。八案是“每场景 2 案”的工程验收样本，不代表生产准确率；报告索引会明确每案通过点和剩余边界。发布入口以 [四场景审核主线进度](docs/product/四场景审核主线进度-20260814.md)、[开发者更新日志](docs/release/2026-08-18-developer-release-notes.md) 和 [甲方用户更新说明](docs/release/2026-08-18-customer-update-notes.md) 为准。
 
+当前三包 Release：[私人仓库 v2026.08.18-r1](https://github.com/jackdiy/MITAKO-Agent/releases/tag/v2026.08.18-r1) / [公司仓库 v2026.08.18-r1](https://github.com/LoopRouterAI/MITAKO-Agent-JK/releases/tag/v2026.08.18-r1)。
+
 ## 交付入口
 
 甲方先读 [0817 四场景业务理解与发布验收说明](甲方沟通交付文档/0817四场景审核业务理解与发布验收说明.html)、[八份报告质量索引](甲方沟通交付文档/0817四场景八份审核报告质量索引.html) 和 [甲方技术对接与私有化部署说明](甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html)。
