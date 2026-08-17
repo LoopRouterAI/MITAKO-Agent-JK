@@ -52,7 +52,7 @@ dist/memes/
 dist/MITAKO_Agent-customer-delivery.html
 
 # 打包与大模型文件
-release/
+/release/
 *.zip
 *.7z
 *.pt

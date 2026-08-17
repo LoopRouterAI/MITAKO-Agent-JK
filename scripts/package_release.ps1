@@ -2,7 +2,8 @@
 param(
     [string]$BaseUrl = $(if ($env:INTERNAL_RELEASE_BASE_URL) { $env:INTERNAL_RELEASE_BASE_URL } else { "http://127.0.0.1:8015" }),
     [string]$VisualUrl = $(if ($env:INTERNAL_RELEASE_VISUAL_URL) { $env:INTERNAL_RELEASE_VISUAL_URL } else { "http://127.0.0.1:7861" }),
-    [switch]$RunModelBatch
+    [switch]$RunModelBatch,
+    [switch]$ReuseValidatedAcceptanceEvidence
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,9 +49,16 @@ function Get-RepositoryRelativePath([string]$Path) {
 
 Assert-NoTrackedChanges "Working tree contains tracked changes. Commit them before creating an auditable customer package."
 Assert-NoUntrackedCode "Working tree contains untracked code. Commit or remove it before creating an auditable customer package."
-$modelBatchParams = @{}
-if ($RunModelBatch) { $modelBatchParams.RunModelBatch = $true }
-& (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl @modelBatchParams
+if ($RunModelBatch -and $ReuseValidatedAcceptanceEvidence) {
+    throw "RunModelBatch and ReuseValidatedAcceptanceEvidence cannot be used together."
+}
+if ($ReuseValidatedAcceptanceEvidence) {
+    Write-Host "[Release] Reusing frozen four-scenario acceptance; full API/model E2E is skipped for this packaging-only release." -ForegroundColor Yellow
+} else {
+    $modelBatchParams = @{}
+    if ($RunModelBatch) { $modelBatchParams.RunModelBatch = $true }
+    & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl @modelBatchParams
+}
 Assert-NoTrackedChanges "Release validation changed tracked files. Review and commit them before customer packaging."
 Assert-NoUntrackedCode "Release validation created untracked code. Review it before customer packaging."
 
@@ -549,6 +557,8 @@ Copy-File "docs\delivery\openapi.yaml"
 Copy-File "docs\delivery\review-advisory-api.md"
 Copy-File "docs\delivery\after-sales-agent-integration.md"
 Copy-File "docs\delivery\甲方技术对接与私有化部署说明.html"
+Copy-File "docs\release\2026-08-18-customer-update-notes.md"
+Copy-File "docs\release\2026-08-18-package-layout.md"
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
 $CustomerHtmlSource = Join-Path (Join-Path $Root $customerDocsName) "0817四场景审核业务理解与发布验收说明.html"
@@ -951,6 +961,8 @@ $customerEvidenceFiles = @(
     "docs\delivery\review-advisory-api.md",
     "docs\delivery\after-sales-agent-integration.md",
     "docs\delivery\甲方技术对接与私有化部署说明.html",
+    "docs\release\2026-08-18-customer-update-notes.md",
+    "docs\release\2026-08-18-package-layout.md",
     "甲方沟通交付文档\0817四场景审核业务理解与发布验收说明.html",
     "甲方沟通交付文档\0817四场景八份审核报告质量索引.html",
     "甲方沟通交付文档\0817甲方技术对接与私有化部署说明.html",
