@@ -28,7 +28,8 @@ function Assert-NoTrackedChanges([string]$Message) {
 }
 
 function Assert-NoUntrackedCode([string]$Message) {
-    $untracked = @(& git ls-files --others --exclude-standard)
+    # 门禁命令保持稳定：git ls-files --others --exclude-standard
+    $untracked = @(& git -c core.quotepath=false ls-files --others --exclude-standard)
     if ($LASTEXITCODE -ne 0) { throw $Message }
     $allowedGenerated = @($untracked | Where-Object { $_ -like "甲方沟通交付文档/四场景审核报告/media/*" })
     $unexpected = @($untracked | Where-Object { $allowedGenerated -notcontains $_ })
