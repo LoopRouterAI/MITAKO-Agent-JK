@@ -84,11 +84,16 @@ function Copy-Path([string]$RelativePath) {
     $source = Join-Path $Root $RelativePath
     if (-not (Test-Path -LiteralPath $source)) { return }
     $target = Join-Path $Stage $RelativePath
-    $parent = Split-Path -Parent $target
-    if (-not (Test-Path -LiteralPath $parent)) {
-        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    if ((Get-Item -LiteralPath $source).PSIsContainer) {
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $target -Recurse -Force
+    } else {
+        $parent = Split-Path -Parent $target
+        if (-not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $source -Destination $target -Force
     }
-    Copy-Item -LiteralPath $source -Destination $target -Recurse -Force
 }
 
 function Copy-LatestReport([string]$Pattern, [string]$TargetRelativePath) {
