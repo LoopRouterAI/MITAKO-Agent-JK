@@ -1,9 +1,10 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BaseUrl = "http://127.0.0.1:8015",
     [string]$VisualUrl = "http://127.0.0.1:7861",
     [switch]$IncludeSecrets,
-    [switch]$RunModelBatch
+    [switch]$RunModelBatch,
+    [switch]$ReuseValidatedAcceptanceEvidence
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +54,13 @@ Assert-NoTrackedChanges "Working tree contains tracked changes. Commit them befo
 Assert-NoUntrackedCode "Working tree contains untracked code. Commit or remove it before creating an auditable internal package."
 
 function Invoke-InternalValidation {
+    if ($RunModelBatch -and $ReuseValidatedAcceptanceEvidence) {
+        throw "RunModelBatch and ReuseValidatedAcceptanceEvidence cannot be used together."
+    }
+    if ($ReuseValidatedAcceptanceEvidence) {
+        Write-Host "[Release] Reusing frozen four-scenario acceptance; full API/model E2E is skipped for this packaging-only release." -ForegroundColor Yellow
+        return
+    }
     $modelBatchParams = @{}
     if ($RunModelBatch) { $modelBatchParams.RunModelBatch = $true }
     & (Join-Path $PSScriptRoot "pre_release_internal_validation.ps1") -BaseUrl $BaseUrl -VisualUrl $VisualUrl @modelBatchParams
@@ -154,10 +162,23 @@ function Copy-SafeSampleLabels {
     $safePayload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $targetPath -Encoding UTF8
 }
 
+$InternalExcludedPrefixes = @(
+    "docs\三大审核场景的小量样本\sample_002\",
+    "docs\三大审核场景的小量样本\sample_003\",
+    "docs\三大审核场景的小量样本\sample_004\",
+    "甲方沟通交付文档\四场景审核报告\media\"
+)
+
 Reset-Stage
 
 Write-Host "[1/5] Copy committed source ..." -ForegroundColor Cyan
-git -c core.quotepath=false ls-files | ForEach-Object { Copy-Path $_ }
+git -c core.quotepath=false ls-files | ForEach-Object {
+    $relativePath = $_.Replace("/", "\")
+    $excluded = $InternalExcludedPrefixes | Where-Object {
+        $relativePath.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+    if (-not $excluded) { Copy-Path $relativePath }
+}
 Copy-Path ".env.example"
 if ($IncludeSecrets) { Copy-Path ".env" }
 
@@ -181,9 +202,6 @@ if ($IncludeSecrets) {
 }
 
 Write-Host "[3/5] Copy runnable samples and acceptance evidence ..." -ForegroundColor Cyan
-Copy-Path "docs\三大审核场景的小量样本\sample_002"
-Copy-Path "docs\三大审核场景的小量样本\sample_003"
-Copy-Path "docs\三大审核场景的小量样本\sample_004"
 Copy-SafeSampleLabels
 Copy-Path "poc\visual_review_poc\sample_videos"
 Copy-Path "tests\reports\customer_order_info_sync_strict_verify_20260720.json"
@@ -197,6 +215,7 @@ Copy-Path "甲方沟通交付文档\0817四场景审核业务理解与发布验�
 Copy-Path "甲方沟通交付文档\0817四场景八份审核报告质量索引.html"
 Copy-Path "甲方沟通交付文档\0817甲方技术对接与私有化部署说明.html"
 Copy-Path "docs\delivery\甲方技术对接与私有化部署说明.html"
+Copy-Path "docs\release\2026-08-18-package-layout.md"
 $fourScenarioPublicReportDir = "甲方沟通交付文档\四场景审核报告"
 foreach ($reportName in @(
     "review_0816_blind_product_damage_611941.html",
@@ -208,7 +227,6 @@ foreach ($reportName in @(
     "review_0816_blind_minor_refund_554611.html",
     "review_0816_blind_minor_refund_511007.html"
 )) { Copy-Path "$fourScenarioPublicReportDir\$reportName" }
-Copy-Path "$fourScenarioPublicReportDir\media"
 $fourScenarioAcceptance = Get-Content -LiteralPath $FourScenarioAcceptanceSource -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($case in $fourScenarioAcceptance.cases) {
     foreach ($propertyName in @("report_json", "report_html")) {
@@ -247,8 +265,7 @@ $evidenceFiles = @(
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_missing_item_289433.html",
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_missing_item_319303.html",
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_554611.html",
-    "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_511007.html",
-    "甲方沟通交付文档\四场景审核报告\media\manifest.json"
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_511007.html"
 )
 $evidenceHashes = @()
 foreach ($relativePath in $evidenceFiles) {
@@ -268,9 +285,11 @@ $manifest = @{
     env_included = (Test-Path -LiteralPath (Join-Path $Stage ".env"))
     databases = $databaseNames
     runtime_snapshots = @($RuntimeSnapshots)
-    samples = @("sample_002", "sample_003", "sample_004", "sample_labels.json (report evaluation only)", "visual_review_poc/sample_videos")
+    samples = @("sample_labels.json (report evaluation only)", "visual_review_poc/sample_videos")
     evidence = $evidenceHashes
-    excluded = @(".venv", "venv", "node_modules", ".git", ".codegraph", "tmp", "logs", "archive", "sample_001", "data/review_jobs", "120G customer assets")
+    package_layout = "source_and_docs_without_large_sample_media"
+    evidence_package = "MITAKO_Agent-four-scenario-evidence-$Date.zip"
+    excluded = @(".venv", "venv", "node_modules", ".git", ".codegraph", "tmp", "logs", "archive", "sample_001", "data/review_jobs", "120G customer assets", "docs/三大审核场景的小量样本/sample_002-004", "甲方沟通交付文档/四场景审核报告/media")
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $Stage "internal-package-manifest.json") -Encoding UTF8
 
@@ -288,6 +307,9 @@ $required = @(
     "甲方沟通交付文档\0817四场景八份审核报告质量索引.html",
     "甲方沟通交付文档\0817甲方技术对接与私有化部署说明.html",
     "docs\delivery\甲方技术对接与私有化部署说明.html",
+    "docs\release\2026-08-18-package-layout.md",
+    "docs\release\2026-08-18-developer-release-notes.md",
+    "docs\release\2026-08-18-customer-update-notes.md",
     "docs\三大审核场景的小量样本\sample_labels.json",
     "scripts\pre_release_internal_validation.ps1",
     "tests\reports\review_0816_four_scenario_blind_results_latest.json",
@@ -296,8 +318,7 @@ $required = @(
     "tests\reports\dynamic_material_capacity_http_62_20260730.json",
     "tests\reports\customer_order_info_sync_strict_verify_20260720.json",
     "tests\reports\customer_order_info_reconcile_applied_20260720.json",
-    "tests\reports\customer_order_info_integration_strict_final_20260720.json",
-    "甲方沟通交付文档\四场景审核报告\media\manifest.json"
+    "tests\reports\customer_order_info_integration_strict_final_20260720.json"
 )
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {

@@ -1,6 +1,6 @@
 # MITAKO Agent 文档索引
 
-> 当前入口（2026-08-14）：先读 [四场景审核主线进度](./product/四场景审核主线进度-20260814.md)，再读 [四场景审核业务决策与报告契约](./product/四场景审核业务决策与报告契约-20260812.md) 和 `product/四场景黄金审核经验/`。0727、0807、0810 等文档保留为历史证据，不再单独代表当前完成状态。
+> 当前入口（2026-08-18）：先读 [四场景审核主线进度](./product/四场景审核主线进度-20260814.md)，再读 [四场景审核业务决策与报告契约](./product/四场景审核业务决策与报告契约-20260812.md) 和 `product/四场景黄金审核经验/`。本次发布变化见 [开发者更新日志](./release/2026-08-18-developer-release-notes.md)、[甲方用户更新说明](./release/2026-08-18-customer-update-notes.md) 与 [三类交付包说明](./release/2026-08-18-package-layout.md)。0727、0807、0810 等文档保留为历史证据，不再单独代表当前完成状态。
 
 ## 当前主入口
 
@@ -10,6 +10,9 @@
 | [product/四场景审核业务决策与报告契约-20260812.md](./product/四场景审核业务决策与报告契约-20260812.md) | 产品、客服、Prompt/Schema、后端、前端和测试的唯一业务真源 |
 | `product/四场景黄金审核经验/` | 四场景独立人工审核 SOP、禁止推断、原子事实、决策和报告经验 |
 | [testing/四场景正式盲测解封评估-20260815.md](./testing/四场景正式盲测解封评估-20260815.md) | 当前正式 API 八案与人工黄金答案的逐案差异、人效边界和发布阻断 |
+| [release/2026-08-18-developer-release-notes.md](./release/2026-08-18-developer-release-notes.md) | Java/Python/前端研发；本次代码、数据流、媒体与管理能力变化 |
+| [release/2026-08-18-customer-update-notes.md](./release/2026-08-18-customer-update-notes.md) | 甲方客服、产品和项目负责人；本次版本的人话说明 |
+| [release/2026-08-18-package-layout.md](./release/2026-08-18-package-layout.md) | 发布与验收人员；三份 ZIP 的内容、隐私和回滚边界 |
 | [../Codex接续开发交接说明.md](../Codex接续开发交接说明.md) | 迁移设备与 Codex 接续 |
 | [迭代维护笔记.md](./迭代维护笔记.md) | 下一轮 Codex 先读的踩坑与需求变化记录 |
 | [../README.md](../README.md) | 所有人 |

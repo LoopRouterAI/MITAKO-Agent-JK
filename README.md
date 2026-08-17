@@ -2,15 +2,15 @@
 
 MITAKO Agent 是供甲方客服、产品和 Java 后端研发验证的售后审核 POC。当前核心不是“让大模型直接决定退款”，而是把用户素材、订单/SKU、包裹物流和可选仓库事实整理为可追溯证据，再输出客服可执行的审核建议。
 
-> 当前状态（2026-08-17）：四场景源码、自动回归、API/Web 技术链、JKAdmin 规则治理、媒体预处理和八案报告已进入可追溯发布版本。八案是“每场景 2 案”的工程验收样本，不代表生产准确率；报告索引会明确每案通过点和剩余边界。发布入口以 [四场景审核主线进度](docs/product/四场景审核主线进度-20260814.md) 和 [2026-08-17 发布说明](docs/release/2026-08-17-release-notes.md) 为准。
+> 当前状态（2026-08-18）：四场景源码、自动回归、API/Web 技术链、JKAdmin 规则治理、媒体预处理和八案报告已进入可追溯发布版本。八案是“每场景 2 案”的工程验收样本，不代表生产准确率；报告索引会明确每案通过点和剩余边界。发布入口以 [四场景审核主线进度](docs/product/四场景审核主线进度-20260814.md)、[开发者更新日志](docs/release/2026-08-18-developer-release-notes.md) 和 [甲方用户更新说明](docs/release/2026-08-18-customer-update-notes.md) 为准。
 
 ## 交付入口
 
 甲方先读 [0817 四场景业务理解与发布验收说明](甲方沟通交付文档/0817四场景审核业务理解与发布验收说明.html)、[八份报告质量索引](甲方沟通交付文档/0817四场景八份审核报告质量索引.html) 和 [甲方技术对接与私有化部署说明](甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html)。
 
-Java/后端研发先读 [内部研发文档入口](我方内部开发文档/README.md)、[当前业务契约](docs/product/四场景审核业务决策与报告契约-20260812.md)、[四场景黄金经验](docs/product/四场景黄金审核经验/README.md) 和 [发布说明](docs/release/2026-08-17-release-notes.md)。
+Java/后端研发先读 [内部研发文档入口](我方内部开发文档/README.md)、[当前业务契约](docs/product/四场景审核业务决策与报告契约-20260812.md)、[四场景黄金经验](docs/product/四场景黄金审核经验/README.md)、[开发者更新日志](docs/release/2026-08-18-developer-release-notes.md) 和 [交付包拆分说明](docs/release/2026-08-18-package-layout.md)。
 
-八份 HTML 报告的直接入口和每案质量结论集中在 [八份报告质量索引](甲方沟通交付文档/0817四场景八份审核报告质量索引.html)。内部验收目录另有 [静态图片证据包 manifest](甲方沟通交付文档/四场景审核报告/media/manifest.json)，可离线预览 WebP 图片；该目录含未成年人证件/支付材料，只随内部研发包保留。客户 ZIP 不携带原始静态证据，客户环境通过授权 API 的签名媒体查看原片和证据。
+八份 HTML 报告的直接入口和每案质量结论集中在 [八份报告质量索引](甲方沟通交付文档/0817四场景八份审核报告质量索引.html)。发布物拆为 [三类交付包](docs/release/2026-08-18-package-layout.md)：内部研发包不再携带大体量样本和离线敏感图片；独立验收证据包携带 8 份 HTML、119 个 WebP 和 manifest；客户 ZIP 通过授权 API 的签名媒体查看原片和证据。
 
 ## 核心能力
 
@@ -128,9 +128,11 @@ npm run build
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pre_release_internal_validation.ps1 -RunModelBatch
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_release.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_internal_release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_four_scenario_evidence.ps1
+.\.venv\Scripts\python.exe scripts\check_release_packages.py
 ```
 
-真实模型、正式 API/Web、桌面/移动报告和签名视频未全部通过时，发布脚本必须停止。客户包不包含源码、内部文档、模型渠道、Key、Prompt、数据库、日志或原始样本；内部研发包不得外发。
+默认打包仍执行完整预发布门禁。仅修改 README、发布说明或包布局，且当前 8 案冻结证据仍通过哈希与契约校验时，可对两个打包脚本显式追加 `-ReuseValidatedAcceptanceEvidence`，跳过重复的真实模型/API E2E；三包解压、内容、隐私、哈希和启动冒烟仍必须执行。客户包不包含源码、内部文档、模型渠道、Key、Prompt、数据库、日志或原始样本；内部研发包不得外发。
 
 ## 安全边界
 

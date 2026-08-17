@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 
 from scripts.check_release_packages import (
@@ -12,6 +13,7 @@ from scripts.check_release_packages import (
     _media_asset_path,
     _verify_0812_four_scenario_acceptance,
     _verify_current_four_scenario_acceptance,
+    _verify_evidence,
 )
 from scripts.run_final_commercial_acceptance import (
     UNSEEN_AUDIT_SCOPES,
@@ -324,6 +326,7 @@ class ReleaseLayoutTest(unittest.TestCase):
     def test_all_publishable_files_default_to_dist(self) -> None:
         customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")
         internal_script = (ROOT / "scripts" / "package_internal_release.ps1").read_text(encoding="utf-8-sig")
+        evidence_script = (ROOT / "scripts" / "package_four_scenario_evidence.ps1").read_text(encoding="utf-8-sig")
         verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         vite_config = (ROOT / "vite.config.js").read_text(encoding="utf-8")
@@ -336,7 +339,11 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertIn('$DeliveryDir = Join-Path $Root "dist"', internal_script)
         self.assertIn('$ZipPath = Join-Path $DeliveryDir "MITAKO_Agent-internal-dev-$Date.zip"', internal_script)
 
+        self.assertIn('$DeliveryDir = Join-Path $Root "dist"', evidence_script)
+        self.assertIn('MITAKO_Agent-four-scenario-evidence-$Date.zip', evidence_script)
+
         self.assertIn('ROOT / "dist" / f"MITAKO_Agent-internal-dev-{date}.zip"', verifier)
+        self.assertIn('ROOT / "dist" / f"MITAKO_Agent-four-scenario-evidence-{date}.zip"', verifier)
         self.assertIn('ROOT / "dist" / f"MITAKO_Agent-customer-preview-{date}.zip"', verifier)
 
         self.assertIn('dist/assets', package["scripts"]["prebuild"])
@@ -498,6 +505,117 @@ class ReleaseLayoutTest(unittest.TestCase):
 
         self.assertIn('source_type = "runtime_report_snapshot"', internal_script)
         self.assertIn('runtime_snapshots = @($RuntimeSnapshots)', internal_script)
+
+    def test_release_splits_source_runtime_and_offline_evidence(self) -> None:
+        internal = (ROOT / "scripts" / "package_internal_release.ps1").read_text(encoding="utf-8-sig")
+        evidence = (ROOT / "scripts" / "package_four_scenario_evidence.ps1").read_text(encoding="utf-8-sig")
+        verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")
+        report_index = (ROOT / "甲方沟通交付文档" / "0817四场景八份审核报告质量索引.html").read_text(
+            encoding="utf-8-sig"
+        )
+
+        self.assertIn('docs\\三大审核场景的小量样本\\sample_002\\', internal)
+        self.assertIn('甲方沟通交付文档\\四场景审核报告\\media\\', internal)
+        self.assertNotIn('Copy-Path "$fourScenarioPublicReportDir\\media"', internal)
+        self.assertNotIn('samples = @("sample_002", "sample_003", "sample_004"', internal)
+
+        self.assertIn('$mediaManifest.reports.PSObject.Properties', evidence)
+        self.assertIn('media_asset_count', evidence)
+        self.assertIn('evidence-package-manifest.json', evidence)
+        self.assertIn('证据包说明.md', evidence)
+
+        self.assertIn('def _verify_evidence(', verifier)
+        self.assertIn('"evidence_zip"', verifier)
+        evidence_verifier = verifier.split("def _verify_evidence(", 1)[1].split("def _free_port", 1)[0]
+        self.assertIn("_verify_local_html_links(root)", evidence_verifier)
+        internal_required = verifier.split("def _verify_internal(zip_path", 1)[1].split("def _verify_customer", 1)[0]
+        self.assertNotIn("FOUR_SCENARIO_REPORT_MEDIA_MANIFEST", internal_required)
+        self.assertIn("FOUR_SCENARIO_REPORT_MEDIA_MANIFEST", verifier.split("def _verify_evidence(", 1)[1])
+        self.assertIn('三份交付 ZIP', report_index)
+        self.assertIn('独立验收证据包', report_index)
+        self.assertNotIn('只随内部研发包保留', report_index)
+
+    def test_evidence_packaging_script_keeps_utf8_bom_for_windows_powershell(self) -> None:
+        script = (ROOT / "scripts" / "package_four_scenario_evidence.ps1").read_bytes()
+
+        self.assertTrue(script.startswith(b"\xef\xbb\xbf"))
+
+    def test_evidence_zip_verifier_checks_report_and_media_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            commit = "a" * 40
+            required_paths = [
+                Path("甲方沟通交付文档/0817四场景审核业务理解与发布验收说明.html"),
+                Path("甲方沟通交付文档/0817四场景八份审核报告质量索引.html"),
+                Path("甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html"),
+                Path("证据包说明.md"),
+            ]
+            report_paths = [
+                Path("甲方沟通交付文档/四场景审核报告") / name
+                for name in (
+                    "review_0816_blind_product_damage_611941.html",
+                    "review_0816_blind_product_damage_592717.html",
+                    "review_0816_blind_wrong_item_515028.html",
+                    "review_0816_blind_wrong_item_310508.html",
+                    "review_0816_blind_missing_item_289433.html",
+                    "review_0816_blind_missing_item_319303.html",
+                    "review_0816_blind_minor_refund_554611.html",
+                    "review_0816_blind_minor_refund_511007.html",
+                )
+            ]
+            for path in required_paths + report_paths:
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("verified", encoding="utf-8")
+
+            asset_path = root / "甲方沟通交付文档/四场景审核报告/media/CASE/user_001.webp"
+            asset_path.parent.mkdir(parents=True, exist_ok=True)
+            asset_path.write_bytes(b"webp-evidence")
+            media_manifest_path = root / "甲方沟通交付文档/四场景审核报告/media/manifest.json"
+            media_manifest = {
+                "scope": "internal_review_only",
+                "reports": {str(index): {"file": path.name} for index, path in enumerate(report_paths)},
+                "assets": [{"asset": "media/CASE/user_001.webp", "sha256": hashlib.sha256(asset_path.read_bytes()).hexdigest()}],
+            }
+            media_manifest_path.write_text(json.dumps(media_manifest), encoding="utf-8")
+            package_manifest_path = root / "evidence-package-manifest.json"
+            package_manifest_path.write_text(json.dumps({
+                "package_type": "four_scenario_offline_evidence",
+                "git_commit": commit,
+                "report_count": 8,
+                "media_asset_count": 1,
+                "media_manifest_sha256": hashlib.sha256(media_manifest_path.read_bytes()).hexdigest(),
+            }), encoding="utf-8")
+
+            zip_path = root / "evidence.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                for path in root.rglob("*"):
+                    if path.is_file() and path != zip_path:
+                        archive.write(path, path.relative_to(root).as_posix())
+
+            result = _verify_evidence(zip_path, root, commit)
+            self.assertEqual(result["reports"], 8)
+            self.assertEqual(result["media_assets"], 1)
+
+    def test_docs_only_release_can_explicitly_reuse_frozen_acceptance(self) -> None:
+        for script_name in ("package_release.ps1", "package_internal_release.ps1"):
+            source = (ROOT / "scripts" / script_name).read_text(encoding="utf-8-sig")
+            self.assertIn("[switch]$ReuseValidatedAcceptanceEvidence", source)
+            self.assertIn("if ($ReuseValidatedAcceptanceEvidence)", source)
+            self.assertIn("_verify_current_four_scenario_acceptance", source)
+            self.assertIn("pre_release_internal_validation.ps1", source)
+
+    def test_customer_package_includes_customer_release_notes_and_package_layout(self) -> None:
+        customer = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")
+        verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")
+
+        for path in (
+            "docs\\release\\2026-08-18-customer-update-notes.md",
+            "docs\\release\\2026-08-18-package-layout.md",
+        ):
+            self.assertIn(f'Copy-File "{path}"', customer)
+        self.assertIn('"docs/release/2026-08-18-customer-update-notes.md"', verifier)
+        self.assertIn('"docs/release/2026-08-18-package-layout.md"', verifier)
 
 
 if __name__ == "__main__":
