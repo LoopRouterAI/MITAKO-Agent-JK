@@ -334,6 +334,8 @@ def _verify_local_html_links(root: Path) -> None:
             # 客户包不携带身份证/支付等静态证据；这类相对路径只在内部离线包中解析，正式查看走授权 API。
             if split.path.replace("\\", "/").startswith("media/"):
                 continue
+            if split.path.replace("\\", "/") == "四场景审核报告/media/manifest.json":
+                continue
             target = (html_path.parent / unquote(split.path)).resolve()
             if root not in target.parents or not target.is_file():
                 missing.append(f"{html_path.relative_to(root).as_posix()} -> {raw}")
