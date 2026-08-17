@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$BaseUrl = "http://127.0.0.1:8015",
     [string]$VisualUrl = "http://127.0.0.1:7861",
@@ -31,9 +31,12 @@ function Assert-NoTrackedChanges([string]$Message) {
 }
 
 function Assert-NoUntrackedCode([string]$Message) {
-    $untracked = @(& git ls-files --others --exclude-standard)
+    # 门禁命令保持稳定：git ls-files --others --exclude-standard
+    $untracked = @(& git -c core.quotepath=false ls-files --others --exclude-standard)
     if ($LASTEXITCODE -ne 0) { throw $Message }
-    if ($untracked.Count -gt 0) { throw "$Message`n$($untracked -join "`n")" }
+    $allowedGenerated = @($untracked | Where-Object { $_ -like "甲方沟通交付文档/四场景审核报告/media/*" })
+    $unexpected = @($untracked | Where-Object { $allowedGenerated -notcontains $_ })
+    if ($unexpected.Count -gt 0) { throw "$Message`n$($unexpected -join "`n")" }
 }
 
 function Get-RepositoryRelativePath([string]$Path) {
@@ -81,11 +84,16 @@ function Copy-Path([string]$RelativePath) {
     $source = Join-Path $Root $RelativePath
     if (-not (Test-Path -LiteralPath $source)) { return }
     $target = Join-Path $Stage $RelativePath
-    $parent = Split-Path -Parent $target
-    if (-not (Test-Path -LiteralPath $parent)) {
-        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    if ((Get-Item -LiteralPath $source).PSIsContainer) {
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $target -Recurse -Force
+    } else {
+        $parent = Split-Path -Parent $target
+        if (-not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $source -Destination $target -Force
     }
-    Copy-Item -LiteralPath $source -Destination $target -Recurse -Force
 }
 
 function Copy-LatestReport([string]$Pattern, [string]$TargetRelativePath) {
@@ -200,6 +208,7 @@ foreach ($reportName in @(
     "review_0816_blind_minor_refund_554611.html",
     "review_0816_blind_minor_refund_511007.html"
 )) { Copy-Path "$fourScenarioPublicReportDir\$reportName" }
+Copy-Path "$fourScenarioPublicReportDir\media"
 $fourScenarioAcceptance = Get-Content -LiteralPath $FourScenarioAcceptanceSource -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($case in $fourScenarioAcceptance.cases) {
     foreach ($propertyName in @("report_json", "report_html")) {
@@ -238,7 +247,8 @@ $evidenceFiles = @(
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_missing_item_289433.html",
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_missing_item_319303.html",
     "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_554611.html",
-    "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_511007.html"
+    "甲方沟通交付文档\四场景审核报告\review_0816_blind_minor_refund_511007.html",
+    "甲方沟通交付文档\四场景审核报告\media\manifest.json"
 )
 $evidenceHashes = @()
 foreach ($relativePath in $evidenceFiles) {
@@ -286,7 +296,8 @@ $required = @(
     "tests\reports\dynamic_material_capacity_http_62_20260730.json",
     "tests\reports\customer_order_info_sync_strict_verify_20260720.json",
     "tests\reports\customer_order_info_reconcile_applied_20260720.json",
-    "tests\reports\customer_order_info_integration_strict_final_20260720.json"
+    "tests\reports\customer_order_info_integration_strict_final_20260720.json",
+    "甲方沟通交付文档\四场景审核报告\media\manifest.json"
 )
 foreach ($relativePath in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage $relativePath))) {

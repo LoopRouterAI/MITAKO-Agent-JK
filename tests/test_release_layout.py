@@ -9,6 +9,7 @@ from pathlib import Path
 
 from scripts.check_release_packages import (
     _dynamic_capacity_evidence_matches_release,
+    _media_asset_path,
     _verify_0812_four_scenario_acceptance,
     _verify_current_four_scenario_acceptance,
 )
@@ -126,6 +127,13 @@ def _write_current_acceptance(root: Path) -> tuple[Path, dict]:
 
 
 class ReleaseLayoutTest(unittest.TestCase):
+    def test_media_manifest_path_keeps_media_directory(self) -> None:
+        root = Path("D:/MITAKO-release-test")
+        self.assertEqual(
+            _media_asset_path(root, "media/592717/user_001.webp"),
+            root / "甲方沟通交付文档" / "四场景审核报告" / "media" / "592717" / "user_001.webp",
+        )
+
     def test_release_verifier_supports_documented_direct_execution(self) -> None:
         result = subprocess.run(
             [
