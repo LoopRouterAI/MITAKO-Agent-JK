@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 修复 2026-08-18 人工测试报告中的 10 个问题，使原 15 个用户沟通场景连续 3 轮保持意图、核心结论、动作状态和下一步一致，并实现 API/Web/移动端同源、无虚构执行状态、双仓发布。
+**Goal:** 修复 2026-08-18 人工测试报告中的 10 个问题，使原 15 个用户沟通场景连续 3 轮保持意图、核心结论、动作状态和下一步一致，并实现 API/Web/移动端同源、无虚构执行状态、停止/断连/超时可取消和双仓发布。
 
-**Architecture:** 新建小型 `customer_service/` 领域层，负责确定性意图、事实来源、工具回执、场景策略、回复计划和公开 DTO。现有 LangGraph 只负责编排，LLM 只能润色程序生成的回复计划；`main.py`、用户端和坐席台只消费统一 `conversation_state`。
+**Architecture:** 新建小型 `customer_service/` 领域层，负责确定性意图、事实来源、工具回执、场景策略、回复计划和公开 DTO。现有 LangGraph 只负责编排，LLM 只能润色程序生成的回复计划；`main.py`、用户端和坐席台只消费统一 `conversation_state`。请求生命周期复用前端 `AbortController` 和后端 `asyncio.Task`，由断连、超时和同 session 单飞共同收口，不新增持久化轮次框架。
 
 **Tech Stack:** Python 3.11、FastAPI、LangGraph、Pydantic、SQLite、React/Vite、pytest、Playwright。
 
@@ -31,16 +31,19 @@
 - `tests/customer_service/test_scenario_policy.py`
 - `tests/customer_service/test_reply_guard.py`
 - `tests/customer_service/test_three_round_stability.py`
+- `tests/test_chat_stream_cancellation.py`
+- `tests/e2e/run_customer_chat_stop.py`
 - `tests/e2e/run_customer_agent_20260818_acceptance.py`
 
 ### 修改
 
 - `agent.py`：保留 LangGraph 编排，调用领域层。
-- `main.py`：SSE 返回统一 `conversation_state`，增加版本接口。
+- `main.py`：SSE 返回统一 `conversation_state`，闭环断连/超时/同 session 单飞并增加版本接口。
 - `business_api.py`：Mock 工具返回标准回执。
 - `handoff_service.py`：人工队列返回标准动作回执。
-- `src/hooks/useChatSSE.js`：保存统一状态。
-- `src/components/chat/ChatPanel.jsx`：把统一状态传递给状态卡。
+- `src/hooks/useChatSSE.js`：保存统一状态并暴露当前轮次停止动作。
+- `src/components/chat/ChatPanel.jsx`：把统一状态和停止动作传递给输入区。
+- `src/components/chat/ChatInput.jsx`：生成期间把发送按钮切换为停止按钮。
 - `src/components/chat/MessageList.jsx`：不从回复文本推断状态。
 - `src/components/cards/openUILibrary.jsx`：按动作状态显示未提交、排队、失败、完成。
 - `src/desk/HumanAgentDesk.jsx`：显示事实来源和工具回执。
@@ -380,6 +383,8 @@ class IntentResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     intent_code: str
     scenario_code: str
+    intent_codes: list[str] = Field(default_factory=list)
+    scenario_codes: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
     matched_evidence: list[str] = Field(default_factory=list)
     requires_clarification: bool = False
@@ -423,7 +428,7 @@ git add customer_service tests/customer_service/test_contracts.py
 git commit -m "feat: add deterministic customer service contracts"
 ```
 
-### Task 3: 重建确定性意图路由
+### Task 3: 重建确定性复合意图路由与四场景映射
 
 **Files:**
 - Create: `customer_service/intent_router.py`
@@ -438,13 +443,41 @@ def test_intent_matches_frozen_case(case):
     result = route_intent(case["message"], history=[])
     assert result.intent_code == case["expected_intent"]
     assert result.scenario_code == case["expected_scenario"]
+
+@pytest.mark.parametrize(
+    ("message", "primary_intent", "primary_scenario", "intent_codes", "scenario_codes"),
+    [
+        (
+            "延期180天了，我要求退款并转人工。",
+            "human_handoff",
+            "refund_progress",
+            {"human_handoff", "refund_progress"},
+            {"refund_progress"},
+        ),
+        (
+            "商品有划痕，而且同一包裹还少了一张特典卡。",
+            "product_damage",
+            "product_damage",
+            {"product_damage", "entitlement_missing"},
+            {"product_damage", "missing_item"},
+        ),
+    ],
+)
+def test_compound_request_keeps_all_business_scenes(
+    message, primary_intent, primary_scenario, intent_codes, scenario_codes
+):
+    result = route_intent(message, history=[])
+    assert result.intent_code == primary_intent
+    assert result.scenario_code == primary_scenario
+    assert set(result.intent_codes) == intent_codes
+    assert set(result.scenario_codes) == scenario_codes
 ```
 
 - [ ] **Step 2: 运行测试确认旧路由失败**
 
 Run: `python -m pytest tests/customer_service/test_intent_router.py -q`
 
-Expected: 至少赠品、发错货、漏发货、隐私删除和地址修改失败。
+Expected: 至少赠品、发错货、漏发货、隐私删除、地址修改和两个复合诉求失败。
 
 - [ ] **Step 3: 实现有优先级的路由**
 
@@ -465,11 +498,11 @@ RULES = (
 )
 ```
 
-每个结果返回实际命中的短语；无唯一规则时返回 `requires_clarification=True`，不得让 LLM 改写意图。
+每个结果返回实际命中的短语。`intent_code` 是本轮优先动作，`scenario_code` 是首要业务场景；`intent_codes` 和 `scenario_codes` 保留全部原子诉求，不得因“转人工”“投诉”等动作覆盖退款进度或四场景业务事实。四场景代码只能映射为 `product_damage`、`wrong_item`、`missing_item`、`minor_refund`，后续策略必须消费 `MITAKO-FOUR-SCENE@20260814.1` 的公开结果，不复制其 Prompt、Schema 或确定性 SOP。无唯一商品、订单或场景时返回 `requires_clarification=True`，不得让 LLM 改写意图。
 
 - [ ] **Step 4: 让 LangGraph 兼容新路由**
 
-`classify_intent()` 调用 `route_intent()`，旧 `intent` 字符串保留为展示标签，同时把完整结果写入 `state["conversation_state"]["intent"]`。
+`classify_intent()` 调用 `route_intent()`，旧 `intent` 字符串保留为展示标签，同时把完整结果写入 `state["conversation_state"]["intent"]`。附件审核结果只读取四场景公开 DTO，通用材料话术不得覆盖其中的 `scenario`、`material_readiness`、`evidence_route` 或 `resolution_basis`。
 
 - [ ] **Step 5: 运行新旧路由相关测试**
 
@@ -605,15 +638,20 @@ def test_child_mobile_invoice_is_rejected():
     ])
     assert decision.core_conclusion == "child_mobile_invoice_not_acceptable"
     assert decision.next_step.code == "request_guardian_mobile_proof"
+
+def test_catalog_key_does_not_match_its_own_record():
+    result = resolve_unique_product("想问五条悟圆形徽章", catalog=demo_catalog())
+    assert result.status == "ambiguous"
+    assert result.product is None
 ```
 
 - [ ] **Step 2: 实现场景决策函数**
 
-每个分支只返回 `ScenarioDecision`，不返回自由文本。商品咨询必须要求唯一 SKU；赠品权益先查活动基线；隐私删除读取配置中的入口和 SLA，配置缺失时显示人工入口，不生成默认 URL。
+每个分支只返回 `ScenarioDecision`，不返回自由文本。商品咨询删除 `_build_product_inventory_reply()` 中 `key in str(value)` 的恒真候选，只允许 SKU、商品链接、订单行或唯一规范化名称命中；否则追问。赠品权益先查活动基线；隐私删除读取配置中的入口和 SLA，配置缺失时显示人工入口，不生成默认 URL。
 
 - [ ] **Step 3: 替换旧 SOP 拼接**
 
-`search_knowledge_base()` 不再根据泛化意图追加抽奖/退款模板；改为把 `ScenarioDecision` 的 policy refs 写入状态。
+`search_knowledge_base()` 不再根据泛化意图追加抽奖/退款模板；改为把 `ScenarioDecision` 的 policy refs 写入状态。四场景附件已有审核结果时，`ScenarioDecision` 只投影 `MITAKO-FOUR-SCENE@20260814.1` 公开字段，不重新推断材料齐全性或审核结论。
 
 - [ ] **Step 4: 运行 P1 测试**
 
@@ -639,7 +677,7 @@ git commit -m "feat: enforce deterministic P1 customer policies"
 
 - [ ] **Step 1: 写 P2 红灯测试**
 
-发错货必须输出核心开箱证据；漏发解析 N/M；高危投诉输出四字段；转人工必须读取 queue receipt。
+发错货必须输出核心开箱证据；漏发解析 N/M；高危投诉输出四字段；转人工必须读取 queue receipt。删除或改写只断言 `should_transfer=True` 的旧测试，测试必须同时断言 `action_state.status=queued`、`receipt_id` 和实际队列记录。
 
 - [ ] **Step 2: 修改 transfer 节点**
 
@@ -695,7 +733,56 @@ git add customer_service/reply_plan.py customer_service/reply_guard.py agent.py 
 git commit -m "feat: block unsupported customer service claims"
 ```
 
-### Task 9: API 统一 ConversationState
+### Task 9: 聊天停止与服务端取消
+
+**Files:**
+- Create: `tests/test_chat_stream_cancellation.py`
+- Create: `tests/e2e/run_customer_chat_stop.py`
+- Modify: `main.py:1571-1804`
+- Modify: `src/hooks/useChatSSE.js:1208-1525`
+- Modify: `src/components/chat/ChatPanel.jsx`
+- Modify: `src/components/chat/ChatInput.jsx`
+
+- [ ] **Step 1: 先写最小失败测试**
+
+`tests/test_chat_stream_cancellation.py` 固定三个生命周期断言：客户端断连会让阻塞中的 `agent_app.ainvoke()` 收到 `CancelledError`；全链路超时只产生 `status=failed/reason_code=chat_timeout`；同 tenant、同 session 的新轮次必须先取消并等待旧任务。三种路径都断言没有 `done: completed`，且 `handoff_store.append_message(..., "assistant", ...)` 未被调用。
+
+`tests/e2e/run_customer_chat_stop.py` 用阻塞 Agent 启动真实 SSE，在浏览器点击 `aria-label="停止生成"`，断言输入框恢复可发送、局部助手气泡未写入历史、服务端取消事件已触发。
+
+- [ ] **Step 2: 运行测试确认当前链路失败**
+
+Run: `python -m pytest tests/test_chat_stream_cancellation.py -q`
+
+Expected: FAIL；当前断连只停止客户端读取，服务端任务继续运行，且取消/异常路径仍可能写默认成功回复。
+
+- [ ] **Step 3: 在现有 SSE 生成器内闭环服务端生命周期**
+
+复用 `asyncio.Task`，按 `(tenant_id, session_id)` 保存当前进程内的活动任务。`CHAT_TURN_TIMEOUT_SECONDS` 从环境变量读取，默认 120 秒，非法值在启动时回退默认值并输出中文错误日志。新轮次发现旧任务未结束时先 `cancel()` 再 `await asyncio.gather(..., return_exceptions=True)`；创建新任务后用 `asyncio.timeout(CHAT_TURN_TIMEOUT_SECONDS)` 包住事件消费与最终结果。每次 `queue.get()` 前检查 `await request.is_disconnected()`，并在 `CancelledError`、超时和生成器 `finally` 中统一取消并等待任务；清理活动任务时必须校验字典中的对象仍是本轮 task，避免旧轮次删除新轮次。
+
+只有成功取得最终 `result` 且未取消、未超时时，才允许选择卡片、写入助手消息和发送 `done: completed`。超时发送独立失败事件 `status=failed/reason_code=chat_timeout`；主动停止或断连直接收口，不补默认成功回复。当前进程内单飞是本轮边界，不新增持久化 `chat_turn` ledger。
+
+- [ ] **Step 4: 暴露当前轮次停止动作并切换按钮**
+
+`useChatSSE` 暴露 `stopCurrentTurn()`，内部复用 `abortControllerRef.current.abort()`，同时清理流式状态卡、局部助手文本、presence timer、`isAwaitingStream` 和 `streamInFlightRef`；不把 controller ref 直接交给组件。`ChatPanel` 把 `onStop` 传给 `ChatInput`；生成期间原发送按钮原位切换为 Square 图标停止按钮，保持尺寸不变并设置 `aria-label="停止生成"` 和 tooltip。停止后允许再次发送，但不把局部文本提交到 history。
+
+- [ ] **Step 5: 运行取消与构建门禁**
+
+Run: `python -m pytest tests/test_chat_stream_cancellation.py -q`
+
+Run: `npm run build`
+
+Run: `python tests/e2e/run_customer_chat_stop.py`
+
+Expected: 断连、超时和同 session 替换均无残留服务端任务、无成功回复写入；停止按钮在 PC 与 390px 手机视口均可操作。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add main.py src/hooks/useChatSSE.js src/components/chat/ChatPanel.jsx src/components/chat/ChatInput.jsx tests/test_chat_stream_cancellation.py tests/e2e/run_customer_chat_stop.py
+git commit -m "fix: cancel abandoned customer chat turns"
+```
+
+### Task 10: API 统一 ConversationState
 
 **Files:**
 - Create: `customer_service/public_projection.py`
@@ -728,7 +815,7 @@ git add customer_service/public_projection.py main.py tests/customer_service/tes
 git commit -m "feat: expose unified customer conversation state"
 ```
 
-### Task 10: Web、Pad、手机和坐席同源
+### Task 11: Web、Pad、手机和坐席同源
 
 **Files:**
 - Modify: `src/hooks/useChatSSE.js`
@@ -769,7 +856,7 @@ git add src tests/e2e/run_customer_state_multidevice.py
 git commit -m "feat: render unified customer action state across clients"
 ```
 
-### Task 11: 部署版本握手
+### Task 12: 部署版本握手
 
 **Files:**
 - Modify: `main.py`
@@ -802,7 +889,7 @@ git add main.py vite.config.js src/App.jsx tests/test_version_handshake.py
 git commit -m "feat: add deployment version handshake"
 ```
 
-### Task 12: 三轮稳定性与完整验收
+### Task 13: 三轮稳定性与完整验收
 
 **Files:**
 - Create: `tests/customer_service/test_three_round_stability.py`
@@ -840,6 +927,7 @@ Expected:
 - P1 6/6；
 - 10 个问题 10/10；
 - 虚构执行状态 0；
+- 主动停止、断连和超时残留任务 0，取消/超时成功回复写入 0；
 - API/Web/坐席差异 0。
 
 - [ ] **Step 5: 写验收报告并提交**
@@ -849,7 +937,7 @@ git add tests/customer_service tests/e2e/run_customer_agent_20260818_acceptance.
 git commit -m "test: close 20260818 customer communication regressions"
 ```
 
-### Task 13: 发布脚本和客户运行时
+### Task 14: 发布脚本和客户运行时
 
 **Files:**
 - Modify: `scripts/package_release.ps1`
@@ -883,7 +971,7 @@ git add scripts/package_release.ps1 scripts/check_release_packages.py tests/test
 git commit -m "release: package deterministic customer service runtime"
 ```
 
-### Task 14: 双仓、部署和人工复验
+### Task 15: 双仓、部署和人工复验
 
 **Files:**
 - Modify: `CHANGELOG.md`
@@ -924,7 +1012,25 @@ git commit -m "release: package deterministic customer service runtime"
 - [ ] PDF 10 个问题全部有对应测试和真实验收结果。
 - [ ] 15 个场景均运行 3 轮。
 - [ ] P1 6/6。
+- [ ] 复合诉求保留全部原子意图与场景，客服编排只消费四场景唯一契约的公开结果。
+- [ ] 商品咨询不存在 `key in str(value)` 恒真命中，无唯一 SKU/链接/订单行时只追问。
 - [ ] 虚构执行状态 0。
+- [ ] 主动停止、SSE 断连、全链路超时和同 session 替换均取消并等待服务端任务，残留活动任务 0，取消/超时成功回复写入 0。
 - [ ] API/Web/Pad/手机/坐席状态一致。
 - [ ] Deeptokenai.cn 版本握手与发布提交一致。
 - [ ] 私人、公司仓库 main、tag 和三份 ZIP 均已发布。
+- [ ] 真实甲方接口仍为 Mock 与契约说明，旧 Companion/陪伴/角色扮演/文字冒险能力保持封存，公开页面不暴露模型、Key、内部 Prompt 或调试参数。
+
+最终验证命令：
+
+```powershell
+python -m pytest tests/customer_service tests/test_chat_stream_cancellation.py tests/e2e/run_mock_business_guard_e2e.py -q
+python tests/e2e/run_customer_chat_stop.py
+python tests/e2e/run_customer_agent_20260818_acceptance.py --rounds 3
+npm run build
+python tests/e2e/run_customer_state_multidevice.py
+python -m pytest tests/test_release_layout.py -q
+python scripts/check_release_packages.py
+```
+
+剩余风险：本轮同 session 单飞只覆盖当前服务进程，不新增持久化 `chat_turn` ledger。仅当甲方要求服务重启后继续未完成轮次或需要逐轮审计时，才扩展持久化生命周期账本。
