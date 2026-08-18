@@ -19,7 +19,9 @@ except Exception:
 
 from llm_models import DEFAULT_MODEL_ID
 from agent_llm import call_llm
+from customer_service.contracts import ActionState, Fact, IntentResult
 from customer_service.intent_router import public_intent_label, route_intent
+from customer_service.scenario_policy import decide_scenario, resolve_unique_product
 from partner_guard import assert_local_or_allowed
 from runtime_paths import mock_data_file
 
@@ -108,7 +110,7 @@ def _load_local_sop_results(intent: str, user_text: str, limit: int = 3) -> List
         (["退款", "退钱", "退货", "不好", "不想要"], ["退款", "退货"]),
         (["物流", "快递", "没收到", "丢件", "签收", "清关", "通关", "仓库", "库房", "入仓", "发货慢"], ["快递物流", "物流异常"]),
         (["破损", "划痕", "有伤", "瑕疵", "开箱"], ["商品有伤", "开箱视频", "有伤补偿"]),
-        (["漏发", "少发", "缺件"], ["漏发货"]),
+        (["漏发", "少发", "缺件", "赠品", "特典", "满赠", "随单赠"], ["漏发货"]),
         (["发错", "错货"], ["发错货"]),
         (["出荷", "转囤", "囤货"], ["出荷转囤"]),
         (["未成年", "小孩", "孩子", "家长", "监护人"], ["未成年人"]),
@@ -508,9 +510,10 @@ def _build_damage_material_reply() -> str:
 
 def _build_product_inventory_reply(state: AgentState, user_text: str) -> str:
     catalog = _load_demo_business_catalog().get("product_catalog") or {}
-    product = next((value for key, value in catalog.items() if key in user_text or key in str(value)), None)
+    scenario_decision = (state.get("conversation_state") or {}).get("scenario_decision") or {}
+    product = scenario_decision.get("resolved_product") or resolve_unique_product(user_text, catalog)
     if not product:
-        return "我暂时没有匹配到这个 SKU 的规格库存，请核对 SKU 后再发我；真实库存需接甲方商品中心后实时查询。"
+        return "我还不能唯一确认具体商品，请提供商品 SKU、商品链接或订单行后再查询；真实库存需接甲方商品中心后实时返回。"
     variants = []
     for item in product.get("variants") or []:
         if item.get("stock_status") == "in_stock":
@@ -522,6 +525,49 @@ def _build_product_inventory_reply(state: AgentState, user_text: str) -> str:
         f"{product.get('name')}当前演示库存：{'；'.join(variants)}。支持{payments}。"
         "这是明确标记的演示商品数据；接入甲方 SKU/库存接口后会按实时可售库存返回，不会让您再确认一次是否查询。"
     )
+
+
+def _public_review_material_state(attachments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from review_service.service import public_job
+
+    for item in attachments or []:
+        if item.get("kind") != "review_task" or not isinstance(item.get("review_result"), dict):
+            continue
+        result = item["review_result"]
+        public = public_job({
+            "job_id": item.get("review_task_id") or item.get("id") or "",
+            "scenario": item.get("scenario") or "",
+            "status": item.get("status") or "",
+            "result": result if isinstance(result.get("review"), dict) else {"review": result},
+        })
+        review = ((public.get("result") or {}).get("review") or {})
+        agent_report = review.get("agent_report") if isinstance(review.get("agent_report"), dict) else {}
+        public_brief = agent_report.get("public_brief") if isinstance(agent_report.get("public_brief"), dict) else {}
+        if not public_brief and isinstance(review.get("agent_brief"), dict):
+            public_brief = review["agent_brief"]
+        summary = review.get("summary") if isinstance(review.get("summary"), dict) else {}
+
+        def public_text(value: Any) -> str:
+            text = str(value or "").strip()
+            return "" if _customer_reply_has_internal_text(text) else text
+
+        return {
+            "contract_version": "MITAKO-FOUR-SCENE@20260814.1",
+            "review_task_id": item.get("review_task_id") or item.get("id") or "",
+            "scenario": item.get("scenario") or "",
+            "status": item.get("status") or "",
+            "public_brief": {
+                key: public_text(public_brief[key])
+                for key in ("conclusion", "next_step")
+                if public_text(public_brief.get(key))
+            },
+            "summary": {
+                key: summary[key]
+                for key in ("confidence", "needs_human_review")
+                if summary.get(key) is not None
+            },
+        }
+    return {}
 
 
 def _is_notification_channel_request(text: str) -> bool:
@@ -771,10 +817,10 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
                 transfer_reason = f"言论命中VIP客服强接管词 '{word}'，触发P0转交规则"
                 break
 
-    # 3. 修改地址/支付账号
-    if any(k in last_user_msg for k in ["修改收货地址", "改收货地址", "改地址", "改支付宝"]):
+    # 3. 支付账号变更仍需直接转人工；收货地址由后续工具回执策略处理。
+    if any(k in last_user_msg for k in ["改支付宝", "修改支付账号", "改支付账号"]):
         should_transfer = True
-        transfer_reason = "修改收货地址/支付账户敏感信息，触发P0防劫单转VIP客服规则"
+        transfer_reason = "修改支付账户敏感信息，触发P0防劫单转VIP客服规则"
 
     # 4. 情绪高风险 (Level 5+ 转VIP客服)
     if emotion_level >= 5:
@@ -924,6 +970,45 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
     intent = state["intent"]
     order_data = state["order_data"]
     last_user_msg = _current_user_text(state)
+    conversation_state = dict(state.get("conversation_state") or {})
+    intent_result = IntentResult.model_validate(
+        conversation_state.get("intent") or route_intent(last_user_msg).model_dump()
+    )
+    facts = [Fact.model_validate(item) for item in conversation_state.get("facts") or []]
+    action_data = conversation_state.get("action_state")
+    action = ActionState.model_validate(action_data) if isinstance(action_data, dict) else None
+    demo_catalog = _load_demo_business_catalog()
+    activities = demo_catalog.get("lottery_activities") or {}
+    activity = next(
+        (
+            activities[item.get("item_id")]
+            for order in order_data.get("orders") or []
+            for item in order.get("items") or []
+            if item.get("item_id") in activities
+        ),
+        None,
+    )
+    policy_config = config.get("configurable", {}).get("scenario_policy_config") or {}
+    scenario_decision = decide_scenario(
+        intent=intent_result,
+        facts=facts,
+        message=last_user_msg,
+        action=action,
+        config=policy_config,
+        catalog=demo_catalog.get("product_catalog") or {},
+        activity=activity,
+    )
+    decision_data = scenario_decision.model_dump(mode="json")
+    conversation_state.update({
+        "scenario_decision": decision_data,
+        "core_conclusion": decision_data["core_conclusion"],
+        "action_state": decision_data["action_state"],
+        "next_step": decision_data["next_step"],
+        "policy_refs": decision_data["policy_refs"],
+    })
+    material_state = _public_review_material_state(state.get("attachments") or [])
+    if material_state:
+        conversation_state["material_state"] = material_state
 
     if queue:
         await queue.put({"type": "node_start", "node": "search_sop", "desc": "正在检索对应的业务 SOP 规范与供应链预警公告..."})
@@ -967,10 +1052,6 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
         sop_results.append("【发货延期补偿SOP】：出荷时间延期超120天以上的订单，可提交平台积分与优先发货标记申请；具体权益、金额和是否生效以业务系统与VIP客服确认为准。")
     elif "补偿" in intent:
         sop_results.append("【虚拟安抚规则】：AI 只允许自动发放虚拟资产（平台积分、发货加急服务标记等），严禁私自发放免邮券、退现金等实体资产，如遇用户强烈要求实体资产补偿，必须转接VIP客服主管处理。")
-    elif "退款" in intent:
-        sop_results.append("【退款处理SOP】：大额退现金（金额 > 100元）AI 禁止自动发放，必须转接售后坐席复核确认。")
-    elif "盲盒" in intent:
-        sop_results.append("【盲盒吞烫质疑应对】：先承接用户失落和质疑；禁止说“绝对随机/绝对无人工干预”等绝对化背书，禁止承诺积分包、挂件或补偿到账。只能说明以活动公示规则和可复核记录为准，可协助提交客服复核。")
     elif "破损" in intent:
         sop_results.append("【退换货破损SOP】：引导用户拍照上传包装破损图及商品细节划痕，核实材料后进入补发、换货或退款的VIP客服确认流程。")
     elif "通知渠道" in intent or "服务建议" in intent:
@@ -985,7 +1066,7 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
             "node": "search_sop",
             "desc": f"检索成功！获取到相关的 SOP 条目与公告 {len(sop_results)} 项。"
         })
-    return {"sop_results": sop_results}
+    return {"sop_results": sop_results, "conversation_state": conversation_state}
 
 
 async def plan_business_readiness_flow(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:

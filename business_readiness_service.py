@@ -26,6 +26,7 @@ def _last_user_text(state: Dict[str, Any]) -> str:
 def classify_sop_branch(text: str, intent: str = "") -> Dict[str, Any]:
     query = f"{intent} {text}"
     rules = [
+        ("missing", "赠品/特典权益核对", ["赠品", "特典", "满赠", "随单赠"], ["lookup_entitlement_rule", "create_after_sales_card"], ["assume_lottery_probability", "auto_reissue"]),
         ("lottery", "抽赏规则与结果复核", ["盲盒", "抽赏", "抽选", "中奖率", "概率", "保底", "奖池", "稀有款", "抽号", "活动规则", "中奖名单", "吞烫", "普款"], ["answer_lottery_rules", "create_lottery_review"], ["promise_win", "change_probability"]),
         ("product_consult", "商品/库存/预售咨询", ["售前商品咨询", "还没下单", "想买", "库存", "现货", "预售", "规格", "SKU", "sku", "商品咨询", "支付方式"], ["answer_product_policy"], ["promise_delivery_date", "reserve_inventory"]),
         ("minor_refund", "未成年人退款", ["未成年", "孩子", "小孩", "家长", "监护人", "监护关系", "实名归属", "承诺书"], ["request_materials", "explain_review_status"], ["auto_refund", "auto_reject"]),

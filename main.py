@@ -1663,6 +1663,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                         "stream_reply": req.stream_reply,
                         "fixtures": req.fixtures or [],
                         "attachments": chat_attachments,
+                        "scenario_policy_config": {
+                            "privacy": {
+                                "entry": os.getenv("MITAKO_PRIVACY_DELETION_ENTRY", "").strip(),
+                                "sla": os.getenv("MITAKO_PRIVACY_DELETION_SLA", "").strip(),
+                            }
+                        },
                     }
                 }
             )

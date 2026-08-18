@@ -15,7 +15,7 @@ RULES = (
     ("human_handoff", "human_handoff", ("转人工", "人工客服", "真人客服", "VIP客服", "找人工", "不想和机器人")),
     ("high_risk_complaint", "complaint", ("12315", "投诉", "起诉", "黑猫", "曝光", "谁处理", "多久处理")),
     ("notification_channel", "notification_channel", ("电话提醒", "电话通知", "打电话", "来电", "电话联系", "手机提醒", "短信提醒")),
-    ("minor_refund_material", "minor_refund", ("未成年人", "未成年", "孩子", "小孩", "家长", "监护人", "监护关系", "户口本", "承诺书")),
+    ("minor_refund_material", "minor_refund", ("未成年人", "未成年", "孩子", "小孩", "家长", "监护人", "监护关系", "手机号实名归属", "实名归属", "户口本", "承诺书")),
     ("wrong_item", "wrong_item", ("发错", "错货", "收到的是另一个", "另一个角色", "不是买的", "串单", "串了")),
     ("entitlement_missing", "missing_item", ("赠品", "特典", "满赠", "随单赠")),
     ("missing_item", "missing_item", ("漏发", "少发", "少了", "缺件", "应有", "实收")),
