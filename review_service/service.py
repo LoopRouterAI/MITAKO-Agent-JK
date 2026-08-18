@@ -31,6 +31,7 @@ from poc.visual_review_poc.local_video_triage_demo import adaptive_frame_budget
 from review_input_safety import assert_review_input_safe
 from review_media_safety import ignored_upload_reason, valid_media_magic
 from review_public_safety import redact_public_review_data
+from poc.visual_review_poc.observability import visual_event_context
 from prompts.visual_review.contract import (
     REVIEW_CONTRACT_VERSION,
     SCENARIO_LABELS,
@@ -54,6 +55,7 @@ from .advisory_assessment import (
 )
 from .schemas import ReviewCaseMetadata
 from .resource_guard import recommended_concurrency, runtime_diagnostics
+import observability_store
 
 
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".txt", ".json"}
@@ -600,6 +602,12 @@ def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
         key: deepcopy(raw_result[key])
         for key in public_result_fields
         if key in raw_result
+    }
+    tenant_id = str(job.get("tenant_id") or "")
+    job_id = str(job.get("job_id") or "")
+    output["result"]["observability"] = {
+        "events_url": f"/api/v1/review/jobs/{quote(job_id, safe='')}/events",
+        **observability_store.summarize_events(tenant_id, job_id=job_id),
     }
     raw_review = output["result"].get("review")
     if isinstance(raw_review, dict):
@@ -1428,7 +1436,12 @@ def run_job(job_id: str) -> Dict[str, Any]:
         "boundary": "审核服务只输出证据、置信度和流程建议；退款、补发、换货、拒绝及最终定责由甲方系统和授权人员执行。",
     }
     try:
-        payload = _call_workbench(job)
+        with visual_event_context(
+            job_id=job_id,
+            tenant_id=str(job.get("tenant_id") or ""),
+            request_id=_workbench_request_id(job),
+        ):
+            payload = _call_workbench(job)
         workbench_transport = payload.pop("_workbench_transport", {})
         media_processing = payload.pop("_review_media_processing", {})
         review = dict(payload.get("review")) if isinstance(payload.get("review"), dict) else {}

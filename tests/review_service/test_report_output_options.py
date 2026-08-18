@@ -175,7 +175,8 @@ class ReportOutputOptionsTest(unittest.TestCase):
             },
         )
         self.assertEqual(set(public["assets"][0]), {"asset_id", "mime_type", "size", "fields"})
-        self.assertEqual(set(public["result"]), {"review", "boundary"})
+        self.assertEqual(set(public["result"]), {"review", "boundary", "observability"})
+        self.assertEqual(public["result"]["observability"]["visibility"], "redacted")
         for secret in ("张三", "13800138000", "private-key", "E:/private", "provider secret"):
             self.assertNotIn(secret, serialized)
 

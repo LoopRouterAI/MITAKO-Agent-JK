@@ -17,6 +17,8 @@ from pydantic import ValidationError
 from auth.jwt_utils import dev_auth_bypass_enabled, protected_api_auth_required
 from auth.middleware import get_current_user_optional, require_roles, tenant_allowed
 from auth.roles import ADMIN_MUTATE_ROLES
+from auth.roles import Role
+import observability_store
 
 from . import service, store
 from .input_readiness import assess_input_readiness
@@ -211,6 +213,36 @@ async def job_detail(job_id: str, user=_integration_user()):
     if not job or job.get("tenant_id") != user["tenant_id"]:
         raise HTTPException(status_code=404, detail="review_job_not_found")
     return {"ok": True, "created": False, "job": service.public_job(job)}
+
+
+@router.get("/jobs/{job_id}/events")
+async def job_events(
+    job_id: str,
+    detail: str = Query("redacted", pattern="^(redacted|internal)$"),
+    limit: int = Query(100, ge=1, le=500),
+    since_id: int = Query(0, ge=0),
+    user=_integration_user(),
+):
+    job = store.get_job(job_id)
+    if not job or job.get("tenant_id") != user["tenant_id"]:
+        raise HTTPException(status_code=404, detail="review_job_not_found")
+    if detail == "internal" and user.get("role") != Role.SUPER_ADMIN.value:
+        raise HTTPException(status_code=403, detail="internal_observability_forbidden")
+    visibility = "internal" if detail == "internal" else "redacted"
+    events = observability_store.list_events(
+        user["tenant_id"],
+        job_id=job_id,
+        visibility=visibility,
+        limit=limit,
+        since_id=since_id,
+    )
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "visibility": visibility,
+        "events": events,
+        "next_since_id": events[-1]["id"] if events else since_id,
+    }
 
 
 @router.get(
