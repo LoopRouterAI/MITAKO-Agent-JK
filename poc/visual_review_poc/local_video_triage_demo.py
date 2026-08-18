@@ -496,6 +496,16 @@ def post_json(channel: Dict[str, Any], payload: Dict[str, Any], timeout: int, so
     last: Dict[str, Any] = {}
     for attempt in range(1, attempts + 1):
         started = time.time()
+        log_visual_event(
+            LOGGER,
+            "visual_model_http_attempt",
+            endpoint=channel["endpoint"],
+            attempt=attempt,
+            max_attempts=attempts,
+            timeout_seconds=timeout,
+            channel=channel.get("channel"),
+            model=channel.get("model"),
+        )
         try:
             with httpx.Client(timeout=timeout) as client:
                 response = client.post(channel["endpoint"], headers=channel["headers"], json=payload)
@@ -503,12 +513,12 @@ def post_json(channel: Dict[str, Any], payload: Dict[str, Any], timeout: int, so
             if response.status_code < 400:
                 log_visual_event(
                     LOGGER,
-                    "visual_model_http_attempt",
+                    "visual_model_http_success",
                     endpoint=channel["endpoint"],
                     attempt=attempt,
+                    max_attempts=attempts,
                     status_code=response.status_code,
                     latency_seconds=latency,
-                    outcome="success",
                     channel=channel.get("channel"),
                     model=channel.get("model"),
                 )
@@ -526,13 +536,14 @@ def post_json(channel: Dict[str, Any], payload: Dict[str, Any], timeout: int, so
             last = {"ok": False, "attempt": attempt, "status_code": None, "latency_seconds": round(time.time() - started, 2), "error_type": classify_error(None, str(exc)), "error": sanitize_error_text(exc, 1500)}
         log_visual_event(
             LOGGER,
-            "visual_model_http_attempt",
+            "visual_model_http_failure",
             endpoint=channel["endpoint"],
             attempt=attempt,
+            max_attempts=attempts,
             status_code=last.get("status_code"),
             latency_seconds=last.get("latency_seconds"),
             error_type=last.get("error_type"),
-            outcome="failed",
+            will_retry=bool(last.get("error_type") == "soft" and attempt < attempts),
             channel=channel.get("channel"),
             model=channel.get("model"),
         )

@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import subprocess
-import threading
 import time
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
@@ -20,6 +19,7 @@ else:
 import cv2
 
 from review_media_safety import valid_media_file
+from review_service.resource_guard import TRANSCODE_GATE, recommended_concurrency
 
 try:
     import imageio_ffmpeg
@@ -164,12 +164,13 @@ PROXY_CODEC_PROFILES = {
 
 def _transcode_concurrency() -> int:
     try:
-        return max(1, min(int(os.getenv("REVIEW_VIDEO_TRANSCODE_CONCURRENCY", "2")), 8))
+        return recommended_concurrency(max(1, min(int(os.getenv("REVIEW_VIDEO_TRANSCODE_CONCURRENCY", "2")), 8)))
     except ValueError:
         return 2
 
 
-_TRANSCODE_SLOTS = threading.BoundedSemaphore(_transcode_concurrency())
+# 保留可替换名称供既有测试和诊断使用；实际槽位由共享资源守门统一管理。
+_TRANSCODE_SLOTS = TRANSCODE_GATE
 _PROXY_CACHE_VERSION = 1
 
 

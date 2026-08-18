@@ -45,6 +45,7 @@ from prompts.visual_review.core import freeze_rule_snapshot
 from review_service.media_forensics import inspect_job_media
 from review_service.policy_governance import get_active_policy
 from review_service.service import ensure_label_isolation, normalize_frame_strategy, postprocess_review
+from review_service.resource_guard import CASE_GATE, runtime_diagnostics
 from review_service.decision_policy import DEFAULT_PRODUCT_DAMAGE_POLICY_REF
 from poc.visual_review_poc.internal_review_ledger import ReviewRequestLedger
 from poc.visual_review_poc.media_registry import MediaRegistry
@@ -94,7 +95,7 @@ try:
         video_proxy_recommendation,
     )
     from poc.visual_review_poc.native_video_perception import run_native_perception_pipeline
-    from poc.visual_review_poc.observability import sanitize_error_text
+    from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text
     from poc.visual_review_poc.secure_media_tunnel import open_secure_media_tunnel
     from poc.visual_review_poc.video_role_preflight import (
         build_opening_role_case,
@@ -136,7 +137,7 @@ except ImportError:
         video_proxy_recommendation,
     )
     from native_video_perception import run_native_perception_pipeline
-    from observability import sanitize_error_text
+    from observability import log_visual_event, sanitize_error_text
     from secure_media_tunnel import open_secure_media_tunnel
     from video_role_preflight import (
         build_opening_role_case,
@@ -215,6 +216,31 @@ MAX_SUPPLEMENTAL_IMAGES = max(
 )
 MAX_BATCH_FOLDERS = max(1, min(int(os.getenv("VISUAL_MAX_BATCH_FOLDERS", "10") or 10), 20))
 MAX_BATCH_FILES = max(MAX_FOLDER_FILES, min(int(os.getenv("VISUAL_MAX_BATCH_FILES", "400") or 400), 1000))
+
+
+def _resource_wait_seconds() -> float:
+    try:
+        return max(0.0, min(float(os.getenv("REVIEW_RESOURCE_WAIT_SECONDS", "30") or 30), 300.0))
+    except (TypeError, ValueError):
+        return 30.0
+
+
+def _run_with_case_slot(fn, *args, **kwargs):
+    with CASE_GATE.slot(timeout=_resource_wait_seconds()) as acquired:
+        if not acquired:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error_type": "review_resource_busy",
+                    "message": "审核资源正在处理其他案件，请稍后重试。",
+                    "retry_after_seconds": max(1, int(_resource_wait_seconds() or 1)),
+                    "resources": runtime_diagnostics(),
+                },
+                headers={"Retry-After": str(max(1, int(_resource_wait_seconds() or 1)))},
+            )
+        return fn(*args, **kwargs)
+
+
 PRIVATE_REPORT_KEYS = {
     "model",
     "display_model",
@@ -2055,6 +2081,14 @@ def _run_review(
     deadline_at = _new_review_deadline()
     profile = REVIEW_MODEL_PROFILES.get(review_model) or REVIEW_MODEL_PROFILES["standard"]
     load_visual_env()
+    started = time.time()
+    log_visual_event(
+        LOGGER,
+        "visual_review_subprocess_start",
+        source="single_review",
+        scenario=scenario,
+        review_model=review_model,
+    )
     policy = dict(policy_snapshot or get_active_policy(rule_tenant_id))
     effective_fps = fps
     effective_max_frames = max_frames
@@ -2499,6 +2533,18 @@ def _run_review(
         review["sampling"]["sampling_mode"] = (
             "native_then_frame_fallback" if native_success_needs_frames else "native_video"
         )
+    log_visual_event(
+        LOGGER,
+        "visual_review_subprocess_finished",
+        source="single_review",
+        scenario=scenario,
+        review_model=review_model,
+        status=(result.get("status") or "unknown"),
+        review_ok=(review.get("summary") or {}).get("review_status") == "completed",
+        frame_count=len(case.get("frames") or []),
+        supplemental_image_count=len(case.get("supplemental_images") or []),
+        latency_seconds=round(time.time() - started, 2),
+    )
     return {"ok": (review.get("summary") or {}).get("review_status") == "completed", **review}
 
 
@@ -2722,6 +2768,14 @@ def _run_sample_agent_review(
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
+    started = time.time()
+    log_visual_event(
+        LOGGER,
+        "visual_review_sample_start",
+        sample_id=sample_id,
+        scenario=scenario,
+        model_key=model_key,
+    )
     args = SimpleNamespace(
         fps=1.0,
         sampling_mode="adaptive",
@@ -2755,6 +2809,18 @@ def _run_sample_agent_review(
         deadline_at=_new_review_deadline(),
     )
     review = _agent_report_response(case, sample_dir, result, f"agent_{sample_id}")
+    log_visual_event(
+        LOGGER,
+        "visual_review_sample_finished",
+        sample_id=sample_id,
+        scenario=scenario,
+        model_key=model_key,
+        status=(result.get("status") or "unknown"),
+        review_ok=(review.get("summary") or {}).get("review_status") == "completed",
+        frame_count=len(case.get("frames") or []),
+        supplemental_image_count=len(case.get("supplemental_images") or []),
+        latency_seconds=round(time.time() - started, 2),
+    )
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
         "source_status": "sample_ready",
@@ -2778,7 +2844,7 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
     for sample_id in sample_ids:
         scenario = scenarios.get(sample_id, "video_unboxing")
         try:
-            result = _run_sample_agent_review(sample_id, scenario, model_key)
+            result = _run_with_case_slot(_run_sample_agent_review, sample_id, scenario, model_key)
             review = result.get("review") or {}
             reports.append({
                 "sample_id": sample_id,
@@ -2806,6 +2872,36 @@ def _run_sample_batch_agent_review(model_key: str) -> Dict[str, Any]:
 def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, evidence_context: Dict[str, Any], sampling_mode: str, fps: float, max_frames: int, api_frame_limit: int, probe_seconds: int, include_internal_metrics: bool = False, include_html_report: bool = True, defer_postprocess: bool = False, rule_tenant_id: str = "mitako") -> Dict[str, Any]:
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
+    started = time.time()
+    log_visual_event(
+        LOGGER,
+        "visual_review_folder_start",
+        scenario=scenario,
+        model_key=model_key,
+        sampling_mode=sampling_mode,
+        fps=fps,
+        max_frames=max_frames,
+        api_frame_limit=api_frame_limit,
+        probe_seconds=probe_seconds,
+    )
+
+    def log_folder_finished(review: Dict[str, Any], status: str = "") -> None:
+        summary = review.get("summary") or {}
+        sampling = review.get("sampling") or {}
+        frame_count = sampling.get("sampled_frames") or 0
+        if not isinstance(frame_count, int):
+            frame_count = 0
+        log_visual_event(
+            LOGGER,
+            "visual_review_folder_finished",
+            scenario=scenario,
+            model_key=model_key,
+            status=status or summary.get("review_status") or "unknown",
+            review_ok=summary.get("review_status") == "completed",
+            frame_count=frame_count,
+            supplemental_image_count=int(sampling.get("supplemental_image_count") or 0),
+            latency_seconds=round(time.time() - started, 2),
+        )
     policy = get_active_policy(rule_tenant_id)
     fps = float(policy.get("native_sampling_fps") or fps)
     max_frames = int(policy.get("max_frames") or max_frames)
@@ -2946,6 +3042,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
                     },
                     "media_preflight_execution": execution,
                 }
+                log_folder_finished(review, "failed")
                 return {
                     "ok": False,
                     "source_status": "media_preflight_failed",
@@ -2978,6 +3075,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
                 execution["videos"] = deepcopy(prepared_videos["execution"])
                 review["media_preflight_execution"] = execution
         review["video_role_preflight"] = role_preflight
+        log_folder_finished(review, "completed" if review.get("ok") else "failed")
         return {"ok": review.get("ok") is True, "source_status": "folder_ready", "review": review}
     load_visual_env()
     args = SimpleNamespace(
@@ -3026,6 +3124,7 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         include_html_report=include_html_report,
         defer_postprocess=defer_postprocess,
     )
+    log_folder_finished(review, str(result.get("status") or "unknown"))
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
         "source_status": "folder_ready",
@@ -3168,6 +3267,7 @@ def health() -> Dict[str, Any]:
         "report_signing_secret_configured": REPORT_SIGNING_SECRET_CONFIGURED,
         "persistent_report_signing_required": REQUIRE_PERSISTENT_REPORT_SIGNING_SECRET,
         "runtime_media_storage": runtime_storage,
+        "resource_budget": CASE_GATE.diagnostics(),
         "model_media_transport": {
             "mode": "adaptive_native_video_or_inline_frames",
             "supplier_file_uri_required": False,
@@ -3268,7 +3368,8 @@ def evaluate_samples(file: UploadFile = File(...)) -> JSONResponse:
 
 @app.post("/api/review-sample")
 def review_sample(payload: Dict[str, str]) -> JSONResponse:
-    return JSONResponse(_run_sample_agent_review(
+    return JSONResponse(_run_with_case_slot(
+        _run_sample_agent_review,
         payload.get("sample_id", "sample_003"),
         payload.get("scenario", "product_damage"),
         payload.get("model_key", "auto"),
@@ -3345,7 +3446,8 @@ def review_folder(
     claim_key = claim_value if claim_mode == "owner" else None
     try:
         folder_dir, ingestion = _save_folder_uploads(files)
-        response = _run_folder_agent_review(
+        response = _run_with_case_slot(
+            _run_folder_agent_review,
             folder_dir,
             scenario,
             "auto",
@@ -3430,7 +3532,8 @@ def review_folders_batch(
     for case_id, case_files in groups.items():
         try:
             folder_dir, ingestion = _save_folder_uploads(case_files)
-            result = _run_folder_agent_review(
+            result = _run_with_case_slot(
+                _run_folder_agent_review,
                 folder_dir,
                 scenario,
                 "auto",
@@ -3549,7 +3652,8 @@ def review(
     evidence_context = _review_evidence_context(
         locals(), assessment_at=_server_assessment_date()
     )
-    result = _run_review(
+    result = _run_with_case_slot(
+        _run_review,
         video,
         scenario,
         fps,

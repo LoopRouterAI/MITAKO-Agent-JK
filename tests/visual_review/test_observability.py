@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import io
+import logging
 import time
 import unittest
 from unittest.mock import patch
@@ -24,6 +26,26 @@ class VisualObservabilityTest(unittest.TestCase):
         client.assert_not_called()
         self.assertEqual(result["error_type"], "deadline")
         self.assertEqual(result["attempt"], 0)
+
+    def test_event_is_written_to_stderr_even_when_logger_filters_info(self):
+        from poc.visual_review_poc.observability import log_visual_event
+
+        stream = io.StringIO()
+        logger = logging.getLogger("test.filtered.visual")
+        logger.setLevel(logging.CRITICAL)
+        with patch("sys.stderr", stream):
+            log_visual_event(
+                logger,
+                "visual_model_http_success",
+                endpoint="https://vod.bj.baidubce.com/v3/chat/gc",
+                status_code=200,
+                headers={"Authorization": "Bearer secret-value"},
+            )
+
+        payload = json.loads(stream.getvalue())
+        self.assertEqual(payload["event"], "visual_model_http_success")
+        self.assertEqual(payload["status_code"], 200)
+        self.assertNotIn("secret-value", stream.getvalue())
 
     def test_event_payload_exposes_endpoint_shape_without_credentials(self):
         from poc.visual_review_poc.observability import visual_event_payload
@@ -85,9 +107,13 @@ class VisualObservabilityTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(events[0][0], "visual_model_http_attempt")
-        self.assertEqual(events[0][1]["status_code"], 200)
-        self.assertNotIn("headers", events[0][1])
-        self.assertNotIn("payload", events[0][1])
+        self.assertNotIn("status_code", events[0][1])
+        self.assertEqual(events[0][1]["attempt"], 1)
+        self.assertEqual(events[-1][0], "visual_model_http_success")
+        self.assertEqual(events[-1][1]["status_code"], 200)
+        for _event, fields in events:
+            self.assertNotIn("headers", fields)
+            self.assertNotIn("payload", fields)
 
     def test_http_attempt_uses_and_releases_process_wide_provider_gate(self):
         from poc.visual_review_poc import model_selection_e2e

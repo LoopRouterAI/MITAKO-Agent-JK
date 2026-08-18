@@ -173,6 +173,8 @@ async def create_job(
         detail = str(exc)
         if detail == "idempotency_key_conflict":
             status = 409
+        elif detail == "review_queue_full":
+            status = 429
         elif detail in {"review_asset_too_large", "review_case_too_large"} or "too_many_review_assets" in detail:
             status = 413
         elif detail in {"unsupported_review_asset", "invalid_review_asset_content", "invalid_review_json_asset"}:
