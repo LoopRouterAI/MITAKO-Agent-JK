@@ -19,7 +19,7 @@ RULES = (
     ("wrong_item", "wrong_item", ("发错", "错货", "收到的是另一个", "另一个角色", "不是买的", "串单", "串了")),
     ("entitlement_missing", "missing_item", ("赠品", "特典", "满赠", "随单赠")),
     ("missing_item", "missing_item", ("漏发", "少发", "少了", "缺件", "应有", "实收")),
-    ("product_damage", "product_damage", ("有伤", "划痕", "破损", "瑕疵", "烂了", "特写照片")),
+    ("product_damage", "product_damage", ("有伤", "划痕", "破损", "瑕疵", "烂了", "特写照片", "开箱视频", "剪辑", "离开镜头", "视频审核")),
     ("product_consultation", "product_consultation", ("库存", "直径", "尺寸", "规格", "发货时间", "SKU", "sku", "现货", "预售", "想买", "支付方式")),
     ("refund_progress", "refund_progress", ("退款", "退钱", "退费", "退款进度", "退款到哪", "多久到账")),
     ("order_logistics", "order_logistics", ("物流", "运输途中", "发货到哪", "发货进度", "催发货", "出库", "清关", "通关", "仓库", "第二笔订单", "引用订单")),
@@ -50,31 +50,65 @@ PUBLIC_LABELS = {
     "casual_chat": "闲聊互动",
 }
 
+VIDEO_DAMAGE_EVIDENCE = {"开箱视频", "剪辑", "离开镜头", "视频审核"}
+SPECIFIC_BUSINESS_INTENTS = {
+    "privacy_deletion",
+    "address_change",
+    "minor_refund_material",
+    "wrong_item",
+    "entitlement_missing",
+    "missing_item",
+    "product_consultation",
+    "refund_progress",
+    "order_logistics",
+    "refund_compensation",
+    "lottery_rule",
+    "lottery_exchange",
+}
+
 
 def _rule_evidence(text: str, intent: str, phrases: tuple[str, ...]) -> list[str]:
     evidence = [phrase for phrase in phrases if phrase in text]
-    if intent == "entitlement_missing" and not any(
-        phrase in text for phrase in ("没有", "没收到", "未收到", "漏发", "少了", "缺少")
-    ):
-        return []
+    if intent == "entitlement_missing":
+        if not evidence:
+            return []
+        missing_evidence = [
+            phrase for phrase in ("没有", "没收到", "未收到", "漏发", "少了", "缺少")
+            if phrase in text
+        ]
+        compact_missing = re.search(
+            r"(?<!不)[少缺](?:了)?[^，。；]{0,8}(?:赠品|特典|满赠|随单赠)",
+            text,
+        )
+        if not missing_evidence and not compact_missing:
+            return []
+        evidence.extend(missing_evidence)
+        if compact_missing:
+            evidence.append(compact_missing.group(0))
     return evidence
 
 
 def route_intent(message: str, history: Sequence[dict[str, Any]] | None = None) -> IntentResult:
     """按固定优先级返回本轮主意图及首要业务场景。"""
     text = str(message or "").strip()
-    matches = [
+    raw_matches = [
         (intent, scenario, evidence)
         for intent, scenario, phrases in RULES
         if (evidence := _rule_evidence(text, intent, phrases))
     ]
 
     count_match = re.search(r"应有\s*\d+.*?实收\s*\d+", text)
-    if count_match and not any(intent == "missing_item" for intent, _, _ in matches):
-        matches.append(("missing_item", "missing_item", [count_match.group(0)]))
-        matches.sort(key=lambda item: next(index for index, rule in enumerate(RULES) if rule[0] == item[0]))
+    if count_match and not any(intent == "missing_item" for intent, _, _ in raw_matches):
+        raw_matches.append(("missing_item", "missing_item", [count_match.group(0)]))
+        raw_matches.sort(key=lambda item: next(index for index, rule in enumerate(RULES) if rule[0] == item[0]))
 
-    if not matches:
+    damage_match = next((item for item in raw_matches if item[0] == "product_damage"), None)
+    if damage_match and set(damage_match[2]) <= VIDEO_DAMAGE_EVIDENCE and any(
+        intent in SPECIFIC_BUSINESS_INTENTS for intent, _, _ in raw_matches
+    ):
+        raw_matches = [item for item in raw_matches if item is not damage_match]
+
+    if not raw_matches:
         return IntentResult(
             intent_code="casual_chat",
             scenario_code="casual_chat",
@@ -83,25 +117,48 @@ def route_intent(message: str, history: Sequence[dict[str, Any]] | None = None) 
             clarification_fields=["request"],
         )
 
-    intent_code, scenario_code, evidence = matches[0]
+    all_evidence = list(dict.fromkeys(
+        phrase
+        for _, _, evidence in raw_matches
+        for phrase in evidence
+    ))
+    matches = raw_matches
+    if any(intent == "entitlement_missing" for intent, _, _ in matches):
+        matches = [
+            item for item in matches
+            if item[0] != "missing_item"
+            and not (item[0] == "lottery_rule" and item[2] == ["活动规则"])
+        ]
+
+    intent_code, scenario_code, _ = matches[0]
+    if {intent_code for intent_code, _, _ in matches} >= {"product_damage", "entitlement_missing"}:
+        intent_code = "product_damage"
+        scenario_code = "product_damage"
     if intent_code == "human_handoff":
         refund_match = next((item for item in matches if item[0] == "refund_progress"), None)
         if refund_match:
             scenario_code = refund_match[1]
-            evidence = evidence + refund_match[2]
 
     clarification_fields: list[str] = []
     if intent_code == "product_consultation" and any(
         phrase in text for phrase in ("没有商品链接", "没有链接", "没商品链接", "没链接")
     ):
         clarification_fields.append("product_identity")
+    if "第二笔订单" in text:
+        clarification_fields.append("order_id")
 
-    unique_evidence = list(dict.fromkeys(evidence))
+    intent_codes = list(dict.fromkeys([intent_code, *(intent for intent, _, _ in matches)]))
+    scenario_matches = matches
+    if intent_code == "human_handoff" and scenario_code != "human_handoff":
+        scenario_matches = [item for item in matches if item[0] != "human_handoff"]
+    scenario_codes = list(dict.fromkeys([scenario_code, *(scenario for _, scenario, _ in scenario_matches)]))
     return IntentResult(
         intent_code=intent_code,
         scenario_code=scenario_code,
-        confidence=min(0.99, 0.9 + 0.02 * len(unique_evidence)),
-        matched_evidence=unique_evidence,
+        intent_codes=intent_codes,
+        scenario_codes=scenario_codes,
+        confidence=min(0.99, 0.9 + 0.02 * len(all_evidence)),
+        matched_evidence=all_evidence,
         requires_clarification=bool(clarification_fields),
         clarification_fields=clarification_fields,
     )

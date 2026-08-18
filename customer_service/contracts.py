@@ -75,10 +75,18 @@ class IntentResult(BaseModel):
 
     intent_code: str
     scenario_code: str
+    intent_codes: list[str] = Field(default_factory=list)
+    scenario_codes: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
     matched_evidence: list[str] = Field(default_factory=list)
     requires_clarification: bool = False
     clarification_fields: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def primary_codes_are_in_atomic_lists(self) -> "IntentResult":
+        self.intent_codes = list(dict.fromkeys([self.intent_code, *self.intent_codes]))
+        self.scenario_codes = list(dict.fromkeys([self.scenario_code, *self.scenario_codes]))
+        return self
 
 
 class NextStep(BaseModel):

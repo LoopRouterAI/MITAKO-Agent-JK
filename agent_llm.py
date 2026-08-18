@@ -33,6 +33,7 @@ async def _emit_llm_failure(
     model_cfg: Dict[str, Any],
     api_key: Optional[str],
     reason: str,
+    emit_analysis_event: bool,
 ) -> str:
     """向 SSE 推送真实错误状态，返回结构化错误回复（不伪造成功日志）"""
     user_reply = "抱歉，虾饺这边暂时没能完成自动核实。我已经为您转接客服继续处理，请稍候。"
@@ -45,6 +46,7 @@ async def _emit_llm_failure(
     }
     if event_queue:
         await _emit_api_log(event_queue, "error", attempt=1)
+    if event_queue and emit_analysis_event:
         await event_queue.put({
             "type": "unified_analysis",
             "intent": analysis["intent"],
@@ -63,6 +65,7 @@ async def call_llm(
     model_id: str = None,
     stream_reply: bool = True,
     emit_text_chunks: bool = True,
+    emit_analysis_event: bool = False,
 ) -> str:
     """调用 OpenAI 兼容大模型（DeepSeek V4 Flash / SenseNova），支持流式与可选思考流"""
     last_text = user_prompt.strip()
@@ -80,6 +83,7 @@ async def call_llm(
             model_cfg,
             api_key,
             f"未配置有效的 LLM API Key，请在 .env 中设置 {key_env}",
+            emit_analysis_event,
         )
 
     if rate_cfg:
@@ -97,6 +101,7 @@ async def call_llm(
                 api_key,
                 f"DeepSeek 调用配额已用尽：每 {window_h} 小时最多 {quota['max_requests']} 次，"
                 f"已用 {quota['used']} 次。请稍后再试或联系VIP客服。",
+                emit_analysis_event,
             )
         quota_acquired = True
     else:
@@ -175,13 +180,14 @@ async def call_llm(
                                     rest = parts[1]
                                     json_part, after = rest.split("</analysis>", 1)
                                     parsed = json.loads(json_part.strip())
-                                    await event_queue.put({
-                                        "type": "unified_analysis",
-                                        "intent": parsed.get("intent", "闲聊互动"),
-                                        "emotion_level": int(parsed.get("emotion_level", 2)),
-                                        "should_transfer": parsed.get("should_transfer", False),
-                                        "transfer_reason": parsed.get("transfer_reason", ""),
-                                    })
+                                    if emit_analysis_event:
+                                        await event_queue.put({
+                                            "type": "unified_analysis",
+                                            "intent": parsed.get("intent", "闲聊互动"),
+                                            "emotion_level": int(parsed.get("emotion_level", 2)),
+                                            "should_transfer": parsed.get("should_transfer", False),
+                                            "transfer_reason": parsed.get("transfer_reason", ""),
+                                        })
                                     user_text = after.lstrip()
                                     if user_text and emit_text_chunks:
                                         await event_queue.put({"type": "text_chunk", "content": user_text})
@@ -247,7 +253,7 @@ async def call_llm(
 
                                                 try:
                                                     parsed = json.loads(json_str)
-                                                    if event_queue:
+                                                    if event_queue and emit_analysis_event:
                                                         await event_queue.put({
                                                             "type": "unified_analysis",
                                                             "intent": parsed.get("intent", "闲聊互动"),
@@ -289,7 +295,7 @@ async def call_llm(
 
                                                 try:
                                                     parsed = json.loads(json_str.strip())
-                                                    if event_queue:
+                                                    if event_queue and emit_analysis_event:
                                                         await event_queue.put({
                                                             "type": "unified_analysis",
                                                             "intent": parsed.get("intent", "闲聊互动"),
@@ -361,4 +367,5 @@ async def call_llm(
             model_cfg,
             api_key,
             f"LLM API 调用失败 ({active_model_id}): {e}",
+            emit_analysis_event,
         )

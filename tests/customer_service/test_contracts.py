@@ -88,6 +88,34 @@ def test_intent_confidence_rejects_out_of_range_values(confidence: float) -> Non
         )
 
 
+def test_intent_result_defaults_atomic_lists_to_primary_codes() -> None:
+    from customer_service.contracts import IntentResult
+
+    result = IntentResult(
+        intent_code="human_handoff",
+        scenario_code="refund_progress",
+        confidence=0.95,
+    )
+
+    assert result.intent_codes == ["human_handoff"]
+    assert result.scenario_codes == ["refund_progress"]
+
+
+def test_intent_result_stably_deduplicates_and_keeps_primary_codes_first() -> None:
+    from customer_service.contracts import IntentResult
+
+    result = IntentResult(
+        intent_code="human_handoff",
+        scenario_code="refund_progress",
+        intent_codes=["refund_progress", "human_handoff", "refund_progress"],
+        scenario_codes=["refund_progress", "refund_progress"],
+        confidence=0.95,
+    )
+
+    assert result.intent_codes == ["human_handoff", "refund_progress"]
+    assert result.scenario_codes == ["refund_progress"]
+
+
 @pytest.mark.parametrize("source_ref", ["", "   "])
 def test_verified_system_fact_requires_source_ref(source_ref: str) -> None:
     from customer_service.contracts import Fact

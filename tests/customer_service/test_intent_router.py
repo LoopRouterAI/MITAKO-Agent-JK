@@ -49,6 +49,45 @@ def test_priority_and_compound_scenarios(
     assert result.scenario_code == expected_scenario
 
 
+def test_refund_handoff_keeps_all_atomic_intents_and_evidence() -> None:
+    result = _route("延期180天了，我要求退款并转人工。")
+
+    assert result.intent_code == "human_handoff"
+    assert result.scenario_code == "refund_progress"
+    assert result.intent_codes == ["human_handoff", "refund_progress"]
+    assert result.scenario_codes == ["refund_progress"]
+    assert {"转人工", "退款"} <= set(result.matched_evidence)
+
+
+def test_damage_with_missing_entitlement_keeps_both_atomic_scenes() -> None:
+    result = _route("商品有划痕，而且同一包裹还少了一张特典卡。")
+
+    assert result.intent_code == "product_damage"
+    assert result.scenario_code == "product_damage"
+    assert result.intent_codes == ["product_damage", "entitlement_missing"]
+    assert result.scenario_codes == ["product_damage", "missing_item"]
+    assert {"划痕", "少了", "特典"} <= set(result.matched_evidence)
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_evidence"),
+    [
+        ("商品有划痕，而且同一包裹还少特典。", "少特典"),
+        ("商品有划痕，而且同一包裹还少一张特典卡。", "少一张特典"),
+    ],
+)
+def test_damage_with_compact_entitlement_missing_phrases_keeps_both_scenes(
+    message: str, expected_evidence: str,
+) -> None:
+    result = _route(message)
+
+    assert result.intent_code == "product_damage"
+    assert result.scenario_code == "product_damage"
+    assert result.intent_codes == ["product_damage", "entitlement_missing"]
+    assert result.scenario_codes == ["product_damage", "missing_item"]
+    assert expected_evidence in result.matched_evidence
+
+
 def test_unknown_input_requires_clarification() -> None:
     result = _route("这个情况能帮我看看吗？")
 
@@ -58,11 +97,60 @@ def test_unknown_input_requires_clarification() -> None:
     assert result.clarification_fields == ["request"]
 
 
+def test_second_order_request_requires_order_identity() -> None:
+    result = _route("我想查第二笔订单，不是刚才那一笔。")
+
+    assert result.intent_code == "order_logistics"
+    assert result.requires_clarification is True
+    assert "order_id" in result.clarification_fields
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "查第二笔订单的退款进度。",
+        "第二笔订单退款并转人工。",
+    ],
+)
+def test_compound_second_order_request_still_requires_order_identity(message: str) -> None:
+    result = _route(message)
+
+    assert "order_logistics" in result.intent_codes
+    assert result.requires_clarification is True
+    assert "order_id" in result.clarification_fields
+
+
 def test_entitlement_keyword_without_missing_signal_does_not_hide_damage() -> None:
     result = _route("限定特典卡表面有明显划痕。")
 
     assert result.intent_code == "product_damage"
     assert result.scenario_code == "product_damage"
+
+
+@pytest.mark.parametrize("keyword", ["开箱视频", "剪辑", "离开镜头", "视频审核"])
+def test_legacy_damage_evidence_keywords_stay_product_damage(keyword: str) -> None:
+    result = _route(f"这个售后材料涉及{keyword}，请帮我看看。")
+
+    assert result.intent_code == "product_damage"
+    assert result.scenario_code == "product_damage"
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_intent"),
+    [
+        ("未成年人退款材料需要视频审核吗？", "minor_refund_material"),
+        ("漏发货的开箱视频被剪辑了。", "missing_item"),
+        ("发错货的视频审核需要多久？", "wrong_item"),
+    ],
+)
+def test_video_evidence_keywords_do_not_pollute_specific_business_scenes(
+    message: str, expected_intent: str
+) -> None:
+    result = _route(message)
+
+    assert result.intent_code == expected_intent
+    assert "product_damage" not in result.intent_codes
+    assert not ({"开箱视频", "剪辑", "离开镜头", "视频审核"} & set(result.matched_evidence))
 
 
 @pytest.mark.parametrize(
@@ -149,3 +237,158 @@ def test_generate_reply_cannot_override_deterministic_intent(monkeypatch: pytest
 
     assert "intent" not in updates
     assert updates["emotion_level"] == 4
+
+
+def test_real_llm_event_path_only_emits_deterministic_analysis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent
+    import agent_llm
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": (
+                            '<analysis>{"intent":"物流追踪/催发货","emotion_level":4,'
+                            '"should_transfer":false}</analysis>\n回复正文'
+                        )
+                    }
+                }]
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(agent_llm.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        agent_llm,
+        "get_model_config",
+        lambda model_id: {"id": "test", "api_base": "https://example.invalid/v1", "model": "test"},
+    )
+    monkeypatch.setattr(agent_llm, "get_model_api_key", lambda model_id: "test-key")
+    queue = asyncio.Queue()
+    state = {
+        "messages": [{"role": "user", "content": "想问五条悟徽章的库存"}],
+        "intent": "售前商品咨询",
+        "emotion_level": 2,
+        "order_data": {},
+        "logistics_data": {},
+        "sop_results": [],
+        "user_memory": {},
+        "compensation_given": [],
+        "should_transfer": False,
+        "transfer_reason": "",
+        "attachments": [],
+        "sop_state": {},
+        "conversation_state": {
+            "intent": {
+                "intent_code": "product_consultation",
+                "scenario_code": "product_consultation",
+                "intent_codes": ["product_consultation"],
+                "scenario_codes": ["product_consultation"],
+                "confidence": 0.95,
+                "matched_evidence": ["库存"],
+                "requires_clarification": False,
+                "clarification_fields": [],
+            }
+        },
+    }
+
+    asyncio.run(
+        agent.generate_reply_with_persona(
+            state,
+            {"configurable": {"event_queue": queue, "stream_reply": False, "model_id": "test"}},
+        )
+    )
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    analyses = [event for event in events if event["type"] == "unified_analysis"]
+
+    assert analyses
+    assert {event["intent"] for event in analyses} == {"售前商品咨询"}
+    assert {event["intent_code"] for event in analyses} == {"product_consultation"}
+
+
+def test_llm_event_filter_preserves_thinking_and_text_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent_llm
+
+    class FakeStreamResponse:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aiter_lines(self):
+            yield 'data: {"choices":[{"delta":{"reasoning_content":"思考"}}]}'
+            yield (
+                'data: {"choices":[{"delta":{"content":"<analysis>{\\"intent\\":'
+                '\\"物流追踪/催发货\\",\\"emotion_level\\":4}</analysis>回复正文"}}]}'
+            )
+            yield "data: [DONE]"
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return FakeStreamResponse()
+
+    monkeypatch.setattr(agent_llm.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        agent_llm,
+        "get_model_config",
+        lambda model_id: {
+            "id": "test",
+            "api_base": "https://example.invalid/v1",
+            "model": "test",
+            "supports_reasoning_stream": True,
+        },
+    )
+    monkeypatch.setattr(agent_llm, "get_model_api_key", lambda model_id: "test-key")
+    queue = asyncio.Queue()
+
+    asyncio.run(
+        agent_llm.call_llm(
+            "系统提示",
+            "用户消息",
+            [],
+            event_queue=queue,
+            model_id="test",
+            stream_reply=True,
+            emit_text_chunks=True,
+            emit_analysis_event=False,
+        )
+    )
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+
+    assert any(event["type"] == "llm_thinking" and event["content"] == "思考" for event in events)
+    assert any(event["type"] == "text_chunk" and event["content"] == "回复正文" for event in events)
+    assert not any(event["type"] == "unified_analysis" for event in events)

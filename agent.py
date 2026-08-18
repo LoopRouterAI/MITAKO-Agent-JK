@@ -335,6 +335,8 @@ def _emit_unified_analysis_event(
         event.update({
             "intent_code": intent_result.get("intent_code"),
             "scenario_code": intent_result.get("scenario_code"),
+            "intent_codes": intent_result.get("intent_codes", []),
+            "scenario_codes": intent_result.get("scenario_codes", []),
             "confidence": intent_result.get("confidence"),
             "matched_evidence": intent_result.get("matched_evidence", []),
             "requires_clarification": intent_result.get("requires_clarification", False),
@@ -1214,6 +1216,7 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
         model_id=model_id,
         stream_reply=stream_reply,
         emit_text_chunks=False,
+        emit_analysis_event=False,
     )
     meme_tags = re.findall(r"<meme:\s*(\w+)>", reply)
     analysis = _parse_reply_analysis(reply)
