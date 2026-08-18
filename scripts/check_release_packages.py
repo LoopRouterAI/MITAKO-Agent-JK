@@ -479,6 +479,10 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "customer runtime is missing the public review safety module",
     )
     _assert(
+        any(name.endswith("observability_store.pyc") for name in runtime_names),
+        "customer runtime is missing the persisted observability store",
+    )
+    _assert(
         any(name.endswith("review_service/material_readiness.pyc") for name in runtime_names),
         "customer runtime is missing the scene material readiness module",
     )
