@@ -650,6 +650,7 @@ $RuntimeFiles = @(
     "review_input_safety.py",
     "review_media_safety.py",
     "review_public_safety.py",
+    "observability_store.py",
     "runtime_paths.py",
     "sla_lock.py",
     "viking_memory.py",
