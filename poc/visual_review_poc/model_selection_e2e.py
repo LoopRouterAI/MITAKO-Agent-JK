@@ -613,6 +613,14 @@ def post_with_retries(
                 "request_attempts": request_attempts,
             }
         started = time.time()
+        log_visual_event(
+            LOGGER,
+            "visual_model_http_attempt",
+            endpoint=endpoint,
+            attempt=attempt,
+            max_attempts=retries + 1,
+            timeout_seconds=timeout,
+        )
         acquired = False
         try:
             if remaining is None:
@@ -656,12 +664,11 @@ def post_with_retries(
                 })
                 log_visual_event(
                     LOGGER,
-                    "visual_model_http_attempt",
+                    "visual_model_http_success",
                     endpoint=endpoint,
                     attempt=attempt,
                     status_code=response.status_code,
                     latency_seconds=latency,
-                    outcome="success",
                 )
                 return {
                     "ok": True,
@@ -687,13 +694,13 @@ def post_with_retries(
         })
         log_visual_event(
             LOGGER,
-            "visual_model_http_attempt",
+            "visual_model_http_failure",
             endpoint=endpoint,
             attempt=attempt,
             status_code=last.get("status_code"),
             latency_seconds=last.get("latency_seconds"),
             error_type=last.get("error_type"),
-            outcome="failed",
+            will_retry=bool(last.get("error_type") == "soft" and attempt <= retries),
         )
         if last["error_type"] != "soft" or attempt > retries:
             return {**last, "request_attempts": request_attempts}

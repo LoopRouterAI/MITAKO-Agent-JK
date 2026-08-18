@@ -94,7 +94,7 @@ try:
         video_proxy_recommendation,
     )
     from poc.visual_review_poc.native_video_perception import run_native_perception_pipeline
-    from poc.visual_review_poc.observability import sanitize_error_text
+    from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text
     from poc.visual_review_poc.secure_media_tunnel import open_secure_media_tunnel
     from poc.visual_review_poc.video_role_preflight import (
         build_opening_role_case,
@@ -136,7 +136,7 @@ except ImportError:
         video_proxy_recommendation,
     )
     from native_video_perception import run_native_perception_pipeline
-    from observability import sanitize_error_text
+    from observability import log_visual_event, sanitize_error_text
     from secure_media_tunnel import open_secure_media_tunnel
     from video_role_preflight import (
         build_opening_role_case,
@@ -2055,6 +2055,14 @@ def _run_review(
     deadline_at = _new_review_deadline()
     profile = REVIEW_MODEL_PROFILES.get(review_model) or REVIEW_MODEL_PROFILES["standard"]
     load_visual_env()
+    started = time.time()
+    log_visual_event(
+        LOGGER,
+        "visual_review_subprocess_start",
+        source="single_review",
+        scenario=scenario,
+        review_model=review_model,
+    )
     policy = dict(policy_snapshot or get_active_policy(rule_tenant_id))
     effective_fps = fps
     effective_max_frames = max_frames
@@ -2499,6 +2507,19 @@ def _run_review(
         review["sampling"]["sampling_mode"] = (
             "native_then_frame_fallback" if native_success_needs_frames else "native_video"
         )
+    log_visual_event(
+        LOGGER,
+        "visual_review_subprocess_finished",
+        source="single_review",
+        scenario=scenario,
+        review_model=review_model,
+        status=result.get("status"),
+        review_ok=(review.get("summary") or {}).get("review_status") == "completed",
+        frame_count=len(case.get("frames") or []),
+        supplemental_image_count=len(case.get("supplemental_images") or []),
+        official_reference_image_count=len(case.get("official_reference_images") or []),
+        latency_seconds=round(time.time() - started, 2),
+    )
     return {"ok": (review.get("summary") or {}).get("review_status") == "completed", **review}
 
 
@@ -2722,6 +2743,14 @@ def _run_sample_agent_review(
     if model_key != "auto" and model_key not in MODEL_CONFIGS:
         raise HTTPException(status_code=400, detail="未知审核模型")
     load_visual_env()
+    started = time.time()
+    log_visual_event(
+        LOGGER,
+        "visual_review_sample_start",
+        sample_id=sample_id,
+        scenario=scenario,
+        model_key=model_key,
+    )
     args = SimpleNamespace(
         fps=1.0,
         sampling_mode="adaptive",
@@ -2755,6 +2784,18 @@ def _run_sample_agent_review(
         deadline_at=_new_review_deadline(),
     )
     review = _agent_report_response(case, sample_dir, result, f"agent_{sample_id}")
+    log_visual_event(
+        LOGGER,
+        "visual_review_sample_finished",
+        sample_id=sample_id,
+        scenario=scenario,
+        model_key=model_key,
+        status=result.get("status"),
+        review_ok=(review.get("summary") or {}).get("review_status") == "completed",
+        frame_count=len(case.get("frames") or []),
+        supplemental_image_count=len(case.get("supplemental_images") or []),
+        latency_seconds=round(time.time() - started, 2),
+    )
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
         "source_status": "sample_ready",
@@ -2980,6 +3021,18 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         review["video_role_preflight"] = role_preflight
         return {"ok": review.get("ok") is True, "source_status": "folder_ready", "review": review}
     load_visual_env()
+    started = time.time()
+    log_visual_event(
+        LOGGER,
+        "visual_review_folder_start",
+        scenario=scenario,
+        model_key=model_key,
+        sampling_mode=sampling_mode,
+        fps=fps,
+        max_frames=max_frames,
+        api_frame_limit=api_frame_limit,
+        probe_seconds=probe_seconds,
+    )
     args = SimpleNamespace(
         fps=fps,
         sampling_mode=sampling_mode,
@@ -3025,6 +3078,17 @@ def _run_folder_agent_review(folder_dir: Path, scenario: str, model_key: str, ev
         include_internal_metrics=include_internal_metrics,
         include_html_report=include_html_report,
         defer_postprocess=defer_postprocess,
+    )
+    log_visual_event(
+        LOGGER,
+        "visual_review_folder_finished",
+        scenario=scenario,
+        model_key=model_key,
+        status=result.get("status"),
+        review_ok=(review.get("summary") or {}).get("review_status") == "completed",
+        frame_count=len(case.get("frames") or []),
+        supplemental_image_count=len(case.get("supplemental_images") or []),
+        latency_seconds=round(time.time() - started, 2),
     )
     return {
         "ok": (review.get("summary") or {}).get("review_status") == "completed",
