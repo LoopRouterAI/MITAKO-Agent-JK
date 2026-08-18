@@ -610,6 +610,7 @@ class ReviewJobResult(BaseModel):
     boundary: str = ""
     review: Optional[ReviewPayload] = None
     recommended_escalation: Dict[str, Any] = Field(default_factory=dict)
+    observability: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ReviewPublicAsset(BaseModel):
