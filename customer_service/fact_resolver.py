@@ -25,8 +25,12 @@ _CLAIM_PATTERN = re.compile(
     r"|(?:准备(?:好|完)?了|备齐(?:了)?|拍(?:好|完)?了|上传了|提交了|提供了)"
     r"|(?:^|[，。！？\s]|我|这边|手里)(?<!没)有(?:了)?"
 )
-_PARSED_STATUSES = frozenset({"parsed", "completed", "succeeded", "success"})
-_FAILED_PARSE_STATUSES = frozenset({"failed", "error", "parse_failed", "invalid"})
+_PARSED_STATUSES = frozenset(
+    {"parsed", "completed", "succeeded", "success", "review_completed", "review_succeeded"}
+)
+_FAILED_PARSE_STATUSES = frozenset(
+    {"failed", "error", "parse_failed", "review_failed", "invalid", "cancelled", "canceled"}
+)
 _QUEUED_HANDOFF_STATUSES = frozenset(
     {"queued", "queuing", "escalated", "transferring", "connected"}
 )
@@ -56,22 +60,19 @@ def _claims_material(message: str) -> bool:
 
 
 def _parse_observation(record: Mapping[str, Any]) -> bool | None:
+    status = _text(record, "status").lower()
+    parse_status = _text(record, "parse_status").lower()
+    if status in _FAILED_PARSE_STATUSES or parse_status in _FAILED_PARSE_STATUSES:
+        return False
     parsed = record.get("parsed")
     if isinstance(parsed, bool):
         return parsed
-    parse_status = _text(record, "parse_status").lower()
     if parse_status in _PARSED_STATUSES:
         return True
-    if parse_status in _FAILED_PARSE_STATUSES:
-        return False
     if record.get("kind") != "review_task":
         return None
-    review_result = record.get("review_result")
-    if isinstance(review_result, Mapping) and review_result:
+    if status in _PARSED_STATUSES:
         return True
-    status = _text(record, "status").lower()
-    if status in _FAILED_PARSE_STATUSES:
-        return False
     return None
 
 

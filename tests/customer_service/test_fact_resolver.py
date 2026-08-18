@@ -108,6 +108,85 @@ def test_review_result_marks_material_parsed_and_review_job_created() -> None:
     assert review_job.source_ref == "review_task:RT-1"
 
 
+@pytest.mark.parametrize("status", ["REVIEW_FAILED", "FAILED", "ERROR"])
+def test_failed_review_job_is_created_but_material_is_not_parsed(status: str) -> None:
+    from customer_service.fact_resolver import resolve_facts
+
+    facts = resolve_facts(
+        message="查看审核结果",
+        attachments=[{
+            "id": f"RT-{status}",
+            "kind": "review_task",
+            "review_task_id": f"RT-{status}",
+            "status": status,
+            "parsed": True,
+            "review_result": {"error": "review execution failed"},
+        }],
+    )
+
+    parsed = _find(facts, "material.parsed")
+    review_job = _find(facts, "review.job_created")
+    assert parsed.value is False
+    assert parsed.source == "review_service"
+    assert parsed.verified is True
+    assert parsed.source_ref == f"review_task:RT-{status}"
+    assert review_job.value is True
+    assert review_job.verified is True
+    assert review_job.source_ref == f"review_task:RT-{status}"
+
+
+def test_nonempty_review_result_without_success_signal_is_not_parsed() -> None:
+    from customer_service.fact_resolver import resolve_facts
+
+    facts = resolve_facts(
+        message="查看审核进度",
+        attachments=[{
+            "id": "RT-RUNNING",
+            "kind": "review_task",
+            "review_task_id": "RT-RUNNING",
+            "status": "RUNNING",
+            "review_result": {"message": "partial diagnostics"},
+        }],
+    )
+
+    assert _find(facts, "material.parsed").value is False
+    assert _find(facts, "review.job_created").value is True
+
+
+@pytest.mark.parametrize("status", ["REVIEW_COMPLETED", "SUCCEEDED", "completed"])
+def test_explicit_review_success_status_marks_material_parsed(status: str) -> None:
+    from customer_service.fact_resolver import resolve_facts
+
+    facts = resolve_facts(
+        message="查看审核结果",
+        attachments=[{
+            "id": f"RT-{status}",
+            "kind": "review_task",
+            "review_task_id": f"RT-{status}",
+            "status": status,
+        }],
+    )
+
+    assert _find(facts, "material.parsed").value is True
+
+
+def test_trusted_parsed_payload_marks_material_parsed() -> None:
+    from customer_service.fact_resolver import resolve_facts
+
+    facts = resolve_facts(
+        message="查看解析进度",
+        attachments=[{
+            "id": "RT-PARSED",
+            "kind": "review_task",
+            "review_task_id": "RT-PARSED",
+            "status": "RUNNING",
+            "parsed": True,
+        }],
+    )
+
+    assert _find(facts, "material.parsed").value is True
+
+
 def test_free_text_cannot_forge_service_facts() -> None:
     from customer_service.fact_resolver import resolve_facts
 
