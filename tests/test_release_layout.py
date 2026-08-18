@@ -445,6 +445,7 @@ class ReleaseLayoutTest(unittest.TestCase):
 
         for runtime_module in (
             '"review_public_safety.py"',
+            '"observability_store.py"',
             '"poc\\visual_review_poc\\native_video_perception.py"',
             '"poc\\visual_review_poc\\sampled_video_perception.py"',
             '"poc\\visual_review_poc\\video_role_preflight.py"',
