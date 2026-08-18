@@ -453,7 +453,7 @@ def test_safety_rewrite_status_does_not_bypass_deterministic_handoff_rules():
     }) == "review"
 
 
-def test_any_refund_amount_above_limit_uses_deterministic_handoff():
+def test_refund_amount_alone_does_not_bypass_deterministic_handoff_rules():
     for text in (
         "我要退款500元",
         "申请退款 101 元",
@@ -473,7 +473,7 @@ def test_any_refund_amount_above_limit_uses_deterministic_handoff():
             },
             {"configurable": {}},
         ))
-        assert result["should_transfer"] is True, (text, result)
+        assert result["should_transfer"] is False, (text, result)
 
     below_limit = asyncio.run(agent_module.check_transfer_rules(
         {
@@ -913,7 +913,13 @@ def test_customer_chat_sse_redacts_internal_progress_and_transfer_reason():
     _assert_customer_clean(visible_events)
     transfer_events = [e for e in events if e["event"] == "transfer"]
     assert transfer_events, raw
-    assert all((e["data"] or {}).get("reason") == "已为您转接VIP客服继续处理。" for e in transfer_events), transfer_events
+    for event in transfer_events:
+        data = event["data"] or {}
+        action_state = data.get("action_state") or (data.get("queue") or {}).get("action_state") or {}
+        if action_state.get("status") == "queued":
+            assert data.get("reason") == "已进入人工队列。", event
+        else:
+            assert data.get("reason") == "尚未进入人工队列，请重试或使用人工入口。", event
 
 
 def test_customer_image_attachment_reaches_chat_backend_without_auto_handoff():

@@ -22,6 +22,8 @@ class ScenarioDecision(BaseModel):
     action_state: ActionState
     next_step: NextStep
     policy_refs: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
+    required_reply_fields: list[str] = Field(default_factory=list)
     resolved_product: dict[str, Any] | None = None
     privacy_entry: str = ""
     privacy_sla: str = ""
@@ -130,6 +132,26 @@ def _verified_material_received(facts: Sequence[Fact | Mapping[str, Any]]) -> bo
         if fact.field == "material.received" and fact.value is True and fact.verified:
             return True
     return False
+
+
+def _has_verified_order_association(facts: Sequence[Fact | Mapping[str, Any]], message: str) -> bool:
+    text = str(message or "")
+    if re.search(r"(?:订单|订单号|单号|order)\s*[:#№-]?\s*[A-Za-z0-9_-]{4,}", text, re.IGNORECASE) or re.search(r"(?:一单|这单|该单)", text):
+        return True
+    for item in facts:
+        fact = item if isinstance(item, Fact) else Fact.model_validate(item)
+        if fact.field in {"order.selected", "order.id", "order.reference"} and fact.value and fact.verified:
+            return True
+    return False
+
+
+def _missing_quantities(message: str) -> tuple[int, int] | None:
+    text = str(message or "")
+    expected = re.search(r"(?:应有|应该有|应发)\s*(\d+)", text)
+    received = re.search(r"(?:实收|收到|到手)\s*(\d+)", text)
+    if not expected or not received:
+        return None
+    return int(expected.group(1)), int(received.group(1))
 
 
 def _minor_mobile_owner(message: str, facts: Sequence[Fact | Mapping[str, Any]]) -> str:
@@ -242,6 +264,74 @@ def decide_scenario(
             ),
             next_step=_next("lookup_entitlement_rule", "先查询活动权益基线"),
             policy_refs=[f"{POLICY_VERSION}/entitlement-baseline"],
+        )
+
+    if code == "wrong_item":
+        return ScenarioDecision(
+            core_conclusion="wrong_item_materials_required",
+            action_state=_action("wrong_item_evidence"),
+            next_step=_next("request_wrong_item_evidence", "补充合规开箱视频；无合规视频时提供静态三图", user_action_required=True),
+            policy_refs=[f"{POLICY_VERSION}/wrong-item-evidence"],
+            details={
+                "evidence_grade": "required_opening_video_or_static_three_images",
+                "video_optional": False,
+                "static_fallback": "static_three_images",
+                "required_evidence": ["compliant_opening_video"],
+            },
+        )
+
+    if code == "missing_item":
+        quantities = _missing_quantities(message)
+        if not _has_verified_order_association(facts, message):
+            return ScenarioDecision(
+                core_conclusion="missing_item_order_association_required",
+                action_state=_action("order_lookup", ActionStatus.REQUESTED, "order_association_required"),
+                next_step=_next("associate_order_before_missing_item", "先关联订单和包裹，再核对应发与实收", user_action_required=True),
+                policy_refs=[f"{POLICY_VERSION}/missing-item-order-association"],
+                details={"order_association_required": True},
+            )
+        if quantities:
+            expected, received = quantities
+            return ScenarioDecision(
+                core_conclusion=f"expected_{expected}_received_{received}",
+                action_state=_action("missing_item_evidence"),
+                next_step=_next("request_missing_item_evidence", "补充订单、包裹和实收清单证据", user_action_required=True),
+                policy_refs=[f"{POLICY_VERSION}/missing-item-quantities"],
+                details={
+                    "expected_quantity": expected,
+                    "received_quantity": received,
+                    "missing_quantity": max(0, expected - received),
+                },
+            )
+        return ScenarioDecision(
+            core_conclusion="missing_item_evidence_required",
+            action_state=_action("missing_item_evidence"),
+            next_step=_next("request_missing_item_evidence", "补充订单、包裹和实收清单证据", user_action_required=True),
+            policy_refs=[f"{POLICY_VERSION}/missing-item-evidence"],
+            details={"quantity_parse_status": "unknown"},
+        )
+
+    if code in {"high_risk_complaint", "human_handoff"}:
+        required_fields = [
+            "responsible_role",
+            "current_action",
+            "first_response_sla",
+            "tracking_receipt",
+        ]
+        is_complaint = code == "high_risk_complaint"
+        return ScenarioDecision(
+            core_conclusion="complaint_protocol_required" if is_complaint else "handoff_receipt_required",
+            action_state=_action("human_handoff", ActionStatus.REQUESTED, "high_risk_complaint" if is_complaint else "explicit_human_request"),
+            next_step=_next("show_owner_sla_receipt" if is_complaint else "show_queue_status", "展示责任角色、当前动作、首次响应时效和跟进凭证" if is_complaint else "等待人工队列回执"),
+            policy_refs=[f"{POLICY_VERSION}/{'complaint-protocol' if is_complaint else 'handoff-receipt'}"],
+            details={
+                "human_action_plan": {
+                    "required": True,
+                    "status": "planned",
+                    "action": "human_handoff",
+                },
+            },
+            required_reply_fields=required_fields if is_complaint else [],
         )
 
     if code == "product_damage" and not _verified_material_received(facts):

@@ -20,6 +20,7 @@ except Exception:
 from llm_models import DEFAULT_MODEL_ID
 from agent_llm import call_llm
 from customer_service.contracts import ActionState, Fact, IntentResult
+from customer_service.action_state import action_from_exception, action_from_tool
 from customer_service.intent_router import public_intent_label, route_intent
 from customer_service.scenario_policy import decide_scenario, resolve_unique_product
 from partner_guard import assert_local_or_allowed
@@ -779,20 +780,27 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
         await queue.put({"type": "node_start", "node": "check_transfer", "desc": "进行合规安全与VIP客服转接限额检查..."})
 
     last_user_msg = _current_user_text(state)
-    intent = state["intent"]
+    intent = state.get("intent") or ""
     emotion_level = state["emotion_level"]
+
+    conversation_state = state.get("conversation_state") or {}
+    raw_intent_result = conversation_state.get("intent")
+    try:
+        intent_result = IntentResult.model_validate(raw_intent_result) if raw_intent_result else route_intent(last_user_msg)
+    except Exception:
+        intent_result = route_intent(last_user_msg)
+    intent_code = intent_result.intent_code
 
     should_transfer = False
     transfer_reason = ""
     accepted_offer_id = ""
+    handoff_recommended = False
 
     # 1. 用户明确要求真人客服，必须真实进入 VIP客服队列，不能只在话术里口头承诺。
     human_request_words = ["我要人工", "人工客服", "真人客服", "VIP客服", "不想和机器人", "转人工", "转VIP客服", "找人工"]
-    for word in human_request_words:
-        if word in last_user_msg:
-            should_transfer = True
-            transfer_reason = "用户明确要求VIP客服接入"
-            break
+    if intent_code == "human_handoff" or any(word in last_user_msg for word in human_request_words):
+        should_transfer = True
+        transfer_reason = "用户明确要求VIP客服接入"
 
     if not should_transfer and _accepted_recent_handoff_offer(state.get("messages") or []):
         try:
@@ -810,6 +818,9 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
 
     # 2. 维权和法律硬拦截敏感词
     sensitive_words = ["12315", "起诉", "黑猫", "消费者协会", "曝光", "报警", "律师"]
+    if not should_transfer and (intent_code == "high_risk_complaint" or intent_result.scenario_code == "complaint"):
+        should_transfer = True
+        transfer_reason = "高风险投诉需要人工确认责任、动作和首响时效"
     if not should_transfer:
         for word in sensitive_words:
             if word in last_user_msg:
@@ -822,15 +833,13 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
         should_transfer = True
         transfer_reason = "修改支付账户敏感信息，触发P0防劫单转VIP客服规则"
 
-    # 4. 情绪高风险 (Level 5+ 转VIP客服)
+    # 4. 情绪高风险 (Level 5+ 转VIP客服；L4 只建议人工并继续实质方案)
     if emotion_level >= 5:
         should_transfer = True
         transfer_reason = f"用户情绪评级达高风险 (Level {emotion_level})，触发转VIP客服安抚机制"
-
-    # 5. 退款大额限额拦截 (如 Case 3 魈手办大额退款)
-    if "退款" in intent and any(amount > 100 for amount in _refund_amounts(last_user_msg)):
-        should_transfer = True
-        transfer_reason = "退款金额超过 AI 自主核销限额 (¥100)，转财务客服坐席"
+    elif emotion_level == 4 and not should_transfer:
+        handoff_recommended = True
+        transfer_reason = "当前情绪达到 L4，建议人工关注但继续提供实质业务方案"
 
     if queue:
         await queue.put({
@@ -843,12 +852,14 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
             intent,
             emotion_level,
             should_transfer,
-            intent_result=(state.get("conversation_state") or {}).get("intent"),
+            intent_result=intent_result.model_dump(mode="json"),
         )
     return {
         "should_transfer": should_transfer,
         "transfer_reason": transfer_reason,
         "handoff_offer_id": accepted_offer_id,
+        "handoff_recommended": handoff_recommended,
+        "intent_result": intent_result.model_dump(mode="json"),
     }
 
 
@@ -1005,6 +1016,8 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
         "action_state": decision_data["action_state"],
         "next_step": decision_data["next_step"],
         "policy_refs": decision_data["policy_refs"],
+        "details": decision_data.get("details") or {},
+        "required_reply_fields": decision_data.get("required_reply_fields") or [],
     })
     material_state = _public_review_material_state(state.get("attachments") or [])
     if material_state:
@@ -1496,9 +1509,23 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
     if not state.get("business_events"):
         event = record_transfer_blocked(state, reason)
         state = {**state, "business_events": [event], "sop_state": event.get("result") or {}}
-    brief = build_handoff_brief(state, reason)
-    queue_meta = enqueue_handoff(session_id, brief, tenant_id=brief.get("tenant_id") or "mitako")
-    if state.get("handoff_offer_id"):
+    conversation_state = dict(state.get("conversation_state") or {})
+    brief: Dict[str, Any] = {"tenant_id": state.get("tenant_id") or "mitako"}
+    queue_meta: Dict[str, Any] = {}
+    try:
+        brief = build_handoff_brief(state, reason)
+        queue_meta = enqueue_handoff(session_id, brief, tenant_id=brief.get("tenant_id") or "mitako")
+        action = action_from_tool("human_handoff", "handoff_service", queue_meta)
+    except Exception as exc:
+        action = action_from_exception("human_handoff", "handoff_service", exc)
+        queue_meta = {
+            "ok": False,
+            "status": "failed",
+            "session_id": session_id,
+            "error": action.reason_code,
+        }
+    queue_meta = {**queue_meta, "action_state": action.model_dump(mode="json")}
+    if action.status.value == "queued" and state.get("handoff_offer_id"):
         try:
             import handoff_store
             handoff_store.update_handoff_offer(
@@ -1506,10 +1533,22 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
             )
         except Exception:
             pass
-    handoff_token = create_handoff_user_token(
-        session_id=session_id,
-        user_id=user_id,
-        tenant_id=brief.get("tenant_id") or "mitako",
+    handoff_token = ""
+    if action.status.value == "queued":
+        try:
+            handoff_token = create_handoff_user_token(
+                session_id=session_id,
+                user_id=user_id,
+                tenant_id=brief.get("tenant_id") or "mitako",
+            )
+        except Exception:
+            handoff_token = ""
+    conversation_state["action_state"] = action.model_dump(mode="json")
+    conversation_state["handoff_receipt"] = action.receipt_id
+    public_reason = (
+        f"{reason}（队列回执 {action.receipt_id}）"
+        if action.status.value == "queued" and action.receipt_id
+        else f"尚未进入人工队列：{action.reason_code}"
     )
 
     if queue:
@@ -1518,15 +1557,26 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
         await queue.put({
             "type": "action_transfer",
             "user_id": user_id,
-            "reason": reason,
+            "reason": public_reason,
             "session_id": session_id,
             "brief": brief,
             "queue": queue_meta,
             "handoff_token": handoff_token,
+            "action_state": action.model_dump(mode="json"),
         })
-        await queue.put({"type": "node_end", "node": "transfer_human", "desc": "会话已加入VIP客服队列，简报已生成。"})
+        await queue.put({
+            "type": "node_end",
+            "node": "transfer_human",
+            "desc": "会话已加入VIP客服队列，简报已生成。" if action.status.value == "queued" else "人工队列接入失败，可重试或使用人工入口。",
+        })
 
-    return {"should_transfer": True}
+    return {
+        "should_transfer": True,
+        "transfer_reason": reason,
+        "conversation_state": conversation_state,
+        "action_state": action.model_dump(mode="json"),
+        "handoff_token": handoff_token,
+    }
 
 async def update_user_memory(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
     """
@@ -1627,11 +1677,8 @@ workflow.add_edge("check_compensation", "generate_reply")
 workflow.add_edge("generate_reply", "safety_review")
 
 def router_after_safety(state: AgentState):
-    reply = state.get("reply_draft", "")
-    has_transfer_action = "<action: transfer_to_human>" in reply
-
-    # 人工转接只服从前置确定性分流或显式动作；安全层负责改写公开回复。
-    if state.get("should_transfer") or has_transfer_action:
+    # 人工转接只服从前置确定性分流；模型回复中的动作标记不能改变路由。
+    if state.get("should_transfer"):
         return "review"
     return "pass"
 

@@ -216,6 +216,75 @@ def test_business_readiness_does_not_route_entitlement_missing_to_lottery() -> N
     assert result["ticket_type"] == "missing"
 
 
+def test_wrong_item_requires_core_unboxing_evidence_with_static_downgrade() -> None:
+    from customer_service.scenario_policy import decide_scenario
+
+    decision = decide_scenario(
+        intent=_intent("wrong_item", "wrong_item"),
+        facts=[],
+        message="订单买的是手办，收到的是另一个角色，发错货需要提交哪些材料？",
+    )
+
+    assert decision.core_conclusion == "wrong_item_materials_required"
+    assert decision.next_step.code == "request_wrong_item_evidence"
+    assert decision.details["evidence_grade"] == "required_opening_video_or_static_three_images"
+    assert decision.details["video_optional"] is False
+    assert decision.details["static_fallback"] == "static_three_images"
+
+
+def test_missing_item_parses_expected_received_and_difference() -> None:
+    from customer_service.scenario_policy import decide_scenario
+
+    decision = decide_scenario(
+        intent=_intent("missing_item", "missing_item"),
+        facts=[],
+        message="一单应有12个吧唧，实收11个，少了一个，怎么证明漏发？",
+    )
+
+    assert decision.core_conclusion == "expected_12_received_11"
+    assert decision.details["expected_quantity"] == 12
+    assert decision.details["received_quantity"] == 11
+    assert decision.details["missing_quantity"] == 1
+    assert decision.next_step.code == "request_missing_item_evidence"
+
+
+def test_missing_item_without_order_association_starts_with_order_lookup() -> None:
+    from customer_service.scenario_policy import decide_scenario
+
+    decision = decide_scenario(
+        intent=_intent("missing_item", "missing_item"),
+        facts=[],
+        message="少了一件商品，怎么证明漏发？",
+    )
+
+    assert decision.core_conclusion == "missing_item_order_association_required"
+    assert decision.next_step.code == "associate_order_before_missing_item"
+    assert decision.details["order_association_required"] is True
+
+
+def test_high_risk_complaint_has_required_reply_fields_and_human_action_plan() -> None:
+    from customer_service.scenario_policy import decide_scenario
+
+    decision = decide_scenario(
+        intent=_intent("high_risk_complaint", "complaint"),
+        facts=[],
+        message="不要只道歉，直接说谁处理、多久处理完，否则我投诉。",
+    )
+
+    assert decision.core_conclusion == "complaint_protocol_required"
+    assert decision.required_reply_fields == [
+        "responsible_role",
+        "current_action",
+        "first_response_sla",
+        "tracking_receipt",
+    ]
+    assert decision.details["human_action_plan"]["required"] is True
+    assert decision.details["human_action_plan"]["status"] == "planned"
+    assert decision.action_state.action == "human_handoff"
+    assert decision.action_state.status == ActionStatus.REQUESTED
+    assert decision.next_step.code == "show_owner_sla_receipt"
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -510,6 +579,34 @@ def test_search_knowledge_base_writes_scenario_decision_to_conversation_state() 
     assert state["policy_refs"]
     assert "intent" in state and "facts" in state
     assert all("中奖概率" not in item and "奖池" not in item for item in result["sop_results"])
+
+
+def test_search_knowledge_base_persists_structured_p2_reply_fields() -> None:
+    import agent
+
+    intent = _intent("high_risk_complaint", "complaint")
+    result = asyncio.run(
+        agent.search_knowledge_base(
+            {
+                "intent": "投诉升级",
+                "order_data": {},
+                "raw_user_content": "不要只道歉，直接说谁处理、多久处理完，否则我投诉。",
+                "messages": [],
+                "attachments": [],
+                "conversation_state": {"intent": intent.model_dump(), "facts": []},
+            },
+            {"configurable": {}},
+        )
+    )
+
+    state = result["conversation_state"]
+    assert state["details"]["human_action_plan"]["required"] is True
+    assert state["required_reply_fields"] == [
+        "responsible_role",
+        "current_action",
+        "first_response_sla",
+        "tracking_receipt",
+    ]
 
 
 def test_main_injects_explicit_privacy_environment_config(

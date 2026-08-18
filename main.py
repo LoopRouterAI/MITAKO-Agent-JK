@@ -1724,11 +1724,21 @@ async def chat_stream(req: ChatRequest, request: Request):
                 # 6. 常规思考追踪 / 转VIP客服
                 elif event["type"] in ["node_start", "node_end", "action_transfer"]:
                     if event["type"] == "action_transfer":
+                        public_queue = build_public_queue_meta(event.get("queue", {}))
+                        action_state = public_queue.get("action_state") or event.get("action_state") or {}
+                        action_status = str(action_state.get("status") or "")
+                        if action_status == "queued":
+                            public_reason = "已进入人工队列。"
+                        elif action_status == "failed":
+                            public_reason = "尚未进入人工队列，请重试或使用人工入口。"
+                        else:
+                            public_reason = "人工接入状态待确认，请等待队列回执。"
                         event = {
                             **event,
-                            "reason": "已为您转接VIP客服继续处理。",
+                            "reason": public_reason,
                             "brief": build_public_handoff_brief(event.get("brief", {})),
-                            "queue": build_public_queue_meta(event.get("queue", {})),
+                            "queue": public_queue,
+                            "action_state": action_state,
                         }
                     else:
                         event = _public_chat_progress(event)
@@ -1776,12 +1786,27 @@ async def chat_stream(req: ChatRequest, request: Request):
             print(f"[stream] 获取状态机最终结果异常: {e}")
             traceback.print_exc()
 
-        if isinstance(result, dict) and (result.get("should_transfer") or result.get("safety_check_result") == "review"):
-            clean_reply = "这个问题我已经为您转接VIP客服继续处理，请稍候。"
-        else:
-            clean_reply = sanitize_customer_reply(reply_fallback)
+        clean_reply = sanitize_customer_reply(reply_fallback)
+        result_action_state = {}
+        if isinstance(result, dict):
+            result_action_state = (
+                (result.get("conversation_state") or {}).get("action_state")
+                or result.get("action_state")
+                or {}
+            )
+        result_action_status = str(result_action_state.get("status") or "")
+        if result_action_status == "failed":
+            clean_reply = "尚未进入人工队列，请重试或使用人工入口。"
+        elif result_action_status == "queued" and clean_reply:
+            clean_reply = clean_reply.replace("已为您转接VIP客服继续处理", "已进入人工队列，后续由人工客服继续处理")
+            clean_reply = clean_reply.replace("已转接VIP客服", "已进入人工队列")
         if not clean_reply.strip():
-            clean_reply = "我已经记录到这个问题了，会按服务流程继续帮你核实处理。"
+            if result_action_status == "queued":
+                clean_reply = "已进入人工队列，后续由人工客服继续处理。"
+            elif result_action_status == "failed":
+                clean_reply = "尚未进入人工队列，请重试或使用人工入口。"
+            else:
+                clean_reply = "我已经记录到这个问题了，会按服务流程继续帮你核实处理。"
         handoff_offer = None
         if (
             clean_reply.strip()
@@ -1809,6 +1834,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 "status": "completed",
                 "reply": clean_reply,
                 "handoff_offer": handoff_offer,
+                **({"action_state": result_action_state} if result_action_state else {}),
             }, ensure_ascii=False)
         }
 

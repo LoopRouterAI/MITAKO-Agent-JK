@@ -424,6 +424,7 @@ def build_public_queue_meta(queue: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "eta": q.get("eta", q.get("eta_minutes", 0)),
         "session_id": q.get("session_id"),
         "status": q.get("status"),
+        "action_state": q.get("action_state") if isinstance(q.get("action_state"), dict) else None,
         "deduped": bool(q.get("deduped")) if "deduped" in q else False,
     }
 
