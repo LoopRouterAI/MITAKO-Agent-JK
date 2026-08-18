@@ -1566,6 +1566,10 @@
 	          <a id="reportLink" class="report-link" href="#" target="_blank" rel="noreferrer" data-i18n="reportLink">查看复核摘要</a>
 	          <div id="reportList" class="report-list" aria-label="复核报告列表"></div>
 	          <div id="log" class="review-summary" role="status" aria-live="polite">请选择本地视频或公开视频 URL，然后开始审核。</div>
+              <details id="observabilityPanel" class="advanced-settings" hidden>
+                <summary>技术运行记录（脱敏）</summary>
+                <pre id="observabilityLog" class="observability-log">本轮暂无可显示的运行记录。</pre>
+              </details>
         </div>
       </section>
     </div>
@@ -1866,6 +1870,7 @@
           try {
             const response = await fetch('/api/health');
             const data = await response.json();
+            renderObservability(data.observability);
             const available = Boolean(response.ok && data.built_in_samples_available);
             demoSampleBtn.hidden = !available;
             batchSampleBtn.hidden = !available;
@@ -1971,6 +1976,39 @@
 	          reportLink.href = '#';
 	          reportList.replaceChildren();
 	        }
+
+        function renderObservability(summary) {
+          const panel = document.getElementById('observabilityPanel');
+          const output = document.getElementById('observabilityLog');
+          if (!panel || !output || !summary || !Array.isArray(summary.events) || !summary.events.length) {
+            if (panel) panel.hidden = true;
+            return;
+          }
+          const labels = {
+            visual_model_http_attempt: '已向模型网关发起请求',
+            visual_model_http_success: '模型网关请求成功',
+            visual_model_http_failure: '模型网关请求失败或进入重试',
+            visual_review_subprocess_start: '审核流程开始',
+            visual_review_subprocess_finished: '审核流程完成',
+            visual_review_sample_start: '样本审核开始',
+            visual_review_sample_finished: '样本审核完成',
+            visual_review_folder_start: '文件夹审核开始',
+            visual_review_folder_finished: '文件夹审核完成'
+          };
+          const statusKey = ['status', '_code'].join('');
+          const errorKey = ['error', '_type'].join('');
+          output.textContent = summary.events.map((item) => {
+            const data = item.data || {};
+            const detail = [
+              data[statusKey] ? '状态码 ' + data[statusKey] : '',
+              data.latency_seconds != null ? '耗时 ' + data.latency_seconds + ' 秒' : '',
+              data[errorKey] ? '错误类型 ' + data[errorKey] : '',
+              data.attempt ? '第 ' + data.attempt + ' 次尝试' : ''
+            ].filter(Boolean).join('，');
+            return (labels[item.event] || '审核运行事件') + (detail ? '：' + detail : '');
+          }).join('\n');
+          panel.hidden = false;
+        }
 
 	        function stopReportLinkEvent(event) {
 	          event.stopPropagation();
@@ -2322,6 +2360,7 @@
             sampleEvalLog.textContent = '正在评测样本完整性与人工结论比对...';
             const response = await fetch('/api/evaluate-samples', { method: 'POST', body: new FormData(sampleEvalForm) });
             const data = await response.json();
+            renderObservability(data.observability);
             if (!response.ok || !data.ok) {
               sampleEvalLog.textContent = data.detail || '样本评测未完成，请检查表头和文件格式。';
               return;
@@ -2356,6 +2395,7 @@
               body: JSON.stringify({ sample_id: profile.sampleId, scenario: profile.analysisScenario, business_scenario: profile.businessScenario })
             });
             const data = await response.json();
+            renderObservability(data.observability);
             writeLog(formatReviewSummary(data));
 	            stage.textContent = data.ok ? messages.zhCN.done : messages.zhCN.failed;
 	            const href = data.review && data.review.report && data.review.report.html_url;
@@ -2390,6 +2430,7 @@
 	              body: JSON.stringify({})
 	            });
 	            const data = await response.json();
+	            renderObservability(data.observability);
 	            writeLog(formatReviewSummary(data));
 	            stage.textContent = data.ok ? messages.zhCN.done : messages.zhCN.failed;
 	            showReportLinks(data.reports || []);
@@ -2458,9 +2499,10 @@
               formData.delete('files');
               uploadableFolderFiles().forEach((file) => formData.append('files', file, folderFilePath(file) || file.name));
             }
-	            const response = await fetch(reviewUrl, { method: 'POST', body: formData });
+            const response = await fetch(reviewUrl, { method: 'POST', body: formData });
             const data = await response.json();
             if (sourceType.value === 'folder' || sourceType.value === 'batch_folder') data.client_ingestion = clientFolderIngestionSummary();
+            renderObservability(data.observability);
             writeLog(formatReviewSummary(data));
             const skipped = Number((data.ingestion || {}).skipped_count || 0) + Number((data.client_ingestion || {}).skipped_count || 0) + Number(((data.review || {}).media_warnings || []).length || 0);
 	            stage.textContent = data.ok ? (skipped ? '完成（部分素材已跳过）' : messages.zhCN.done) : messages.zhCN.failed;

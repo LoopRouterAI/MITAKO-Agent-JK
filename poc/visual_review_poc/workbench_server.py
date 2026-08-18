@@ -95,7 +95,8 @@ try:
         video_proxy_recommendation,
     )
     from poc.visual_review_poc.native_video_perception import run_native_perception_pipeline
-    from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text
+    from poc.visual_review_poc.observability import log_visual_event, sanitize_error_text, visual_event_context
+    import observability_store
     from poc.visual_review_poc.secure_media_tunnel import open_secure_media_tunnel
     from poc.visual_review_poc.video_role_preflight import (
         build_opening_role_case,
@@ -137,7 +138,8 @@ except ImportError:
         video_proxy_recommendation,
     )
     from native_video_perception import run_native_perception_pipeline
-    from observability import log_visual_event, sanitize_error_text
+    from observability import log_visual_event, sanitize_error_text, visual_event_context
+    import observability_store
     from secure_media_tunnel import open_secure_media_tunnel
     from video_role_preflight import (
         build_opening_role_case,
@@ -3424,6 +3426,7 @@ def review_folder(
     files: List[UploadFile] = File(...),
 ) -> JSONResponse:
     scenario, business_scenario = _normalize_review_scenario(scenario, business_scenario)
+    event_request_id = x_request_id.strip() or f"web-{uuid4().hex[:16]}"
     if sampling_mode not in {"adaptive", "dense"}:
         raise HTTPException(status_code=400, detail="未知抽帧策略")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
@@ -3446,23 +3449,31 @@ def review_folder(
     claim_key = claim_value if claim_mode == "owner" else None
     try:
         folder_dir, ingestion = _save_folder_uploads(files)
-        response = _run_with_case_slot(
-            _run_folder_agent_review,
-            folder_dir,
-            scenario,
-            "auto",
-            evidence_context,
-            sampling_mode,
-            fps,
-            max_frames,
-            api_frame_limit,
-            probe_seconds,
-            include_internal_metrics=internal_request and x_mitako_internal_metrics == "1",
-            include_html_report=include_html_report,
-            defer_postprocess=internal_request and defer_postprocess,
-            rule_tenant_id=resolved_rule_tenant,
-        )
+        with visual_event_context(
+            tenant_id=resolved_rule_tenant,
+            request_id=event_request_id,
+        ):
+            response = _run_with_case_slot(
+                _run_folder_agent_review,
+                folder_dir,
+                scenario,
+                "auto",
+                evidence_context,
+                sampling_mode,
+                fps,
+                max_frames,
+                api_frame_limit,
+                probe_seconds,
+                include_internal_metrics=internal_request and x_mitako_internal_metrics == "1",
+                include_html_report=include_html_report,
+                defer_postprocess=internal_request and defer_postprocess,
+                rule_tenant_id=resolved_rule_tenant,
+            )
         response["ingestion"] = ingestion
+        response["observability"] = observability_store.summarize_request(
+            event_request_id,
+            tenant_id=resolved_rule_tenant,
+        )
     except ValueError as exc:
         _fail_internal_review_request(claim_key)
         LOGGER.warning(
@@ -3485,6 +3496,7 @@ def review_folder(
 
 @app.post("/api/review-folders-batch")
 def review_folders_batch(
+    x_request_id: str = Header("", alias="X-Request-ID"),
     scenario: str = Form("video_unboxing"),
     business_scenario: str = Form(""),
     ticket_id: str = Form(""),
@@ -3520,6 +3532,7 @@ def review_folders_batch(
     files: List[UploadFile] = File(...),
 ) -> JSONResponse:
     scenario, business_scenario = _normalize_review_scenario(scenario, business_scenario)
+    event_request_id = x_request_id.strip() or f"web-{uuid4().hex[:16]}"
     if sampling_mode not in {"adaptive", "dense"}:
         raise HTTPException(status_code=400, detail="未知抽帧策略")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
@@ -3532,19 +3545,20 @@ def review_folders_batch(
     for case_id, case_files in groups.items():
         try:
             folder_dir, ingestion = _save_folder_uploads(case_files)
-            result = _run_with_case_slot(
-                _run_folder_agent_review,
-                folder_dir,
-                scenario,
-                "auto",
-                evidence_context,
-                sampling_mode,
-                fps,
-                max_frames,
-                api_frame_limit,
-                probe_seconds,
-                include_html_report=include_html_report,
-            )
+            with visual_event_context(request_id=event_request_id, scenario=scenario):
+                result = _run_with_case_slot(
+                    _run_folder_agent_review,
+                    folder_dir,
+                    scenario,
+                    "auto",
+                    evidence_context,
+                    sampling_mode,
+                    fps,
+                    max_frames,
+                    api_frame_limit,
+                    probe_seconds,
+                    include_html_report=include_html_report,
+                )
             result["ingestion"] = ingestion
             cases.append({"case_id": case_id, **result})
         except HTTPException as exc:
@@ -3563,11 +3577,13 @@ def review_folders_batch(
         "summary": {"total": len(cases), "success": success, "failed": len(cases) - success, "complete": True},
         "cases": cases,
         "reports": reports,
+        "observability": observability_store.summarize_request(event_request_id),
     })
 
 
 @app.post("/api/review")
 def review(
+    x_request_id: str = Header("", alias="X-Request-ID"),
     source_type: str = Form("upload"),
     video_url: str = Form(""),
     scenario: str = Form("video_unboxing"),
@@ -3606,6 +3622,7 @@ def review(
     if source_type not in {"upload", "url"}:
         raise HTTPException(status_code=400, detail="未知素材来源")
     scenario, business_scenario = _normalize_review_scenario(scenario, business_scenario)
+    event_request_id = x_request_id.strip() or f"web-{uuid4().hex[:16]}"
     if review_model not in REVIEW_MODEL_PROFILES:
         raise HTTPException(status_code=400, detail="未知审核档位")
     fps = _clamp_float(fps, 0.1, 2.0, 1.0)
@@ -3652,19 +3669,21 @@ def review(
     evidence_context = _review_evidence_context(
         locals(), assessment_at=_server_assessment_date()
     )
-    result = _run_with_case_slot(
-        _run_review,
-        video,
-        scenario,
-        fps,
-        max_frames,
-        api_frame_limit,
-        probe_seconds,
-        review_model,
-        evidence_context,
-        include_html_report=include_html_report,
-    )
+    with visual_event_context(request_id=event_request_id, scenario=scenario):
+        result = _run_with_case_slot(
+            _run_review,
+            video,
+            scenario,
+            fps,
+            max_frames,
+            api_frame_limit,
+            probe_seconds,
+            review_model,
+            evidence_context,
+            include_html_report=include_html_report,
+        )
     response = {"ok": result["ok"], "source_status": source_status, "review": result}
+    response["observability"] = observability_store.summarize_request(event_request_id)
     if result.get("diagnostics"):
         response["diagnostics"] = result["diagnostics"]
     return JSONResponse(response)
