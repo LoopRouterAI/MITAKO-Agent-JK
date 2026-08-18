@@ -93,6 +93,113 @@ def test_invalid_tool_responses_never_become_completed(response: object) -> None
     assert action.status not in {ActionStatus.QUEUED, ActionStatus.SUCCEEDED}
 
 
+@pytest.mark.parametrize("status", ["queued", "succeeded"])
+@pytest.mark.parametrize("receipt_key", ["receipt_id", "queue_id"])
+@pytest.mark.parametrize(
+    "receipt",
+    [True, 123, 1.5, ["Q-1"], {"id": "Q-1"}, ("Q-1",), object(), "   "],
+)
+def test_completed_action_rejects_non_string_receipts(
+    status: str,
+    receipt_key: str,
+    receipt: object,
+) -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": status,
+            receipt_key: receipt,
+            "occurred_at": "2026-08-18T20:00:00+08:00",
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "invalid_tool_receipt"
+
+
+@pytest.mark.parametrize("status", ["queued", "succeeded"])
+@pytest.mark.parametrize("timestamp_key", ["occurred_at", "created_at"])
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        True,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        10**400,
+        "not-a-date",
+        "2026-02-30T12:00:00+08:00",
+        ["2026-08-18T20:00:00+08:00"],
+        {"value": "2026-08-18T20:00:00+08:00"},
+        object(),
+    ],
+)
+def test_completed_action_absorbs_invalid_timestamps(
+    status: str,
+    timestamp_key: str,
+    timestamp: object,
+) -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": status,
+            "receipt_id": "Q-1",
+            timestamp_key: timestamp,
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "invalid_tool_timestamp"
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "expected"),
+    [
+        ("2026-08-18T20:00:00+08:00", "2026-08-18T20:00:00+08:00"),
+        (
+            datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc).timestamp(),
+            "2026-08-18T12:00:00+00:00",
+        ),
+    ],
+)
+def test_completed_action_accepts_iso8601_and_finite_epoch(timestamp: object, expected: str) -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "queued",
+            "receipt_id": "Q-1",
+            "occurred_at": timestamp,
+        },
+    )
+
+    assert action.status == ActionStatus.QUEUED
+    assert action.occurred_at == expected
+
+
+def test_invalid_primary_receipt_and_timestamp_cannot_fall_back_to_other_fields() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "queued",
+            "receipt_id": True,
+            "queue_id": "Q-1",
+            "occurred_at": "not-a-date",
+            "created_at": "2026-08-18T20:00:00+08:00",
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "invalid_tool_receipt"
+
+
 def test_duplicate_receipt_normalization_is_stable() -> None:
     response = {
         "ok": True,

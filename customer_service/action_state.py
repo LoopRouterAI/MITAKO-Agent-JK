@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
+import math
 from typing import Any
 
 from .contracts import ActionState, ActionStatus
@@ -41,6 +42,7 @@ _DEFAULT_REASON = {
 }
 _RECEIPT_KEYS = ("receipt_id", "queue_id", "ticket_id", "task_id", "card_id", "compensation_id", "session_id", "id")
 _OCCURRED_KEYS = ("occurred_at", "created_at", "enqueued_at", "accepted_at", "updated_at")
+_MISSING = object()
 
 
 def _now() -> str:
@@ -58,13 +60,50 @@ def _text(*values: Any) -> str:
 def _field(*sources: Mapping[str, Any], keys: tuple[str, ...]) -> str:
     for source in sources:
         for key in keys:
-            value = source.get(key)
-            if isinstance(value, (int, float)) and key in _OCCURRED_KEYS:
-                return datetime.fromtimestamp(value, timezone.utc).isoformat()
-            text = _text(value)
+            text = _text(source.get(key))
             if text:
                 return text
     return ""
+
+
+def _raw_field(*sources: Mapping[str, Any], keys: tuple[str, ...]) -> object:
+    for source in sources:
+        for key in keys:
+            if key in source:
+                return source[key]
+    return _MISSING
+
+
+def _receipt_field(*sources: Mapping[str, Any]) -> tuple[str, bool]:
+    value = _raw_field(*sources, keys=_RECEIPT_KEYS)
+    if not isinstance(value, str):
+        return "", False
+    receipt_id = value.strip()
+    return receipt_id, bool(receipt_id)
+
+
+def _timestamp_field(*sources: Mapping[str, Any]) -> tuple[str, bool]:
+    value = _raw_field(*sources, keys=_OCCURRED_KEYS)
+    if isinstance(value, bool) or value is _MISSING:
+        return "", False
+    if isinstance(value, str):
+        timestamp = value.strip()
+        if not timestamp:
+            return "", False
+        try:
+            datetime.fromisoformat(timestamp[:-1] + "+00:00" if timestamp.endswith("Z") else timestamp)
+        except ValueError:
+            return "", False
+        return timestamp, True
+    if isinstance(value, (int, float)):
+        try:
+            epoch = float(value)
+            if not math.isfinite(epoch):
+                return "", False
+            return datetime.fromtimestamp(epoch, timezone.utc).isoformat(), True
+        except (OverflowError, OSError, TypeError, ValueError):
+            return "", False
+    return "", False
 
 
 def _failed(action: str, tool_name: str, reason_code: str, occurred_at: str = "") -> ActionState:
@@ -100,7 +139,7 @@ def action_from_tool(action: str, tool_name: str, response: object) -> ActionSta
     if status is None:
         return _failed(action_name, normalized_tool, "invalid_tool_status")
 
-    occurred_at = _field(state_source, response, keys=_OCCURRED_KEYS)
+    occurred_at, timestamp_valid = _timestamp_field(state_source, response)
     mock_response = dict(response)
     if state_source:
         mock_response.update(state_source)
@@ -118,9 +157,12 @@ def action_from_tool(action: str, tool_name: str, response: object) -> ActionSta
     else:
         reason_code = _field(state_source, response, keys=("reason_code", "error", "code")) or _DEFAULT_REASON[status]
 
-    receipt_id = _field(state_source, response, keys=_RECEIPT_KEYS)
-    if status in _COMPLETED_STATUSES and (not receipt_id or not occurred_at):
-        return _failed(action_name, normalized_tool, "invalid_tool_response", occurred_at)
+    receipt_id, receipt_valid = _receipt_field(state_source, response)
+    if status in _COMPLETED_STATUSES:
+        if not receipt_valid:
+            return _failed(action_name, normalized_tool, "invalid_tool_receipt", occurred_at)
+        if not timestamp_valid:
+            return _failed(action_name, normalized_tool, "invalid_tool_timestamp")
 
     return ActionState(
         action=action_name,
