@@ -233,6 +233,35 @@ def finish_job(
     return get_job(job_id) or {}
 
 
+def requeue_running_job(job_id: str, *, diagnostics: Dict[str, Any], expected_attempts: int) -> Dict[str, Any]:
+    """把暂时资源繁忙的运行轮次退回队列，不把 429 误记成业务失败。"""
+    now = time.time()
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE review_jobs
+            SET status='QUEUED', attempts=MAX(0, attempts-1), lease_until=0,
+                started_at=0, completed_at=0, diagnostics=?, updated_at=?
+            WHERE job_id=? AND status='RUNNING' AND attempts=?
+            """,
+            (_json(diagnostics), now, job_id, int(expected_attempts)),
+        )
+        if cur.rowcount:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO review_job_attempts(
+                  job_id, attempt, status, result, diagnostics,
+                  workbench_request_id, started_at, completed_at
+                )
+                SELECT job_id, ?, 'RESOURCE_WAIT', '{}', ?,
+                       workbench_request_id, started_at, ?
+                FROM review_jobs WHERE job_id=?
+                """,
+                (int(expected_attempts), _json(diagnostics), now, job_id),
+            )
+    return get_job(job_id) or {}
+
+
 def queue_retry(job_id: str) -> Optional[Dict[str, Any]]:
     now = time.time()
     with _connect() as conn:
@@ -315,6 +344,33 @@ def recover_incomplete() -> List[str]:
             "SELECT job_id FROM review_jobs WHERE status IN ('QUEUED', 'RETRYING') ORDER BY created_at"
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+def list_queued_job_ids(limit: int = 200) -> List[str]:
+    """返回最早的待执行案件，供有界调度器补位；不改变案件状态。"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT job_id FROM review_jobs
+            WHERE status IN ('QUEUED', 'RETRYING')
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (max(1, min(int(limit or 1), 200)),),
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def discard_queued_job(job_id: str) -> bool:
+    """容量拒绝时清理刚创建且尚未执行的案件，避免留下孤立队列项。"""
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM review_jobs WHERE job_id=? AND status='QUEUED' AND attempts=0",
+            (job_id,),
+        )
+    return cur.rowcount == 1
 
 
 def list_attempts(job_id: str) -> List[Dict[str, Any]]:

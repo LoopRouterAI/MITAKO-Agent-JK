@@ -3,6 +3,8 @@ from __future__ import annotations
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from review_service.resource_guard import recommended_concurrency
+
 from configs.model_catalog import summarize_cost_observability
 from poc.visual_review_poc.observability import sanitize_error_text
 
@@ -29,7 +31,7 @@ def run_adaptive_tasks(
     invoke: Callable[[Any], Dict[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """按供应商反馈缩放滚动并发；完成一个任务后立即补位。"""
-    configured = max(1, min(int(workers or 1), len(tasks) or 1))
+    configured = recommended_concurrency(max(1, min(int(workers or 1), len(tasks) or 1)))
     current = configured
     completed: List[Optional[Dict[str, Any]]] = [None] * len(tasks)
     wave_workers: List[int] = []

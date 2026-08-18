@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from copy import deepcopy
@@ -52,6 +53,7 @@ from .advisory_assessment import (
     is_no_action_continuation,
 )
 from .schemas import ReviewCaseMetadata
+from .resource_guard import recommended_concurrency, runtime_diagnostics
 
 
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".txt", ".json"}
@@ -61,8 +63,16 @@ SCENARIO_MAP = {
     "missing_item": "video_unboxing",
     "minor_refund": "minor_material",
 }
-MAX_WORKERS = max(1, min(int(os.getenv("REVIEW_JOB_WORKERS", "2") or 2), 8))
+MAX_WORKERS = recommended_concurrency(max(1, min(int(os.getenv("REVIEW_JOB_WORKERS", "2") or 2), 8)))
+try:
+    QUEUE_CAPACITY = max(0, min(int(os.getenv("REVIEW_JOB_QUEUE_CAPACITY", "8") or 8), 64))
+except (TypeError, ValueError):
+    QUEUE_CAPACITY = 8
+_SCHEDULE_CAPACITY = MAX_WORKERS + QUEUE_CAPACITY
 EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="mitako-review")
+_SCHEDULE_SLOTS = threading.BoundedSemaphore(max(1, _SCHEDULE_CAPACITY))
+_SCHEDULE_LOCK = threading.RLock()
+_SCHEDULED_JOBS: set[str] = set()
 
 
 class WorkbenchRequestError(RuntimeError):
@@ -260,6 +270,10 @@ async def create_job_from_uploads(
         if existing and store.request_hash(existing["job_id"]) == request_hash:
             return existing, False
         raise ValueError("idempotency_key_conflict") from exc
+    if not queue_admission_available(tenant_id):
+        store.discard_queued_job(job_id)
+        shutil.rmtree(upload_root() / job_id, ignore_errors=True)
+        raise ValueError("review_queue_full")
     enqueue(job_id)
     return job, True
 
@@ -1462,6 +1476,12 @@ def run_job(job_id: str) -> Dict[str, Any]:
             "status_code": exc.status_code,
             "attempts": exc.attempts,
         }
+        if exc.status_code == 429:
+            return store.requeue_running_job(
+                job_id,
+                diagnostics=diagnostics,
+                expected_attempts=execution_attempt,
+            )
     except Exception as exc:
         diagnostics = {"error_type": exc.__class__.__name__, "message": str(exc)[:1200]}
     failed_review = attach_advisory_assessment(
@@ -1523,13 +1543,53 @@ def render_job_report(job: Dict[str, Any]) -> str:
     return render_public_report(redact_public_review_data(data))
 
 
-def enqueue(job_id: str) -> None:
-    EXECUTOR.submit(run_job, job_id)
+def _run_scheduled_job(job_id: str) -> None:
+    try:
+        run_job(job_id)
+    finally:
+        with _SCHEDULE_LOCK:
+            _SCHEDULED_JOBS.discard(job_id)
+            _SCHEDULE_SLOTS.release()
+        _dispatch_queued_jobs()
+
+
+def _submit_job(job_id: str) -> bool:
+    with _SCHEDULE_LOCK:
+        if job_id in _SCHEDULED_JOBS:
+            return True
+        if not _SCHEDULE_SLOTS.acquire(blocking=False):
+            return False
+        _SCHEDULED_JOBS.add(job_id)
+        try:
+            EXECUTOR.submit(_run_scheduled_job, job_id)
+        except Exception:
+            _SCHEDULED_JOBS.discard(job_id)
+            _SCHEDULE_SLOTS.release()
+            raise
+        return True
+
+
+def _dispatch_queued_jobs() -> int:
+    dispatched = 0
+    try:
+        queued_job_ids = store.list_queued_job_ids(limit=_SCHEDULE_CAPACITY)
+    except Exception:
+        return 0
+    for job_id in queued_job_ids:
+        if not _submit_job(job_id):
+            break
+        dispatched += 1
+    return dispatched
+
+
+def enqueue(job_id: str) -> bool:
+    """有界提交；满载时保留数据库 QUEUED，待完成任务释放槽位后补位。"""
+    return _submit_job(job_id)
 
 
 def recover_jobs() -> None:
-    for job_id in store.recover_incomplete():
-        enqueue(job_id)
+    store.recover_incomplete()
+    _dispatch_queued_jobs()
 
 
 def retry_job(job_id: str) -> Dict[str, Any]:
@@ -1541,11 +1601,42 @@ def retry_job(job_id: str) -> Dict[str, Any]:
 
 
 def metrics(tenant_id: str = "") -> Dict[str, Any]:
-    return {**store.snapshot(tenant_id), "workers": MAX_WORKERS}
+    return {
+        **store.snapshot(tenant_id),
+        "workers": MAX_WORKERS,
+        "queue": queue_diagnostics(tenant_id),
+        "resources": runtime_diagnostics(),
+    }
+
+
+def queue_diagnostics(tenant_id: str = "") -> Dict[str, Any]:
+    with _SCHEDULE_LOCK:
+        scheduled = len(_SCHEDULED_JOBS)
+    snapshot = store.snapshot(tenant_id)
+    return {
+        "capacity": _SCHEDULE_CAPACITY,
+        "worker_capacity": MAX_WORKERS,
+        "queue_capacity": QUEUE_CAPACITY,
+        "scheduled": scheduled,
+        "available_slots": max(0, _SCHEDULE_CAPACITY - scheduled),
+        "queued": int(snapshot.get("queued") or 0),
+        "backpressure": scheduled >= _SCHEDULE_CAPACITY,
+    }
+
+
+def queue_admission_available(tenant_id: str) -> bool:
+    snapshot = store.snapshot(tenant_id)
+    in_system = int(snapshot.get("queued") or 0) + int(snapshot.get("running") or 0)
+    return in_system < _SCHEDULE_CAPACITY
 
 
 def runtime_readiness() -> Dict[str, Any]:
     checks: Dict[str, Any] = {}
+    resource_state = runtime_diagnostics()
+    checks["resources"] = {
+        "ready": not bool((resource_state.get("case_gate") or {}).get("memory", {}).get("pressure")),
+        **resource_state,
+    }
     ffprobe = resolve_ffprobe()
     checks["ffprobe"] = {
         "ready": bool(ffprobe),

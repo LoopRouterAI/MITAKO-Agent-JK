@@ -86,6 +86,7 @@ from poc.visual_review_poc.fulfillment_reconciliation import (
     apply_fulfillment_guard,
 )
 from poc.visual_review_poc.specialized_model_pass import run_adaptive_tasks, run_specialized_frame_pass
+from review_service.resource_guard import recommended_concurrency
 from poc.visual_review_poc.sampled_video_perception import run_sampled_video_perception
 from poc.visual_review_poc.native_video_perception import normalize_minor_damage_evidence
 from poc.visual_review_poc.minor_material_pipeline import run_minor_material_pipeline
@@ -603,6 +604,16 @@ def post_with_retries(
     for attempt in range(1, retries + 2):
         remaining = deadline_at - time.monotonic() if deadline_at is not None else None
         if remaining is not None and remaining <= 0:
+            log_visual_event(
+                LOGGER,
+                "visual_model_http_failure",
+                endpoint=endpoint,
+                attempt=attempt,
+                max_attempts=retries + 1,
+                timeout_seconds=timeout,
+                error_type="deadline",
+                will_retry=False,
+            )
             return {
                 "ok": False,
                 "status_code": None,
@@ -613,6 +624,14 @@ def post_with_retries(
                 "request_attempts": request_attempts,
             }
         started = time.time()
+        log_visual_event(
+            LOGGER,
+            "visual_model_http_attempt",
+            endpoint=endpoint,
+            attempt=attempt,
+            max_attempts=retries + 1,
+            timeout_seconds=timeout,
+        )
         acquired = False
         try:
             if remaining is None:
@@ -621,6 +640,16 @@ def post_with_retries(
             else:
                 acquired = _PROVIDER_REQUEST_GATE.acquire(timeout=max(0.0, remaining))
                 if not acquired:
+                    log_visual_event(
+                        LOGGER,
+                        "visual_model_http_failure",
+                        endpoint=endpoint,
+                        attempt=attempt,
+                        max_attempts=retries + 1,
+                        timeout_seconds=timeout,
+                        error_type="deadline",
+                        will_retry=False,
+                    )
                     return {
                         "ok": False,
                         "status_code": None,
@@ -632,6 +661,16 @@ def post_with_retries(
                     }
                 remaining = deadline_at - time.monotonic()
                 if remaining <= 0:
+                    log_visual_event(
+                        LOGGER,
+                        "visual_model_http_failure",
+                        endpoint=endpoint,
+                        attempt=attempt,
+                        max_attempts=retries + 1,
+                        timeout_seconds=timeout,
+                        error_type="deadline",
+                        will_retry=False,
+                    )
                     return {
                         "ok": False,
                         "status_code": None,
@@ -656,12 +695,12 @@ def post_with_retries(
                 })
                 log_visual_event(
                     LOGGER,
-                    "visual_model_http_attempt",
+                    "visual_model_http_success",
                     endpoint=endpoint,
                     attempt=attempt,
+                    max_attempts=retries + 1,
                     status_code=response.status_code,
                     latency_seconds=latency,
-                    outcome="success",
                 )
                 return {
                     "ok": True,
@@ -687,13 +726,14 @@ def post_with_retries(
         })
         log_visual_event(
             LOGGER,
-            "visual_model_http_attempt",
+            "visual_model_http_failure",
             endpoint=endpoint,
             attempt=attempt,
+            max_attempts=retries + 1,
             status_code=last.get("status_code"),
             latency_seconds=last.get("latency_seconds"),
             error_type=last.get("error_type"),
-            outcome="failed",
+            will_retry=bool(last.get("error_type") == "soft" and attempt <= retries),
         )
         if last["error_type"] != "soft" or attempt > retries:
             return {**last, "request_attempts": request_attempts}
@@ -2566,7 +2606,7 @@ def call_model_chunked(
         and (scenario != "product_damage" or causality_policy.get("force_action_scan") is True)
     )
     if scenario in {"minor_material", "minor_refund"}:
-        workers = max(1, min(int(os.getenv("REVIEW_MINOR_WORKERS", "6") or 6), 8))
+        workers = recommended_concurrency(max(1, min(int(os.getenv("REVIEW_MINOR_WORKERS", "6") or 6), 8)))
         output = run_minor_material_pipeline(
             case,
             invoke=invoke_model,
@@ -2592,10 +2632,10 @@ def call_model_chunked(
                 0,
                 min(int(os.getenv("REVIEW_SAMPLED_BATCH_OVERLAP", "2") or 2), limit - 1),
             ),
-            workers=max(
+            workers=recommended_concurrency(max(
                 1,
                 min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4),
-            ),
+            )),
         )
         parsed = result.get("parsed") or {}
         result["evaluation"] = evaluate(parsed, load_report_label(case["case_id"]))
@@ -2668,7 +2708,7 @@ def call_model_chunked(
         )
         main_frames = _representative_frames(frames, main_frame_limit)
     chunks = [main_frames[index:index + limit] for index in range(0, len(main_frames), limit)]
-    workers = max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4, len(chunks)))
+    workers = recommended_concurrency(max(1, min(int(os.getenv("REVIEW_CHUNK_WORKERS", "2") or 2), 4, len(chunks))))
     reference_segment_limit = max(1, min(int(os.getenv("REVIEW_PRODUCT_IMAGE_MAX_SEGMENTS", "3") or 3), 3, len(chunks)))
     reference_segment_indices = {
         round(position * (len(chunks) - 1) / max(reference_segment_limit - 1, 1))
