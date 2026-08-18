@@ -19,9 +19,11 @@ except Exception:
 
 from llm_models import DEFAULT_MODEL_ID
 from agent_llm import call_llm
-from customer_service.contracts import ActionState, Fact, IntentResult
+from customer_service.contracts import ActionState, Fact, IntentResult, ReplyPlan
 from customer_service.action_state import action_from_exception, action_from_tool
 from customer_service.intent_router import public_intent_label, route_intent
+from customer_service.reply_guard import guard_reply
+from customer_service.reply_plan import build_reply_plan, public_reply_plan_payload, render_reply_plan
 from customer_service.scenario_policy import decide_scenario, resolve_unique_product
 from partner_guard import assert_local_or_allowed
 from runtime_paths import mock_data_file
@@ -44,7 +46,7 @@ except ImportError:
     HAS_OPENVIKING = False
 
 from viking_memory import viking_db
-from prompts.customer_service import CUSTOMER_SERVICE_BASE_PROMPT, get_customer_service_system_prompt
+from prompts.customer_service import CUSTOMER_SERVICE_BASE_PROMPT
 
 # 2. 定义 Agent 状态结构
 class AgentState(TypedDict):
@@ -410,9 +412,9 @@ def sanitize_customer_reply(reply: str) -> str:
         return ""
     compact = text.strip()
     if compact.startswith("{") or compact.startswith("[") or "<analysis>" in compact:
-        return "我已经记录到这个问题了，会按服务流程继续帮你核实处理。"
+        return ""
     if _customer_reply_has_internal_text(compact):
-        return "我已经记录到这个问题了，会按服务流程继续帮你核实处理。"
+        return ""
     return compact
 
 
@@ -1290,7 +1292,11 @@ async def check_compensation_eligibility(state: AgentState, config: RunnableConf
 
 
 # 5.9 generate_reply 节点
-def _complaint_reply_fields(state: AgentState, tracking_receipt: str = "") -> Dict[str, str]:
+def _complaint_reply_fields(
+    state: AgentState,
+    tracking_receipt: str = "",
+    action_status: str = "",
+) -> Dict[str, str]:
     from handoff_routing import get_sla_config
 
     conversation_state = state.get("conversation_state") or {}
@@ -1300,21 +1306,21 @@ def _complaint_reply_fields(state: AgentState, tracking_receipt: str = "") -> Di
         get_sla_config(state.get("tenant_id") or "mitako").get("first_response_seconds") or 180
     )
     first_response_sla = f"入队后 {max(1, (first_response_seconds + 59) // 60)} 分钟内首次响应"
+    if tracking_receipt:
+        current_action = "已进入人工队列并同步投诉简报"
+        receipt = tracking_receipt
+    elif action_status == "failed":
+        current_action = "尚未进入人工队列，请重试或使用人工入口"
+        receipt = "暂无有效队列回执"
+    else:
+        current_action = "正在提交人工队列并同步投诉简报"
+        receipt = "等待人工队列回执"
     return {
         "responsible_role": str(configured.get("responsible_role") or "VIP客服主管"),
-        "current_action": "已进入人工队列并同步投诉简报" if tracking_receipt else "正在提交人工队列并同步投诉简报",
+        "current_action": current_action,
         "first_response_sla": first_response_sla,
-        "tracking_receipt": tracking_receipt or "等待人工队列回执",
+        "tracking_receipt": receipt,
     }
-
-
-def _build_complaint_protocol_reply(fields: Dict[str, str]) -> str:
-    return (
-        f"责任角色：{fields['responsible_role']}。"
-        f"当前动作：{fields['current_action']}。"
-        f"首次响应时效：{fields['first_response_sla']}。"
-        f"跟进凭证：{fields['tracking_receipt']}。"
-    )
 
 
 async def generate_reply_with_persona(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
@@ -1325,82 +1331,37 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
     if queue:
         await queue.put({"type": "node_start", "node": "generate_reply", "desc": "小蛟正在整理上下文并编写回复..."})
 
-    last_user_msg = _current_user_text(state)
     intent = state["intent"]
     emotion_level = state["emotion_level"]
-    order_data = state["order_data"]
-    logistics_data = state["logistics_data"]
-    sop_results = state["sop_results"]
-    user_memory = state["user_memory"]
-    compensation_given = state["compensation_given"]
     should_transfer = state["should_transfer"]
-    transfer_reason = state["transfer_reason"]
-    attachments = state.get("attachments") or config.get("configurable", {}).get("attachments") or []
     conversation_state = dict(state.get("conversation_state") or {})
     intent_result = conversation_state.get("intent") or {}
+    public_config: Dict[str, Any] = {}
     if _intent_in_result(intent_result, "high_risk_complaint"):
         reply_fields = _complaint_reply_fields(state)
         conversation_state["reply_fields"] = reply_fields
+        public_config["complaint_protocol"] = reply_fields
+
+    reply_plan = build_reply_plan(conversation_state, public_config=public_config)
+    conversation_state["reply_plan"] = reply_plan.model_dump(mode="json")
+    if _intent_in_result(intent_result, "high_risk_complaint"):
         if queue:
             await queue.put({"type": "node_end", "node": "generate_reply", "desc": "高风险投诉响应协议已生成。"})
         return {
-            "reply_draft": _build_complaint_protocol_reply(reply_fields),
+            "reply_draft": render_reply_plan(reply_plan),
             "meme_tags": [],
             "conversation_state": conversation_state,
         }
-
-    sop_state = state.get("sop_state") or {}
-    sop_context = {
-        "ticket_type": sop_state.get("ticket_type"),
-        "sop_branch": sop_state.get("sop_branch"),
-        "needs_human": sop_state.get("needs_human"),
-        "allowed_actions": sop_state.get("allowed_actions"),
-        "blocked_actions": sop_state.get("blocked_actions"),
-    } if sop_state else {}
-
-    context_str = f"""
-用户信息数据：
-- 昵称: {user_memory.get('nickname')}
-- 级别: {user_memory.get('member_level')}
-- 偏好 IP: {', '.join(user_memory.get('favorite_ips', []))}
-
-会话属性：
-- 识别意图: {intent}
-- 情绪等级: Level {emotion_level}
-- 召回的 SOP 规范与供应链公告: {chr(10).join(sop_results)}
-- 服务流程状态: {json.dumps(sop_context, ensure_ascii=False)}
-
-业务详情数据：
-- 用户订单: {json.dumps(order_data, ensure_ascii=False)}
-- 实时物流状态: {json.dumps(logistics_data, ensure_ascii=False)}
-- 本轮补偿/关怀建议: {json.dumps(compensation_given, ensure_ascii=False)}
-- 是否满足转VIP客服条件: {"是" if should_transfer else "否"}
-- 转VIP客服原因说明: {transfer_reason}
-- 用户已上传附件元数据: {json.dumps(attachments, ensure_ascii=False)}
-
-附件处理要求：
-- 如果用户已上传图片/视频，只能说“已收到材料/图片”，不要说没收到。
-- 当前聊天 Agent 不直接做最终视觉裁决；应先整理已收到材料、说明还缺什么，并引导进入售后/视觉审核流程。
-- 普通图片/视频咨询不应直接转 VIP客服；除非用户明确要求 VIP客服、出现监管投诉/法律威胁、改地址/账号等高风险动作。
-"""
-
-    history = state["messages"][:-1]
     model_id = config.get("configurable", {}).get("model_id") or DEFAULT_MODEL_ID
     stream_reply = config.get("configurable", {}).get("stream_reply", False)
-    tenant_id = config.get("configurable", {}).get("tenant_id") or "mitako"
-
-    user_payload = (
-        "<untrusted_business_context>\n"
-        + context_str
-        + "\n</untrusted_business_context>\n"
-        + "<current_user_message>\n"
-        + last_user_msg
-        + "\n</current_user_message>"
+    user_payload = json.dumps(
+        {"reply_plan": public_reply_plan_payload(reply_plan)},
+        ensure_ascii=False,
     )
     reply = await call_llm(
-        get_customer_service_system_prompt(tenant_id),
+        "你只负责润色公开回复计划。不得增加事实、状态、商品、时效、责任、凭证或已执行动作。只输出面向用户的正文。",
         user_payload,
-        history,
+        [],
         queue,
         model_id=model_id,
         stream_reply=stream_reply,
@@ -1409,7 +1370,11 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
     )
     meme_tags = re.findall(r"<meme:\s*(\w+)>", reply)
     analysis = _parse_reply_analysis(reply)
-    updates: Dict[str, Any] = {"reply_draft": reply, "meme_tags": meme_tags}
+    updates: Dict[str, Any] = {
+        "reply_draft": reply,
+        "meme_tags": meme_tags,
+        "conversation_state": conversation_state,
+    }
     if analysis.get("emotion_level"):
         try:
             parsed_level = max(1, min(6, int(analysis.get("emotion_level"))))
@@ -1566,9 +1531,26 @@ async def safety_review_agent(state: AgentState, config: RunnableConfig) -> Dict
             reply = _build_notification_channel_reply(state)
             modified = True
 
-    if not sanitize_customer_reply(reply).strip():
-        reply = _build_grounded_service_reply(state)
+    conversation_state = dict(state.get("conversation_state") or {})
+    if not conversation_state.get("intent"):
+        try:
+            conversation_state["intent"] = route_intent(_current_user_text(state)).model_dump(mode="json")
+        except Exception:
+            pass
+    try:
+        reply_plan = ReplyPlan.model_validate(conversation_state.get("reply_plan") or {})
+    except Exception:
+        reply_plan = build_reply_plan(conversation_state)
+    conversation_state["reply_plan"] = reply_plan.model_dump(mode="json")
+    guard_result = guard_reply(
+        sanitize_customer_reply(reply),
+        conversation_state=conversation_state,
+        reply_plan=reply_plan,
+    )
+    if not guard_result.allowed:
         modified = True
+    reply = guard_result.reply
+    conversation_state["reply_guard_reason"] = guard_result.reason_code or "pass"
 
     if queue:
         await queue.put({
@@ -1577,20 +1559,37 @@ async def safety_review_agent(state: AgentState, config: RunnableConfig) -> Dict
             "desc": f"安全质检完毕: 状态={safety_check_result.upper()} (回复{'经修正后合规' if modified else '安全合规'})"
         })
 
-    return {"reply_draft": reply, "safety_check_result": safety_check_result}
+    return {
+        "reply_draft": reply,
+        "safety_check_result": safety_check_result,
+        "conversation_state": conversation_state,
+    }
 
 
 # 5.11 send_reply / transfer_human / update_memory 节点
 async def send_to_user(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
     queue = config.get("configurable", {}).get("event_queue")
+    conversation_state = dict(state.get("conversation_state") or {})
+    try:
+        reply_plan = ReplyPlan.model_validate(conversation_state.get("reply_plan") or {})
+    except Exception:
+        reply_plan = build_reply_plan(conversation_state)
+    guard_result = guard_reply(
+        sanitize_customer_reply(state.get("reply_draft", "")),
+        conversation_state=conversation_state,
+        reply_plan=reply_plan,
+    )
+    conversation_state["reply_plan"] = reply_plan.model_dump(mode="json")
+    conversation_state["reply_guard_reason"] = guard_result.reason_code or "pass"
     if queue:
         await queue.put({"type": "node_start", "node": "send_reply", "desc": "下发回复气泡至用户客户端..."})
-        reply = state.get("reply_draft", "")
-        user_text = sanitize_customer_reply(reply)
-        if user_text:
-            await queue.put({"type": "text_chunk", "content": user_text})
+        if guard_result.reply:
+            await queue.put({"type": "text_chunk", "content": guard_result.reply})
         await queue.put({"type": "node_end", "node": "send_reply", "desc": "回复发送完成。"})
-    return {}
+    return {
+        "reply_draft": guard_result.reply,
+        "conversation_state": conversation_state,
+    }
 
 async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
     from handoff_service import build_handoff_brief, enqueue_handoff
@@ -1607,7 +1606,7 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
     conversation_state = dict(state.get("conversation_state") or {})
     intent_data = conversation_state.get("intent") or {}
     is_high_risk_complaint = _intent_in_result(intent_data, "high_risk_complaint")
-    if is_high_risk_complaint and not conversation_state.get("scenario_decision"):
+    if intent_data and not conversation_state.get("scenario_decision"):
         decision = decide_scenario(
             intent=IntentResult.model_validate(intent_data),
             facts=[Fact.model_validate(item) for item in conversation_state.get("facts") or []],
@@ -1674,15 +1673,25 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
             handoff_token = ""
     conversation_state["action_state"] = action.model_dump(mode="json")
     conversation_state["handoff_receipt"] = action.receipt_id
-    reply_draft = ""
     reply_fields: Dict[str, str] = {}
-    if is_high_risk_complaint and action.status.value == "queued":
+    public_config: Dict[str, Any] = {}
+    if is_high_risk_complaint:
         reply_fields = _complaint_reply_fields(
             {**state, "conversation_state": conversation_state},
-            action.receipt_id,
+            action.receipt_id if action.status.value == "queued" else "",
+            action.status.value,
         )
         conversation_state["reply_fields"] = reply_fields
-        reply_draft = _build_complaint_protocol_reply(reply_fields)
+        public_config["complaint_protocol"] = reply_fields
+    reply_plan = build_reply_plan(conversation_state, public_config=public_config)
+    guard_result = guard_reply(
+        render_reply_plan(reply_plan),
+        conversation_state=conversation_state,
+        reply_plan=reply_plan,
+    )
+    conversation_state["reply_plan"] = reply_plan.model_dump(mode="json")
+    conversation_state["reply_guard_reason"] = guard_result.reason_code or "pass"
+    reply_draft = guard_result.reply
     public_reason = (
         f"{reason}（队列回执 {action.receipt_id}）"
         if action.status.value == "queued" and action.receipt_id

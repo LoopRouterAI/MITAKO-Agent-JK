@@ -15,7 +15,10 @@ from typing import List, Dict, Any, Optional
 from sse_starlette.sse import EventSourceResponse
 
 from agent import agent_app, classify_intent, sanitize_customer_reply
+from customer_service.contracts import ReplyPlan
 from customer_service.fact_resolver import resolve_facts
+from customer_service.reply_guard import guard_reply
+from customer_service.reply_plan import build_reply_plan
 from llm_models import DEFAULT_PUBLIC_MODEL_ID, list_models_public
 from image_models import list_image_models_public
 from image_service import generate_image
@@ -776,6 +779,78 @@ def _public_unified_analysis(event: Dict[str, Any]) -> Dict[str, Any]:
         "intent": sanitize_customer_reply(str(event.get("intent") or "服务咨询")),
         "emotion_level": int(event.get("emotion_level") or 2),
         "should_transfer": bool(event.get("should_transfer")),
+    }
+
+
+def _finalize_customer_reply(result: Dict[str, Any]) -> Dict[str, Any]:
+    """用确定性状态完成最终回复，禁止空洞成功兜底。"""
+    payload = result if isinstance(result, dict) else {}
+    conversation_state = dict(payload.get("conversation_state") or {})
+    action_state = (
+        conversation_state.get("action_state")
+        or payload.get("action_state")
+        or {}
+    )
+    if action_state:
+        conversation_state["action_state"] = action_state
+    try:
+        reply_plan = ReplyPlan.model_validate(conversation_state.get("reply_plan") or {})
+    except Exception:
+        reply_plan = build_reply_plan(conversation_state)
+
+    candidate = sanitize_customer_reply(str(payload.get("reply_draft") or ""))
+    if str(action_state.get("status") or "") == "queued":
+        candidate = candidate.replace("已为您转接VIP客服继续处理", "已进入人工队列，后续由人工客服继续处理")
+        candidate = candidate.replace("已转接VIP客服", "已进入人工队列")
+    guard_result = guard_reply(
+        candidate,
+        conversation_state=conversation_state,
+        reply_plan=reply_plan,
+    )
+    conversation_state["reply_plan"] = reply_plan.model_dump(mode="json")
+    conversation_state["reply_guard_reason"] = guard_result.reason_code or "pass"
+
+    required_fields = conversation_state.get("required_reply_fields") or []
+    reply_fields = conversation_state.get("reply_fields") or {}
+    missing_fields = [
+        field for field in required_fields
+        if not str(reply_fields.get(field) or "").strip()
+    ]
+    action_status = str(action_state.get("status") or "")
+    core_conclusion = str(
+        conversation_state.get("core_conclusion")
+        or (conversation_state.get("scenario_decision") or {}).get("core_conclusion")
+        or ""
+    )
+    verified_material_received = any(
+        item.get("field") == "material.received"
+        and item.get("value") is True
+        and item.get("verified") is True
+        and item.get("source") != "user_statement"
+        and str(item.get("source_ref") or "").strip()
+        for item in conversation_state.get("facts") or []
+        if isinstance(item, dict)
+    )
+    evidence_conflict = (
+        core_conclusion == "material_received" and not verified_material_received
+        or core_conclusion == "address_change_succeeded" and action_status != "succeeded"
+        or core_conclusion in {"show_verified_logistics_node", "show_verified_order_progress"}
+        and action_status != "succeeded"
+    )
+    status = "failed" if (
+        action_status == "failed"
+        or missing_fields
+        or not payload
+        or evidence_conflict
+        or conversation_state["reply_guard_reason"] == "unsafe_reply_plan_fallback"
+    ) else "completed"
+    return {
+        "status": status,
+        "reply": guard_result.reply,
+        "conversation_state": conversation_state,
+        "action_state": action_state,
+        "required_reply_fields": required_fields,
+        "reply_fields": reply_fields,
     }
 
 
@@ -1805,35 +1880,13 @@ async def chat_stream(req: ChatRequest, request: Request):
             print(f"[stream] 获取状态机最终结果异常: {e}")
             traceback.print_exc()
 
-        clean_reply = sanitize_customer_reply(reply_fallback)
-        result_action_state = {}
-        result_conversation_state = {}
-        if isinstance(result, dict):
-            result_conversation_state = result.get("conversation_state") or {}
-            result_action_state = (
-                result_conversation_state.get("action_state")
-                or result.get("action_state")
-                or {}
-            )
-        result_action_status = str(result_action_state.get("status") or "")
-        required_reply_fields = result_conversation_state.get("required_reply_fields") or []
-        reply_fields = result_conversation_state.get("reply_fields") or {}
-        missing_reply_fields = [field for field in required_reply_fields if not str(reply_fields.get(field) or "").strip()]
-        done_status = "failed" if result_action_status == "failed" or missing_reply_fields else "completed"
-        if result_action_status == "failed":
-            clean_reply = "尚未进入人工队列，请重试或使用人工入口。"
-        elif missing_reply_fields:
-            clean_reply = "人工接入信息不完整，尚不能确认处理责任、响应时效或跟进凭证，请重试。"
-        elif result_action_status == "queued" and clean_reply:
-            clean_reply = clean_reply.replace("已为您转接VIP客服继续处理", "已进入人工队列，后续由人工客服继续处理")
-            clean_reply = clean_reply.replace("已转接VIP客服", "已进入人工队列")
-        if not clean_reply.strip():
-            if result_action_status == "queued":
-                clean_reply = "已进入人工队列，后续由人工客服继续处理。"
-            elif result_action_status == "failed":
-                clean_reply = "尚未进入人工队列，请重试或使用人工入口。"
-            else:
-                clean_reply = "我已经记录到这个问题了，会按服务流程继续帮你核实处理。"
+        finalized = _finalize_customer_reply(result)
+        clean_reply = finalized["reply"]
+        done_status = finalized["status"]
+        result_conversation_state = finalized["conversation_state"]
+        result_action_state = finalized["action_state"]
+        required_reply_fields = finalized["required_reply_fields"]
+        reply_fields = finalized["reply_fields"]
         handoff_offer = None
         if (
             clean_reply.strip()
