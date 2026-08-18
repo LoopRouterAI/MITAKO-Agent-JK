@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 from sse_starlette.sse import EventSourceResponse
 
 from agent import agent_app, classify_intent, sanitize_customer_reply
+from customer_service.fact_resolver import resolve_facts
 from llm_models import DEFAULT_PUBLIC_MODEL_ID, list_models_public
 from image_models import list_image_models_public
 from image_service import generate_image
@@ -1590,6 +1591,10 @@ async def chat_stream(req: ChatRequest, request: Request):
         elif existing_entry.get("status") != "chatting":
             raise HTTPException(status_code=409, detail="handoff_active")
     uploaded_attachments = _require_all_chat_attachments_valid(req.attachments, req.user_id, req.session_id, tenant_id)
+    initial_facts = [
+        fact.model_dump(mode="json")
+        for fact in resolve_facts(message=req.content, attachments=uploaded_attachments)
+    ]
     review_context = _recent_review_attachments(req.user_id, req.session_id, tenant_id, req.content)
     uploaded_ids = {item.get("review_task_id") or item.get("id") for item in uploaded_attachments}
     chat_attachments = uploaded_attachments + [
@@ -1626,6 +1631,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             "active_order_id": req.active_order_id or "",
             "tenant_id": tenant_id,
             "intent": "",
+            "conversation_state": {"intent": {}, "facts": initial_facts},
             "emotion_level": 2,
             "order_data": {},
             "logistics_data": {},
