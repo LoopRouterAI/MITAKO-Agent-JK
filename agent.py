@@ -19,6 +19,7 @@ except Exception:
 
 from llm_models import DEFAULT_MODEL_ID
 from agent_llm import call_llm
+from customer_service.intent_router import public_intent_label, route_intent
 from partner_guard import assert_local_or_allowed
 from runtime_paths import mock_data_file
 
@@ -50,6 +51,7 @@ class AgentState(TypedDict):
     session_id: str
     active_order_id: str                  # 前端选中的焦点订单
     intent: str
+    conversation_state: Dict[str, Any]    # 确定性领域状态
     emotion_level: int
     order_data: Dict[str, Any]            # 缓存查到的订单详情
     logistics_data: Dict[str, Any]        # 缓存查到的物流详情
@@ -85,6 +87,8 @@ PUBLIC_INTENT_LABELS = {
     "物流追踪/催发货",
     "退款退货/补偿",
     "退款退货/申请退款",
+    "隐私合规/资料删除",
+    "订单信息/地址修改",
 }
 
 
@@ -312,15 +316,31 @@ def _load_mock_orders_for_user(user_id: str) -> Dict[str, Any]:
     return {"orders": user_orders, "total": len(user_orders)}
 
 
-def _emit_unified_analysis_event(queue: Any, intent: str, emotion_level: int, should_transfer: bool = False) -> None:
+def _emit_unified_analysis_event(
+    queue: Any,
+    intent: str,
+    emotion_level: int,
+    should_transfer: bool = False,
+    intent_result: Optional[Dict[str, Any]] = None,
+) -> None:
     if not queue:
         return
-    queue.put_nowait({
+    event = {
         "type": "unified_analysis",
         "intent": intent,
         "emotion_level": max(1, min(6, int(emotion_level or 2))),
         "should_transfer": bool(should_transfer),
-    })
+    }
+    if intent_result:
+        event.update({
+            "intent_code": intent_result.get("intent_code"),
+            "scenario_code": intent_result.get("scenario_code"),
+            "confidence": intent_result.get("confidence"),
+            "matched_evidence": intent_result.get("matched_evidence", []),
+            "requires_clarification": intent_result.get("requires_clarification", False),
+            "clarification_fields": intent_result.get("clarification_fields", []),
+        })
+    queue.put_nowait(event)
 
 
 def _strip_reply_analysis(reply: str) -> str:
@@ -635,39 +655,9 @@ async def classify_intent(state: AgentState, config: RunnableConfig) -> Dict[str
     short_negative_turn = len(last_user_msg.strip()) <= 18 or any(k in last_user_msg for k in ["md", "MD", "废话", "脑子", "敷衍", "垃圾"])
     context_msg = f"{recent_user_text}\n{last_user_msg}" if short_negative_turn else last_user_msg
 
-    intent = "闲聊互动"
+    intent_result = route_intent(last_user_msg, history=(state.get("messages") or [])[:-1])
+    intent = public_intent_label(intent_result)
     emotion_level = 2
-
-    if any(k in last_user_msg for k in ["我要人工", "人工客服", "真人客服", "VIP客服", "不想和机器人", "转人工", "转VIP客服", "找人工"]):
-        intent = "VIP客服请求"
-    elif _is_notification_channel_request(last_user_msg):
-        intent = "通知渠道/服务建议"
-    elif (
-        any(k in context_msg for k in ["还没下单", "库存", "现货", "预售", "规格", "SKU", "sku", "想买", "支付方式"])
-        or ("商品" in context_msg and any(k in context_msg for k in ["咨询", "问一下", "能不能退"]))
-    ) and not any(k in context_msg for k in ["订单", "物流", "发货", "清关", "破损", "划痕", "有伤", "瑕疵"]):
-        intent = "售前商品咨询"
-    elif any(k in context_msg for k in ["未成年", "孩子", "小孩", "家长", "监护人", "监护关系", "实名归属", "承诺书"]):
-        intent = "退款退货/未成年人退款"
-    elif any(k in context_msg for k in ["起诉", "黑猫", "12315", "曝光"]):
-        intent = "投诉升级"
-    elif any(k in context_msg for k in [
-        "盲盒", "普款", "稀有款", "改概率", "概率", "保底", "奖池", "抽号",
-        "吞烫", "中奖率", "抽赏", "抽选", "活动规则", "中奖名单",
-    ]):
-        intent = "盲盒相关/吞烫质疑"
-    elif any(k in context_msg for k in ["破损", "烂了", "划痕", "有伤", "瑕疵", "开箱视频", "照片", "视频审核", "剪辑", "离开镜头"]):
-        intent = "换货补发/商品破损"
-    elif any(k in context_msg for k in ["出荷", "发货", "跑路", "没收到", "物流", "清关", "通关", "仓库", "库房", "入仓", "慢"]):
-        intent = "物流追踪/催发货"
-    elif any(k in context_msg for k in ["补偿", "赔偿", "免邮"]):
-        intent = "退款退货/补偿"
-    elif any(k in context_msg for k in ["退款", "退钱", "全额", "退货", "不好", "不想要"]):
-        intent = "退款退货/申请退款"
-    elif any(k in context_msg for k in ["置换区", "重复", "交换"]):
-        intent = "盲盒相关/置换区咨询"
-    elif "引用订单" in last_user_msg or re.search(r"ORD_\d{4}_\d+", last_user_msg) or _extract_explicit_order_ref(last_user_msg):
-        intent = "物流追踪/催发货"
 
     if any(k in context_msg for k in ["垃圾", "跑路", "无语", "恶心", "气人", "太慢", "一直拖", "等疯了", "毛线", "生气", "串单", "串了", "完全不对", "离谱", "再这样", "别敷衍", "废话", "脑子有病", "有病"]):
         emotion_level = 4
@@ -682,8 +672,20 @@ async def classify_intent(state: AgentState, config: RunnableConfig) -> Dict[str
             "node": "intent_classify",
             "desc": f"初步分析：意图=【{intent}】，情绪等级=【Level {emotion_level}】"
         })
-        _emit_unified_analysis_event(queue, intent, emotion_level, False)
-    return {"intent": intent, "emotion_level": emotion_level}
+        _emit_unified_analysis_event(
+            queue,
+            intent,
+            emotion_level,
+            False,
+            intent_result=intent_result.model_dump(),
+        )
+    conversation_state = dict(state.get("conversation_state") or {})
+    conversation_state["intent"] = intent_result.model_dump()
+    return {
+        "intent": intent,
+        "conversation_state": conversation_state,
+        "emotion_level": emotion_level,
+    }
 
 
 
@@ -788,7 +790,13 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
             "node": "check_transfer",
             "desc": f"转交状态：{'需转交VIP客服' if should_transfer else 'AI承接中'} (原因: {transfer_reason or '无'})"
         })
-        _emit_unified_analysis_event(queue, intent, emotion_level, should_transfer)
+        _emit_unified_analysis_event(
+            queue,
+            intent,
+            emotion_level,
+            should_transfer,
+            intent_result=(state.get("conversation_state") or {}).get("intent"),
+        )
     return {
         "should_transfer": should_transfer,
         "transfer_reason": transfer_reason,
@@ -1210,9 +1218,6 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
     meme_tags = re.findall(r"<meme:\s*(\w+)>", reply)
     analysis = _parse_reply_analysis(reply)
     updates: Dict[str, Any] = {"reply_draft": reply, "meme_tags": meme_tags}
-    llm_intent = str(analysis.get("intent") or "")
-    if llm_intent in PUBLIC_INTENT_LABELS:
-        updates["intent"] = llm_intent
     if analysis.get("emotion_level"):
         try:
             parsed_level = max(1, min(6, int(analysis.get("emotion_level"))))
@@ -1221,12 +1226,13 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
             updates["emotion_level"] = parsed_level
         except Exception:
             pass
-    if queue and (analysis.get("intent") or analysis.get("emotion_level") or analysis.get("should_transfer")):
+    if queue and (analysis.get("emotion_level") or analysis.get("should_transfer")):
         _emit_unified_analysis_event(
             queue,
-            updates.get("intent") or intent,
+            intent,
             updates.get("emotion_level") or emotion_level,
             should_transfer,
+            intent_result=(state.get("conversation_state") or {}).get("intent"),
         )
 
     if queue:
