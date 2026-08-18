@@ -134,6 +134,18 @@ def _verified_material_received(facts: Sequence[Fact | Mapping[str, Any]]) -> bo
     return False
 
 
+def _verified_true_field_names(
+    facts: Sequence[Fact | Mapping[str, Any]],
+    required_fields: set[str],
+) -> set[str]:
+    verified = set()
+    for item in facts:
+        fact = item if isinstance(item, Fact) else Fact.model_validate(item)
+        if fact.field in required_fields and fact.value is True and fact.verified:
+            verified.add(fact.field)
+    return verified
+
+
 def _has_verified_order_association(facts: Sequence[Fact | Mapping[str, Any]], message: str) -> bool:
     text = str(message or "")
     if re.search(r"(?:订单|订单号|单号|order)\s*[:#№-]?\s*[A-Za-z0-9_-]{4,}", text, re.IGNORECASE) or re.search(r"(?:一单|这单|该单)", text):
@@ -212,7 +224,7 @@ def decide_scenario(
 ) -> ScenarioDecision:
     """按优先意图返回可序列化的确定性场景决策。"""
     del activity  # 本轮只要求先查活动权益，不能用抽奖字段替代权益基线。
-    code = intent.intent_code
+    code = "high_risk_complaint" if "high_risk_complaint" in intent.intent_codes else intent.intent_code
 
     if code == "minor_refund_material":
         if _minor_mobile_owner(message, facts) == "minor":
@@ -267,16 +279,56 @@ def decide_scenario(
         )
 
     if code == "wrong_item":
+        static_fields = {
+            "wrong_item.received_group_photo",
+            "wrong_item.green_bag_or_package_view",
+            "wrong_item.matching_waybill",
+        }
+        verified_static_fields = _verified_true_field_names(facts, static_fields)
+        static_ready = verified_static_fields == static_fields
+        static_field_order = (
+            "received_group_photo",
+            "green_bag_or_package_view",
+            "matching_waybill",
+        )
+        missing_static_fields = [
+            field for field in static_field_order
+            if f"wrong_item.{field}" not in verified_static_fields
+        ]
         return ScenarioDecision(
             core_conclusion="wrong_item_materials_required",
             action_state=_action("wrong_item_evidence"),
-            next_step=_next("request_wrong_item_evidence", "补充合规开箱视频；无合规视频时提供静态三图", user_action_required=True),
+            next_step=(
+                _next("review_wrong_item_static_evidence", "按静态三图进入人工或仓库核验")
+                if static_ready
+                else _next("request_wrong_item_evidence", "补充合规开箱视频；无合规视频时提供静态三图", user_action_required=True)
+            ),
             policy_refs=[f"{POLICY_VERSION}/wrong-item-evidence"],
             details={
                 "evidence_grade": "required_opening_video_or_static_three_images",
                 "video_optional": False,
-                "static_fallback": "static_three_images",
-                "required_evidence": ["compliant_opening_video"],
+                "required_evidence": {
+                    "primary_route": "compliant_opening_video",
+                    "requirements": [
+                        "sealed_start",
+                        "matching_waybill",
+                        "continuous_opening",
+                        "all_received_items_visible",
+                    ],
+                },
+                "static_fallback": {
+                    "route": "static_three_images",
+                    "downgrade_condition": "no_compliant_opening_video",
+                    "required_fields": [
+                        "received_group_photo",
+                        "green_bag_or_package_view",
+                        "matching_waybill",
+                    ],
+                    "effect": "materials_complete_pending_human_or_warehouse_verification",
+                },
+                "selected_evidence_route": "static_three_images" if static_ready else "pending_evidence",
+                "missing_static_fields": missing_static_fields,
+                "video_missing_blocks_review": False,
             },
         )
 
@@ -330,6 +382,12 @@ def decide_scenario(
                     "status": "planned",
                     "action": "human_handoff",
                 },
+                "complaint_protocol": {
+                    "responsible_role": "VIP客服主管",
+                    "current_action": "提交人工队列并同步投诉简报",
+                    "first_response_sla": "以人工队列租户配置为准",
+                    "tracking_receipt": "pending_queue_receipt",
+                } if is_complaint else {},
             },
             required_reply_fields=required_fields if is_complaint else [],
         )

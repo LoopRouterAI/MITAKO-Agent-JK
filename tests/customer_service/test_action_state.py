@@ -9,7 +9,7 @@ import pytest
 
 import business_api
 import handoff_service
-from customer_service.action_state import action_from_exception, action_from_tool
+from customer_service.action_state import action_envelope, action_from_exception, action_from_tool
 from customer_service.contracts import ActionState, ActionStatus
 
 
@@ -198,6 +198,210 @@ def test_invalid_primary_receipt_and_timestamp_cannot_fall_back_to_other_fields(
 
     assert action.status == ActionStatus.FAILED
     assert action.reason_code == "invalid_tool_receipt"
+
+
+def test_nested_action_and_tool_mismatch_cannot_claim_handoff_queue() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "queued",
+            "queue_id": "QUEUE-1",
+            "created_at": "2026-08-18T20:00:00+08:00",
+            "action_state": {
+                "action": "address_change",
+                "tool_name": "business_api",
+                "status": "queued",
+                "receipt_id": "FAKE-1",
+                "occurred_at": "2026-08-18T20:00:00+08:00",
+            },
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "action_mismatch"
+
+
+def test_nested_tool_only_mismatch_cannot_claim_handoff_queue() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "queued",
+            "queue_id": "QUEUE-1",
+            "created_at": "2026-08-18T20:00:00+08:00",
+            "action_state": {
+                "action": "human_handoff",
+                "tool_name": "business_api",
+                "status": "queued",
+                "receipt_id": "QUEUE-1",
+                "occurred_at": "2026-08-18T20:00:00+08:00",
+            },
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "action_mismatch"
+
+
+def test_nested_status_receipt_and_top_level_conflicts_never_become_queued() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "failed",
+            "queue_id": "REAL-1",
+            "created_at": "2026-08-18T20:00:00+08:00",
+            "action_state": {
+                "action": "human_handoff",
+                "tool_name": "handoff_service",
+                "status": "queued",
+                "receipt_id": "FAKE-1",
+                "occurred_at": "2026-08-18T20:00:00+08:00",
+            },
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "invalid_tool_receipt"
+
+
+def test_nested_receipt_only_conflict_never_becomes_queued() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "queued",
+            "queue_id": "REAL-1",
+            "created_at": "2026-08-18T20:00:00+08:00",
+            "action_state": {
+                "action": "human_handoff",
+                "tool_name": "handoff_service",
+                "status": "queued",
+                "receipt_id": "FAKE-1",
+                "occurred_at": "2026-08-18T20:00:00+08:00",
+            },
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "invalid_tool_receipt"
+
+
+def test_explicit_invalid_top_receipt_cannot_fall_back_to_nested_receipt() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "queued",
+            "receipt_id": True,
+            "occurred_at": "2026-08-18T20:00:00+08:00",
+            "action_state": {
+                "action": "human_handoff",
+                "tool_name": "handoff_service",
+                "status": "queued",
+                "receipt_id": "QUEUE-1",
+                "occurred_at": "2026-08-18T20:00:00+08:00",
+            },
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "invalid_tool_receipt"
+
+
+def test_explicit_invalid_top_timestamp_cannot_fall_back_to_nested_timestamp() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "queued",
+            "receipt_id": "QUEUE-1",
+            "occurred_at": "not-a-date",
+            "action_state": {
+                "action": "human_handoff",
+                "tool_name": "handoff_service",
+                "status": "queued",
+                "receipt_id": "QUEUE-1",
+                "occurred_at": "2026-08-18T20:00:00+08:00",
+            },
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code == "invalid_tool_timestamp"
+
+
+def test_nested_negative_result_cannot_be_overridden_by_top_level_success() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "failed",
+            "queue_id": "REAL-1",
+            "created_at": "2026-08-18T20:00:00+08:00",
+            "action_state": {
+                "action": "human_handoff",
+                "tool_name": "handoff_service",
+                "ok": False,
+                "status": "queued",
+                "receipt_id": "FAKE-1",
+                "occurred_at": "2026-08-18T20:00:00+08:00",
+            },
+        },
+    )
+
+    assert action.status == ActionStatus.FAILED
+    assert action.reason_code in {"invalid_tool_receipt", "tool_rejected"}
+
+
+def test_nested_same_action_and_tool_remains_valid() -> None:
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": "queued",
+            "queue_id": "QUEUE-1",
+            "created_at": "2026-08-18T20:00:00+08:00",
+            "action_state": {
+                "action": "human_handoff",
+                "tool_name": "handoff_service",
+                "status": "queued",
+                "receipt_id": "QUEUE-1",
+                "occurred_at": "2026-08-18T20:00:00+08:00",
+            },
+        },
+    )
+
+    assert action.status == ActionStatus.QUEUED
+    assert action.receipt_id == "QUEUE-1"
+
+
+@pytest.mark.parametrize("status", ["requested", "accepted", "pending_human", "failed"])
+def test_non_completed_action_envelope_round_trips_with_empty_receipt_and_time(status: str) -> None:
+    original = ActionState(
+        action="human_handoff",
+        status=status,
+        tool_name="handoff_service",
+    )
+
+    normalized = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        action_envelope(original),
+    )
+
+    assert normalized.status == original.status
+    assert normalized.receipt_id == ""
+    assert normalized.occurred_at == ""
 
 
 def test_duplicate_receipt_normalization_is_stable() -> None:

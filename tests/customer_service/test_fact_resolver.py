@@ -50,6 +50,52 @@ def test_attachment_service_receipt_marks_received() -> None:
     assert received.source_ref == "attachment:A1"
 
 
+def test_verified_wrong_item_attachment_metadata_generates_static_evidence_facts() -> None:
+    from customer_service.fact_resolver import resolve_facts
+
+    facts = resolve_facts(
+        message="请按材料处理。",
+        attachments=[
+            {
+                "id": f"A-{index}",
+                "status": "stored",
+                "evidence_scenario": "wrong_item",
+                "evidence_category": category,
+                "evidence_verified": True,
+            }
+            for index, category in enumerate(
+                ("received_group_photo", "green_bag_or_package_view", "matching_waybill"),
+                start=1,
+            )
+        ],
+    )
+
+    for category in ("received_group_photo", "green_bag_or_package_view", "matching_waybill"):
+        fact = _find(facts, f"wrong_item.{category}")
+        assert fact.value is True
+        assert fact.source == "attachment_service"
+        assert fact.verified is True
+
+
+@pytest.mark.parametrize("verified", [False, None])
+def test_unverified_attachment_metadata_never_generates_static_evidence_fact(verified: object) -> None:
+    from customer_service.fact_resolver import resolve_facts
+
+    facts = resolve_facts(
+        message="商品全家福和面单都在文件名里。",
+        attachments=[{
+            "id": "A-UNVERIFIED",
+            "name": "商品全家福_绿色袋_匹配面单.png",
+            "status": "stored",
+            "evidence_scenario": "wrong_item",
+            "evidence_category": "received_group_photo",
+            "evidence_verified": verified,
+        }],
+    )
+
+    assert not any(fact.field.startswith("wrong_item.") for fact in facts)
+
+
 @pytest.mark.parametrize(
     "message",
     [

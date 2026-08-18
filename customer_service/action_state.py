@@ -74,6 +74,15 @@ def _raw_field(*sources: Mapping[str, Any], keys: tuple[str, ...]) -> object:
     return _MISSING
 
 
+def _has_field(source: Mapping[str, Any], keys: tuple[str, ...]) -> bool:
+    return any(key in source for key in keys)
+
+
+def _explicit_field_is_blank(source: Mapping[str, Any], keys: tuple[str, ...]) -> bool:
+    value = _raw_field(source, keys=keys)
+    return value is None or isinstance(value, str) and not value.strip()
+
+
 def _receipt_field(*sources: Mapping[str, Any]) -> tuple[str, bool]:
     value = _raw_field(*sources, keys=_RECEIPT_KEYS)
     if not isinstance(value, str):
@@ -134,17 +143,78 @@ def action_from_tool(action: str, tool_name: str, response: object) -> ActionSta
 
     nested = response.get("action_state")
     state_source = nested if isinstance(nested, Mapping) else {}
-    raw_status = _field(state_source, response, keys=("status", "action_status"))
-    status = _STATUS_ALIASES.get(raw_status.lower())
+    top_action = _text(response.get("action"))
+    top_tool = _text(response.get("tool_name"))
+    nested_action = _text(state_source.get("action"))
+    nested_tool = _text(state_source.get("tool_name"))
+    if (
+        ("action" in response and top_action != action_name)
+        or ("tool_name" in response and top_tool != normalized_tool)
+        or ("action" in state_source and nested_action != action_name)
+        or ("tool_name" in state_source and nested_tool != normalized_tool)
+    ):
+        return _failed(action_name, normalized_tool, "action_mismatch")
+
+    status_keys = ("status", "action_status")
+    top_status_text = _text(_raw_field(response, keys=status_keys)) if _has_field(response, status_keys) else ""
+    nested_status_text = _text(_raw_field(state_source, keys=status_keys)) if _has_field(state_source, status_keys) else ""
+    top_status = _STATUS_ALIASES.get(top_status_text.lower()) if top_status_text else None
+    nested_status = _STATUS_ALIASES.get(nested_status_text.lower()) if nested_status_text else None
+    if (
+        _has_field(response, status_keys) and top_status is None
+        or _has_field(state_source, status_keys) and nested_status is None
+    ):
+        return _failed(action_name, normalized_tool, "invalid_tool_status")
+    if top_status and nested_status and top_status != nested_status:
+        return _failed(action_name, normalized_tool, "invalid_tool_receipt")
+    status = nested_status or top_status
     if status is None:
         return _failed(action_name, normalized_tool, "invalid_tool_status")
 
-    occurred_at, timestamp_valid = _timestamp_field(state_source, response)
+    nested_receipt_provided = _has_field(state_source, _RECEIPT_KEYS)
+    top_receipt_provided = _has_field(response, _RECEIPT_KEYS)
+    nested_receipt, nested_receipt_valid = _receipt_field(state_source)
+    top_receipt, top_receipt_valid = _receipt_field(response)
+    if (
+        nested_receipt_provided
+        and not nested_receipt_valid
+        and (status in _COMPLETED_STATUSES or not _explicit_field_is_blank(state_source, _RECEIPT_KEYS))
+        or top_receipt_provided
+        and not top_receipt_valid
+        and (status in _COMPLETED_STATUSES or not _explicit_field_is_blank(response, _RECEIPT_KEYS))
+    ):
+        return _failed(action_name, normalized_tool, "invalid_tool_receipt")
+    if nested_receipt_valid and top_receipt_valid and nested_receipt != top_receipt:
+        return _failed(action_name, normalized_tool, "invalid_tool_receipt")
+    receipt_id = nested_receipt if nested_receipt_valid else top_receipt
+    receipt_valid = nested_receipt_valid or top_receipt_valid
+
+    nested_timestamp_provided = _has_field(state_source, _OCCURRED_KEYS)
+    top_timestamp_provided = _has_field(response, _OCCURRED_KEYS)
+    nested_timestamp, nested_timestamp_valid = _timestamp_field(state_source)
+    top_timestamp, top_timestamp_valid = _timestamp_field(response)
+    if (
+        nested_timestamp_provided
+        and not nested_timestamp_valid
+        and (status in _COMPLETED_STATUSES or not _explicit_field_is_blank(state_source, _OCCURRED_KEYS))
+        or top_timestamp_provided
+        and not top_timestamp_valid
+        and (status in _COMPLETED_STATUSES or not _explicit_field_is_blank(response, _OCCURRED_KEYS))
+    ):
+        return _failed(action_name, normalized_tool, "invalid_tool_timestamp")
+    if nested_timestamp_valid and top_timestamp_valid and nested_timestamp != top_timestamp:
+        return _failed(action_name, normalized_tool, "invalid_tool_timestamp")
+    occurred_at = nested_timestamp if nested_timestamp_valid else top_timestamp
+    timestamp_valid = nested_timestamp_valid or top_timestamp_valid
     mock_response = dict(response)
     if state_source:
         mock_response.update(state_source)
     unconnected_mock = _is_unconnected_mock(mock_response)
-    negative_result = response.get("ok") is False or response.get("success") is False
+    negative_result = any(
+        source.get(key) is False
+        for source in (response, state_source)
+        for key in ("ok", "success")
+    )
     if negative_result and not (
         unconnected_mock and status in {ActionStatus.REQUESTED, ActionStatus.PENDING_HUMAN}
     ):
@@ -157,7 +227,6 @@ def action_from_tool(action: str, tool_name: str, response: object) -> ActionSta
     else:
         reason_code = _field(state_source, response, keys=("reason_code", "error", "code")) or _DEFAULT_REASON[status]
 
-    receipt_id, receipt_valid = _receipt_field(state_source, response)
     if status in _COMPLETED_STATUSES:
         if not receipt_valid:
             return _failed(action_name, normalized_tool, "invalid_tool_receipt", occurred_at)

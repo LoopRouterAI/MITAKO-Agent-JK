@@ -418,13 +418,21 @@ def build_public_agent(agent: Optional[Dict[str, Any]]) -> Dict[str, str]:
 
 def build_public_queue_meta(queue: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     q = queue or {}
+    action_state = q.get("action_state") if isinstance(q.get("action_state"), dict) else None
+    if q.get("status") == "failed" or (action_state or {}).get("status") == "failed":
+        return {
+            "session_id": q.get("session_id"),
+            "status": "failed",
+            "action_state": action_state,
+            "deduped": False,
+        }
     return {
         "position": q.get("position", 0),
         "ahead": q.get("ahead", 0),
         "eta": q.get("eta", q.get("eta_minutes", 0)),
         "session_id": q.get("session_id"),
         "status": q.get("status"),
-        "action_state": q.get("action_state") if isinstance(q.get("action_state"), dict) else None,
+        "action_state": action_state,
         "deduped": bool(q.get("deduped")) if "deduped" in q else False,
     }
 

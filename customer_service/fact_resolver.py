@@ -34,6 +34,11 @@ _FAILED_PARSE_STATUSES = frozenset(
 _QUEUED_HANDOFF_STATUSES = frozenset(
     {"queued", "queuing", "escalated", "transferring", "connected"}
 )
+_WRONG_ITEM_STATIC_CATEGORIES = frozenset({
+    "received_group_photo",
+    "green_bag_or_package_view",
+    "matching_waybill",
+})
 
 
 def _text(record: Mapping[str, Any] | None, *keys: str) -> str:
@@ -120,7 +125,7 @@ def resolve_facts(
         handoff_id and _text(handoff, "status").lower() in _QUEUED_HANDOFF_STATUSES
     )
 
-    return [
+    facts = [
         Fact(
             field="material.user_claimed",
             value=claimed,
@@ -170,3 +175,18 @@ def resolve_facts(
             verified=handoff_queued,
         ),
     ]
+    for item in trusted_attachments:
+        category = _text(item, "evidence_category")
+        if (
+            item.get("evidence_verified") is True
+            and _text(item, "evidence_scenario") == "wrong_item"
+            and category in _WRONG_ITEM_STATIC_CATEGORIES
+        ):
+            facts.append(Fact(
+                field=f"wrong_item.{category}",
+                value=True,
+                source=FactSource.ATTACHMENT_SERVICE,
+                source_ref=_attachment_ref(item),
+                verified=True,
+            ))
+    return facts

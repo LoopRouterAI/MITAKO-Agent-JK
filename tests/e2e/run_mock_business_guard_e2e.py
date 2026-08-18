@@ -215,14 +215,21 @@ async def _search_sop() -> list:
     return result.get("sop_results") or []
 
 
-def test_p0_transfer_short_circuit():
+def test_p0_complaint_builds_protocol_before_handoff():
     events = asyncio.run(_collect_agent_events("我要去12315投诉你们，还要起诉"))
     nodes = [e.get("node") for e in events if e.get("type") in ("node_start", "node_end")]
     assert "transfer_human" in nodes, nodes
-    assert "generate_reply" not in nodes, nodes
-    assert "check_compensation" not in nodes, nodes
-    audit = handoff_store.list_business_events(session_id="session_guard_p0")
-    assert any(e["event_type"] == "service_transfer_blocked" for e in audit), audit
+    assert "search_sop" in nodes, nodes
+    assert "generate_reply" in nodes, nodes
+    transfer = next(e for e in events if e.get("type") == "action_transfer")
+    assert transfer["action_state"]["status"] == "queued", transfer
+    assert transfer["action_state"]["receipt_id"] == "session_guard_p0", transfer
+    assert transfer["required_reply_fields"] == [
+        "responsible_role",
+        "current_action",
+        "first_response_sla",
+        "tracking_receipt",
+    ]
 
 
 def test_local_sop_recall():

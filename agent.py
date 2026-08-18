@@ -348,6 +348,10 @@ def _emit_unified_analysis_event(
     queue.put_nowait(event)
 
 
+def _intent_in_result(intent_data: Dict[str, Any], code: str) -> bool:
+    return intent_data.get("intent_code") == code or code in (intent_data.get("intent_codes") or [])
+
+
 def _strip_reply_analysis(reply: str) -> str:
     if "<analysis>" in reply and "</analysis>" in reply:
         return reply.split("</analysis>", 1)[1].lstrip()
@@ -528,6 +532,9 @@ def _build_product_inventory_reply(state: AgentState, user_text: str) -> str:
     )
 
 
+_REVIEW_SUCCESS_STATUSES = {"succeeded", "success", "completed", "review_completed", "review_succeeded"}
+
+
 def _public_review_material_state(attachments: List[Dict[str, Any]]) -> Dict[str, Any]:
     from review_service.service import public_job
 
@@ -544,6 +551,12 @@ def _public_review_material_state(attachments: List[Dict[str, Any]]) -> Dict[str
         review = ((public.get("result") or {}).get("review") or {})
         agent_report = review.get("agent_report") if isinstance(review.get("agent_report"), dict) else {}
         public_brief = agent_report.get("public_brief") if isinstance(agent_report.get("public_brief"), dict) else {}
+        parsed = agent_report.get("parsed") if isinstance(agent_report.get("parsed"), dict) else {}
+        reconciliation = (
+            parsed.get("fulfillment_reconciliation")
+            if isinstance(parsed.get("fulfillment_reconciliation"), dict)
+            else {}
+        )
         if not public_brief and isinstance(review.get("agent_brief"), dict):
             public_brief = review["agent_brief"]
         summary = review.get("summary") if isinstance(review.get("summary"), dict) else {}
@@ -552,7 +565,7 @@ def _public_review_material_state(attachments: List[Dict[str, Any]]) -> Dict[str
             text = str(value or "").strip()
             return "" if _customer_reply_has_internal_text(text) else text
 
-        return {
+        material_state = {
             "contract_version": "MITAKO-FOUR-SCENE@20260814.1",
             "review_task_id": item.get("review_task_id") or item.get("id") or "",
             "scenario": item.get("scenario") or "",
@@ -568,6 +581,13 @@ def _public_review_material_state(attachments: List[Dict[str, Any]]) -> Dict[str
                 if summary.get(key) is not None
             },
         }
+        if reconciliation:
+            material_state["fulfillment_reconciliation"] = {
+                key: reconciliation[key]
+                for key in ("evidence_route", "user_materials_complete", "warehouse_check")
+                if key in reconciliation
+            }
+        return material_state
     return {}
 
 
@@ -818,7 +838,10 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
 
     # 2. 维权和法律硬拦截敏感词
     sensitive_words = ["12315", "起诉", "黑猫", "消费者协会", "曝光", "报警", "律师"]
-    if not should_transfer and (intent_code == "high_risk_complaint" or intent_result.scenario_code == "complaint"):
+    if not should_transfer and (
+        _intent_in_result(intent_result.model_dump(mode="json"), "high_risk_complaint")
+        or "complaint" in intent_result.scenario_codes
+    ):
         should_transfer = True
         transfer_reason = "高风险投诉需要人工确认责任、动作和首响时效"
     if not should_transfer:
@@ -986,6 +1009,39 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
         conversation_state.get("intent") or route_intent(last_user_msg).model_dump()
     )
     facts = [Fact.model_validate(item) for item in conversation_state.get("facts") or []]
+    material_state = _public_review_material_state(state.get("attachments") or [])
+    reconciliation = material_state.get("fulfillment_reconciliation") or {}
+    review_attachment = next(
+        (
+            item for item in state.get("attachments") or []
+            if item.get("kind") == "review_task"
+            and (item.get("review_task_id") or item.get("id")) == material_state.get("review_task_id")
+        ),
+        {},
+    )
+    if (
+        intent_result.scenario_code == "wrong_item"
+        and material_state.get("scenario") == "wrong_item"
+        and str(material_state.get("status") or "").lower() in _REVIEW_SUCCESS_STATUSES
+        and review_attachment.get("scope_verified") is True
+        and reconciliation.get("evidence_route") == "static_three_images"
+        and reconciliation.get("user_materials_complete") is True
+    ):
+        source_ref = f"review_task:{material_state.get('review_task_id')}"
+        facts.extend(
+            Fact(
+                field=f"wrong_item.{field}",
+                value=True,
+                source="review_service",
+                source_ref=source_ref,
+                verified=True,
+            )
+            for field in (
+                "received_group_photo",
+                "green_bag_or_package_view",
+                "matching_waybill",
+            )
+        )
     action_data = conversation_state.get("action_state")
     action = ActionState.model_validate(action_data) if isinstance(action_data, dict) else None
     demo_catalog = _load_demo_business_catalog()
@@ -1011,6 +1067,7 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
     )
     decision_data = scenario_decision.model_dump(mode="json")
     conversation_state.update({
+        "facts": [fact.model_dump(mode="json") for fact in facts],
         "scenario_decision": decision_data,
         "core_conclusion": decision_data["core_conclusion"],
         "action_state": decision_data["action_state"],
@@ -1019,7 +1076,6 @@ async def search_knowledge_base(state: AgentState, config: RunnableConfig) -> Di
         "details": decision_data.get("details") or {},
         "required_reply_fields": decision_data.get("required_reply_fields") or [],
     })
-    material_state = _public_review_material_state(state.get("attachments") or [])
     if material_state:
         conversation_state["material_state"] = material_state
 
@@ -1234,6 +1290,33 @@ async def check_compensation_eligibility(state: AgentState, config: RunnableConf
 
 
 # 5.9 generate_reply 节点
+def _complaint_reply_fields(state: AgentState, tracking_receipt: str = "") -> Dict[str, str]:
+    from handoff_routing import get_sla_config
+
+    conversation_state = state.get("conversation_state") or {}
+    details = conversation_state.get("details") or {}
+    configured = details.get("complaint_protocol") or {}
+    first_response_seconds = int(
+        get_sla_config(state.get("tenant_id") or "mitako").get("first_response_seconds") or 180
+    )
+    first_response_sla = f"入队后 {max(1, (first_response_seconds + 59) // 60)} 分钟内首次响应"
+    return {
+        "responsible_role": str(configured.get("responsible_role") or "VIP客服主管"),
+        "current_action": "已进入人工队列并同步投诉简报" if tracking_receipt else "正在提交人工队列并同步投诉简报",
+        "first_response_sla": first_response_sla,
+        "tracking_receipt": tracking_receipt or "等待人工队列回执",
+    }
+
+
+def _build_complaint_protocol_reply(fields: Dict[str, str]) -> str:
+    return (
+        f"责任角色：{fields['responsible_role']}。"
+        f"当前动作：{fields['current_action']}。"
+        f"首次响应时效：{fields['first_response_sla']}。"
+        f"跟进凭证：{fields['tracking_receipt']}。"
+    )
+
+
 async def generate_reply_with_persona(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
     """
     AI 回复生成节点：调用已配置的 LLM（默认 DeepSeek V4 Flash / SenseNova）。在 System Prompt 红线下产出流式回复。
@@ -1253,6 +1336,18 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
     should_transfer = state["should_transfer"]
     transfer_reason = state["transfer_reason"]
     attachments = state.get("attachments") or config.get("configurable", {}).get("attachments") or []
+    conversation_state = dict(state.get("conversation_state") or {})
+    intent_result = conversation_state.get("intent") or {}
+    if _intent_in_result(intent_result, "high_risk_complaint"):
+        reply_fields = _complaint_reply_fields(state)
+        conversation_state["reply_fields"] = reply_fields
+        if queue:
+            await queue.put({"type": "node_end", "node": "generate_reply", "desc": "高风险投诉响应协议已生成。"})
+        return {
+            "reply_draft": _build_complaint_protocol_reply(reply_fields),
+            "meme_tags": [],
+            "conversation_state": conversation_state,
+        }
 
     sop_state = state.get("sop_state") or {}
     sop_context = {
@@ -1510,14 +1605,48 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
         event = record_transfer_blocked(state, reason)
         state = {**state, "business_events": [event], "sop_state": event.get("result") or {}}
     conversation_state = dict(state.get("conversation_state") or {})
+    intent_data = conversation_state.get("intent") or {}
+    is_high_risk_complaint = _intent_in_result(intent_data, "high_risk_complaint")
+    if is_high_risk_complaint and not conversation_state.get("scenario_decision"):
+        decision = decide_scenario(
+            intent=IntentResult.model_validate(intent_data),
+            facts=[Fact.model_validate(item) for item in conversation_state.get("facts") or []],
+            message=_current_user_text(state),
+        )
+        decision_data = decision.model_dump(mode="json")
+        conversation_state.update({
+            "scenario_decision": decision_data,
+            "core_conclusion": decision_data["core_conclusion"],
+            "action_state": decision_data["action_state"],
+            "next_step": decision_data["next_step"],
+            "policy_refs": decision_data["policy_refs"],
+            "details": decision_data["details"],
+            "required_reply_fields": decision_data["required_reply_fields"],
+        })
     brief: Dict[str, Any] = {"tenant_id": state.get("tenant_id") or "mitako"}
     queue_meta: Dict[str, Any] = {}
     try:
         brief = build_handoff_brief(state, reason)
         queue_meta = enqueue_handoff(session_id, brief, tenant_id=brief.get("tenant_id") or "mitako")
         action = action_from_tool("human_handoff", "handoff_service", queue_meta)
+        if action.status.value == "queued" and (
+            str(queue_meta.get("session_id") or "") != session_id
+            or action.receipt_id != session_id
+        ):
+            action = action_from_tool(
+                "human_handoff",
+                "handoff_service",
+                {"ok": False, "status": "failed", "error": "session_mismatch"},
+            )
     except Exception as exc:
         action = action_from_exception("human_handoff", "handoff_service", exc)
+        queue_meta = {
+            "ok": False,
+            "status": "failed",
+            "session_id": session_id,
+            "error": action.reason_code,
+        }
+    if action.status.value == "failed":
         queue_meta = {
             "ok": False,
             "status": "failed",
@@ -1545,6 +1674,15 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
             handoff_token = ""
     conversation_state["action_state"] = action.model_dump(mode="json")
     conversation_state["handoff_receipt"] = action.receipt_id
+    reply_draft = ""
+    reply_fields: Dict[str, str] = {}
+    if is_high_risk_complaint and action.status.value == "queued":
+        reply_fields = _complaint_reply_fields(
+            {**state, "conversation_state": conversation_state},
+            action.receipt_id,
+        )
+        conversation_state["reply_fields"] = reply_fields
+        reply_draft = _build_complaint_protocol_reply(reply_fields)
     public_reason = (
         f"{reason}（队列回执 {action.receipt_id}）"
         if action.status.value == "queued" and action.receipt_id
@@ -1563,6 +1701,8 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
             "queue": queue_meta,
             "handoff_token": handoff_token,
             "action_state": action.model_dump(mode="json"),
+            "required_reply_fields": conversation_state.get("required_reply_fields") or [],
+            "reply_fields": reply_fields,
         })
         await queue.put({
             "type": "node_end",
@@ -1576,6 +1716,7 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
         "conversation_state": conversation_state,
         "action_state": action.model_dump(mode="json"),
         "handoff_token": handoff_token,
+        "reply_draft": reply_draft,
     }
 
 async def update_user_memory(state: AgentState, config: RunnableConfig) -> Dict[str, Any]:
@@ -1650,6 +1791,12 @@ workflow.add_edge("intent_classify", "emotion_detect")
 workflow.add_edge("emotion_detect", "check_transfer")
 
 def router_after_transfer_check(state: AgentState):
+    conversation_state = state.get("conversation_state") or {}
+    intent_result = conversation_state.get("intent") or {}
+    if _intent_in_result(intent_result, "high_risk_complaint"):
+        scenario_ready = bool(conversation_state.get("scenario_decision"))
+        reply_ready = bool(str(state.get("reply_draft") or "").strip())
+        return "transfer" if state.get("should_transfer") and scenario_ready and reply_ready else "continue"
     return "transfer" if state.get("should_transfer") else "continue"
 
 

@@ -210,6 +210,11 @@ class ChatRequest(BaseModel):
 
 ALLOWED_CHAT_ATTACHMENT_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_CHAT_ATTACHMENT_BYTES = 12 * 1024 * 1024
+WRONG_ITEM_STATIC_EVIDENCE_CATEGORIES = {
+    "received_group_photo",
+    "green_bag_or_package_view",
+    "matching_waybill",
+}
 
 
 def _safe_attachment_name(name: str) -> str:
@@ -268,6 +273,7 @@ def _valid_chat_attachments(items: List[ChatAttachment], user_id: str, session_i
                 "boundary": task.get("boundary") or "",
                 "review_result": task.get("result") or {},
                 "reviewed_at": task.get("reviewed_at") or 0,
+                "scope_verified": True,
             })
             continue
         if not item.url.startswith("/api/v1/chat/attachments/"):
@@ -283,13 +289,25 @@ def _valid_chat_attachments(items: List[ChatAttachment], user_id: str, session_i
         path = CHAT_ATTACHMENTS_DIR / filename
         if not path.exists() or path.stat().st_size != size:
             continue
-        valid.append({
+        attachment = {
             "id": str(meta.get("id") or item.id),
             "name": str(meta.get("name") or item.name),
             "mime_type": mime_type,
             "size": size,
             "url": f"/api/v1/chat/attachments/{filename}",
-        })
+        }
+        evidence_category = str(meta.get("evidence_category") or "")
+        if (
+            meta.get("evidence_verified") is True
+            and meta.get("evidence_scenario") == "wrong_item"
+            and evidence_category in WRONG_ITEM_STATIC_EVIDENCE_CATEGORIES
+        ):
+            attachment.update({
+                "evidence_scenario": "wrong_item",
+                "evidence_category": evidence_category,
+                "evidence_verified": True,
+            })
+        valid.append(attachment)
     return valid
 
 
@@ -307,6 +325,7 @@ def _review_task_attachment(task: Dict[str, Any]) -> Dict[str, Any]:
         "boundary": task.get("boundary") or "",
         "review_result": task.get("result") or {},
         "reviewed_at": task.get("reviewed_at") or 0,
+        "scope_verified": True,
     }
 
 
@@ -1788,15 +1807,23 @@ async def chat_stream(req: ChatRequest, request: Request):
 
         clean_reply = sanitize_customer_reply(reply_fallback)
         result_action_state = {}
+        result_conversation_state = {}
         if isinstance(result, dict):
+            result_conversation_state = result.get("conversation_state") or {}
             result_action_state = (
-                (result.get("conversation_state") or {}).get("action_state")
+                result_conversation_state.get("action_state")
                 or result.get("action_state")
                 or {}
             )
         result_action_status = str(result_action_state.get("status") or "")
+        required_reply_fields = result_conversation_state.get("required_reply_fields") or []
+        reply_fields = result_conversation_state.get("reply_fields") or {}
+        missing_reply_fields = [field for field in required_reply_fields if not str(reply_fields.get(field) or "").strip()]
+        done_status = "failed" if result_action_status == "failed" or missing_reply_fields else "completed"
         if result_action_status == "failed":
             clean_reply = "尚未进入人工队列，请重试或使用人工入口。"
+        elif missing_reply_fields:
+            clean_reply = "人工接入信息不完整，尚不能确认处理责任、响应时效或跟进凭证，请重试。"
         elif result_action_status == "queued" and clean_reply:
             clean_reply = clean_reply.replace("已为您转接VIP客服继续处理", "已进入人工队列，后续由人工客服继续处理")
             clean_reply = clean_reply.replace("已转接VIP客服", "已进入人工队列")
@@ -1831,10 +1858,12 @@ async def chat_stream(req: ChatRequest, request: Request):
         yield {
             "event": "done",
             "data": json.dumps({
-                "status": "completed",
+                "status": done_status,
                 "reply": clean_reply,
                 "handoff_offer": handoff_offer,
                 **({"action_state": result_action_state} if result_action_state else {}),
+                **({"required_reply_fields": required_reply_fields} if required_reply_fields else {}),
+                **({"reply_fields": reply_fields} if reply_fields else {}),
             }, ensure_ascii=False)
         }
 

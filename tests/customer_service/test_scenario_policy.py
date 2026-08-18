@@ -229,7 +229,40 @@ def test_wrong_item_requires_core_unboxing_evidence_with_static_downgrade() -> N
     assert decision.next_step.code == "request_wrong_item_evidence"
     assert decision.details["evidence_grade"] == "required_opening_video_or_static_three_images"
     assert decision.details["video_optional"] is False
-    assert decision.details["static_fallback"] == "static_three_images"
+    assert decision.details["static_fallback"]["route"] == "static_three_images"
+    assert decision.details["static_fallback"]["downgrade_condition"]
+    assert decision.details["static_fallback"]["required_fields"] == [
+        "received_group_photo",
+        "green_bag_or_package_view",
+        "matching_waybill",
+    ]
+
+
+def test_wrong_item_static_three_images_selects_downgrade_route_without_video_block() -> None:
+    from customer_service.scenario_policy import decide_scenario
+
+    facts = [
+        Fact(
+            field=f"wrong_item.{field}",
+            value=True,
+            source=FactSource.ATTACHMENT_SERVICE,
+            source_ref=f"ATTACH-{index}",
+            verified=True,
+        )
+        for index, field in enumerate(
+            ("received_group_photo", "green_bag_or_package_view", "matching_waybill"),
+            start=1,
+        )
+    ]
+    decision = decide_scenario(
+        intent=_intent("wrong_item", "wrong_item"),
+        facts=facts,
+        message="没有合规开箱视频，我已上传商品全家福、包装袋和匹配面单。",
+    )
+
+    assert decision.details["selected_evidence_route"] == "static_three_images"
+    assert decision.next_step.code == "review_wrong_item_static_evidence"
+    assert decision.details["video_missing_blocks_review"] is False
 
 
 def test_missing_item_parses_expected_received_and_difference() -> None:
@@ -607,6 +640,114 @@ def test_search_knowledge_base_persists_structured_p2_reply_fields() -> None:
         "first_response_sla",
         "tracking_receipt",
     ]
+
+
+def test_search_knowledge_base_consumes_public_static_three_image_review_route() -> None:
+    import agent
+
+    intent = _intent("wrong_item", "wrong_item")
+    result = asyncio.run(
+        agent.search_knowledge_base(
+            {
+                "intent": "换货补发/商品破损",
+                "order_data": {},
+                "raw_user_content": "没有合规开箱视频，静态三图已经审核完成。",
+                "messages": [],
+                "attachments": [{
+                    "kind": "review_task",
+                    "review_task_id": "RT-STATIC-1",
+                    "scenario": "wrong_item",
+                    "status": "succeeded",
+                    "scope_verified": True,
+                    "review_result": {
+                        "review": {
+                            "summary": {"confidence": 0.9, "needs_human_review": True},
+                            "agent_report": {"parsed": {"fulfillment_reconciliation": {
+                                "evidence_route": "static_three_images",
+                                "user_materials_complete": True,
+                                "warehouse_check": {"state": "pending", "outcome": None},
+                            }}},
+                        }
+                    },
+                }],
+                "conversation_state": {"intent": intent.model_dump(), "facts": []},
+            },
+            {"configurable": {}},
+        )
+    )
+
+    state = result["conversation_state"]
+    assert state["details"]["selected_evidence_route"] == "static_three_images"
+    assert state["next_step"]["code"] == "review_wrong_item_static_evidence"
+
+
+@pytest.mark.parametrize("status", ["failed", "queued", "cancelled", "running"])
+def test_static_review_route_requires_matching_scene_scope_and_success(status: str) -> None:
+    import agent
+
+    intent = _intent("wrong_item", "wrong_item")
+    result = asyncio.run(
+        agent.search_knowledge_base(
+            {
+                "intent": "换货补发/商品破损",
+                "order_data": {},
+                "raw_user_content": "请核对发错货静态材料。",
+                "messages": [],
+                "attachments": [{
+                    "kind": "review_task",
+                    "review_task_id": f"RT-{status}",
+                    "scenario": "wrong_item",
+                    "status": status,
+                    "scope_verified": True,
+                    "review_result": {"review": {"agent_report": {"parsed": {
+                        "fulfillment_reconciliation": {
+                            "evidence_route": "static_three_images",
+                            "user_materials_complete": True,
+                        }
+                    }}}},
+                }],
+                "conversation_state": {"intent": intent.model_dump(), "facts": []},
+            },
+            {"configurable": {}},
+        )
+    )
+
+    assert result["conversation_state"]["details"]["selected_evidence_route"] == "pending_evidence"
+
+
+def test_missing_item_static_review_cannot_complete_wrong_item_route() -> None:
+    import agent
+
+    intent = _intent("wrong_item", "wrong_item")
+    result = asyncio.run(
+        agent.search_knowledge_base(
+            {
+                "intent": "换货补发/商品破损",
+                "order_data": {},
+                "raw_user_content": "请核对发错货静态材料。",
+                "messages": [],
+                "attachments": [{
+                    "kind": "review_task",
+                    "review_task_id": "RT-MISSING",
+                    "scenario": "missing_item",
+                    "status": "succeeded",
+                    "scope_verified": True,
+                    "review_result": {"review": {"agent_report": {"parsed": {
+                        "fulfillment_reconciliation": {
+                            "evidence_route": "static_three_images",
+                            "user_materials_complete": True,
+                        }
+                    }}}},
+                }],
+                "conversation_state": {"intent": intent.model_dump(), "facts": []},
+            },
+            {"configurable": {}},
+        )
+    )
+
+    state = result["conversation_state"]
+    assert state["details"]["selected_evidence_route"] == "pending_evidence"
+    assert not any(fact["field"].startswith("wrong_item.") for fact in state["facts"])
 
 
 def test_main_injects_explicit_privacy_environment_config(
