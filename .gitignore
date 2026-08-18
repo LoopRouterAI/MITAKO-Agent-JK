@@ -24,6 +24,7 @@ logs/
 .codegraph/
 .cursor/
 archive/
+.worktrees/
 
 # 测试与演示产物
 tests/reports/*.html
