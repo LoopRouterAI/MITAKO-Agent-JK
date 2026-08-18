@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import handoff_store as store
+from customer_service.action_state import action_envelope, action_from_tool
 from handoff_routing import load_routing_config, resolve_required_tier, save_routing_config
 from handoff_observer import generate_observer_reply, is_observer_request
 from handoff_ws import emit_session_event
@@ -467,6 +468,28 @@ def _tenant_forbidden(entry: Dict[str, Any], tenant_id: Optional[str]) -> bool:
     return bool(tenant_id) and (entry.get("tenant_id") or "mitako") != tenant_id
 
 
+def _queue_action(entry: Dict[str, Any], *, deduped: bool = False) -> Dict[str, Any]:
+    current_status = entry.get("status") or "queuing"
+    reason_code = "queue_already_joined" if deduped else "queue_joined"
+    if current_status in {"escalated", "transferring"}:
+        reason_code = "pending_human_handoff"
+    elif current_status in {"connected", "closed"}:
+        reason_code = "human_handoff_accepted"
+    action = action_from_tool(
+        "human_handoff",
+        "handoff_service",
+        {
+            "ok": True,
+            "status": current_status,
+            "receipt_id": entry.get("session_id"),
+            "enqueued_at": entry.get("enqueued_at"),
+            "accepted_at": entry.get("accepted_at"),
+            "reason_code": reason_code,
+        },
+    )
+    return action_envelope(action, include_status=False)
+
+
 def enqueue_handoff(session_id: str, brief: Dict[str, Any], tenant_id: str = "mitako") -> Dict[str, Any]:
     tid = brief.get("tenant_id") or tenant_id or "mitako"
     existing = _get_entry(session_id)
@@ -476,6 +499,7 @@ def enqueue_handoff(session_id: str, brief: Dict[str, Any], tenant_id: str = "mi
         current_status = existing.get("status")
         agent = existing.get("assigned_agent") or existing.get("pending_agent") or existing.get("suggested_agent")
         return {
+            "ok": True,
             "position": existing.get("position", 0),
             "ahead": existing.get("ahead", 0),
             "eta": existing.get("eta_minutes", 0),
@@ -484,6 +508,8 @@ def enqueue_handoff(session_id: str, brief: Dict[str, Any], tenant_id: str = "mi
             "suggested_agent": build_public_agent(agent),
             "status": current_status,
             "deduped": True,
+            "queue_id": session_id,
+            **_queue_action(existing, deduped=True),
         }
     active = store.list_active_sessions(tenant_id=tid)
     waiting = [s for s in active if s.get("status") in ("queuing", "escalated", "transferring")]
@@ -522,12 +548,17 @@ def enqueue_handoff(session_id: str, brief: Dict[str, Any], tenant_id: str = "mi
     except Exception:
         pass
     return {
+        "ok": True,
         "position": position,
         "ahead": ahead,
         "eta": eta,
         "session_id": session_id,
         "required_tier": required_tier,
         "suggested_agent": build_public_agent(agent),
+        "status": "queuing",
+        "deduped": False,
+        "queue_id": session_id,
+        **_queue_action(entry),
     }
 
 

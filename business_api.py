@@ -8,11 +8,13 @@ from __future__ import annotations
 import json
 import os
 import socket
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from customer_service.action_state import action_envelope, action_from_tool
 from runtime_paths import mock_data_file, viking_memory_dir
 
 DATA_FILE = str(mock_data_file())
@@ -37,6 +39,22 @@ def _demo_meta() -> Dict[str, Any]:
         "integration_status": "not_connected",
         "write_effect": "none",
     }
+
+
+def _mock_action(action: str, receipt_id: str) -> Dict[str, Any]:
+    state = action_from_tool(
+        action,
+        "business_api",
+        {
+            "ok": True,
+            "status": "requested",
+            "receipt_id": receipt_id,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "reason_code": "partner_integration_not_connected",
+            **_demo_meta(),
+        },
+    )
+    return action_envelope(state)
 
 
 def load_data() -> Dict[str, Any]:
@@ -258,11 +276,13 @@ def post_compensate(req: CompensateReq):
     if req.amount > 22.0:
         raise HTTPException(status_code=400, detail="超过自动建议额度，请转VIP客服审批。")
     return {
+        "ok": False,
         "success": False,
         "would_create": True,
         **_demo_meta(),
         "compensation_id": f"COMP_{req.order_id}",
         "message": f"已生成补偿申请建议：用户 {req.user_id}，订单 {req.order_id}，类型 {req.type}，金额 {req.amount}。原因：{req.reason}",
+        **_mock_action("compensation", f"COMP_{req.order_id}"),
     }
 
 
@@ -272,12 +292,14 @@ def post_order_urgent(order_id: str, req: UrgentReq):
     if not order:
         raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
     return {
+        "ok": False,
         "success": False,
         "would_create": True,
         **_demo_meta(),
         "is_expeditable": True,
         "estimated_ship_date": "",
         "message": f"已生成加急处理建议：订单 {order_id}，级别 {req.urgency_level}。原因：{req.reason}",
+        **_mock_action("order_urgent", f"URGENT_{order_id}"),
     }
 
 
@@ -324,6 +346,7 @@ def create_ticket(req: TicketCreateReq):
             "source": req.source,
             "content": req.content,
         },
+        **_mock_action("ticket", ticket_id),
     }
 
 
@@ -345,12 +368,13 @@ def create_after_sales_card(req: AfterSalesCardReq):
     order = load_data().get("orders", {}).get(req.order_id)
     if not order:
         raise HTTPException(status_code=404, detail=f"Order {req.order_id} not found")
+    card_id = f"ASC_{req.order_id}_{req.card_type}"
     return {
         "ok": True,
         "would_create": True,
         **_demo_meta(),
         "card": {
-            "card_id": f"ASC_{req.order_id}_{req.card_type}",
+            "card_id": card_id,
             "user_id": req.user_id,
             "order_id": req.order_id,
             "card_type": req.card_type,
@@ -359,23 +383,26 @@ def create_after_sales_card(req: AfterSalesCardReq):
             "reason": req.reason,
             "requires_user_confirm": True,
         },
+        **_mock_action("after_sales_card", card_id),
     }
 
 
 @business_router.post("/api/v1/warehouse/tasks")
 def create_warehouse_task(req: WarehouseTaskReq):
+    task_id = f"WH_{req.order_id}_{req.task_type}"
     return {
         "ok": True,
         "would_create": True,
         **_demo_meta(),
         "task": {
-            "task_id": f"WH_{req.order_id}_{req.task_type}",
+            "task_id": task_id,
             "order_id": req.order_id,
             "task_type": req.task_type,
             "priority": req.priority,
             "status": "ready_for_review",
             "reason": req.reason,
         },
+        **_mock_action("warehouse_task", task_id),
     }
 
 
