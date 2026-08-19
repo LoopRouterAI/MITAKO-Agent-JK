@@ -603,6 +603,8 @@ def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
         for key in public_result_fields
         if key in raw_result
     }
+    if not output["result"].get("material_readiness"):
+        output["result"].pop("material_readiness", None)
     tenant_id = str(job.get("tenant_id") or "")
     job_id = str(job.get("job_id") or "")
     output["result"]["observability"] = {
@@ -616,6 +618,8 @@ def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
             for key in public_review_fields
             if key in raw_review
         }
+        if not output["result"]["review"].get("material_readiness"):
+            output["result"]["review"].pop("material_readiness", None)
         raw_agent_report = output["result"]["review"].get("agent_report")
         if isinstance(raw_agent_report, dict):
             raw_agent_report = _durable_job_media(raw_agent_report, job)

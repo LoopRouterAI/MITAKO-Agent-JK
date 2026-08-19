@@ -561,6 +561,8 @@ Copy-File "docs\delivery\review-advisory-api.md"
 Copy-File "docs\delivery\after-sales-agent-integration.md"
 Copy-File "docs\delivery\甲方技术对接与私有化部署说明.html"
 Copy-File "docs\release\2026-08-18-customer-update-notes.md"
+Copy-File "docs\release\2026-08-19-v3-beta-customer-notes.md"
+Copy-File "docs\testing\客服Agent用户沟通回归验收-20260819.md"
 Copy-File "docs\release\2026-08-18-package-layout.md"
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)

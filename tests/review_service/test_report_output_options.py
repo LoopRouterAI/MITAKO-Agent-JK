@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from poc.visual_review_poc import workbench_server
 from review_service import router, service
+from review_service.schemas import ReviewJobResponse
 
 
 def successful_workbench_review() -> dict:
@@ -130,6 +131,33 @@ class ReportOutputOptionsTest(unittest.TestCase):
         agent_report = public["result"]["review"]["agent_report"]
 
         self.assertNotIn("inference_estimate", agent_report)
+
+    def test_failed_job_omits_empty_material_readiness_from_public_contract(self):
+        job = {
+            "job_id": "RJ-FAILED-MATERIAL",
+            "client_case_id": "CASE-FAILED-MATERIAL",
+            "scenario": "minor_refund",
+            "status": "FAILED",
+            "assets": [],
+            "result": {
+                "material_readiness": {},
+                "review": {
+                    "material_readiness": {},
+                    "summary": {"review_status": "failed"},
+                },
+            },
+            "attempts": 1,
+            "created_at": 1.0,
+            "started_at": 2.0,
+            "completed_at": 3.0,
+            "updated_at": 4.0,
+        }
+
+        public = service.public_job(job)
+        ReviewJobResponse.model_validate({"ok": True, "created": False, "job": public})
+
+        self.assertNotIn("material_readiness", public["result"])
+        self.assertNotIn("material_readiness", public["result"]["review"])
 
     def test_job_json_uses_strict_public_projection(self):
         job = {

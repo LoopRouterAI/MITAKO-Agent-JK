@@ -647,10 +647,14 @@ class ReleaseLayoutTest(unittest.TestCase):
 
         for path in (
             "docs\\release\\2026-08-18-customer-update-notes.md",
+            "docs\\release\\2026-08-19-v3-beta-customer-notes.md",
+            "docs\\testing\\客服Agent用户沟通回归验收-20260819.md",
             "docs\\release\\2026-08-18-package-layout.md",
         ):
             self.assertIn(f'Copy-File "{path}"', customer)
         self.assertIn('"docs/release/2026-08-18-customer-update-notes.md"', verifier)
+        self.assertIn('"docs/release/2026-08-19-v3-beta-customer-notes.md"', verifier)
+        self.assertIn('"docs/testing/客服Agent用户沟通回归验收-20260819.md"', verifier)
         self.assertIn('"docs/release/2026-08-18-package-layout.md"', verifier)
 
 

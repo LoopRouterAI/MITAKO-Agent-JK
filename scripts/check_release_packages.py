@@ -57,6 +57,9 @@ FOUR_SCENARIO_REPORT_MEDIA_MANIFEST = f"{FOUR_SCENARIO_REPORT_DIR}/media/manifes
 FOUR_SCENARIO_EVIDENCE_MANIFEST = "evidence-package-manifest.json"
 CUSTOMER_RELEASE_NOTES = "docs/release/2026-08-18-customer-update-notes.md"
 DEVELOPER_RELEASE_NOTES = "docs/release/2026-08-18-developer-release-notes.md"
+V3_CUSTOMER_RELEASE_NOTES = "docs/release/2026-08-19-v3-beta-customer-notes.md"
+V3_DEVELOPER_RELEASE_NOTES = "docs/release/2026-08-19-v3-beta-developer-notes.md"
+CUSTOMER_CHAT_ACCEPTANCE = "docs/testing/客服Agent用户沟通回归验收-20260819.md"
 PACKAGE_LAYOUT_GUIDE = "docs/release/2026-08-18-package-layout.md"
 FOUR_SCENARIO_REPORT_FILES = tuple(
     f"{FOUR_SCENARIO_REPORT_DIR}/review_0816_blind_{scenario}_{case_id}.html"
@@ -360,6 +363,9 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         *FOUR_SCENARIO_REPORT_FILES,
         CUSTOMER_RELEASE_NOTES,
         DEVELOPER_RELEASE_NOTES,
+        V3_CUSTOMER_RELEASE_NOTES,
+        V3_DEVELOPER_RELEASE_NOTES,
+        CUSTOMER_CHAT_ACCEPTANCE,
         PACKAGE_LAYOUT_GUIDE,
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
@@ -416,6 +422,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
         CUSTOMER_RELEASE_NOTES,
+        V3_CUSTOMER_RELEASE_NOTES,
+        CUSTOMER_CHAT_ACCEPTANCE,
         PACKAGE_LAYOUT_GUIDE,
         "甲方沟通交付文档/README.md",
         FOUR_SCENARIO_CUSTOMER_GUIDE,
