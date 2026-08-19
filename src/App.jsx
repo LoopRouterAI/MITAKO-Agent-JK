@@ -69,6 +69,11 @@ function getInternalOpsMode() {
   return params.get('ops') === '1' || params.get('dev') === '1';
 }
 
+function getTenantId() {
+  if (typeof window === 'undefined') return 'mitako';
+  return new URLSearchParams(window.location.search).get('tenant_id')?.trim() || 'mitako';
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState('usr_001');
   const [monitorOpen, setMonitorOpen] = useState(() => {
@@ -87,6 +92,7 @@ export default function App() {
   const [orderPickerOpen, setOrderPickerOpen] = useState(false);
   const [orderPriorityWeights, setOrderPriorityWeights] = useState(DEFAULT_ORDER_PRIORITY_WEIGHTS);
   const internalOpsMode = getInternalOpsMode();
+  const tenantId = getTenantId();
 
   const {
     orders,
@@ -126,6 +132,7 @@ export default function App() {
   }, [streamReplyEnabled]);
 
   const chat = useChatSSE(currentUser, selectedModelId, refreshModels, {
+    tenantId,
     activeOrderId,
     streamReplyEnabled,
     orderPriorityWeights,

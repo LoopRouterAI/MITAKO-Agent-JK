@@ -14,8 +14,10 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from auth.jwt_utils import create_handoff_user_token, create_token
+from auth.middleware import resolve_handoff_ws_user
 from auth.roles import Role
 import handoff_store
+import main
 from handoff_ws import HandoffHub
 from handoff_service import build_public_handoff_brief
 from main import AuthLoginRequest, app
@@ -100,6 +102,178 @@ def test_queued_handoff_copy_does_not_claim_human_is_connected() -> None:
     assert build_public_handoff_brief({})["reason"] == "已进入人工队列，正在等待客服接入。"
     source = Path("src/hooks/useChatSSE.js").read_text(encoding="utf-8")
     assert "已为您转接VIP客服继续处理。" not in source
+
+
+def test_nondefault_customer_session_ids_are_tenant_qualified() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "MITAKO_DEMO_CUSTOMERS": "shared-user,c,b_c",
+            "MITAKO_DEMO_CUSTOMER_TENANTS": "tenant-a,tenant-b,a_b,a,a!b",
+        },
+        clear=False,
+    ):
+        assert main._customer_session_is_allowed(
+            "shared-user",
+            "session:tenant-a:shared-user",
+            "tenant-a",
+        )
+        assert main._customer_session_is_allowed(
+            "shared-user",
+            "session:tenant-b:shared-user",
+            "tenant-b",
+        )
+        assert not main._customer_session_is_allowed(
+            "shared-user",
+            "session_shared-user",
+            "tenant-a",
+        )
+        assert main._customer_session_is_allowed("c", "session:a_b:c", "a_b")
+        assert main._customer_session_is_allowed("b_c", "session:a:b_c", "a")
+        assert main._customer_session_is_allowed("c", "session:a%21b:c", "a!b")
+        assert not main._customer_session_is_allowed("c", "session_a_b_c", "a_b")
+
+    hook = Path("src/hooks/useChatSSE.js").read_text(encoding="utf-8")
+    app_source = Path("src/App.jsx").read_text(encoding="utf-8")
+    assert "function encodeSessionPart(value)" in hook
+    assert ".replace(/[!'()*]/g" in hook
+    assert "session:${encodeSessionPart(tenant)}:${encodeSessionPart(user)}" in hook
+    assert "tenantId," in app_source
+
+
+def test_tenant_qualified_customer_sessions_do_not_collide_in_sqlite() -> None:
+    session_a = main._customer_session_id("c", "a_b")
+    session_b = main._customer_session_id("b_c", "a")
+    assert session_a != session_b
+
+    with TemporaryDirectory() as temp_dir, patch.object(
+        handoff_store, "_DB_DIR", temp_dir
+    ), patch.object(
+        handoff_store, "_DB_PATH", str(Path(temp_dir) / "handoff.db")
+    ), patch.object(
+        handoff_store, "_db_ready", False
+    ):
+        first = handoff_store.ensure_chat_session(session_a, "c", "a_b")
+        second = handoff_store.ensure_chat_session(session_b, "b_c", "a")
+
+        assert first["tenant_id"] == "a_b"
+        assert second["tenant_id"] == "a"
+        assert handoff_store.get_session(session_a)["user_id"] == "c"
+        assert handoff_store.get_session(session_b)["user_id"] == "b_c"
+
+
+def test_customer_ui_preserves_escalated_and_transferring_states() -> None:
+    hook = Path("src/hooks/useChatSSE.js").read_text(encoding="utf-8")
+    cards = Path("src/components/cards/openUILibrary.jsx").read_text(encoding="utf-8")
+
+    assert "WAITING_HANDOFF_STATES" in hook
+    assert "queueMeta?.status" in hook
+    assert "const restored = await restoreHandoffState();" in hook
+    assert "if (active && !restored) await resetChat();" in hook
+    assert "authValue: serviceAuthRef.current || customerAuthRef.current" in hook
+    assert "syncWaitingHandoffState(statusData);" in hook
+    assert "syncWaitingHandoffState(data);" in hook
+    assert "transferEscalated" in cards
+    assert "transferTransferring" in cards
+
+
+def test_customer_session_token_restores_own_handoff_state_only() -> None:
+    secret = "handoff-restore-tenant-secret-0123456789abcdef"
+    with TemporaryDirectory() as temp_dir, patch.object(
+        handoff_store, "_DB_DIR", temp_dir
+    ), patch.object(
+        handoff_store, "_DB_PATH", str(Path(temp_dir) / "handoff.db")
+    ), patch.object(
+        handoff_store, "_db_ready", False
+    ), patch.dict(
+        "os.environ",
+        {
+            "MITAKO_JWT_SECRET": secret,
+            "MITAKO_PROTECTED_API_AUTH_REQUIRED": "1",
+            "MITAKO_DEV_AUTH_BYPASS": "0",
+        },
+        clear=False,
+    ):
+        handoff_store.upsert_session(
+            {
+                "session_id": "session_tenant-a_shared-user",
+                "user_id": "shared-user",
+                "tenant_id": "tenant-a",
+                "status": "escalated",
+                "brief": {"user_id": "shared-user", "tenant_id": "tenant-a"},
+            }
+        )
+        own_token = create_token(
+            sub="shared-user",
+            role=Role.CUSTOMER_USER.value,
+            tenant_id="tenant-a",
+            extra={"session_id": "session_tenant-a_shared-user"},
+        )
+        other_tenant_token = create_token(
+            sub="shared-user",
+            role=Role.CUSTOMER_USER.value,
+            tenant_id="tenant-b",
+            extra={"session_id": "session_tenant-a_shared-user"},
+        )
+        client = TestClient(app)
+
+        restored = client.get(
+            "/api/v1/handoff/status/session_tenant-a_shared-user",
+            headers={"Authorization": f"Bearer {own_token}"},
+        )
+        forbidden = client.get(
+            "/api/v1/handoff/status/session_tenant-a_shared-user",
+            headers={"Authorization": f"Bearer {other_tenant_token}"},
+        )
+
+        assert restored.status_code == 200
+        assert restored.json()["status"] == "escalated"
+        assert forbidden.status_code == 403
+
+
+def test_customer_session_token_can_resume_own_handoff_websocket_only() -> None:
+    secret = "handoff-websocket-tenant-secret-0123456789abcdef"
+
+    class FakeWebSocket:
+        query_params = {}
+
+        def __init__(self, token: str) -> None:
+            self.headers = {"sec-websocket-protocol": f"handoff.{token}"}
+
+    with patch.dict(
+        "os.environ",
+        {
+            "MITAKO_JWT_SECRET": secret,
+            "MITAKO_PROTECTED_API_AUTH_REQUIRED": "1",
+            "MITAKO_DEV_AUTH_BYPASS": "0",
+        },
+        clear=False,
+    ):
+        own_token = create_token(
+            sub="shared-user",
+            role=Role.CUSTOMER_USER.value,
+            tenant_id="tenant-a",
+            extra={"session_id": "session_tenant-a_shared-user"},
+        )
+        other_tenant_token = create_token(
+            sub="shared-user",
+            role=Role.CUSTOMER_USER.value,
+            tenant_id="tenant-b",
+            extra={"session_id": "session_tenant-a_shared-user"},
+        )
+
+        assert resolve_handoff_ws_user(
+            FakeWebSocket(own_token),
+            "session_tenant-a_shared-user",
+            "shared-user",
+            "tenant-a",
+        )
+        assert resolve_handoff_ws_user(
+            FakeWebSocket(other_tenant_token),
+            "session_tenant-a_shared-user",
+            "shared-user",
+            "tenant-a",
+        ) is None
 
 
 def test_handoff_hub_echoes_the_authenticated_websocket_subprotocol() -> None:

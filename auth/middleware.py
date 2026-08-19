@@ -104,7 +104,7 @@ def assert_tenant_access(user: dict, tenant_id: str) -> None:
 
 
 def resolve_handoff_ws_user(websocket: WebSocket, session_id: str, session_user_id: str, session_tenant: str) -> Optional[dict]:
-    """WebSocket 连接鉴权 — 坐席 JWT 或 handoff_user 会话 token"""
+    """WebSocket 连接鉴权 — 坐席 JWT 或当前客户会话 token。"""
     from auth.roles import DESK_ACCESS_ROLES
 
     if not protected_api_auth_required() and dev_auth_bypass_enabled():
@@ -118,7 +118,7 @@ def resolve_handoff_ws_user(websocket: WebSocket, session_id: str, session_user_
         if not tenant_allowed(user, session_tenant):
             return None
         return user
-    if role == Role.HANDOFF_USER.value:
+    if role in {Role.CUSTOMER_USER.value, Role.HANDOFF_USER.value}:
         if user.get("sub") != session_user_id:
             return None
         if user.get("session_id") and user.get("session_id") != session_id:

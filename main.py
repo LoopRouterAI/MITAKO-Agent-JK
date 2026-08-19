@@ -6,6 +6,7 @@ import asyncio
 import traceback
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 from weakref import WeakValueDictionary
 from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
@@ -482,6 +483,14 @@ def _split_env_values(name: str, default: str = "") -> set[str]:
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
+def _customer_session_id(user_id: str, tenant_id: str) -> str:
+    tenant = (tenant_id or "mitako").strip() or "mitako"
+    user = (user_id or "").strip()
+    if tenant == "mitako":
+        return f"session_{user}"
+    return f"session:{quote(tenant, safe='')}:{quote(user, safe='')}"
+
+
 def _customer_session_is_allowed(user_id: str, session_id: str, tenant_id: str) -> bool:
     existing = handoff_store.get_session(session_id)
     if existing:
@@ -494,10 +503,11 @@ def _customer_session_is_allowed(user_id: str, session_id: str, tenant_id: str) 
 
     allowed_users = _split_env_values("MITAKO_DEMO_CUSTOMERS", "usr_001,usr_002,usr_003,usr_004,usr_005,usr_006,usr_e2e,probe")
     allowed_tenants = _split_env_values("MITAKO_DEMO_CUSTOMER_TENANTS", "mitako")
+    allowed_session_ids = {_customer_session_id(user_id, tenant_id)}
     return (
         tenant_id in allowed_tenants
         and user_id in allowed_users
-        and session_id == f"session_{user_id}"
+        and session_id in allowed_session_ids
     )
 
 
@@ -511,7 +521,7 @@ def _session_user_and_tenant(entry: Dict[str, Any]) -> tuple[str, str]:
 def _require_handoff_user(request: Request, session_id: str, entry: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     token = _handoff_bearer(request)
     user = decode_token(token) if token else None
-    if not user or user.get("role") != Role.HANDOFF_USER.value:
+    if not user or user.get("role") not in {Role.CUSTOMER_USER.value, Role.HANDOFF_USER.value}:
         raise HTTPException(status_code=401, detail="handoff_token_required")
     if user.get("session_id") and user.get("session_id") != session_id:
         raise HTTPException(status_code=403, detail="handoff_session_mismatch")

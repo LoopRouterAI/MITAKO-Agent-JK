@@ -360,18 +360,32 @@ export const HandoffQueueCard = defineComponent({
   component: ({ props }) => {
     const { position, ahead, eta, reason, status } = props;
     const connected = status === 'connected';
+    const escalated = status === 'escalated';
+    const transferring = status === 'transferring';
     const hasAhead = Number(ahead || 0) > 0;
+    const title = connected
+      ? t('cards.transferConnected')
+      : escalated
+        ? t('cards.transferEscalated')
+        : transferring
+          ? t('cards.transferTransferring')
+          : t('transfer.queueTitle');
+    const statusDescription = escalated
+      ? t('cards.transferEscalatedDesc')
+      : transferring
+        ? t('cards.transferTransferringDesc')
+        : hasAhead ? t('transfer.queueBusy') : t('transfer.queueAssigning');
     return (
       <div className={`${shell} p-4`}>
         <div className="flex items-center gap-3">
           <IconBox>{connected ? <UserCheck className="h-5 w-5" aria-hidden="true" /> : <Phone className="h-5 w-5" aria-hidden="true" />}</IconBox>
           <div className="min-w-0">
             <h4 className="text-xs font-black text-slate-950">
-              {connected ? t('cards.transferConnected') : t('transfer.queueTitle')}
+              {title}
             </h4>
             {!connected ? (
               <>
-                <p className="text-pretty mt-0.5 text-[10px] leading-relaxed text-slate-600">{hasAhead ? t('transfer.queueBusy') : t('transfer.queueAssigning')}</p>
+                <p className="text-pretty mt-0.5 text-[10px] leading-relaxed text-slate-600">{statusDescription}</p>
                 <p className="mt-0.5 text-pretty text-[10px] text-slate-600">{hasAhead ? t('transfer.queueDesc', 'zh-CN', { ahead, eta }) : t('transfer.queueDescZero', 'zh-CN', { eta })}</p>
                 <p className="mt-1 font-mono text-[10px] text-slate-500">{t('transfer.queuePosition', 'zh-CN', { position })}</p>
               </>

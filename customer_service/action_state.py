@@ -55,6 +55,7 @@ _PUBLIC_REASON_CODES = set(_DEFAULT_REASON.values()) | {
     "invalid_tool_status",
     "invalid_tool_timestamp",
     "order_selection_required",
+    "session_mismatch",
     "partner_integration_not_connected",
     "pending_human_handoff",
     "queue_already_joined",

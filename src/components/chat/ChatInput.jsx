@@ -272,7 +272,7 @@ export default function ChatInput({
   const toolButtonClass = 'flex min-h-[58px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white text-[10px] font-black text-slate-950 transition active:scale-[0.98] hover:bg-[var(--mitako-lime-soft)] focus-visible:ring-2 focus-visible:ring-[var(--mitako-lime)]';
 
   const isConnected = handoffState === 'connected';
-  const isQueuing = handoffState === 'queuing';
+  const isQueuing = ['queuing', 'escalated', 'transferring'].includes(handoffState);
   const placeholder = isConnected
     ? t('input.placeholderTransferred')
     : isQueuing

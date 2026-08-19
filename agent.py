@@ -1663,7 +1663,7 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
             action = action_from_tool(
                 "human_handoff",
                 "handoff_service",
-                {"ok": False, "status": "failed", "error": "session_mismatch"},
+                {"ok": False, "status": "failed", "reason_code": "session_mismatch"},
             )
     except Exception as exc:
         action = action_from_exception("human_handoff", "handoff_service", exc)
