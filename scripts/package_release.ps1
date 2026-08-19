@@ -20,8 +20,8 @@ $CustomerHtmlPath = Join-Path $DeliveryDir "MITAKO_Agent-customer-delivery.html"
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_customer_stage_$Date"
 $CompileStage = Join-Path $env:TEMP "mitako_runtime_compile_$Date"
 $GitCommit = (git rev-parse HEAD).Trim()
-$FrontendBuild = "v3-beta-$($GitCommit.Substring(0, 12))"
-$CustomerPolicyVersion = "MITAKO-CUSTOMER-CHAT-20260818.1"
+$FrontendBuild = "v3.1-beta-$($GitCommit.Substring(0, 12))"
+$CustomerPolicyVersion = "MITAKO-CUSTOMER-CHAT-20260819.1"
 $PackageDeployedAt = (Get-Date).ToString("o")
 
 function Assert-NoTrackedChanges([string]$Message) {
@@ -562,7 +562,10 @@ Copy-File "docs\delivery\after-sales-agent-integration.md"
 Copy-File "docs\delivery\甲方技术对接与私有化部署说明.html"
 Copy-File "docs\release\2026-08-18-customer-update-notes.md"
 Copy-File "docs\release\2026-08-19-v3-beta-customer-notes.md"
+Copy-File "docs\release\2026-08-19-v3.1-beta-customer-notes.md"
 Copy-File "docs\testing\客服Agent用户沟通回归验收-20260819.md"
+Copy-File "甲方沟通交付文档\0819客服Agent用户沟通问题闭环验收报告.html"
+Copy-File "甲方沟通交付文档\0819v3.1_API与WebDemo功能与测试说明.html"
 Copy-File "docs\release\2026-08-18-package-layout.md"
 
 $customerDocsName = New-Utf16String @(0x7532,0x65B9,0x6C9F,0x901A,0x4EA4,0x4ED8,0x6587,0x6863)
@@ -976,7 +979,10 @@ $customerEvidenceFiles = @(
     "docs\delivery\甲方技术对接与私有化部署说明.html",
     "docs\release\2026-08-18-customer-update-notes.md",
     "docs\release\2026-08-19-v3-beta-customer-notes.md",
+    "docs\release\2026-08-19-v3.1-beta-customer-notes.md",
     "docs\testing\客服Agent用户沟通回归验收-20260819.md",
+    "甲方沟通交付文档\0819客服Agent用户沟通问题闭环验收报告.html",
+    "甲方沟通交付文档\0819v3.1_API与WebDemo功能与测试说明.html",
     "docs\release\2026-08-18-package-layout.md",
     "甲方沟通交付文档\0817四场景审核业务理解与发布验收说明.html",
     "甲方沟通交付文档\0817四场景八份审核报告质量索引.html",

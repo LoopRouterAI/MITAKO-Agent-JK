@@ -100,6 +100,8 @@ def test_handoff_offer_cannot_be_consumed_by_another_tenant() -> None:
 
 def test_queued_handoff_copy_does_not_claim_human_is_connected() -> None:
     assert build_public_handoff_brief({})["reason"] == "已进入人工队列，正在等待客服接入。"
+    assert build_public_handoff_brief({"action_state": {"status": "failed"}})["reason"] == "尚未进入人工队列，请重试或使用人工入口。"
+    assert build_public_handoff_brief({"action_state": {"status": "queued"}})["reason"] == "已进入人工队列，正在等待客服接入。"
     source = Path("src/hooks/useChatSSE.js").read_text(encoding="utf-8")
     assert "已为您转接VIP客服继续处理。" not in source
 

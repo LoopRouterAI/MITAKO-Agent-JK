@@ -2,9 +2,9 @@
 
 MITAKO Agent 是供甲方客服、产品和 Java 后端研发验证的售后审核 POC。当前核心不是“让大模型直接决定退款”，而是把用户素材、订单/SKU、包裹物流和可选仓库事实整理为可追溯证据，再输出客服可执行的审核建议。
 
-> 当前状态（2026-08-19）：v3 Beta 在原四场景审核能力上，重建了客服对话的确定性意图、事实、工具回执、场景策略、回复守卫和跨端公开状态。2026-08-18 人工反馈 10 项问题均有回归，15 场景连续 3 轮 API 验收 `45/45`。详见 [v3 Beta 开发者说明](docs/release/2026-08-19-v3-beta-developer-notes.md)、[甲方更新说明](docs/release/2026-08-19-v3-beta-customer-notes.md) 和 [客服沟通验收报告](docs/testing/客服Agent用户沟通回归验收-20260819.md)。
+> 当前状态（2026-08-19）：v3.1 Beta 在原四场景审核能力上，继续收口客服对话的确定性意图、事实、工具回执、场景策略、回复守卫和跨端公开状态。2026-08-18 人工反馈 10 项问题均有本地回归；失败转人工公开简报残留成功文案已修复。详见 [v3.1 Beta 开发者说明](docs/release/2026-08-19-v3.1-beta-developer-notes.md)、[甲方更新说明](docs/release/2026-08-19-v3.1-beta-customer-notes.md)、[问题与修复 HTML](甲方沟通交付文档/0819客服Agent用户沟通问题闭环验收报告.html) 和 [API/Web Demo 测试 HTML](甲方沟通交付文档/0819v3.1_API与WebDemo功能与测试说明.html)。
 
-当前 v3 Beta Release：[私人仓库 v3.0.0-beta.1](https://github.com/jackdiy/MITAKO-Agent/releases/tag/v3.0.0-beta.1) / [公司仓库 v3.0.0-beta.1](https://github.com/LoopRouterAI/MITAKO-Agent-JK/releases/tag/v3.0.0-beta.1)。文件哈希、测试证据和线上部署状态见 [v3 Beta 发布回执](docs/release/2026-08-19-v3-beta-release-receipt.md)。`v2026.08.18-r2` 继续保留用于回滚。
+当前 v3.1 Beta Release：[私人仓库 v3.1.0-beta.1](https://github.com/jackdiy/MITAKO-Agent/releases/tag/v3.1.0-beta.1) / [公司仓库 v3.1.0-beta.1](https://github.com/LoopRouterAI/MITAKO-Agent-JK/releases/tag/v3.1.0-beta.1)。文件哈希、测试证据和线上部署状态见 [v3.1 Beta 发布回执](docs/release/2026-08-19-v3.1-beta-release-receipt.md)。`v2026.08.18-r2` 和 `v3.0.0-beta.1` 继续保留用于回滚。
 
 本次 v3 Beta 重点：客服 Agent 不再依赖模型自由判断意图和执行状态；用户端、坐席端与 API 共用同一状态，完成态必须有回执。视觉审核、转码资源背压和结构化观测继续沿用 r2 能力。
 
