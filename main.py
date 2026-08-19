@@ -7,6 +7,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
+from weakref import WeakValueDictionary
 from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,7 @@ from handoff_service import (
     build_public_handoff_brief,
     build_public_queue_meta,
     enqueue_handoff,
+    publish_handoff,
     get_queue_status,
     reset_session_handoff,
     list_desk_sessions,
@@ -103,6 +105,36 @@ app = FastAPI(title="MITAKO 客服 Agent 主站", description="提供客服前�
 APP_ROOT = app_root()
 INTERNAL_BUSINESS_NODE = "".join(chr(c) for c in (109, 111, 99, 107, 95, 98, 117, 115, 105, 110, 101, 115, 115))
 INTERNAL_API_EVENT = "".join(chr(c) for c in (97, 112, 105, 95, 108, 111, 103))
+DEFAULT_CHAT_TURN_TIMEOUT_SECONDS = 120.0
+CHAT_TURN_CANCEL_GRACE_SECONDS = 1.0
+
+
+class ChatTurnBusyError(RuntimeError):
+    pass
+
+
+class HandoffPublishError(RuntimeError):
+    pass
+
+
+def _read_chat_turn_timeout_seconds() -> float:
+    raw = os.getenv("CHAT_TURN_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_CHAT_TURN_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+        if not (0 < value < float("inf")):
+            raise ValueError
+        return value
+    except ValueError:
+        print("[聊天服务] CHAT_TURN_TIMEOUT_SECONDS 无效，已回退为 120 秒")
+        return DEFAULT_CHAT_TURN_TIMEOUT_SECONDS
+
+
+CHAT_TURN_TIMEOUT_SECONDS = _read_chat_turn_timeout_seconds()
+_active_chat_turns: Dict[tuple[str, str], asyncio.Task] = {}
+_chat_turn_locks = WeakValueDictionary()
+_chat_turn_registry_lock = asyncio.Lock()
 
 
 def _business_demo_enabled() -> bool:
@@ -1698,229 +1730,308 @@ async def chat_stream(req: ChatRequest, request: Request):
 
     async def event_generator():
         queue = asyncio.Queue()
+        agent_task: Optional[asyncio.Task] = None
+        turn_task = asyncio.current_task()
+        user_message_id: Optional[int] = None
+        assistant_message_id: Optional[int] = None
+        handoff_offer_id = ""
+        handoff_snapshot: Optional[Dict[str, Any]] = None
+        pending_handoff_events: List[Dict[str, Any]] = []
+        handoff_should_publish = False
+        handoff_published = False
+        turn_persisted = False
+        turn_key = (tenant_id, req.session_id)
         model_content = req.content
         if chat_attachments:
-            attachment_lines = [
-                _chat_attachment_context_line(item)
-                for item in chat_attachments
-            ]
+            attachment_lines = [_chat_attachment_context_line(item) for item in chat_attachments]
             model_content = req.content + "\n\n[用户已上传附件]\n" + "\n".join(attachment_lines)
-        handoff_store.ensure_chat_session(req.session_id, req.user_id, tenant_id=tenant_id)
-        handoff_store.append_message(
-            req.session_id,
-            "user",
-            req.content,
-            meta={"kind": "ai_chat", "attachments": chat_attachments},
-        )
-        server_history = handoff_store.recent_chat_history(req.session_id, limit=20)
-        if chat_attachments and server_history and server_history[-1].get("role") == "user":
-            server_history[-1] = {**server_history[-1], "content": model_content}
 
-        # 初始 State
-        state = {
-            "messages": server_history or (req.history + [{"role": "user", "content": model_content}]),
-            "raw_user_content": req.content,
-            "user_id": req.user_id,
-            "session_id": req.session_id,
-            "active_order_id": req.active_order_id or "",
-            "tenant_id": tenant_id,
-            "intent": "",
-            "conversation_state": {"intent": {}, "facts": initial_facts},
-            "emotion_level": 2,
-            "order_data": {},
-            "logistics_data": {},
-            "sop_results": [],
-            "user_memory": {},
-            "reply_draft": "",
-            "safety_check_result": "pass",
-            "should_transfer": False,
-            "transfer_reason": "",
-            "handoff_offer_id": "",
-            "compensation_given": [],
-            "meme_tags": [],
-            "fixtures": req.fixtures or [],
-            "attachments": chat_attachments,
-            "sop_state": {},
-            "business_events": [],
-            "business_cards": [],
-        }
+        try:
+            deadline = asyncio.get_running_loop().time() + CHAT_TURN_TIMEOUT_SECONDS
+            async with asyncio.timeout_at(deadline):
+                async with _chat_turn_registry_lock:
+                    turn_lock = _chat_turn_locks.get(turn_key)
+                    if turn_lock is None:
+                        turn_lock = asyncio.Lock()
+                        _chat_turn_locks[turn_key] = turn_lock
 
-        # 异步启动 LangGraph 状态机任务
-        task = asyncio.create_task(
-            agent_app.ainvoke(
-                state,
-                config={
-                    "configurable": {
-                        "event_queue": queue,
-                        "model_id": req.model_id,
+                async with turn_lock:
+                    previous_turn = _active_chat_turns.get(turn_key)
+                    if previous_turn is not None and previous_turn is not turn_task:
+                        if not previous_turn.done():
+                            previous_turn.cancel()
+                            remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+                            done, _ = await asyncio.wait(
+                                {previous_turn},
+                                timeout=min(CHAT_TURN_CANCEL_GRACE_SECONDS, remaining),
+                            )
+                            if previous_turn not in done:
+                                raise ChatTurnBusyError
+                        await asyncio.gather(previous_turn, return_exceptions=True)
+
+                    handoff_store.ensure_chat_session(req.session_id, req.user_id, tenant_id=tenant_id)
+                    handoff_snapshot = handoff_store.get_session(req.session_id)
+                    user_message = handoff_store.append_message(
+                        req.session_id,
+                        "user",
+                        req.content,
+                        meta={"kind": "ai_chat", "attachments": chat_attachments},
+                    )
+                    user_message_id = int(user_message["id"])
+                    server_history = handoff_store.recent_chat_history(req.session_id, limit=20)
+                    if chat_attachments and server_history and server_history[-1].get("role") == "user":
+                        server_history[-1] = {**server_history[-1], "content": model_content}
+
+                    state = {
+                        "messages": server_history or (req.history + [{"role": "user", "content": model_content}]),
+                        "raw_user_content": req.content,
+                        "user_id": req.user_id,
+                        "session_id": req.session_id,
+                        "active_order_id": req.active_order_id or "",
                         "tenant_id": tenant_id,
-                        "stream_reply": req.stream_reply,
+                        "intent": "",
+                        "conversation_state": {"intent": {}, "facts": initial_facts},
+                        "emotion_level": 2,
+                        "order_data": {},
+                        "logistics_data": {},
+                        "sop_results": [],
+                        "user_memory": {},
+                        "reply_draft": "",
+                        "safety_check_result": "pass",
+                        "should_transfer": False,
+                        "transfer_reason": "",
+                        "handoff_offer_id": "",
+                        "compensation_given": [],
+                        "meme_tags": [],
                         "fixtures": req.fixtures or [],
                         "attachments": chat_attachments,
-                        "scenario_policy_config": {
-                            "privacy": {
-                                "entry": os.getenv("MITAKO_PRIVACY_DELETION_ENTRY", "").strip(),
-                                "sla": os.getenv("MITAKO_PRIVACY_DELETION_SLA", "").strip(),
+                        "sop_state": {},
+                        "business_events": [],
+                        "business_cards": [],
+                    }
+                    agent_task = asyncio.create_task(
+                        agent_app.ainvoke(
+                            state,
+                            config={
+                                "configurable": {
+                                    "event_queue": queue,
+                                    "model_id": req.model_id,
+                                    "tenant_id": tenant_id,
+                                    "stream_reply": req.stream_reply,
+                                    "fixtures": req.fixtures or [],
+                                    "attachments": chat_attachments,
+                                    "defer_handoff_publish": True,
+                                    "scenario_policy_config": {
+                                        "privacy": {
+                                            "entry": os.getenv("MITAKO_PRIVACY_DELETION_ENTRY", "").strip(),
+                                            "sla": os.getenv("MITAKO_PRIVACY_DELETION_SLA", "").strip(),
+                                        }
+                                    },
+                                }
                             }
-                        },
-                    }
-                }
+                        )
+                    )
+                    _active_chat_turns[turn_key] = turn_task
+
+                while not agent_task.done() or not queue.empty():
+                    if await request.is_disconnected():
+                        return
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=0.05)
+                    except asyncio.TimeoutError:
+                        continue
+
+                    if event["type"] in {"handoff_brief", "action_transfer"}:
+                        pending_handoff_events.append(event)
+                    elif event["type"] == "llm_thinking":
+                        yield {
+                            "event": "thinking",
+                            "data": json.dumps({"type": "llm_thinking", "content": event["content"]}, ensure_ascii=False),
+                        }
+                    elif event["type"] == "text_chunk":
+                        yield {
+                            "event": "chunk",
+                            "data": json.dumps({"content": event["content"]}, ensure_ascii=False),
+                        }
+                    elif event["type"] in ["node_start", "node_end"]:
+                        public_event = _public_chat_progress(event)
+                        yield {
+                            "event": "thinking",
+                            "data": json.dumps(public_event, ensure_ascii=False),
+                        }
+                    elif event["type"] == INTERNAL_API_EVENT:
+                        yield {
+                            "event": INTERNAL_API_EVENT,
+                            "data": json.dumps(_public_api_log(event), ensure_ascii=False),
+                        }
+                    elif event["type"] == "unified_analysis":
+                        yield {
+                            "event": "unified_analysis",
+                            "data": json.dumps(_public_unified_analysis(event), ensure_ascii=False),
+                        }
+                    queue.task_done()
+
+                if await request.is_disconnected():
+                    return
+                result = await agent_task
+
+            result_action_state = (
+                (result.get("conversation_state") or {}).get("action_state")
+                or result.get("action_state")
+                or {}
+            ) if isinstance(result, dict) else {}
+            handoff_should_publish = bool(
+                isinstance(result, dict)
+                and result.get("should_transfer")
+                and str(result_action_state.get("status") or "") == "queued"
             )
-        )
 
-        current_emotion_level = 2
-        buffer_sent = {
-            "search": False,
-            "api": False
-        }
-
-        # 监听执行状态队列
-        while not task.done() or not queue.empty():
-            try:
-                # 0.05s 超时检查 task.done
-                event = await asyncio.wait_for(queue.get(), timeout=0.05)
-
-                # 1. 监测到情绪变化时更新本地延时参考
-                if event["type"] == "node_end" and event["node"] == "intent_classify":
-                    # 从日志流中解析出情绪，如 "情绪等级=【Level 4】"
-                    desc = event.get("desc", "")
-                    match = re.search(r"Level\s*(\d)", desc)
-                    if match:
-                        current_emotion_level = int(match.group(1))
-
-
-
-                # 3. 大模型 Thinking 思考流实时推送
-                if event["type"] == "llm_thinking":
-                    yield {
-                        "event": "thinking",
-                        "data": json.dumps({
-                            "type": "llm_thinking",
-                            "content": event["content"]
-                        }, ensure_ascii=False)
-                    }
-
-                # 4. 大模型正式回复的流直接推送 (去除后端强行限速，改为由前端控制打字缓冲)
-                elif event["type"] == "text_chunk":
-                    char_content = event["content"]
-                    yield {
-                        "event": "chunk",
-                        "data": json.dumps({"content": char_content}, ensure_ascii=False)
-                    }
-
-                # 5. 移交简报
-                elif event["type"] == "handoff_brief":
+            for event in pending_handoff_events:
+                if event["type"] == "handoff_brief":
                     yield {
                         "event": "handoff_brief",
-                        "data": json.dumps({"brief": build_public_handoff_brief(event.get("brief", {}))}, ensure_ascii=False)
+                        "data": json.dumps({"brief": build_public_handoff_brief(event.get("brief", {}))}, ensure_ascii=False),
                     }
-
-                # 6. 常规思考追踪 / 转VIP客服
-                elif event["type"] in ["node_start", "node_end", "action_transfer"]:
-                    if event["type"] == "action_transfer":
-                        public_queue = build_public_queue_meta(event.get("queue", {}))
-                        action_state = public_queue.get("action_state") or event.get("action_state") or {}
-                        action_status = str(action_state.get("status") or "")
-                        if action_status == "queued":
-                            public_reason = "已进入人工队列。"
-                        elif action_status == "failed":
-                            public_reason = "尚未进入人工队列，请重试或使用人工入口。"
-                        else:
-                            public_reason = "人工接入状态待确认，请等待队列回执。"
-                        event = {
-                            **event,
-                            "reason": public_reason,
-                            "brief": build_public_handoff_brief(event.get("brief", {})),
-                            "queue": public_queue,
-                            "action_state": action_state,
-                        }
-                    else:
-                        event = _public_chat_progress(event)
-                    yield {
-                        "event": "thinking" if event["type"] != "action_transfer" else "transfer",
-                        "data": json.dumps(event, ensure_ascii=False)
-                    }
-
-                # 7. 独立调试日志推送
-                elif event["type"] == INTERNAL_API_EVENT:
-                    yield {
-                        "event": INTERNAL_API_EVENT,
-                        "data": json.dumps(_public_api_log(event), ensure_ascii=False)
-                    }
-
-                # 7. 统一分析（意图和情绪）事件下发
-                elif event["type"] == "unified_analysis":
-                    yield {
-                        "event": "unified_analysis",
-                        "data": json.dumps(_public_unified_analysis(event), ensure_ascii=False)
-                    }
-
-                queue.task_done()
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                print(f"[stream] 提取事件时发生异常: {e}")
-                break
-
-        # 获取最终执行结果
-        reply_fallback = ""
-        result = {}
-        try:
-            result = await task
-            reply_fallback = result.get("reply_draft", "") if isinstance(result, dict) else ""
+                    continue
+                public_queue = build_public_queue_meta(event.get("queue", {}))
+                action_state = public_queue.get("action_state") or event.get("action_state") or {}
+                action_status = str(action_state.get("status") or "")
+                if action_status == "queued":
+                    public_reason = "已进入人工队列。"
+                elif action_status == "failed":
+                    public_reason = "尚未进入人工队列，请重试或使用人工入口。"
+                else:
+                    public_reason = "人工接入状态待确认，请等待队列回执。"
+                yield {
+                    "event": "transfer",
+                    "data": json.dumps({
+                        **event,
+                        "reason": public_reason,
+                        "brief": build_public_handoff_brief(event.get("brief", {})),
+                        "queue": public_queue,
+                        "action_state": action_state,
+                    }, ensure_ascii=False),
+                }
 
             primary_card = _select_primary_customer_card(result)
             if primary_card:
+                yield {"event": "card", "data": json.dumps(primary_card, ensure_ascii=False)}
+
+            if await request.is_disconnected():
+                return
+            finalized = _finalize_customer_reply(result)
+            clean_reply = finalized["reply"]
+            done_status = finalized["status"]
+            result_action_state = finalized["action_state"]
+            required_reply_fields = finalized["required_reply_fields"]
+            reply_fields = finalized["reply_fields"]
+            handoff_offer = None
+            if (
+                clean_reply.strip()
+                and not (isinstance(result, dict) and result.get("should_transfer"))
+                and any(k in clean_reply for k in ["可以帮您转接VIP客服", "可以帮你转接VIP客服", "需要VIP客服", "是否转接人工客服", "帮您转人工"])
+            ):
+                handoff_offer = handoff_store.create_handoff_offer(
+                    req.session_id,
+                    req.user_id,
+                    "AI在当前会话中提出VIP客服转接选项",
+                    tenant_id,
+                )
+                handoff_offer_id = handoff_offer["offer_id"]
+            if clean_reply.strip():
+                assistant_message = handoff_store.append_message(
+                    req.session_id,
+                    "assistant",
+                    clean_reply,
+                    meta={"kind": "ai_chat"},
+                )
+                assistant_message_id = int(assistant_message["id"])
+
+            if handoff_offer:
                 yield {
-                    "event": "card",
-                    "data": json.dumps(primary_card, ensure_ascii=False)
+                    "event": "handoff_offer",
+                    "data": json.dumps({"offer_id": handoff_offer_id, "status": "offered"}, ensure_ascii=False),
                 }
 
-        except Exception as e:
-            print(f"[stream] 获取状态机最终结果异常: {e}")
-            traceback.print_exc()
-
-        finalized = _finalize_customer_reply(result)
-        clean_reply = finalized["reply"]
-        done_status = finalized["status"]
-        result_conversation_state = finalized["conversation_state"]
-        result_action_state = finalized["action_state"]
-        required_reply_fields = finalized["required_reply_fields"]
-        reply_fields = finalized["reply_fields"]
-        handoff_offer = None
-        if (
-            clean_reply.strip()
-            and not (isinstance(result, dict) and result.get("should_transfer"))
-            and any(k in clean_reply for k in ["可以帮您转接VIP客服", "可以帮你转接VIP客服", "需要VIP客服", "是否转接人工客服", "帮您转人工"])
-        ):
-            handoff_offer = handoff_store.create_handoff_offer(
-                req.session_id,
-                req.user_id,
-                "AI在当前会话中提出VIP客服转接选项",
-                tenant_id,
-            )
-        if clean_reply.strip():
-            handoff_store.append_message(req.session_id, "assistant", clean_reply, meta={"kind": "ai_chat"})
-
-        if handoff_offer:
+            turn_persisted = True
+            if handoff_should_publish:
+                handoff_published = publish_handoff(req.session_id, tenant_id=tenant_id)
+                if not handoff_published:
+                    turn_persisted = False
+                    raise HandoffPublishError
             yield {
-                "event": "handoff_offer",
-                "data": json.dumps({"offer_id": handoff_offer["offer_id"], "status": "offered"}, ensure_ascii=False),
+                "event": "done",
+                "data": json.dumps({
+                    "status": done_status,
+                    "reply": clean_reply,
+                    "handoff_offer": handoff_offer,
+                    **({"action_state": result_action_state} if result_action_state else {}),
+                    **({"required_reply_fields": required_reply_fields} if required_reply_fields else {}),
+                    **({"reply_fields": reply_fields} if reply_fields else {}),
+                }, ensure_ascii=False),
             }
+        except asyncio.TimeoutError:
+            yield {
+                "event": "terminal",
+                "data": json.dumps({"status": "failed", "reason_code": "chat_timeout"}, ensure_ascii=False),
+            }
+        except ChatTurnBusyError:
+            yield {
+                "event": "terminal",
+                "data": json.dumps({"status": "failed", "reason_code": "chat_turn_busy"}, ensure_ascii=False),
+            }
+        except HandoffPublishError:
+            yield {
+                "event": "terminal",
+                "data": json.dumps({"status": "failed", "reason_code": "handoff_publish_failed"}, ensure_ascii=False),
+            }
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[stream] 聊天任务异常: {e}")
+            traceback.print_exc()
+            yield {
+                "event": "terminal",
+                "data": json.dumps({"status": "failed", "reason_code": "chat_failed"}, ensure_ascii=False),
+            }
+        finally:
+            async def cleanup_turn() -> None:
+                if agent_task is not None:
+                    if not agent_task.done():
+                        agent_task.cancel()
+                    await asyncio.gather(agent_task, return_exceptions=True)
+                if not turn_persisted:
+                    if assistant_message_id is not None:
+                        handoff_store.delete_message(req.session_id, assistant_message_id, tenant_id=tenant_id)
+                    if user_message_id is not None:
+                        handoff_store.delete_message(req.session_id, user_message_id, tenant_id=tenant_id)
+                    if handoff_offer_id:
+                        handoff_store.update_handoff_offer(
+                            handoff_offer_id,
+                            "expired",
+                            req.session_id,
+                            req.user_id,
+                        )
+                    current_handoff = handoff_store.get_session(req.session_id)
+                    if (
+                        handoff_snapshot
+                        and current_handoff
+                        and (current_handoff.get("tenant_id") or "mitako") == tenant_id
+                        and current_handoff.get("status") in {"chatting", "queuing"}
+                    ):
+                        handoff_store.upsert_session(handoff_snapshot)
+                async with _chat_turn_registry_lock:
+                    if _active_chat_turns.get(turn_key) is turn_task:
+                        _active_chat_turns.pop(turn_key, None)
 
-        yield {
-            "event": "done",
-            "data": json.dumps({
-                "status": done_status,
-                "reply": clean_reply,
-                "handoff_offer": handoff_offer,
-                **({"action_state": result_action_state} if result_action_state else {}),
-                **({"required_reply_fields": required_reply_fields} if required_reply_fields else {}),
-                **({"reply_fields": reply_fields} if reply_fields else {}),
-            }, ensure_ascii=False)
-        }
+            cleanup_task = asyncio.create_task(cleanup_turn())
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    continue
+            await cleanup_task
 
-    import re
     return EventSourceResponse(event_generator())
 
 if __name__ == "__main__":

@@ -499,7 +499,13 @@ def _queue_action(entry: Dict[str, Any], *, deduped: bool = False) -> Dict[str, 
     return action_envelope(action, include_status=False)
 
 
-def enqueue_handoff(session_id: str, brief: Dict[str, Any], tenant_id: str = "mitako") -> Dict[str, Any]:
+def enqueue_handoff(
+    session_id: str,
+    brief: Dict[str, Any],
+    tenant_id: str = "mitako",
+    *,
+    publish: bool = True,
+) -> Dict[str, Any]:
     tid = brief.get("tenant_id") or tenant_id or "mitako"
     existing = _get_entry(session_id)
     if existing and existing.get("status") in ("queuing", "escalated", "transferring", "connected", "closed"):
@@ -550,12 +556,8 @@ def enqueue_handoff(session_id: str, brief: Dict[str, Any], tenant_id: str = "mi
         "observer_mode": True,
     }
     _save(entry)
-    _emit_status(session_id, entry)
-    try:
-        from im_sync_service import sync_handoff_created
-        sync_handoff_created(session_id, entry)
-    except Exception:
-        pass
+    if publish:
+        publish_handoff(session_id, tenant_id=tid)
     return {
         "ok": True,
         "position": position,
@@ -569,6 +571,20 @@ def enqueue_handoff(session_id: str, brief: Dict[str, Any], tenant_id: str = "mi
         "queue_id": session_id,
         **_queue_action(entry),
     }
+
+
+def publish_handoff(session_id: str, tenant_id: str = "mitako") -> bool:
+    entry = _get_entry(session_id)
+    if not entry or _tenant_forbidden(entry, tenant_id):
+        return False
+    _emit_status(session_id, entry)
+    try:
+        from im_sync_service import sync_handoff_created
+
+        sync_handoff_created(session_id, entry)
+    except Exception:
+        pass
+    return True
 
 
 def get_queue_status(session_id: str) -> Optional[Dict[str, Any]]:

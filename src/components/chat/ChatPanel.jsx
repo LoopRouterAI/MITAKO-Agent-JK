@@ -27,6 +27,7 @@ export default function ChatPanel({
   setInputVal,
   handoffState,
   onSend,
+  onStop,
   onBackToAi,
   onConfirmHandoff,
   onDismissHandoff,
@@ -97,6 +98,7 @@ export default function ChatPanel({
           handoffState={handoffState}
           isAwaitingStream={isAwaitingStream}
           onSend={onSend}
+          onStop={onStop}
           onBackToAi={onBackToAi}
           onReferenceOrder={onReferenceOrder}
           hasOrder={orders?.length > 0}

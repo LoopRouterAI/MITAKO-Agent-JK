@@ -591,6 +591,23 @@ def append_message(
     }
 
 
+def delete_message(session_id: str, message_id: int, tenant_id: str) -> bool:
+    """仅删除指定租户、会话中的单条消息。"""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM handoff_messages
+            WHERE id = ? AND session_id = ?
+              AND EXISTS (
+                SELECT 1 FROM handoff_sessions
+                WHERE session_id = ? AND tenant_id = ?
+              )
+            """,
+            (message_id, session_id, session_id, tenant_id or "mitako"),
+        )
+        return cur.rowcount == 1
+
+
 def ensure_chat_session(session_id: str, user_id: str, tenant_id: str = "mitako") -> Dict[str, Any]:
     entry = get_session(session_id)
     if entry:

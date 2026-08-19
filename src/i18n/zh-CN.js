@@ -58,6 +58,7 @@ export default {
     placeholderTransferred: '向VIP客服发送消息；需要时可 @小蛟 帮您整理诉求',
     placeholderQueuing: '排队期间仍可继续补充信息…',
     send: '发送',
+    stop: '停止生成',
     openTools: '展开常用入口',
     toolBrowse: '商品',
     toolOrder: '订单',

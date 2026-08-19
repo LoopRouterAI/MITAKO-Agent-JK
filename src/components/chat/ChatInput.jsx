@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Send, Headphones, Plus, Package, Image, Camera, MapPin, ShoppingBag, Video, X } from 'lucide-react';
+import { Send, Square, Headphones, Plus, Package, Image, Camera, MapPin, ShoppingBag, Video, X } from 'lucide-react';
 import t from '../../i18n/index.js';
 
 const DEMO_PRODUCTS = [
@@ -206,6 +206,7 @@ export default function ChatInput({
   handoffState,
   isAwaitingStream,
   onSend,
+  onStop,
   onBackToAi,
   onReferenceOrder,
   hasOrder,
@@ -345,7 +346,17 @@ export default function ChatInput({
         >
           <Plus className={`w-5 h-5 transition-transform duration-200 ${toolsOpen ? 'rotate-45' : ''}`} aria-hidden="true" />
         </button>
-        {(inputVal.trim() || pendingAttachments.length > 0) && (
+        {isAwaitingStream ? (
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label={t('input.stop')}
+            title={t('input.stop')}
+            className="touch-target flex h-11 min-w-[44px] flex-shrink-0 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-rose-700 transition-colors hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-rose-400"
+          >
+            <Square className="h-4 w-4 fill-current" aria-hidden="true" />
+          </button>
+        ) : (inputVal.trim() || pendingAttachments.length > 0) && (
           <button
             type="button"
             onClick={submit}

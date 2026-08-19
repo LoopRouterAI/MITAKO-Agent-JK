@@ -119,6 +119,7 @@ function toPublicLogStatus(status) {
 function rebuildHistoryFromMessages(messages, agentName) {
   const hist = [];
   for (const msg of messages) {
+    if (msg._cancelled) continue;
     if (msg.type !== 'text' || !msg.content?.text?.trim()) continue;
     if (String(msg._id).startsWith('welcome_') || String(msg._id).startsWith('greeting_')) continue;
     if (msg.position === 'right') {
@@ -193,6 +194,9 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
 
   const activeBotMsgIdRef = useRef(null);
   const activeBotMsgTextRef = useRef('');
+  const activeTurnUiIdsRef = useRef(new Set());
+  const currentTurnUserMessageIdRef = useRef(null);
+  const currentTurnHandoffStartedRef = useRef(false);
   const streamFlushRafRef = useRef(null);
   const activeLogCardIdRef = useRef(null);
   const apiLogsCacheRef = useRef({});
@@ -580,6 +584,9 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     streamFinalizedRef.current = false;
     activeBotMsgIdRef.current = null;
     activeBotMsgTextRef.current = '';
+    activeTurnUiIdsRef.current.clear();
+    currentTurnUserMessageIdRef.current = null;
+    currentTurnHandoffStartedRef.current = false;
     activeQueryStatusIdRef.current = null;
     clearPresenceTimers();
   }, [clearPresenceTimers]);
@@ -784,6 +791,39 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     }));
   }, []);
 
+  const discardCurrentTurnUi = useCallback(() => {
+    const localIds = activeTurnUiIdsRef.current;
+    const userMessageId = currentTurnUserMessageIdRef.current;
+    setChatMessages(prev => prev
+      .filter(msg => !localIds.has(msg._id))
+      .map(msg => (msg._id === userMessageId ? { ...msg, _cancelled: true } : msg)));
+    activeTurnUiIdsRef.current = new Set();
+    currentTurnUserMessageIdRef.current = null;
+    if (currentTurnHandoffStartedRef.current) {
+      handoffStateRef.current = 'none';
+      setHandoffState('none');
+      activeQueueIdRef.current = null;
+    }
+    currentTurnHandoffStartedRef.current = false;
+    activeBotMsgIdRef.current = null;
+    activeBotMsgTextRef.current = '';
+    currentTurnUserValRef.current = '';
+    cleanupStreamUI();
+    clearPresenceTimers();
+    streamFinalizedRef.current = true;
+    streamInFlightRef.current = false;
+    setIsAwaitingStream(false);
+  }, [cleanupStreamUI, clearPresenceTimers]);
+
+  const stopCurrentTurn = useCallback(() => {
+    activeTurnIdRef.current += 1;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    discardCurrentTurnUi();
+  }, [discardCurrentTurnUi]);
+
   /** 将助手回复写入 UI，有内容才创建气泡。 */
   const revealAssistantMessage = useCallback((text, { streaming = false } = {}) => {
     const displayText = sanitizeUserVisibleText(text ?? '');
@@ -792,6 +832,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     if (!activeBotMsgIdRef.current) {
       const id = `bot_${Date.now()}`;
       activeBotMsgIdRef.current = id;
+      activeTurnUiIdsRef.current.add(id);
       setChatMessages(prev => [...prev, {
         _id: id,
         type: 'text',
@@ -825,9 +866,11 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
   }, [revealAssistantMessage]);
 
   const appendCustomCard = useCallback((cardType, cardData) => {
+    const id = `card_${Date.now()}`;
+    activeTurnUiIdsRef.current.add(id);
     const publicCardData = sanitizePublicObject(cardData || {});
     setChatMessages(prev => [...prev, {
-      _id: `card_${Date.now()}`,
+      _id: id,
       type: 'custom',
       content: { cardType, cardData: publicCardData },
       position: 'left',
@@ -1047,7 +1090,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     }
   }, []);
 
-  const startHandoffQueue = useCallback((reason, brief = null, queueMeta = null) => {
+  const startHandoffQueue = useCallback((reason, brief = null, queueMeta = null, transient = false) => {
     const hs = handoffStateRef.current;
     if (hs === 'queuing' || hs === 'connected') return;
 
@@ -1059,6 +1102,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
 
     const queueId = `handoff_queue_${Date.now()}`;
     activeQueueIdRef.current = queueId;
+    if (transient) activeTurnUiIdsRef.current.add(queueId);
     const position = queueMeta?.position ?? 1;
     const ahead = queueMeta?.ahead ?? Math.max(0, position - 1);
     const eta = queueMeta?.eta ?? queueMeta?.eta_minutes ?? 1;
@@ -1177,11 +1221,9 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       revealAssistantMessage(activeBotMsgTextRef.current);
     }
 
-    commitTurnToHistory();
-    streamFinalizedRef.current = true;
-    setIsAwaitingStream(false);
-    startHandoffQueue(reason, brief, eventData.queue);
-  }, [cleanupStreamUI, commitTurnToHistory, revealAssistantMessage, startHandoffQueue]);
+    currentTurnHandoffStartedRef.current = true;
+    startHandoffQueue(reason, brief, eventData.queue, true);
+  }, [cleanupStreamUI, revealAssistantMessage, startHandoffQueue]);
 
   const finalizeStream = useCallback((userVal, turnId) => {
     if (streamFinalizedRef.current) return;
@@ -1199,6 +1241,10 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     cleanupStreamUI();
     clearPresenceTimers();
     syncHistoryFromUI(activeBotMsgTextRef.current);
+    activeTurnUiIdsRef.current = new Set();
+    currentTurnUserMessageIdRef.current = null;
+    currentTurnHandoffStartedRef.current = false;
+    currentTurnUserValRef.current = '';
     activeBotMsgIdRef.current = null;
     activeBotMsgTextRef.current = '';
     setIsAwaitingStream(false);
@@ -1279,9 +1325,13 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     activeTurnIdRef.current = turnId;
     streamInFlightRef.current = true;
     streamFinalizedRef.current = false;
+    activeTurnUiIdsRef.current = new Set();
+    currentTurnUserMessageIdRef.current = null;
+    currentTurnHandoffStartedRef.current = false;
     clearPresenceTimers();
 
-    abortControllerRef.current = new AbortController();
+    const turnAbortController = new AbortController();
+    abortControllerRef.current = turnAbortController;
 
     // 发送前从 UI 快照重建 history，不包含本条用户消息。
     syncHistoryFromUI();
@@ -1292,8 +1342,10 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       setChatMessages(prev => prev.filter(m => m.content?.cardType !== 'handoff_prompt'));
     }
 
-    setChatMessages(prev => [...prev, {
-      _id: `user_${Date.now()}`,
+    const userMessageId = `user_${Date.now()}`;
+    currentTurnUserMessageIdRef.current = userMessageId;
+    setChatMessages(prev => [...prev.filter(m => !String(m._id).startsWith('welcome_scan_')), {
+      _id: userMessageId,
       type: 'text',
       content: { text: visibleText, attachments: displayAttachments },
       position: 'right',
@@ -1311,6 +1363,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     if (useStreamUi) {
       const queryCardId = `query_${Date.now()}`;
       activeQueryStatusIdRef.current = queryCardId;
+      activeTurnUiIdsRef.current.add(queryCardId);
       setChatMessages(prev => [...prev, {
         _id: queryCardId,
         type: 'custom',
@@ -1331,11 +1384,12 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       }, 2200);
     }
 
+    let receivedDone = false;
     try {
       const authOptions = await customerFetchOptions({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: abortControllerRef.current.signal,
+        signal: turnAbortController.signal,
         body: JSON.stringify({
           user_id: sessionContext.userId,
           session_id: `session_${sessionContext.userId}`,
@@ -1396,11 +1450,14 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
         } else if (eventType === INTERNAL_API_EVENT) {
           handleApiLogging(eventData);
         } else if (eventType === 'done') {
+          receivedDone = true;
           const fallbackReply = (eventData.reply || eventData.reply_draft || '').trim();
           if (fallbackReply && !activeBotMsgTextRef.current.trim()) {
             activeBotMsgTextRef.current = sanitizeUserVisibleText(fallbackReply);
           }
           finalizeStream(userText, turnId);
+        } else if (eventType === 'terminal') {
+          discardCurrentTurnUi();
         }
       };
 
@@ -1425,8 +1482,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       }
     } catch (e) {
       if (e?.name === 'AbortError') {
-        streamFinalizedRef.current = true;
-        clearPresenceTimers();
+        if (turnId === activeTurnIdRef.current) discardCurrentTurnUi();
         return;
       }
       if (turnId !== activeTurnIdRef.current || !isSessionContextActive(sessionContext)) return;
@@ -1459,13 +1515,11 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       }
     } finally {
       if (turnId !== activeTurnIdRef.current || !isSessionContextActive(sessionContext)) return;
-      if (!streamFinalizedRef.current) {
-        finalizeStream(userText, turnId);
-      }
+      if (!receivedDone && !streamFinalizedRef.current) discardCurrentTurnUi();
       streamInFlightRef.current = false;
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === turnAbortController) abortControllerRef.current = null;
     }
-  }, [appendAssistantDelta, appendCustomCard, captureSessionContext, clearPresenceTimers, customerFetchOptions, finalizeStream, handleApiLogging, handleHandoff, handleNodeTrace, handleUnifiedAnalysis, handoffFetchOptions, isSessionContextActive, modelId, pollHandoffSync, syncHistoryFromUI, uploadAttachmentFiles]);
+  }, [appendAssistantDelta, appendCustomCard, captureSessionContext, clearPresenceTimers, customerFetchOptions, discardCurrentTurnUi, finalizeStream, handleApiLogging, handleHandoff, handleNodeTrace, handleUnifiedAnalysis, handoffFetchOptions, isSessionContextActive, modelId, pollHandoffSync, syncHistoryFromUI, uploadAttachmentFiles]);
 
   const confirmWelcomeOrder = useCallback((orderMeta) => {
     const orderId = orderMeta?.order_id;
@@ -1520,6 +1574,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     prepareUserSwitch,
     resetChat,
     handleSend,
+    stopCurrentTurn,
     confirmWelcomeOrder,
     browseWelcomeOrders,
   };

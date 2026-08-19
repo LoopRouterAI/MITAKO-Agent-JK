@@ -1626,7 +1626,12 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
     queue_meta: Dict[str, Any] = {}
     try:
         brief = build_handoff_brief(state, reason)
-        queue_meta = enqueue_handoff(session_id, brief, tenant_id=brief.get("tenant_id") or "mitako")
+        queue_meta = enqueue_handoff(
+            session_id,
+            brief,
+            tenant_id=brief.get("tenant_id") or "mitako",
+            publish=not bool(config.get("configurable", {}).get("defer_handoff_publish")),
+        )
         action = action_from_tool("human_handoff", "handoff_service", queue_meta)
         if action.status.value == "queued" and (
             str(queue_meta.get("session_id") or "") != session_id

@@ -225,6 +225,7 @@ export default function App() {
             handoffState={chat.handoffState}
             assignedHumanAgent={chat.assignedHumanAgent}
             onSend={chat.handleSend}
+            onStop={chat.stopCurrentTurn}
             onBackToAi={handleBackToAi}
             onConfirmHandoff={chat.confirmHandoff}
             onDismissHandoff={chat.dismissHandoffPrompt}
