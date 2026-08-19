@@ -173,6 +173,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
   const [isTransfered, setIsTransfered] = useState(false);
   const [handoffState, setHandoffState] = useState('none'); // none | prompt | queuing | connected
   const [handoffBrief, setHandoffBrief] = useState(null);
+  const [conversationState, setConversationState] = useState(null);
   const [assignedHumanAgent, setAssignedHumanAgent] = useState(null);
   const [inputVal, setInputVal] = useState('');
 
@@ -423,6 +424,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     const sessionId = `session_${sessionContext.userId}`;
 
     let agent = statusPayload?.agent || statusPayload?.assigned_agent || null;
+    if (statusPayload?.conversation_state) setConversationState(statusPayload.conversation_state);
 
     if (!agent) {
       try {
@@ -494,6 +496,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       const statusData = statusR.ok ? await statusR.json() : null;
       if (!isSessionContextActive(sessionContext)) return;
       if (statusData?.ok) {
+        if (statusData.conversation_state) setConversationState(statusData.conversation_state);
         if (statusData.status === 'connected' && hs === 'queuing') {
           await completeHandoffConnection(activeQueueIdRef.current, statusData, sessionContext);
           return;
@@ -521,6 +524,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       authValue: serviceAuthRef.current,
       onStatus: (data) => {
         if (!isSessionContextActive(sessionContext)) return;
+        if (data.conversation_state) setConversationState(data.conversation_state);
         if (data.status === 'connected' && handoffStateRef.current === 'queuing') {
           completeHandoffConnection(activeQueueIdRef.current, data, sessionContext);
         }
@@ -543,6 +547,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     setIsTransfered(false);
     setHandoffState('none');
     setHandoffBrief(null);
+    setConversationState(null);
     setAssignedHumanAgent(null);
     if (handoffQueueTimerRef.current) {
       clearTimeout(handoffQueueTimerRef.current);
@@ -1132,6 +1137,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       if (!response.ok || !isSessionContextActive(sessionContext)) return;
       const data = await response.json();
       if (!data?.ok || !['queuing', 'escalated', 'transferring', 'connected'].includes(data.status)) return;
+      if (data.conversation_state) setConversationState(data.conversation_state);
       startHandoffQueue('已恢复当前用户的客服接待状态。', data.brief, data);
       if (data.status === 'connected') {
         await completeHandoffConnection(activeQueueIdRef.current, data, sessionContext);
@@ -1434,6 +1440,9 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
         } catch {
           return;
         }
+        if (eventData?.conversation_state) {
+          setConversationState(eventData.conversation_state);
+        }
 
         if (eventType === 'thinking') {
           if (eventData.type !== 'llm_thinking') handleNodeTrace(eventData);
@@ -1548,6 +1557,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     setIsTransfered,
     handoffState,
     handoffBrief,
+    conversationState,
     assignedHumanAgent,
     confirmHandoff,
     dismissHandoffPrompt,

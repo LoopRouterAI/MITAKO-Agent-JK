@@ -659,6 +659,18 @@ export default {
     integrations: '服务连接',
     authFlag: '鉴权开关',
   },
+  conversationState: {
+    title: '当前处理状态',
+    receipt: '跟进凭证',
+    unknown: '待确认',
+    statusNotRequested: '未提交',
+    statusRequested: '待执行',
+    statusAccepted: '已受理',
+    statusQueued: '排队中',
+    statusSucceeded: '已完成',
+    statusFailed: '未执行成功',
+    statusPendingHuman: '等待人工',
+  },
   desk: {
     title: 'MITAKO VIP客服工作台',
     subtitle: '阅读服务记录 · 确认接手后回复 · 可转交、升级或结案',

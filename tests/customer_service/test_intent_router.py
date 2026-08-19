@@ -198,7 +198,7 @@ def test_classify_intent_keeps_public_label_and_stores_typed_result() -> None:
     assert analysis_event["scenario_code"] == typed_intent["scenario_code"]
 
 
-def test_generate_reply_cannot_override_deterministic_intent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_generate_reply_cannot_override_deterministic_intent_or_emotion(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent
 
     async def fake_call_llm(*args, **kwargs):
@@ -236,10 +236,11 @@ def test_generate_reply_cannot_override_deterministic_intent(monkeypatch: pytest
     updates = asyncio.run(agent.generate_reply_with_persona(state, {"configurable": {}}))
 
     assert "intent" not in updates
-    assert updates["emotion_level"] == 4
+    assert updates.get("emotion_level", state["emotion_level"]) == 2
+    assert updates["conversation_state"]["intent"]["intent_code"] == "product_consultation"
 
 
-def test_real_llm_event_path_only_emits_deterministic_analysis(
+def test_reply_generation_does_not_emit_a_second_analysis_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import agent
@@ -319,9 +320,7 @@ def test_real_llm_event_path_only_emits_deterministic_analysis(
         events.append(queue.get_nowait())
     analyses = [event for event in events if event["type"] == "unified_analysis"]
 
-    assert analyses
-    assert {event["intent"] for event in analyses} == {"售前商品咨询"}
-    assert {event["intent_code"] for event in analyses} == {"product_consultation"}
+    assert analyses == []
 
 
 def test_llm_event_filter_preserves_thinking_and_text_chunks(

@@ -6,6 +6,7 @@ import MessageList from './MessageList.jsx';
 import ChatInput from './ChatInput.jsx';
 import ChatPresenceDock from './ChatPresenceDock.jsx';
 import XiaoJiaoLoadingBubble from './XiaoJiaoLoadingBubble.jsx';
+import ConversationStateCard from '../shared/ConversationStateCard.jsx';
 import { MITAKO_AGENT_AVATAR } from '../../constants/memeMap.js';
 
 export default function ChatPanel({
@@ -26,6 +27,7 @@ export default function ChatPanel({
   inputVal,
   setInputVal,
   handoffState,
+  conversationState,
   onSend,
   onStop,
   onBackToAi,
@@ -91,6 +93,8 @@ export default function ChatPanel({
             <ChatPresenceDock phase={presencePhase} handoffState={handoffState} />
           )}
         </div>
+
+        <ConversationStateCard state={conversationState} />
 
         <ChatInput
           inputVal={inputVal}

@@ -223,6 +223,7 @@ export default function App() {
             inputVal={chat.inputVal}
             setInputVal={handleInputChange}
             handoffState={chat.handoffState}
+            conversationState={chat.conversationState}
             assignedHumanAgent={chat.assignedHumanAgent}
             onSend={chat.handleSend}
             onStop={chat.stopCurrentTurn}

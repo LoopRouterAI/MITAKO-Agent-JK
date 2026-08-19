@@ -141,3 +141,66 @@ def test_done_event_contains_same_public_conversation_state(monkeypatch) -> None
     assert done["conversation_state"]["core_conclusion"] == "material_not_received"
     assert done["conversation_state"]["next_step"]["code"] == "upload_materials"
     assert "internal_prompt" not in json.dumps(done, ensure_ascii=False)
+
+
+def test_handoff_desk_brief_keeps_the_same_public_state() -> None:
+    from handoff_service import build_desk_brief, build_handoff_brief
+
+    source = _conversation_state()
+    brief = build_handoff_brief({
+        "messages": [{"role": "user", "content": "请转人工继续处理"}],
+        "intent": "商品有伤",
+        "emotion_level": 4,
+        "conversation_state": source,
+        "user_id": "desk-state-user",
+        "session_id": "desk-state-session",
+        "tenant_id": "mitako",
+    })
+    desk = build_desk_brief(brief)
+
+    assert desk["conversation_state"] == {
+        **desk["conversation_state"],
+        "core_conclusion": "material_not_received",
+    }
+    assert desk["conversation_state"]["action_state"]["status"] == "not_requested"
+    assert "tool_name" not in json.dumps(desk["conversation_state"], ensure_ascii=False)
+
+
+def test_desk_session_uses_current_queue_receipt_instead_of_stale_brief(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import handoff_service
+    import handoff_store
+
+    monkeypatch.setattr(handoff_store, "_DB_DIR", str(tmp_path))
+    monkeypatch.setattr(handoff_store, "_DB_PATH", str(tmp_path / "handoff.db"))
+    monkeypatch.setattr(handoff_store, "_db_ready", False)
+    state = _conversation_state()
+    state["action_state"]["action"] = "human_handoff"
+    state["action_state"]["status"] = "requested"
+    brief = handoff_service.build_handoff_brief({
+        "messages": [{"role": "user", "content": "请转人工"}],
+        "intent": "VIP客服请求",
+        "emotion_level": 2,
+        "conversation_state": state,
+        "user_id": "queue-state-user",
+        "session_id": "queue-state-session",
+        "tenant_id": "mitako",
+    })
+    handoff_service.enqueue_handoff(
+        "queue-state-session",
+        brief,
+        tenant_id="mitako",
+        publish=False,
+    )
+
+    desk = handoff_service.get_desk_session("queue-state-session", tenant_id="mitako")
+    customer = handoff_service.build_customer_handoff_payload(
+        handoff_service.get_queue_status("queue-state-session")
+    )
+
+    action = desk["brief"]["conversation_state"]["action_state"]
+    assert action["status"] == "queued"
+    assert action["receipt_id"] == "queue-state-session"
+    assert customer["conversation_state"]["action_state"] == action

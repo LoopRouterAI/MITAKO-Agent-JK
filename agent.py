@@ -1171,8 +1171,8 @@ async def plan_business_readiness_flow(state: AgentState, config: RunnableConfig
         sop_state.get("ticket_type") in {"minor_refund", "damage"}
         and _is_material_collection_turn(last_user_msg, state.get("intent") or "", attachments)
     )
+    sop_state["material_collection_turn"] = material_first_scene
     result["business_review_required"] = bool(sop_state.get("needs_human") or action.get("requires_human"))
-    result["material_collection_turn"] = material_first_scene
     if queue:
         await queue.put({
             "type": "node_end",
@@ -1369,28 +1369,11 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
         emit_analysis_event=False,
     )
     meme_tags = re.findall(r"<meme:\s*(\w+)>", reply)
-    analysis = _parse_reply_analysis(reply)
     updates: Dict[str, Any] = {
         "reply_draft": reply,
         "meme_tags": meme_tags,
         "conversation_state": conversation_state,
     }
-    if analysis.get("emotion_level"):
-        try:
-            parsed_level = max(1, min(6, int(analysis.get("emotion_level"))))
-            if emotion_level >= 4 and parsed_level < 4:
-                parsed_level = emotion_level
-            updates["emotion_level"] = parsed_level
-        except Exception:
-            pass
-    if queue and (analysis.get("emotion_level") or analysis.get("should_transfer")):
-        _emit_unified_analysis_event(
-            queue,
-            intent,
-            updates.get("emotion_level") or emotion_level,
-            should_transfer,
-            intent_result=(state.get("conversation_state") or {}).get("intent"),
-        )
 
     if queue:
         await queue.put({

@@ -709,6 +709,8 @@ def _select_primary_customer_card(result: Dict[str, Any]) -> Optional[Dict[str, 
             break
     if any(k in last_user for k in ["一句话", "简短", "只说结论", "不要卡片"]):
         return None
+    if (result.get("sop_state") or {}).get("material_collection_turn"):
+        return None
 
     sop = result.get("sop_state") or {}
     ticket_type = sop.get("ticket_type") or "general"

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Headphones, RefreshCw, Send, User, ClipboardList, CheckCircle2, ArrowUpCircle, AlertTriangle, Users, SmilePlus, Search, Image as ImageIcon } from 'lucide-react';
 import t from '../i18n/index.js';
 import RichTextContent from '../components/shared/RichTextContent.jsx';
+import ConversationStateCard from '../components/shared/ConversationStateCard.jsx';
 import { authFetch, getAuthToken } from '../lib/authClient.js';
 import { attachHandoffTransport } from '../hooks/useHandoffSync.js';
 import { sanitizePublicText } from '../utils/publicText.js';
@@ -564,6 +565,8 @@ export default function HumanAgentDesk({ authUser = null }) {
                   {acceptBlockedReason}
                 </div>
               )}
+
+              <ConversationStateCard state={brief?.conversation_state} />
 
               {canAccept && (
                 <div className="mx-4 mt-3 rounded-[8px] border border-slate-200 bg-[var(--mitako-lime-soft)] p-3 text-xs text-[var(--mitako-ink)]">

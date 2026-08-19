@@ -6,6 +6,8 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
+from customer_service.public_projection import project_conversation_state
+
 import handoff_store as store
 from customer_service.action_state import action_envelope, action_from_tool
 from handoff_routing import load_routing_config, resolve_required_tier, save_routing_config
@@ -310,6 +312,7 @@ def build_handoff_brief(state: Dict[str, Any], reason: Optional[str] = None) -> 
         "sop_state": state.get("sop_state") or {},
         "business_cards": state.get("business_cards") or [],
         "review_tasks": state.get("review_tasks") or [],
+        "conversation_state": project_conversation_state(state.get("conversation_state") or {}),
         "user_id": state.get("user_id"),
         "session_id": state.get("session_id"),
     }
@@ -341,6 +344,7 @@ def build_public_handoff_brief(brief: Optional[Dict[str, Any]]) -> Dict[str, Any
         "reason": "已为您转接VIP客服继续处理。",
         "orders": [_sanitize_customer_text(o) for o in (src.get("orders") or [])],
         "conversation_snippet": snippet,
+        "conversation_state": project_conversation_state(src.get("conversation_state") or {}),
         "user_id": src.get("user_id"),
         "session_id": src.get("session_id"),
     }
@@ -601,6 +605,11 @@ def get_queue_status(session_id: str) -> Optional[Dict[str, Any]]:
 
 def build_customer_handoff_payload(entry: Dict[str, Any]) -> Dict[str, Any]:
     agent = entry.get("assigned_agent") or entry.get("suggested_agent") or entry.get("agent") or {}
+    brief = build_public_handoff_brief(entry.get("brief"))
+    conversation_state = dict(brief.get("conversation_state") or {})
+    conversation_state["action_state"] = (_queue_action(entry).get("action_state") or {})
+    conversation_state = project_conversation_state(conversation_state)
+    brief["conversation_state"] = conversation_state
     payload = {
         "session_id": entry.get("session_id"),
         "status": entry.get("status"),
@@ -610,7 +619,8 @@ def build_customer_handoff_payload(entry: Dict[str, Any]) -> Dict[str, Any]:
         "agent": build_public_agent(agent),
         "assigned_agent": build_public_agent(entry.get("assigned_agent")),
         "pending_agent": build_public_agent(entry.get("pending_agent")),
-        "brief": build_public_handoff_brief(entry.get("brief")),
+        "brief": brief,
+        "conversation_state": conversation_state,
     }
     if entry.get("status") == "connected":
         payload["welcome"] = _sanitize_customer_text(entry.get("welcome") or build_human_welcome(agent, entry.get("brief")))
@@ -835,6 +845,7 @@ def build_desk_brief(brief: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "sop_state": _public_nested(sop_state),
         "business_cards": _public_nested(business_cards),
         "review_tasks": _public_nested(src.get("review_tasks") or []),
+        "conversation_state": project_conversation_state(src.get("conversation_state") or {}),
         "required_tier": src.get("required_tier"),
         "user_id": src.get("user_id"),
         "session_id": src.get("session_id"),
@@ -928,10 +939,14 @@ def get_desk_session(session_id: str, tenant_id: Optional[str] = None) -> Option
     can_accept = status in ("queuing", "escalated", "transferring")
     can_chat = status == "connected"
     business_events = public_business_events(store.list_business_events(session_id=session_id, limit=100))
+    desk_brief = build_desk_brief(entry.get("brief"))
+    conversation_state = dict(desk_brief.get("conversation_state") or {})
+    conversation_state["action_state"] = (_queue_action(entry).get("action_state") or {})
+    desk_brief["conversation_state"] = project_conversation_state(conversation_state)
     return {
         "session_id": session_id,
         "status": status,
-        "brief": build_desk_brief(entry.get("brief")),
+        "brief": desk_brief,
         "agent": entry.get("assigned_agent") or entry.get("pending_agent") or entry.get("suggested_agent"),
         "assigned_agent": entry.get("assigned_agent"),
         "pending_agent": entry.get("pending_agent"),

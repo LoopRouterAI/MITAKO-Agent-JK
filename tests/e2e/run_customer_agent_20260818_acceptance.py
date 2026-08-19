@@ -200,6 +200,106 @@ def test_high_risk_graph_waits_for_scenario_and_reply_plan_before_transfer() -> 
     assert agent.router_after_transfer_check(ready) == "transfer"
 
 
+def test_model_reply_analysis_cannot_raise_deterministic_emotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent
+
+    async def fake_call_llm(*_args, **_kwargs) -> str:
+        return '<analysis>{"emotion_level": 5, "should_transfer": true}</analysis>请先上传材料。'
+
+    monkeypatch.setattr(agent, "call_llm", fake_call_llm)
+    state = _state(
+        "我只有特写照片和面单，但还没有上传文件。",
+        "product_damage",
+        "product_damage",
+        emotion_level=2,
+    )
+    state["should_transfer"] = False
+    state["conversation_state"].update({
+        "scenario_decision": {
+            "core_conclusion": "material_not_received",
+            "action_state": {
+                "action": "material_upload",
+                "status": "not_requested",
+                "receipt_id": "",
+                "tool_name": "",
+                "reason_code": "",
+                "occurred_at": "",
+            },
+            "next_step": {
+                "code": "upload_materials",
+                "label": "上传本轮待审核材料",
+                "user_action_required": True,
+            },
+        },
+        "action_state": {
+            "action": "material_upload",
+            "status": "not_requested",
+            "receipt_id": "",
+            "tool_name": "",
+            "reason_code": "",
+            "occurred_at": "",
+        },
+        "next_step": {
+            "code": "upload_materials",
+            "label": "上传本轮待审核材料",
+            "user_action_required": True,
+        },
+        "core_conclusion": "material_not_received",
+    })
+
+    result = asyncio.run(agent.generate_reply_with_persona(state, {"configurable": {}}))
+
+    assert result.get("emotion_level", 2) == 2
+
+
+def test_material_collection_turn_does_not_emit_unverified_order_card() -> None:
+    import main
+
+    card = main._select_primary_customer_card({
+        "messages": [{"role": "user", "content": "我还没有上传材料。"}],
+        "sop_state": {"ticket_type": "damage", "material_collection_turn": True},
+        "business_cards": [{
+            "type": "business_action",
+            "data": {
+                "sop": {"ticket_type": "damage"},
+                "action": {
+                    "type": "after_sales_card",
+                    "reason": "已生成售后处理单",
+                    "requires_human": True,
+                },
+            },
+        }],
+    })
+
+    assert card is None
+
+
+def test_business_readiness_marks_material_collection_in_persisted_sop_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent
+    import business_readiness_service
+
+    monkeypatch.setattr(
+        business_readiness_service,
+        "run_business_flow",
+        lambda _state, _fixtures: {
+            "sop_state": {"ticket_type": "damage"},
+            "business_events": [],
+            "business_cards": [{"type": "business_action", "data": {}}],
+        },
+    )
+    result = asyncio.run(agent.plan_business_readiness_flow({
+        "raw_user_content": "我有照片和面单，但还没有上传材料。",
+        "intent": "换货补发/商品破损",
+        "attachments": [],
+    }, {"configurable": {}}))
+
+    assert result["sop_state"]["material_collection_turn"] is True
+
+
 def test_transfer_success_requires_canonical_queue_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent
     import auth.jwt_utils
