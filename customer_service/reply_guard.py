@@ -66,7 +66,7 @@ _SECRET_PATTERN = re.compile(
     r"\b(?:api[_ -]?key|key)\b\s*[:：=]|\bsk-[A-Za-z0-9_-]+|"
     r"\b(?:postgres|mysql|redis)\s+(?:timeout|error)\b|"
     r"\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[a-z0-9_]+_(?:tool|service)\b|"
-    r"\b(?:DeepSeek(?:-V?\d+)?|Gemini|GPT-?\d*|Claude|OpenAI|SenseNova)\b",
+    r"(?:DeepSeek(?:-V?\d+)?|Gemini|GPT-?\d*|Claude|OpenAI|SenseNova)",
     re.IGNORECASE,
 )
 _SEMANTIC_FORBIDDEN = (
@@ -241,6 +241,6 @@ def guard_reply(
         return rejected("forbidden_reply_plan_claim")
     if any(required and required not in text for required in plan.must_say):
         return rejected("missing_required_reply_fact")
-    if re.sub(r"\s+", "", text) != re.sub(r"\s+", "", fallback):
-        return rejected("unexpected_reply_content")
+    # 允许模型在保留确定性事实的前提下做自然语言润色；事实、动作、时效和敏感词
+    # 仍由上面的门禁校验，不能再用“必须逐字等于模板”把模型变成固定句子生成器。
     return ReplyGuardResult(allowed=True, reply=text)

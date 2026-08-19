@@ -231,6 +231,23 @@ def test_reply_must_include_reply_plan_required_content() -> None:
     assert result.reason_code == "missing_required_reply_fact"
 
 
+def test_safe_model_polish_is_allowed_when_plan_facts_are_preserved() -> None:
+    from customer_service.reply_guard import guard_reply
+    from customer_service.reply_plan import build_reply_plan, render_reply_plan
+
+    state = _state(
+        conclusion="product_identity_ambiguous",
+        next_step="request_product_identity",
+    )
+    plan = build_reply_plan(state)
+    candidate = render_reply_plan(plan) + "我会继续按这个信息帮您核对。"
+
+    result = guard_reply(candidate, conversation_state=state, reply_plan=plan)
+
+    assert result.allowed is True
+    assert result.reply.endswith("我会继续按这个信息帮您核对。")
+
+
 def test_unknown_product_plan_does_not_invent_default_product() -> None:
     from customer_service.reply_plan import build_reply_plan, render_reply_plan
 

@@ -322,6 +322,18 @@ def _load_mock_orders_for_user(user_id: str) -> Dict[str, Any]:
     return {"orders": user_orders, "total": len(user_orders)}
 
 
+def _load_mock_logistics(order_id: str) -> Dict[str, Any]:
+    mock_data_path = str(mock_data_file())
+    if not os.path.exists(mock_data_path):
+        return {}
+    try:
+        with open(mock_data_path, "r", encoding="utf-8") as f:
+            db = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return dict((db.get("logistics") or {}).get(order_id) or {})
+
+
 def _emit_unified_analysis_event(
     queue: Any,
     intent: str,
@@ -925,7 +937,6 @@ async def query_order_system(state: AgentState, config: RunnableConfig) -> Dict[
         await queue.put({"type": "node_start", "node": "query_order", "desc": f"向后台拉取用户 {user_id} 的全部订单{focus_hint}..."})
 
     order_data = {}
-    semantic_failure = False
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             res = await client.get(f"{LOCAL_BUSINESS_URL}/api/v1/orders/{user_id}")
@@ -933,11 +944,15 @@ async def query_order_system(state: AgentState, config: RunnableConfig) -> Dict[
                 payload = res.json()
                 if _business_payload_success(payload):
                     order_data = payload
+                    if not order_data.get("orders"):
+                        local_orders = _load_mock_orders_for_user(user_id)
+                        if local_orders.get("orders"):
+                            order_data = local_orders
                 else:
-                    semantic_failure = True
-    except Exception as e:
+                    order_data = {}
+    except Exception:
         order_data = _load_mock_orders_for_user(user_id)
-    if not order_data and not semantic_failure:
+    if not order_data or not order_data.get("orders"):
         order_data = _load_mock_orders_for_user(user_id)
 
     if focus_ref and order_data.get("orders"):
@@ -1003,12 +1018,17 @@ async def query_logistics(state: AgentState, config: RunnableConfig) -> Dict[str
                 payload = res.json()
                 if _business_payload_success(payload):
                     logistics_data = payload
-    except Exception as e:
-        mock_data_path = str(mock_data_file())
-        if os.path.exists(mock_data_path):
-            with open(mock_data_path, "r", encoding="utf-8") as f:
-                db = json.load(f)
-                logistics_data = db.get("logistics", {}).get(order_id, {})
+                    if not logistics_data.get("timeline"):
+                        local_logistics = _load_mock_logistics(order_id)
+                        if local_logistics:
+                            logistics_data = local_logistics
+    except Exception:
+        logistics_data = _load_mock_logistics(order_id)
+
+    if not logistics_data:
+        # 本地业务服务返回 404/5xx 时不能静默结束订单流程；保留可追溯的本地演示数据，
+        # 仅作为当前 demo 的业务数据源，不把它伪装成真实外部仓储回执。
+        logistics_data = _load_mock_logistics(order_id)
 
     if queue:
         carrier = logistics_data.get("carrier", "未知")
@@ -1399,7 +1419,7 @@ async def generate_reply_with_persona(state: AgentState, config: RunnableConfig)
         ensure_ascii=False,
     )
     reply = await call_llm(
-        "你只负责润色公开回复计划。不得增加事实、状态、商品、时效、责任、凭证或已执行动作。只输出面向用户的正文。",
+        "你只负责润色公开回复计划。必须原样保留 reply_plan.must_say 中的每句话；可以调整标点和语气，但不得增加事实、状态、商品、时效、责任、凭证或已执行动作。只输出面向用户的正文。",
         user_payload,
         [],
         queue,

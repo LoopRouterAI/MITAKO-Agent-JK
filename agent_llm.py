@@ -179,15 +179,17 @@ async def call_llm(
                                     parts = full_content.split("<analysis>", 1)
                                     rest = parts[1]
                                     json_part, after = rest.split("</analysis>", 1)
-                                    parsed = json.loads(json_part.strip())
-                                    if emit_analysis_event:
-                                        await event_queue.put({
-                                            "type": "unified_analysis",
-                                            "intent": parsed.get("intent", "闲聊互动"),
-                                            "emotion_level": int(parsed.get("emotion_level", 2)),
-                                            "should_transfer": parsed.get("should_transfer", False),
-                                            "transfer_reason": parsed.get("transfer_reason", ""),
-                                        })
+                                    compact_json = json_part.strip()
+                                    if compact_json:
+                                        parsed = json.loads(compact_json)
+                                        if emit_analysis_event:
+                                            await event_queue.put({
+                                                "type": "unified_analysis",
+                                                "intent": parsed.get("intent", "闲聊互动"),
+                                                "emotion_level": int(parsed.get("emotion_level", 2)),
+                                                "should_transfer": parsed.get("should_transfer", False),
+                                                "transfer_reason": parsed.get("transfer_reason", ""),
+                                            })
                                     user_text = after.lstrip()
                                     if user_text and emit_text_chunks:
                                         await event_queue.put({"type": "text_chunk", "content": user_text})

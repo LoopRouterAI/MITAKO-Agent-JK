@@ -108,6 +108,64 @@ def test_second_order_request_requires_order_identity() -> None:
 @pytest.mark.parametrize(
     "message",
     [
+        "我想咨询这笔订单：订单 #024001。当前页面显示状态：待核对。请帮我核对现在进度和下一步处理。",
+        "我想咨询这件商品：抽奖排球少年限定色纸。当前页面显示状态：抽奖名额待发。请帮我核对现在进度和下一步处理。订单 #025012。",
+    ],
+)
+def test_order_card_progress_request_enters_order_workflow(message: str) -> None:
+    result = _route(message)
+
+    assert result.intent_code == "order_logistics"
+    assert result.scenario_code == "order_logistics"
+    assert "订单" in result.matched_evidence or "#" in result.matched_evidence
+
+
+def test_order_card_progress_runs_order_and_logistics_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agent
+
+    async def run_case() -> dict:
+        monkeypatch.setattr(agent, "LOCAL_BUSINESS_URL", "http://127.0.0.1:9")
+        message = "我想咨询这笔订单：订单 #024001。当前页面显示状态：待核对。请帮我核对现在进度和下一步处理。"
+        state = {
+            "messages": [{"role": "user", "content": message}],
+            "raw_user_content": message,
+            "user_id": "usr_001",
+            "session_id": "order-progress-regression",
+            "active_order_id": "",
+            "intent": "",
+            "conversation_state": {},
+            "emotion_level": 2,
+            "order_data": {},
+            "logistics_data": {},
+            "sop_results": [],
+            "user_memory": {},
+            "reply_draft": "",
+            "safety_check_result": "",
+            "should_transfer": False,
+            "transfer_reason": "",
+            "handoff_offer_id": "",
+            "compensation_given": [],
+            "meme_tags": [],
+            "fixtures": [],
+            "attachments": [],
+            "sop_state": {},
+            "business_events": [],
+            "business_cards": [],
+        }
+        for node in (agent.classify_intent, agent.query_order_system, agent.query_logistics, agent.search_knowledge_base):
+            state.update(await node(state, {"configurable": {}}))
+        return state
+
+    state = asyncio.run(run_case())
+    assert state["conversation_state"]["intent"]["intent_code"] == "order_logistics"
+    assert state["conversation_state"]["core_conclusion"] == "show_verified_order_progress"
+    assert state["order_data"]["focused_order_id"] == "ORD_2024_001"
+    assert state["logistics_data"]["timeline"]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
         "查第二笔订单的退款进度。",
         "第二笔订单退款并转人工。",
     ],
@@ -321,6 +379,52 @@ def test_reply_generation_does_not_emit_a_second_analysis_event(
     analyses = [event for event in events if event["type"] == "unified_analysis"]
 
     assert analyses == []
+
+
+def test_non_stream_empty_analysis_wrapper_is_not_reported_as_parse_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import agent_llm
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "<analysis></analysis>\n订单已进入核对流程。"}}]}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(agent_llm.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        agent_llm,
+        "get_model_config",
+        lambda model_id: {"id": "test", "api_base": "https://example.invalid/v1", "model": "test"},
+    )
+    monkeypatch.setattr(agent_llm, "get_model_api_key", lambda model_id: "test-key")
+    queue = asyncio.Queue()
+
+    asyncio.run(agent_llm.call_llm(
+        "系统提示", "用户消息", [], queue, model_id="test", stream_reply=False,
+        emit_text_chunks=True, emit_analysis_event=False,
+    ))
+
+    assert "analysis 解析失败" not in capsys.readouterr().out
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    assert any(event.get("type") == "text_chunk" and "订单已进入核对流程" in event.get("content", "") for event in events)
 
 
 def test_llm_event_filter_preserves_thinking_and_text_chunks(

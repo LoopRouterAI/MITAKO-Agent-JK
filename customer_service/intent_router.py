@@ -51,6 +51,10 @@ PUBLIC_LABELS = {
 }
 
 VIDEO_DAMAGE_EVIDENCE = {"开箱视频", "剪辑", "离开镜头", "视频审核"}
+_ORDER_REFERENCE_HINTS = ("订单", "单号", "ORD_", "#")
+_ORDER_PROGRESS_HINTS = (
+    "进度", "当前状态", "页面显示状态", "下一步", "核对", "查询", "到哪一步", "发货",
+)
 SPECIFIC_BUSINESS_INTENTS = {
     "privacy_deletion",
     "address_change",
@@ -96,6 +100,22 @@ def route_intent(message: str, history: Sequence[dict[str, Any]] | None = None) 
         for intent, scenario, phrases in RULES
         if (evidence := _rule_evidence(text, intent, phrases))
     ]
+
+    # 订单卡片带来的自然语言通常不是“物流/催发货”，而是“订单状态、当前进度、下一步”。
+    # 只有同时出现订单标识和进度动作词才提升为订单业务，避免把普通商品咨询误判成物流查询。
+    if (
+        any(marker in text for marker in _ORDER_REFERENCE_HINTS)
+        and any(marker in text for marker in _ORDER_PROGRESS_HINTS)
+        and not any(intent == "order_logistics" for intent, _, _ in raw_matches)
+    ):
+        evidence = [
+            marker for marker in (*_ORDER_REFERENCE_HINTS, *_ORDER_PROGRESS_HINTS)
+            if marker in text
+        ]
+        raw_matches.append(("order_logistics", "order_logistics", evidence[:4]))
+        raw_matches.sort(key=lambda item: next(
+            index for index, rule in enumerate(RULES) if rule[0] == item[0]
+        ))
 
     count_match = re.search(r"应有\s*\d+.*?实收\s*\d+", text)
     if count_match and not any(intent == "missing_item" for intent, _, _ in raw_matches):
