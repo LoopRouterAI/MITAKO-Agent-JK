@@ -1,6 +1,6 @@
 # MITAKO Agent 文档索引
 
-> 当前入口（2026-08-19）：视觉审核继续以四场景契约为真源；客服沟通 v3 Beta 先读 [开发者说明](./release/2026-08-19-v3-beta-developer-notes.md)、[甲方更新说明](./release/2026-08-19-v3-beta-customer-notes.md) 和 [15×3 回归验收](./testing/客服Agent用户沟通回归验收-20260819.md)。
+> 当前入口（2026-08-19）：视觉审核继续以四场景契约为真源；客服沟通 v3 Beta 先读 [开发者说明](./release/2026-08-19-v3-beta-developer-notes.md)、[甲方更新说明](./release/2026-08-19-v3-beta-customer-notes.md)、[15×3 回归验收](./testing/客服Agent用户沟通回归验收-20260819.md) 和 [发布回执](./release/2026-08-19-v3-beta-release-receipt.md)。
 
 ## 当前主入口
 
@@ -15,6 +15,7 @@
 | [release/2026-08-18-package-layout.md](./release/2026-08-18-package-layout.md) | 发布与验收人员；三份 ZIP 的内容、隐私和回滚边界 |
 | [release/2026-08-19-v3-beta-developer-notes.md](./release/2026-08-19-v3-beta-developer-notes.md) | 研发；客服沟通架构、API、状态机和兼容边界 |
 | [release/2026-08-19-v3-beta-customer-notes.md](./release/2026-08-19-v3-beta-customer-notes.md) | 甲方客服与项目负责人；本版可感知变化 |
+| [release/2026-08-19-v3-beta-release-receipt.md](./release/2026-08-19-v3-beta-release-receipt.md) | 发布与运维；双仓 Release、三包哈希、测试证据和线上部署状态 |
 | [testing/客服Agent用户沟通回归验收-20260819.md](./testing/客服Agent用户沟通回归验收-20260819.md) | 测试、研发和甲方验收；10 项问题与 15×3 证据 |
 | [../Codex接续开发交接说明.md](../Codex接续开发交接说明.md) | 迁移设备与 Codex 接续 |
 | [迭代维护笔记.md](./迭代维护笔记.md) | 下一轮 Codex 先读的踩坑与需求变化记录 |
