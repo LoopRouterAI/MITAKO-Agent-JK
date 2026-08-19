@@ -584,6 +584,9 @@ class ReleaseLayoutTest(unittest.TestCase):
                 Path("甲方沟通交付文档/0817四场景审核业务理解与发布验收说明.html"),
                 Path("甲方沟通交付文档/0817四场景八份审核报告质量索引.html"),
                 Path("甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html"),
+                Path("docs/release/2026-08-19-v3-beta-customer-notes.md"),
+                Path("docs/release/2026-08-19-v3-beta-developer-notes.md"),
+                Path("docs/testing/客服Agent用户沟通回归验收-20260819.md"),
                 Path("证据包说明.md"),
             ]
             report_paths = [
@@ -656,6 +659,21 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertIn('"docs/release/2026-08-19-v3-beta-customer-notes.md"', verifier)
         self.assertIn('"docs/testing/客服Agent用户沟通回归验收-20260819.md"', verifier)
         self.assertIn('"docs/release/2026-08-18-package-layout.md"', verifier)
+
+    def test_evidence_package_includes_current_v3_release_and_acceptance_docs(self) -> None:
+        evidence = (ROOT / "scripts" / "package_four_scenario_evidence.ps1").read_text(encoding="utf-8-sig")
+        verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")
+
+        for path in (
+            "docs\\release\\2026-08-19-v3-beta-customer-notes.md",
+            "docs\\release\\2026-08-19-v3-beta-developer-notes.md",
+            "docs\\testing\\客服Agent用户沟通回归验收-20260819.md",
+        ):
+            self.assertIn(f'Copy-File "{path}"', evidence)
+        evidence_verifier = verifier.split("def _verify_evidence", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("V3_CUSTOMER_RELEASE_NOTES", evidence_verifier)
+        self.assertIn("V3_DEVELOPER_RELEASE_NOTES", evidence_verifier)
+        self.assertIn("CUSTOMER_CHAT_ACCEPTANCE", evidence_verifier)
 
 
 if __name__ == "__main__":
