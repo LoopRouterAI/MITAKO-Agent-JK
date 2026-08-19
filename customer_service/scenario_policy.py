@@ -227,6 +227,17 @@ def decide_scenario(
     code = "high_risk_complaint" if "high_risk_complaint" in intent.intent_codes else intent.intent_code
 
     if code == "minor_refund_material":
+        if any(term in message for term in ("两本户口本", "分别在两本", "不同户口本")):
+            return ScenarioDecision(
+                core_conclusion="guardianship_chain_not_established",
+                action_state=_action("minor_refund_material"),
+                next_step=_next(
+                    "request_legal_guardianship_proof",
+                    "补充能直接闭环法定监护关系的材料",
+                    user_action_required=True,
+                ),
+                policy_refs=[f"{POLICY_VERSION}/guardianship-chain"],
+            )
         if _minor_mobile_owner(message, facts) == "minor":
             return ScenarioDecision(
                 core_conclusion="child_mobile_invoice_not_acceptable",
@@ -442,6 +453,42 @@ def decide_scenario(
             policy_refs=[f"{POLICY_VERSION}/privacy-explicit-config"],
             privacy_entry=entry if configured else "",
             privacy_sla=sla if configured else "",
+        )
+
+    if code == "lottery_rule":
+        return ScenarioDecision(
+            core_conclusion="published_rule_required",
+            action_state=_action("lottery_rule"),
+            next_step=_next("show_published_rule_boundary", "说明已公示规则及无法推断的边界"),
+            policy_refs=[f"{POLICY_VERSION}/published-lottery-rule"],
+        )
+
+    if code == "order_logistics":
+        if any(term in message for term in ("第二笔订单", "另一笔订单", "不是刚才那一笔")):
+            return ScenarioDecision(
+                core_conclusion="order_selection_required",
+                action_state=_action("order_lookup", ActionStatus.REQUESTED, "order_selection_required"),
+                next_step=_next("select_second_order", "选择需要查询的第二笔订单", user_action_required=True),
+                policy_refs=[f"{POLICY_VERSION}/order-selection"],
+            )
+        current = action if action and action.action == "order_lookup" else _action(
+            "order_lookup",
+            ActionStatus.REQUESTED,
+            "verified_order_lookup_required",
+        )
+        in_transit = any(term in message for term in ("运输途中", "当前到哪里", "物流到哪"))
+        return ScenarioDecision(
+            core_conclusion=(
+                "show_verified_logistics_node"
+                if in_transit
+                else "show_verified_order_progress"
+            ),
+            action_state=current,
+            next_step=_next(
+                "wait_for_next_logistics_event" if in_transit else "show_current_progress",
+                "等待下一物流节点" if in_transit else "显示当前订单进度",
+            ),
+            policy_refs=[f"{POLICY_VERSION}/verified-order-progress"],
         )
 
     return ScenarioDecision(

@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 import json
 import re
+import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 from customer_service.contracts import IntentResult
 
@@ -298,6 +304,76 @@ def test_business_readiness_marks_material_collection_in_persisted_sop_state(
     }, {"configurable": {}}))
 
     assert result["sop_state"]["material_collection_turn"] is True
+
+
+def test_address_change_without_partner_write_returns_failed_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent
+
+    class FailingClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, *_args, **_kwargs):
+            raise OSError("partner unavailable")
+
+    monkeypatch.setattr(agent.httpx, "AsyncClient", FailingClient)
+    result = asyncio.run(agent.query_order_system({
+        "user_id": "usr_004",
+        "intent": "订单修改/收货地址",
+        "messages": [{"role": "user", "content": "订单026403还没出库，我填错了收货地址，能修改吗？"}],
+        "raw_user_content": "订单026403还没出库，我填错了收货地址，能修改吗？",
+        "active_order_id": "",
+        "conversation_state": {"intent": _intent("address_change", "order_change")},
+    }, {"configurable": {}}))
+
+    action = result["conversation_state"]["action_state"]
+    assert action["action"] == "address_change"
+    assert action["status"] == "failed"
+    assert action["reason_code"] == "partner_integration_not_connected"
+
+
+def test_verified_logistics_query_returns_succeeded_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"carrier": "受控承运商", "status": "in_transit", "timeline": [{"status": "运输中"}]}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, *_args, **_kwargs):
+            return Response()
+
+    monkeypatch.setattr(agent.httpx, "AsyncClient", Client)
+    result = asyncio.run(agent.query_logistics({
+        "order_data": {"orders": [{"order_id": "ORD-LOG-1"}]},
+        "conversation_state": {"intent": _intent("order_logistics", "order_logistics")},
+    }, {"configurable": {}}))
+
+    action = result["conversation_state"]["action_state"]
+    assert action["action"] == "order_lookup"
+    assert action["status"] == "succeeded"
+    assert action["receipt_id"] == "LOGISTICS-ORD-LOG-1"
 
 
 def test_transfer_success_requires_canonical_queue_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -661,3 +737,124 @@ def test_verified_attachment_metadata_drives_static_route_in_full_chat(
     public_text = json.dumps(events, ensure_ascii=False)
     assert "evidence_verified" not in public_text
     assert "evidence_category" not in public_text
+
+
+_PERSONA_USERS = {
+    "gold_member": "usr_001",
+    "silver_member": "usr_002",
+    "platinum_member": "usr_003",
+    "regular_member": "usr_004",
+    "new_user": "usr_005",
+    "guardian": "usr_006",
+}
+_CASE_USER_OVERRIDES = {
+    # 该控制场景必须具备受信订单上下文；usr_005 的演示账号明确没有订单。
+    "CHAT-15-SHIPMENT-PROGRESS": "usr_004",
+}
+
+
+async def _reply_plan_only(_system: str, user: str, *_args, **_kwargs) -> str:
+    try:
+        plan = json.loads(user).get("reply_plan") or {}
+        lines = [str(item) for item in plan.get("must_say") or [] if str(item).strip()]
+        return "".join(lines) or "请按当前处理状态继续。"
+    except Exception:
+        return "请按当前处理状态继续。"
+
+
+def _acceptance_signature(done: dict) -> tuple[str, str, str, str, str]:
+    state = done.get("conversation_state") or {}
+    intent = state.get("intent") or {}
+    action = state.get("action_state") or {}
+    next_step = state.get("next_step") or {}
+    return (
+        str(intent.get("intent_code") or ""),
+        str(intent.get("scenario_code") or ""),
+        str(state.get("core_conclusion") or ""),
+        str(action.get("status") or ""),
+        str(next_step.get("code") or ""),
+    )
+
+
+def run_acceptance(rounds: int, output: Path) -> int:
+    import agent
+    import main
+
+    cases = json.loads(
+        (ROOT / "tests" / "fixtures" / "customer_agent_20260818_cases.json").read_text(encoding="utf-8")
+    )["cases"]
+    rows = []
+    failures = []
+    with tempfile.TemporaryDirectory(prefix="mitako-customer-chat-acceptance-") as temp_dir:
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            _reset_handoff_store(monkeypatch, Path(temp_dir))
+            monkeypatch.setenv("MITAKO_PRIVACY_DELETION_ENTRY", "联系隐私专席提交身份核验申请")
+            monkeypatch.setenv("MITAKO_PRIVACY_DELETION_SLA", "身份核验通过后 15 个工作日内处理")
+            monkeypatch.setattr(agent, "call_llm", _reply_plan_only)
+            client = TestClient(main.app)
+            for round_no in range(1, rounds + 1):
+                for case in cases:
+                    user_id = _CASE_USER_OVERRIDES.get(case["case_id"], _PERSONA_USERS[case["persona"]])
+                    session_id = f"accept-{round_no}-{case['case_id'].lower()}"
+                    events = _run_chat(client, user_id, session_id, case["message"])
+                    done = next((item["data"] for item in events if item["event"] == "done"), None)
+                    expected = (
+                        case["expected_intent"],
+                        case["expected_scenario"],
+                        case["expected_core_conclusion"],
+                        case["expected_action_status"],
+                        case["expected_next_step"],
+                    )
+                    actual = _acceptance_signature(done or {})
+                    forbidden = [
+                        claim for claim in case.get("forbidden_claims", [])
+                        if claim in str((done or {}).get("reply") or "")
+                    ]
+                    passed = done is not None and actual == expected and not forbidden
+                    row = {
+                        "round": round_no,
+                        "case_id": case["case_id"],
+                        "priority": case["priority"],
+                        "passed": passed,
+                        "expected": expected,
+                        "actual": actual,
+                        "forbidden_claims_found": forbidden,
+                        "done_status": (done or {}).get("status"),
+                    }
+                    rows.append(row)
+                    if not passed:
+                        failures.append(row)
+        finally:
+            monkeypatch.undo()
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "version": "MITAKO-CUSTOMER-CHAT-20260818.1",
+        "tested_at": "2026-08-19",
+        "rounds": rounds,
+        "case_count": len(cases),
+        "run_count": len(rows),
+        "passed": len(rows) - len(failures),
+        "failed": len(failures),
+        "model_mode": "deterministic_reply_plan_renderer",
+        "rows": rows,
+    }
+    output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({key: report[key] for key in ("rounds", "case_count", "run_count", "passed", "failed")}, ensure_ascii=False))
+    if failures:
+        print(json.dumps(failures, ensure_ascii=False, indent=2))
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="运行 2026-08-18 客服沟通 15 场景稳定性验收")
+    parser.add_argument("--rounds", type=int, default=3)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=ROOT / "tests" / "reports" / "customer_chat_20260819_acceptance.json",
+    )
+    args = parser.parse_args()
+    raise SystemExit(run_acceptance(max(1, args.rounds), args.output))

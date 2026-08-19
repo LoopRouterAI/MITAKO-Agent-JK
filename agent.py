@@ -5,6 +5,7 @@ import json
 import httpx
 import asyncio
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, TypedDict, List, Dict, Any, Optional
 from langchain_core.runnables import RunnableConfig
@@ -934,6 +935,26 @@ async def query_order_system(state: AgentState, config: RunnableConfig) -> Dict[
     if focus_ref and order_data.get("orders"):
         order_data = _focus_order_data(order_data, focus_ref)
 
+    conversation_state = dict(state.get("conversation_state") or {})
+    intent_result = conversation_state.get("intent") or {}
+    if _intent_in_result(intent_result, "address_change"):
+        conversation_state["action_state"] = action_from_tool(
+            "address_change",
+            "order_service",
+            {"status": "failed", "reason_code": "partner_integration_not_connected"},
+        ).model_dump(mode="json")
+    elif _intent_in_result(intent_result, "order_logistics") and order_data.get("orders"):
+        order_id = str(order_data["orders"][0].get("order_id") or user_id)
+        conversation_state["action_state"] = action_from_tool(
+            "order_lookup",
+            "order_service",
+            {
+                "status": "succeeded",
+                "receipt_id": f"ORDER-{order_id}",
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+            },
+        ).model_dump(mode="json")
+
     if queue:
         orders_summary = ", ".join([f"{o['order_id']}({o['status']})" for o in order_data.get("orders", [])])
         desc = (
@@ -946,7 +967,7 @@ async def query_order_system(state: AgentState, config: RunnableConfig) -> Dict[
             "node": "query_order",
             "desc": desc
         })
-    return {"order_data": order_data}
+    return {"order_data": order_data, "conversation_state": conversation_state}
 
 
 # 5.6 query_logistics 节点
@@ -994,7 +1015,18 @@ async def query_logistics(state: AgentState, config: RunnableConfig) -> Dict[str
             "node": "query_logistics",
             "desc": desc
         })
-    return {"logistics_data": logistics_data}
+    conversation_state = dict(state.get("conversation_state") or {})
+    if logistics_data and _intent_in_result(conversation_state.get("intent") or {}, "order_logistics"):
+        conversation_state["action_state"] = action_from_tool(
+            "order_lookup",
+            "order_service",
+            {
+                "status": "succeeded",
+                "receipt_id": f"LOGISTICS-{order_id}",
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+            },
+        ).model_dump(mode="json")
+    return {"logistics_data": logistics_data, "conversation_state": conversation_state}
 
 
 # 5.7 search_sop 节点：检索匹配 SOP 与供应链预警数据

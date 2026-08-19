@@ -475,6 +475,16 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertIn('name.endswith("prompts/visual_review/schemas.pyc")', verifier)
         self.assertIn('name.endswith("configs/model_catalog.pyc")', verifier)
         self.assertIn('Copy-RuntimeDir "configs"', customer_script)
+        self.assertIn('Copy-RuntimeDir "customer_service"', customer_script)
+        for runtime_module in (
+            "customer_service/contracts.pyc",
+            "customer_service/intent_router.pyc",
+            "customer_service/action_state.pyc",
+            "customer_service/scenario_policy.pyc",
+            "customer_service/reply_guard.pyc",
+            "customer_service/public_projection.pyc",
+        ):
+            self.assertIn(f'name.endswith("{runtime_module}")', verifier)
 
     def test_compiled_customer_runtime_locks_python_minor_version(self) -> None:
         customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")

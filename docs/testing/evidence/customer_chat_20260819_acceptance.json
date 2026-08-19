@@ -1,0 +1,1002 @@
+{
+  "version": "MITAKO-CUSTOMER-CHAT-20260818.1",
+  "tested_at": "2026-08-19",
+  "rounds": 3,
+  "case_count": 15,
+  "run_count": 45,
+  "passed": 45,
+  "failed": 0,
+  "model_mode": "deterministic_reply_plan_renderer",
+  "rows": [
+    {
+      "round": 1,
+      "case_id": "CHAT-01-MINOR-MOBILE-OWNER",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "minor_refund_material",
+        "minor_refund",
+        "child_mobile_invoice_not_acceptable",
+        "not_requested",
+        "request_guardian_mobile_proof"
+      ],
+      "actual": [
+        "minor_refund_material",
+        "minor_refund",
+        "child_mobile_invoice_not_acceptable",
+        "not_requested",
+        "request_guardian_mobile_proof"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-02-PRODUCT-AMBIGUOUS",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "product_consultation",
+        "product_consultation",
+        "product_identity_ambiguous",
+        "not_requested",
+        "request_product_identity"
+      ],
+      "actual": [
+        "product_consultation",
+        "product_consultation",
+        "product_identity_ambiguous",
+        "not_requested",
+        "request_product_identity"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-03-ENTITLEMENT-MISSING",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "entitlement_missing",
+        "missing_item",
+        "entitlement_baseline_required",
+        "requested",
+        "lookup_entitlement_rule"
+      ],
+      "actual": [
+        "entitlement_missing",
+        "missing_item",
+        "entitlement_baseline_required",
+        "requested",
+        "lookup_entitlement_rule"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-04-MATERIAL-NOT-UPLOADED",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "product_damage",
+        "product_damage",
+        "material_not_received",
+        "not_requested",
+        "upload_materials"
+      ],
+      "actual": [
+        "product_damage",
+        "product_damage",
+        "material_not_received",
+        "not_requested",
+        "upload_materials"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-05-WRONG-ITEM",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "wrong_item",
+        "wrong_item",
+        "wrong_item_materials_required",
+        "not_requested",
+        "request_wrong_item_evidence"
+      ],
+      "actual": [
+        "wrong_item",
+        "wrong_item",
+        "wrong_item_materials_required",
+        "not_requested",
+        "request_wrong_item_evidence"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-06-MISSING-COUNT",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "missing_item",
+        "missing_item",
+        "expected_12_received_11",
+        "not_requested",
+        "request_missing_item_evidence"
+      ],
+      "actual": [
+        "missing_item",
+        "missing_item",
+        "expected_12_received_11",
+        "not_requested",
+        "request_missing_item_evidence"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-07-REFUND-HANDOFF",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "human_handoff",
+        "refund_progress",
+        "handoff_receipt_required",
+        "queued",
+        "show_queue_status"
+      ],
+      "actual": [
+        "human_handoff",
+        "refund_progress",
+        "handoff_receipt_required",
+        "queued",
+        "show_queue_status"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-08-HIGH-RISK-COMPLAINT",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "high_risk_complaint",
+        "complaint",
+        "complaint_protocol_required",
+        "queued",
+        "show_owner_sla_receipt"
+      ],
+      "actual": [
+        "high_risk_complaint",
+        "complaint",
+        "complaint_protocol_required",
+        "queued",
+        "show_owner_sla_receipt"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-09-ADDRESS-CHANGE-FAILURE",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "address_change",
+        "order_change",
+        "address_change_requires_tool",
+        "failed",
+        "show_retry_and_human_entry"
+      ],
+      "actual": [
+        "address_change",
+        "order_change",
+        "address_change_requires_tool",
+        "failed",
+        "show_retry_and_human_entry"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "failed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-10-PRIVACY-DELETION",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "privacy_deletion",
+        "privacy_compliance",
+        "privacy_verification_required",
+        "not_requested",
+        "show_configured_privacy_entry"
+      ],
+      "actual": [
+        "privacy_deletion",
+        "privacy_compliance",
+        "privacy_verification_required",
+        "not_requested",
+        "show_configured_privacy_entry"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-11-LOTTERY-REPEAT",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "lottery_rule",
+        "lottery_rule",
+        "published_rule_required",
+        "not_requested",
+        "show_published_rule_boundary"
+      ],
+      "actual": [
+        "lottery_rule",
+        "lottery_rule",
+        "published_rule_required",
+        "not_requested",
+        "show_published_rule_boundary"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-12-LOGISTICS-IN-TRANSIT",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_logistics_node",
+        "succeeded",
+        "wait_for_next_logistics_event"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_logistics_node",
+        "succeeded",
+        "wait_for_next_logistics_event"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-13-SECOND-ORDER",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "order_selection_required",
+        "requested",
+        "select_second_order"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "order_selection_required",
+        "requested",
+        "select_second_order"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-14-GUARDIAN-RELATIONSHIP",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "minor_refund_material",
+        "minor_refund",
+        "guardianship_chain_not_established",
+        "not_requested",
+        "request_legal_guardianship_proof"
+      ],
+      "actual": [
+        "minor_refund_material",
+        "minor_refund",
+        "guardianship_chain_not_established",
+        "not_requested",
+        "request_legal_guardianship_proof"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 1,
+      "case_id": "CHAT-15-SHIPMENT-PROGRESS",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_order_progress",
+        "succeeded",
+        "show_current_progress"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_order_progress",
+        "succeeded",
+        "show_current_progress"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-01-MINOR-MOBILE-OWNER",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "minor_refund_material",
+        "minor_refund",
+        "child_mobile_invoice_not_acceptable",
+        "not_requested",
+        "request_guardian_mobile_proof"
+      ],
+      "actual": [
+        "minor_refund_material",
+        "minor_refund",
+        "child_mobile_invoice_not_acceptable",
+        "not_requested",
+        "request_guardian_mobile_proof"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-02-PRODUCT-AMBIGUOUS",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "product_consultation",
+        "product_consultation",
+        "product_identity_ambiguous",
+        "not_requested",
+        "request_product_identity"
+      ],
+      "actual": [
+        "product_consultation",
+        "product_consultation",
+        "product_identity_ambiguous",
+        "not_requested",
+        "request_product_identity"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-03-ENTITLEMENT-MISSING",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "entitlement_missing",
+        "missing_item",
+        "entitlement_baseline_required",
+        "requested",
+        "lookup_entitlement_rule"
+      ],
+      "actual": [
+        "entitlement_missing",
+        "missing_item",
+        "entitlement_baseline_required",
+        "requested",
+        "lookup_entitlement_rule"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-04-MATERIAL-NOT-UPLOADED",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "product_damage",
+        "product_damage",
+        "material_not_received",
+        "not_requested",
+        "upload_materials"
+      ],
+      "actual": [
+        "product_damage",
+        "product_damage",
+        "material_not_received",
+        "not_requested",
+        "upload_materials"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-05-WRONG-ITEM",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "wrong_item",
+        "wrong_item",
+        "wrong_item_materials_required",
+        "not_requested",
+        "request_wrong_item_evidence"
+      ],
+      "actual": [
+        "wrong_item",
+        "wrong_item",
+        "wrong_item_materials_required",
+        "not_requested",
+        "request_wrong_item_evidence"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-06-MISSING-COUNT",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "missing_item",
+        "missing_item",
+        "expected_12_received_11",
+        "not_requested",
+        "request_missing_item_evidence"
+      ],
+      "actual": [
+        "missing_item",
+        "missing_item",
+        "expected_12_received_11",
+        "not_requested",
+        "request_missing_item_evidence"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-07-REFUND-HANDOFF",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "human_handoff",
+        "refund_progress",
+        "handoff_receipt_required",
+        "queued",
+        "show_queue_status"
+      ],
+      "actual": [
+        "human_handoff",
+        "refund_progress",
+        "handoff_receipt_required",
+        "queued",
+        "show_queue_status"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-08-HIGH-RISK-COMPLAINT",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "high_risk_complaint",
+        "complaint",
+        "complaint_protocol_required",
+        "queued",
+        "show_owner_sla_receipt"
+      ],
+      "actual": [
+        "high_risk_complaint",
+        "complaint",
+        "complaint_protocol_required",
+        "queued",
+        "show_owner_sla_receipt"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-09-ADDRESS-CHANGE-FAILURE",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "address_change",
+        "order_change",
+        "address_change_requires_tool",
+        "failed",
+        "show_retry_and_human_entry"
+      ],
+      "actual": [
+        "address_change",
+        "order_change",
+        "address_change_requires_tool",
+        "failed",
+        "show_retry_and_human_entry"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "failed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-10-PRIVACY-DELETION",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "privacy_deletion",
+        "privacy_compliance",
+        "privacy_verification_required",
+        "not_requested",
+        "show_configured_privacy_entry"
+      ],
+      "actual": [
+        "privacy_deletion",
+        "privacy_compliance",
+        "privacy_verification_required",
+        "not_requested",
+        "show_configured_privacy_entry"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-11-LOTTERY-REPEAT",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "lottery_rule",
+        "lottery_rule",
+        "published_rule_required",
+        "not_requested",
+        "show_published_rule_boundary"
+      ],
+      "actual": [
+        "lottery_rule",
+        "lottery_rule",
+        "published_rule_required",
+        "not_requested",
+        "show_published_rule_boundary"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-12-LOGISTICS-IN-TRANSIT",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_logistics_node",
+        "succeeded",
+        "wait_for_next_logistics_event"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_logistics_node",
+        "succeeded",
+        "wait_for_next_logistics_event"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-13-SECOND-ORDER",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "order_selection_required",
+        "requested",
+        "select_second_order"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "order_selection_required",
+        "requested",
+        "select_second_order"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-14-GUARDIAN-RELATIONSHIP",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "minor_refund_material",
+        "minor_refund",
+        "guardianship_chain_not_established",
+        "not_requested",
+        "request_legal_guardianship_proof"
+      ],
+      "actual": [
+        "minor_refund_material",
+        "minor_refund",
+        "guardianship_chain_not_established",
+        "not_requested",
+        "request_legal_guardianship_proof"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 2,
+      "case_id": "CHAT-15-SHIPMENT-PROGRESS",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_order_progress",
+        "succeeded",
+        "show_current_progress"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_order_progress",
+        "succeeded",
+        "show_current_progress"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-01-MINOR-MOBILE-OWNER",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "minor_refund_material",
+        "minor_refund",
+        "child_mobile_invoice_not_acceptable",
+        "not_requested",
+        "request_guardian_mobile_proof"
+      ],
+      "actual": [
+        "minor_refund_material",
+        "minor_refund",
+        "child_mobile_invoice_not_acceptable",
+        "not_requested",
+        "request_guardian_mobile_proof"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-02-PRODUCT-AMBIGUOUS",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "product_consultation",
+        "product_consultation",
+        "product_identity_ambiguous",
+        "not_requested",
+        "request_product_identity"
+      ],
+      "actual": [
+        "product_consultation",
+        "product_consultation",
+        "product_identity_ambiguous",
+        "not_requested",
+        "request_product_identity"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-03-ENTITLEMENT-MISSING",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "entitlement_missing",
+        "missing_item",
+        "entitlement_baseline_required",
+        "requested",
+        "lookup_entitlement_rule"
+      ],
+      "actual": [
+        "entitlement_missing",
+        "missing_item",
+        "entitlement_baseline_required",
+        "requested",
+        "lookup_entitlement_rule"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-04-MATERIAL-NOT-UPLOADED",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "product_damage",
+        "product_damage",
+        "material_not_received",
+        "not_requested",
+        "upload_materials"
+      ],
+      "actual": [
+        "product_damage",
+        "product_damage",
+        "material_not_received",
+        "not_requested",
+        "upload_materials"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-05-WRONG-ITEM",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "wrong_item",
+        "wrong_item",
+        "wrong_item_materials_required",
+        "not_requested",
+        "request_wrong_item_evidence"
+      ],
+      "actual": [
+        "wrong_item",
+        "wrong_item",
+        "wrong_item_materials_required",
+        "not_requested",
+        "request_wrong_item_evidence"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-06-MISSING-COUNT",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "missing_item",
+        "missing_item",
+        "expected_12_received_11",
+        "not_requested",
+        "request_missing_item_evidence"
+      ],
+      "actual": [
+        "missing_item",
+        "missing_item",
+        "expected_12_received_11",
+        "not_requested",
+        "request_missing_item_evidence"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-07-REFUND-HANDOFF",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "human_handoff",
+        "refund_progress",
+        "handoff_receipt_required",
+        "queued",
+        "show_queue_status"
+      ],
+      "actual": [
+        "human_handoff",
+        "refund_progress",
+        "handoff_receipt_required",
+        "queued",
+        "show_queue_status"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-08-HIGH-RISK-COMPLAINT",
+      "priority": "P2",
+      "passed": true,
+      "expected": [
+        "high_risk_complaint",
+        "complaint",
+        "complaint_protocol_required",
+        "queued",
+        "show_owner_sla_receipt"
+      ],
+      "actual": [
+        "high_risk_complaint",
+        "complaint",
+        "complaint_protocol_required",
+        "queued",
+        "show_owner_sla_receipt"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-09-ADDRESS-CHANGE-FAILURE",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "address_change",
+        "order_change",
+        "address_change_requires_tool",
+        "failed",
+        "show_retry_and_human_entry"
+      ],
+      "actual": [
+        "address_change",
+        "order_change",
+        "address_change_requires_tool",
+        "failed",
+        "show_retry_and_human_entry"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "failed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-10-PRIVACY-DELETION",
+      "priority": "P1",
+      "passed": true,
+      "expected": [
+        "privacy_deletion",
+        "privacy_compliance",
+        "privacy_verification_required",
+        "not_requested",
+        "show_configured_privacy_entry"
+      ],
+      "actual": [
+        "privacy_deletion",
+        "privacy_compliance",
+        "privacy_verification_required",
+        "not_requested",
+        "show_configured_privacy_entry"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-11-LOTTERY-REPEAT",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "lottery_rule",
+        "lottery_rule",
+        "published_rule_required",
+        "not_requested",
+        "show_published_rule_boundary"
+      ],
+      "actual": [
+        "lottery_rule",
+        "lottery_rule",
+        "published_rule_required",
+        "not_requested",
+        "show_published_rule_boundary"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-12-LOGISTICS-IN-TRANSIT",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_logistics_node",
+        "succeeded",
+        "wait_for_next_logistics_event"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_logistics_node",
+        "succeeded",
+        "wait_for_next_logistics_event"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-13-SECOND-ORDER",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "order_selection_required",
+        "requested",
+        "select_second_order"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "order_selection_required",
+        "requested",
+        "select_second_order"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-14-GUARDIAN-RELATIONSHIP",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "minor_refund_material",
+        "minor_refund",
+        "guardianship_chain_not_established",
+        "not_requested",
+        "request_legal_guardianship_proof"
+      ],
+      "actual": [
+        "minor_refund_material",
+        "minor_refund",
+        "guardianship_chain_not_established",
+        "not_requested",
+        "request_legal_guardianship_proof"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    },
+    {
+      "round": 3,
+      "case_id": "CHAT-15-SHIPMENT-PROGRESS",
+      "priority": "CONTROL",
+      "passed": true,
+      "expected": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_order_progress",
+        "succeeded",
+        "show_current_progress"
+      ],
+      "actual": [
+        "order_logistics",
+        "order_logistics",
+        "show_verified_order_progress",
+        "succeeded",
+        "show_current_progress"
+      ],
+      "forbidden_claims_found": [],
+      "done_status": "completed"
+    }
+  ]
+}
