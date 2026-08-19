@@ -20,6 +20,9 @@ $CustomerHtmlPath = Join-Path $DeliveryDir "MITAKO_Agent-customer-delivery.html"
 $Stage = Join-Path $env:TEMP "MITAKO_Agent_customer_stage_$Date"
 $CompileStage = Join-Path $env:TEMP "mitako_runtime_compile_$Date"
 $GitCommit = (git rev-parse HEAD).Trim()
+$FrontendBuild = "v3-beta-$($GitCommit.Substring(0, 12))"
+$CustomerPolicyVersion = "MITAKO-CUSTOMER-CHAT-20260818.1"
+$PackageDeployedAt = (Get-Date).ToString("o")
 
 function Assert-NoTrackedChanges([string]$Message) {
     & git diff --quiet --
@@ -852,6 +855,10 @@ set "%MTK%_BUSINESS_%VERIFY_KIND%_API_ENABLED=1"
 set "%MTK%_AUTH_REQUIRED=0"
 set "%MTK%_PROTECTED_API_AUTH_REQUIRED=0"
 set "%MTK%_%DEV_KIND%_AUTH_BYPASS=1"
+set MITAKO_BUILD_COMMIT=__MITAKO_BUILD_COMMIT__
+set VITE_BUILD_ID=__VITE_BUILD_ID__
+set MITAKO_CUSTOMER_POLICY_VERSION=__MITAKO_CUSTOMER_POLICY_VERSION__
+set MITAKO_DEPLOYED_AT=__MITAKO_DEPLOYED_AT__
 set VISUAL_WORKBENCH_PORT=7861
 set VISUAL_WORKBENCH_PUBLIC_URL=http://127.0.0.1:7861
 set "%MTK%_VISUAL_WORKBENCH_DIR=%CD%\visual_review_workbench"
@@ -899,6 +906,10 @@ echo Visual workbench: run visual_review_workbench\start-workbench-windows.bat
 pause
 endlocal
 '@
+$StartBat = $StartBat.Replace("__MITAKO_BUILD_COMMIT__", $GitCommit)
+$StartBat = $StartBat.Replace("__VITE_BUILD_ID__", $FrontendBuild)
+$StartBat = $StartBat.Replace("__MITAKO_CUSTOMER_POLICY_VERSION__", $CustomerPolicyVersion)
+$StartBat = $StartBat.Replace("__MITAKO_DEPLOYED_AT__", $PackageDeployedAt)
 $StartBat | Set-Content -LiteralPath (Join-Path $Stage "start-windows.bat") -Encoding UTF8
 
 $WorkbenchBat = @'
@@ -964,6 +975,8 @@ $customerEvidenceFiles = @(
     "docs\delivery\after-sales-agent-integration.md",
     "docs\delivery\甲方技术对接与私有化部署说明.html",
     "docs\release\2026-08-18-customer-update-notes.md",
+    "docs\release\2026-08-19-v3-beta-customer-notes.md",
+    "docs\testing\客服Agent用户沟通回归验收-20260819.md",
     "docs\release\2026-08-18-package-layout.md",
     "甲方沟通交付文档\0817四场景审核业务理解与发布验收说明.html",
     "甲方沟通交付文档\0817四场景八份审核报告质量索引.html",

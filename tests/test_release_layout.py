@@ -479,6 +479,15 @@ class ReleaseLayoutTest(unittest.TestCase):
         self.assertIn('name.endswith("configs/model_catalog.pyc")', verifier)
         self.assertIn('Copy-RuntimeDir "configs"', customer_script)
         self.assertIn('Copy-RuntimeDir "customer_service"', customer_script)
+        for version_env in (
+            "MITAKO_BUILD_COMMIT",
+            "VITE_BUILD_ID",
+            "MITAKO_CUSTOMER_POLICY_VERSION",
+            "MITAKO_DEPLOYED_AT",
+        ):
+            self.assertIn(version_env, customer_script)
+        self.assertIn("__MITAKO_BUILD_COMMIT__", customer_script)
+        self.assertIn("$StartBat.Replace", customer_script)
         for runtime_module in (
             "customer_service/contracts.pyc",
             "customer_service/intent_router.pyc",
