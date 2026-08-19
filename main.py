@@ -18,6 +18,7 @@ from sse_starlette.sse import EventSourceResponse
 from agent import agent_app, classify_intent, sanitize_customer_reply
 from customer_service.contracts import ReplyPlan
 from customer_service.fact_resolver import resolve_facts
+from customer_service.public_projection import project_conversation_state
 from customer_service.reply_guard import guard_reply
 from customer_service.reply_plan import build_reply_plan
 from llm_models import DEFAULT_PUBLIC_MODEL_ID, list_models_public
@@ -807,10 +808,20 @@ def _public_api_log(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _public_unified_analysis(event: Dict[str, Any]) -> Dict[str, Any]:
+    intent = {
+        "intent_code": event.get("intent_code") or "",
+        "scenario_code": event.get("scenario_code") or "",
+        "intent_codes": event.get("intent_codes") or [],
+        "scenario_codes": event.get("scenario_codes") or [],
+        "confidence": event.get("confidence"),
+        "requires_clarification": bool(event.get("requires_clarification")),
+        "clarification_fields": event.get("clarification_fields") or [],
+    }
     return {
         "intent": sanitize_customer_reply(str(event.get("intent") or "服务咨询")),
         "emotion_level": int(event.get("emotion_level") or 2),
         "should_transfer": bool(event.get("should_transfer")),
+        "conversation_state": project_conversation_state({"intent": intent}),
     }
 
 
@@ -1885,6 +1896,8 @@ async def chat_stream(req: ChatRequest, request: Request):
                 and result.get("should_transfer")
                 and str(result_action_state.get("status") or "") == "queued"
             )
+            finalized = _finalize_customer_reply(result)
+            public_conversation_state = project_conversation_state(finalized["conversation_state"])
 
             for event in pending_handoff_events:
                 if event["type"] == "handoff_brief":
@@ -1910,16 +1923,22 @@ async def chat_stream(req: ChatRequest, request: Request):
                         "brief": build_public_handoff_brief(event.get("brief", {})),
                         "queue": public_queue,
                         "action_state": action_state,
+                        "conversation_state": public_conversation_state,
                     }, ensure_ascii=False),
                 }
 
             primary_card = _select_primary_customer_card(result)
             if primary_card:
-                yield {"event": "card", "data": json.dumps(primary_card, ensure_ascii=False)}
+                yield {
+                    "event": "card",
+                    "data": json.dumps({
+                        **primary_card,
+                        "conversation_state": public_conversation_state,
+                    }, ensure_ascii=False),
+                }
 
             if await request.is_disconnected():
                 return
-            finalized = _finalize_customer_reply(result)
             clean_reply = finalized["reply"]
             done_status = finalized["status"]
             result_action_state = finalized["action_state"]
@@ -1968,6 +1987,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     **({"action_state": result_action_state} if result_action_state else {}),
                     **({"required_reply_fields": required_reply_fields} if required_reply_fields else {}),
                     **({"reply_fields": reply_fields} if reply_fields else {}),
+                    "conversation_state": public_conversation_state,
                 }, ensure_ascii=False),
             }
         except asyncio.TimeoutError:
