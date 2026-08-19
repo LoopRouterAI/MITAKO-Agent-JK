@@ -138,6 +138,17 @@ _chat_turn_locks = WeakValueDictionary()
 _chat_turn_registry_lock = asyncio.Lock()
 
 
+@app.get("/api/v1/version")
+async def version_handshake() -> Dict[str, str]:
+    """返回由部署流程显式注入的可审计版本，不读取 Git 工作区。"""
+    return {
+        "backend_commit": os.getenv("MITAKO_BUILD_COMMIT", "").strip() or "unknown",
+        "frontend_build": os.getenv("VITE_BUILD_ID", "").strip() or "unknown",
+        "customer_policy_version": os.getenv("MITAKO_CUSTOMER_POLICY_VERSION", "").strip() or "unknown",
+        "deployed_at": os.getenv("MITAKO_DEPLOYED_AT", "").strip() or "unknown",
+    }
+
+
 def _business_demo_enabled() -> bool:
     raw = os.getenv("MITAKO_BUSINESS_DEMO_API_ENABLED", "").strip().lower()
     if raw in {"1", "true", "yes"}:
