@@ -60,7 +60,7 @@
 
 ## 自动验证
 
-- 全仓：`1488 passed + 100 subtests passed`。
+- 全仓：`1490 passed + 100 subtests passed`。
 - 客服领域与正式 API：15 场景连续 3 轮，`45/45`。
 - P1：`6/6`。
 - 禁止词命中：`0`。
