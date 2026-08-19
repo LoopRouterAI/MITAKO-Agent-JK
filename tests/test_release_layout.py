@@ -379,6 +379,9 @@ class ReleaseLayoutTest(unittest.TestCase):
         )
         self.assertFalse(_dynamic_capacity_evidence_matches_release("not-a-commit", current_commit))
 
+        main_source = (ROOT / "main.py").read_text(encoding="utf-8-sig")
+        self.assertIn("app.include_router(review_service_router)", main_source)
+
     def test_customer_package_excludes_previous_release_archives(self) -> None:
         customer_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")
         verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")

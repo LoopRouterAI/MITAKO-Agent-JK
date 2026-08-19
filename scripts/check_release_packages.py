@@ -40,7 +40,6 @@ REPORT_DIR = ROOT / "tests" / "reports"
 DYNAMIC_CAPACITY_EVIDENCE_PATHS = (
     ".env.example",
     "auth",
-    "main.py",
     "prompts",
     "review_service",
     "poc/visual_review_poc/minor_material_pipeline.py",
