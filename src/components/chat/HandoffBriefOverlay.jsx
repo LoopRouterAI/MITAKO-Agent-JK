@@ -57,7 +57,7 @@ export default function HandoffBriefOverlay({ open, brief, agent, onClose }) {
           )}
           <section>
             <h4 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-1">{t('transfer.briefReason')}</h4>
-            <p className="text-slate-700">{brief.reason || '已为您转接VIP客服继续处理。'}</p>
+            <p className="text-slate-700">{brief.reason || '已进入人工队列，正在等待客服接入。'}</p>
           </section>
           {snippet.length > 0 && (
             <section>

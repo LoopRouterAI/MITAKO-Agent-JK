@@ -43,6 +43,28 @@ _DEFAULT_REASON = {
 _RECEIPT_KEYS = ("receipt_id", "queue_id", "ticket_id", "task_id", "card_id", "compensation_id", "session_id", "id")
 _OCCURRED_KEYS = ("occurred_at", "created_at", "enqueued_at", "accepted_at", "updated_at")
 _MISSING = object()
+_PUBLIC_REASON_CODES = set(_DEFAULT_REASON.values()) | {
+    "action_mismatch",
+    "address_updated",
+    "connected",
+    "entitlement_baseline_required",
+    "human_handoff_accepted",
+    "invalid_action_request",
+    "invalid_tool_receipt",
+    "invalid_tool_response",
+    "invalid_tool_status",
+    "invalid_tool_timestamp",
+    "order_selection_required",
+    "partner_integration_not_connected",
+    "pending_human_handoff",
+    "queue_already_joined",
+    "tool_error",
+    "tool_forbidden",
+    "tool_rejected",
+    "tool_timeout",
+    "tool_unavailable",
+    "upstream_rejected",
+}
 
 
 def _now() -> str:
@@ -55,6 +77,11 @@ def _text(*values: Any) -> str:
         if text:
             return text
     return ""
+
+
+def normalize_reason_code(value: Any, fallback: str = "tool_error") -> str:
+    code = _text(value)
+    return code if code in _PUBLIC_REASON_CODES else fallback
 
 
 def _field(*sources: Mapping[str, Any], keys: tuple[str, ...]) -> str:
@@ -218,14 +245,20 @@ def action_from_tool(action: str, tool_name: str, response: object) -> ActionSta
     if negative_result and not (
         unconnected_mock and status in {ActionStatus.REQUESTED, ActionStatus.PENDING_HUMAN}
     ):
-        reason = _field(state_source, response, keys=("reason_code", "error", "code")) or "tool_rejected"
+        reason = normalize_reason_code(
+            _field(state_source, response, keys=("reason_code", "code")),
+            "tool_rejected",
+        )
         return _failed(action_name, normalized_tool, reason, occurred_at)
 
     if unconnected_mock and status in _COMPLETED_STATUSES:
         status = ActionStatus.REQUESTED
         reason_code = "partner_integration_not_connected"
     else:
-        reason_code = _field(state_source, response, keys=("reason_code", "error", "code")) or _DEFAULT_REASON[status]
+        reason_code = normalize_reason_code(
+            _field(state_source, response, keys=("reason_code", "code")),
+            _DEFAULT_REASON[status],
+        )
 
     if status in _COMPLETED_STATUSES:
         if not receipt_valid:

@@ -7,12 +7,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from review_public_safety import redact_public_review_data
+from .action_state import normalize_reason_code
 
 
 _SENSITIVE_FACT_FIELD = re.compile(
     r"(?:^|[._-])(?:identity|id_card|phone|mobile|address|email|name|account|bank|tracking)(?:$|[._-])",
     re.IGNORECASE,
 )
+_PUBLIC_CODE = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -76,7 +78,7 @@ def _action_state(value: Any) -> dict[str, Any]:
         "action": str(raw.get("action") or ""),
         "status": str(raw.get("status") or "not_requested"),
         "receipt_id": str(raw.get("receipt_id") or ""),
-        "reason_code": str(raw.get("reason_code") or ""),
+        "reason_code": normalize_reason_code(raw.get("reason_code")) if raw.get("reason_code") else "",
         "occurred_at": str(raw.get("occurred_at") or ""),
     }
 
@@ -104,7 +106,9 @@ def project_conversation_state(value: Any) -> dict[str, Any]:
         "material_state": _material_state(raw.get("material_state")),
         "action_state": _action_state(raw.get("action_state")),
         "next_step": _next_step(raw.get("next_step") or scenario.get("next_step")),
-        "core_conclusion": str(raw.get("core_conclusion") or scenario.get("core_conclusion") or ""),
+        "core_conclusion": _safe_core_conclusion(
+            raw.get("core_conclusion") or scenario.get("core_conclusion")
+        ),
         "required_reply_fields": required_fields,
         "reply_fields": redact_public_review_data({
             key: reply_fields.get(key)
@@ -112,3 +116,8 @@ def project_conversation_state(value: Any) -> dict[str, Any]:
             if key in reply_fields
         }),
     }
+
+
+def _safe_core_conclusion(value: Any) -> str:
+    code = str(value or "").strip()
+    return code if _PUBLIC_CODE.fullmatch(code) else ""

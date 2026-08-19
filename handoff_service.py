@@ -341,7 +341,7 @@ def build_public_handoff_brief(brief: Optional[Dict[str, Any]]) -> Dict[str, Any
         })
     return {
         "summary": _sanitize_customer_text(src.get("summary") or "已同步您的服务记录，客服会继续协助处理。"),
-        "reason": "已为您转接VIP客服继续处理。",
+        "reason": "已进入人工队列，正在等待客服接入。",
         "orders": [_sanitize_customer_text(o) for o in (src.get("orders") or [])],
         "conversation_snippet": snippet,
         "conversation_state": project_conversation_state(src.get("conversation_state") or {}),

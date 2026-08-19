@@ -52,7 +52,7 @@ function toPublicHandoffBrief(brief) {
     : [];
   return {
     summary: sanitizeUserVisibleText(brief.summary || '已同步您的服务记录，客服会继续协助处理。'),
-    reason: '已为您转接VIP客服继续处理。',
+    reason: '已进入人工队列，正在等待客服接入。',
     orders: Array.isArray(brief.orders) ? brief.orders.map(sanitizeUserVisibleText) : [],
     conversation_snippet: snippet,
   };
@@ -1117,7 +1117,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
       type: 'custom',
       content: {
         cardType: 'handoff_queue',
-        cardData: { position, ahead, eta, reason: '已为您转接VIP客服继续处理。' },
+        cardData: { position, ahead, eta, reason: '已进入人工队列，正在等待客服接入。' },
       },
       position: 'left',
       user: buildLeftUserMeta(SPEAKER.AI),
@@ -1216,7 +1216,7 @@ export function useChatSSE(currentUser, modelId = 'standard-service', onTurnComp
     cleanupStreamUI();
 
     const brief = eventData.brief || null;
-    const reason = '已为您转接VIP客服继续处理。';
+    const reason = '已进入人工队列，正在等待客服接入。';
     if (eventData[HANDOFF_AUTH_FIELD]) {
       serviceAuthRef.current = eventData[HANDOFF_AUTH_FIELD];
     }

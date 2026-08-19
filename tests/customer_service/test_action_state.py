@@ -51,7 +51,21 @@ def test_rejected_tool_response_is_failed_even_if_it_claims_requested() -> None:
     )
 
     assert action.status == ActionStatus.FAILED
-    assert action.reason_code == "upstream_rejected"
+    assert action.reason_code == "tool_rejected"
+
+
+def test_tool_error_text_never_becomes_public_reason_code() -> None:
+    action = action_from_tool(
+        "address_change",
+        "business_api",
+        {
+            "ok": False,
+            "status": "requested",
+            "error": "API_KEY=sk-secret C:\\private\\service.py:88 user=13800138000",
+        },
+    )
+
+    assert action.reason_code == "tool_rejected"
 
 
 @pytest.mark.parametrize(

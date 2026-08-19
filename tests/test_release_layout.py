@@ -129,6 +129,19 @@ def _write_current_acceptance(root: Path) -> tuple[Path, dict]:
 
 
 class ReleaseLayoutTest(unittest.TestCase):
+    def test_customer_runtime_uses_sanitizer_safe_business_contract_flag(self) -> None:
+        package_script = (ROOT / "scripts" / "package_release.ps1").read_text(encoding="utf-8-sig")
+        main_source = (ROOT / "main.py").read_text(encoding="utf-8-sig")
+
+        self.assertIn("BUSINESS_CONTRACT_API_ENABLED", package_script)
+        self.assertIn("MITAKO_BUSINESS_CONTRACT_API_ENABLED", main_source)
+
+    def test_release_verifier_requires_customer_fact_and_reply_modules(self) -> None:
+        verifier = (ROOT / "scripts" / "check_release_packages.py").read_text(encoding="utf-8-sig")
+
+        self.assertIn("customer_service/fact_resolver.pyc", verifier)
+        self.assertIn("customer_service/reply_plan.pyc", verifier)
+
     def test_media_manifest_path_keeps_media_directory(self) -> None:
         root = Path("D:/MITAKO-release-test")
         self.assertEqual(

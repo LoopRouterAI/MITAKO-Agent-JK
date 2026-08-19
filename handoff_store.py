@@ -183,8 +183,8 @@ def create_handoff_offer(session_id: str, user_id: str, reason: str, tenant_id: 
     offer_id = f"HO-{uuid4().hex[:12].upper()}"
     with _lock, _connect() as conn:
         conn.execute(
-            "UPDATE handoff_offers SET status='expired', updated_at=? WHERE session_id=? AND user_id=? AND status='offered'",
-            (now, session_id, user_id),
+            "UPDATE handoff_offers SET status='expired', updated_at=? WHERE tenant_id=? AND session_id=? AND user_id=? AND status='offered'",
+            (now, tenant_id or "mitako", session_id, user_id),
         )
         conn.execute(
             """
@@ -204,37 +204,52 @@ def create_handoff_offer(session_id: str, user_id: str, reason: str, tenant_id: 
     }
 
 
-def get_active_handoff_offer(session_id: str, user_id: str = "", max_age_seconds: int = 900) -> Optional[Dict[str, Any]]:
+def get_active_handoff_offer(
+    session_id: str,
+    tenant_id: str,
+    user_id: str = "",
+    max_age_seconds: int = 900,
+) -> Optional[Dict[str, Any]]:
     cutoff = time.time() - max(30, max_age_seconds)
     with _lock, _connect() as conn:
         if user_id:
             row = conn.execute(
                 """
                 SELECT * FROM handoff_offers
-                WHERE session_id=? AND user_id=? AND status='offered' AND created_at>=?
+                WHERE tenant_id=? AND session_id=? AND user_id=? AND status='offered' AND created_at>=?
                 ORDER BY created_at DESC LIMIT 1
                 """,
-                (session_id, user_id, cutoff),
+                (tenant_id, session_id, user_id, cutoff),
             ).fetchone()
         else:
             row = conn.execute(
                 """
                 SELECT * FROM handoff_offers
-                WHERE session_id=? AND status='offered' AND created_at>=?
+                WHERE tenant_id=? AND session_id=? AND status='offered' AND created_at>=?
                 ORDER BY created_at DESC LIMIT 1
                 """,
-                (session_id, cutoff),
+                (tenant_id, session_id, cutoff),
             ).fetchone()
     return dict(row) if row else None
 
 
-def update_handoff_offer(offer_id: str, status: str, session_id: str = "", user_id: str = "") -> Optional[Dict[str, Any]]:
+def update_handoff_offer(
+    offer_id: str,
+    status: str,
+    session_id: str,
+    user_id: str,
+    *,
+    tenant_id: str,
+) -> Optional[Dict[str, Any]]:
     allowed = {"consented", "declined", "expired", "failed", "queued"}
     if status not in allowed:
         raise ValueError("invalid_handoff_offer_status")
     now = time.time()
     with _lock, _connect() as conn:
-        row = conn.execute("SELECT * FROM handoff_offers WHERE offer_id=?", (offer_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM handoff_offers WHERE offer_id=? AND tenant_id=?",
+            (offer_id, tenant_id),
+        ).fetchone()
         if not row:
             return None
         current = dict(row)
@@ -242,7 +257,10 @@ def update_handoff_offer(offer_id: str, status: str, session_id: str = "", user_
             return None
         if user_id and current.get("user_id") != user_id:
             return None
-        conn.execute("UPDATE handoff_offers SET status=?, updated_at=? WHERE offer_id=?", (status, now, offer_id))
+        conn.execute(
+            "UPDATE handoff_offers SET status=?, updated_at=? WHERE offer_id=? AND tenant_id=?",
+            (status, now, offer_id, tenant_id),
+        )
         current.update({"status": status, "updated_at": now})
         return current
 
@@ -806,6 +824,23 @@ def _row_to_business_event(row: sqlite3.Row) -> Dict[str, Any]:
         "result": _json_loads(row["result_json"], {}),
         "created_at": row["created_at"],
     }
+
+
+def business_event_checkpoint(session_id: str, tenant_id: str) -> int:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(id), 0) AS checkpoint FROM business_audit_events WHERE session_id=? AND tenant_id=?",
+            (session_id, tenant_id),
+        ).fetchone()
+        return int(row["checkpoint"] or 0)
+
+
+def rollback_business_events(session_id: str, tenant_id: str, checkpoint: int) -> None:
+    with _lock, _connect() as conn:
+        conn.execute(
+            "DELETE FROM business_audit_events WHERE session_id=? AND tenant_id=? AND id>?",
+            (session_id, tenant_id, checkpoint),
+        )
 
 
 def list_business_events(

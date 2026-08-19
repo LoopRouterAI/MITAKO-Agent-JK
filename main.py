@@ -150,7 +150,10 @@ async def version_handshake() -> Dict[str, str]:
 
 
 def _business_demo_enabled() -> bool:
-    raw = os.getenv("MITAKO_BUSINESS_DEMO_API_ENABLED", "").strip().lower()
+    raw = os.getenv(
+        "MITAKO_BUSINESS_CONTRACT_API_ENABLED",
+        os.getenv("MITAKO_BUSINESS_DEMO_API_ENABLED", ""),
+    ).strip().lower()
     if raw in {"1", "true", "yes"}:
         return True
     if raw in {"0", "false", "no"}:
@@ -1366,7 +1369,7 @@ async def request_handoff(req: HandoffRequest, request: Request):
             "ok": True,
             "brief": existing_payload["brief"],
             "queue": build_public_queue_meta(queue_meta),
-            "reason": "已为您转接VIP客服继续处理。",
+            "reason": "已进入人工队列，正在等待客服接入。",
             "handoff_token": handoff_token,
         }
     token = _handoff_bearer(request)
@@ -1379,7 +1382,13 @@ async def request_handoff(req: HandoffRequest, request: Request):
     )
     tenant_id = _request_tenant_id(req.tenant_id, token_user, existing)
     if req.offer_id:
-        offer = handoff_store.update_handoff_offer(req.offer_id, "consented", req.session_id, req.user_id)
+        offer = handoff_store.update_handoff_offer(
+            req.offer_id,
+            "consented",
+            req.session_id,
+            req.user_id,
+            tenant_id=tenant_id,
+        )
         if not offer:
             raise HTTPException(status_code=409, detail="handoff_offer_invalid_or_expired")
     server_messages = handoff_store.recent_chat_history(req.session_id, limit=20)
@@ -1433,7 +1442,13 @@ async def request_handoff(req: HandoffRequest, request: Request):
     brief["tenant_id"] = tenant_id
     queue_meta = enqueue_handoff(req.session_id, brief, tenant_id=brief["tenant_id"])
     if req.offer_id:
-        handoff_store.update_handoff_offer(req.offer_id, "queued", req.session_id, req.user_id)
+        handoff_store.update_handoff_offer(
+            req.offer_id,
+            "queued",
+            req.session_id,
+            req.user_id,
+            tenant_id=tenant_id,
+        )
     handoff_token = create_handoff_user_token(
         session_id=req.session_id,
         user_id=req.user_id,
@@ -1443,7 +1458,7 @@ async def request_handoff(req: HandoffRequest, request: Request):
         "ok": True,
         "brief": build_public_handoff_brief(brief),
         "queue": build_public_queue_meta(queue_meta),
-        "reason": "已为您转接VIP客服继续处理。",
+        "reason": "已进入人工队列，正在等待客服接入。",
         "handoff_token": handoff_token,
         "data_mode": "demo",
         "source_system": "mitako_fixture",
@@ -1739,7 +1754,47 @@ async def chat_stream(req: ChatRequest, request: Request):
             handoff_store.delete_session(req.session_id, tenant_id=tenant_id)
             existing_entry = None
         elif existing_entry.get("status") != "chatting":
-            raise HTTPException(status_code=409, detail="handoff_active")
+            active_payload = build_customer_handoff_payload(existing_entry)
+            queue = build_public_queue_meta(existing_entry)
+            action_state = active_payload.get("conversation_state", {}).get("action_state") or {}
+            status = existing_entry.get("status") or "queuing"
+            public_reason = (
+                "人工客服已接入，后续由人工继续处理。"
+                if status == "connected"
+                else "已进入人工队列，正在等待客服接入。"
+            )
+
+            async def active_handoff_events():
+                yield {
+                    "event": "transfer",
+                    "data": json.dumps(
+                        {
+                            "status": status,
+                            "reason": public_reason,
+                            "brief": active_payload.get("brief"),
+                            "queue": queue,
+                            "action_state": action_state,
+                            "conversation_state": active_payload.get("conversation_state") or {},
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+                yield {
+                    "event": "done",
+                    "data": json.dumps(
+                        {
+                            "status": "completed",
+                            "reply": public_reason,
+                            "conversation_state": active_payload.get("conversation_state") or {},
+                            "action_state": action_state,
+                            "required_reply_fields": [],
+                            "reply_fields": {},
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+
+            return EventSourceResponse(active_handoff_events())
     uploaded_attachments = _require_all_chat_attachments_valid(req.attachments, req.user_id, req.session_id, tenant_id)
     initial_facts = [
         fact.model_dump(mode="json")
@@ -1760,6 +1815,10 @@ async def chat_stream(req: ChatRequest, request: Request):
         assistant_message_id: Optional[int] = None
         handoff_offer_id = ""
         handoff_snapshot: Optional[Dict[str, Any]] = None
+        business_event_checkpoint = 0
+        profile_uri = f"viking://user/{req.user_id}/profile"
+        profile_existed = False
+        profile_snapshot: Dict[str, Any] = {}
         pending_handoff_events: List[Dict[str, Any]] = []
         handoff_should_publish = False
         handoff_published = False
@@ -1795,6 +1854,9 @@ async def chat_stream(req: ChatRequest, request: Request):
 
                     handoff_store.ensure_chat_session(req.session_id, req.user_id, tenant_id=tenant_id)
                     handoff_snapshot = handoff_store.get_session(req.session_id)
+                    business_event_checkpoint = handoff_store.business_event_checkpoint(req.session_id, tenant_id)
+                    profile_existed = viking_db.exists(profile_uri)
+                    profile_snapshot = viking_db.read_json(profile_uri) if profile_existed else {}
                     user_message = handoff_store.append_message(
                         req.session_id,
                         "user",
@@ -2034,6 +2096,13 @@ async def chat_stream(req: ChatRequest, request: Request):
                         agent_task.cancel()
                     await asyncio.gather(agent_task, return_exceptions=True)
                 if not turn_persisted:
+                    handoff_store.rollback_business_events(
+                        req.session_id,
+                        tenant_id,
+                        business_event_checkpoint,
+                    )
+                    if profile_existed:
+                        viking_db.write_json(profile_uri, profile_snapshot)
                     if assistant_message_id is not None:
                         handoff_store.delete_message(req.session_id, assistant_message_id, tenant_id=tenant_id)
                     if user_message_id is not None:
@@ -2044,6 +2113,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                             "expired",
                             req.session_id,
                             req.user_id,
+                            tenant_id=tenant_id,
                         )
                     current_handoff = handoff_store.get_session(req.session_id)
                     if (

@@ -8,6 +8,7 @@ import pytest
 import handoff_store
 import handoff_service
 import main
+from viking_memory import MockOpenViking
 
 
 class _Request:
@@ -155,6 +156,50 @@ def test_timeout_emits_failed_terminal_without_success_side_effects(
         assert handoff_offers == []
         assert handoff_store.recent_chat_history("timeout-session") == []
         assert getattr(main, "_active_chat_turns", None) == {}
+
+    asyncio.run(run())
+
+
+def test_timeout_rolls_back_business_events_and_user_memory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    async def run() -> None:
+        memory = MockOpenViking(str(tmp_path / "viking"))
+        monkeypatch.setattr(main, "viking_db", memory)
+        profile_uri = "viking://user/usr_001/profile"
+        before = memory.read_json(profile_uri)
+
+        async def write_then_block(state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+            handoff_store.append_business_event(
+                session_id=state["session_id"],
+                user_id=state["user_id"],
+                tenant_id=state["tenant_id"],
+                event_type="cancelled_event",
+                status="planned",
+            )
+            changed = memory.read_json(profile_uri)
+            changed["cancelled_turn_marker"] = True
+            memory.write_json(profile_uri, changed)
+            await asyncio.Event().wait()
+            return {}
+
+        monkeypatch.setattr(main, "CHAT_TURN_TIMEOUT_SECONDS", 0.03, raising=False)
+        monkeypatch.setattr(main.agent_app, "ainvoke", write_then_block)
+        response = await main.chat_stream(
+            _chat_request("usr_001", "rollback-session", "这轮超时"),
+            _request("usr_001", "rollback-session"),
+        )
+        events = await asyncio.wait_for(_collect(response), timeout=0.5)
+
+        assert _event_data(events, "terminal") == [
+            {"status": "failed", "reason_code": "chat_timeout"}
+        ]
+        assert handoff_store.list_business_events(
+            session_id="rollback-session",
+            tenant_id="mitako",
+        ) == []
+        assert memory.read_json(profile_uri) == before
 
     asyncio.run(run())
 

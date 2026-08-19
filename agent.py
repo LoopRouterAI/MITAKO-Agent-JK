@@ -828,12 +828,20 @@ async def check_transfer_rules(state: AgentState, config: RunnableConfig) -> Dic
     if not should_transfer and _accepted_recent_handoff_offer(state.get("messages") or []):
         try:
             import handoff_store
-            offer = handoff_store.get_active_handoff_offer(state.get("session_id") or "", state.get("user_id") or "")
+            offer = handoff_store.get_active_handoff_offer(
+                state.get("session_id") or "",
+                state.get("tenant_id") or "mitako",
+                state.get("user_id") or "",
+            )
         except Exception:
             offer = None
         if offer:
             handoff_store.update_handoff_offer(
-                offer["offer_id"], "consented", state.get("session_id") or "", state.get("user_id") or ""
+                offer["offer_id"],
+                "consented",
+                state.get("session_id") or "",
+                state.get("user_id") or "",
+                tenant_id=state.get("tenant_id") or "mitako",
             )
             accepted_offer_id = offer["offer_id"]
             should_transfer = True
@@ -1640,7 +1648,7 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
     brief: Dict[str, Any] = {"tenant_id": state.get("tenant_id") or "mitako"}
     queue_meta: Dict[str, Any] = {}
     try:
-        brief = build_handoff_brief(state, reason)
+        brief = build_handoff_brief({**state, "conversation_state": conversation_state}, reason)
         queue_meta = enqueue_handoff(
             session_id,
             brief,
@@ -1677,7 +1685,11 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
         try:
             import handoff_store
             handoff_store.update_handoff_offer(
-                state["handoff_offer_id"], "queued", session_id, user_id
+                state["handoff_offer_id"],
+                "queued",
+                session_id,
+                user_id,
+                tenant_id=brief.get("tenant_id") or "mitako",
             )
         except Exception:
             pass

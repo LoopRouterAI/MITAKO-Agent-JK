@@ -106,6 +106,22 @@ def test_public_projection_removes_internal_and_sensitive_fields() -> None:
     assert "310101199001011234" not in encoded
 
 
+def test_public_projection_rejects_unbounded_internal_codes() -> None:
+    from customer_service.public_projection import project_conversation_state
+
+    state = _conversation_state()
+    state["action_state"]["reason_code"] = "API_KEY=sk-secret C:\\private\\service.py"
+    state["core_conclusion"] = "provider token sk-secret at C:\\private\\service.py"
+
+    public = project_conversation_state(state)
+    encoded = json.dumps(public, ensure_ascii=False)
+
+    assert public["action_state"]["reason_code"] == "tool_error"
+    assert public["core_conclusion"] == ""
+    assert "sk-secret" not in encoded
+    assert "service.py" not in encoded
+
+
 def test_done_event_contains_same_public_conversation_state(monkeypatch) -> None:
     state = _conversation_state()
 

@@ -776,6 +776,15 @@ def _acceptance_signature(done: dict) -> tuple[str, str, str, str, str]:
     )
 
 
+def _acceptance_session_id(case_id: str) -> str:
+    return f"accept-{case_id.lower()}"
+
+
+def test_acceptance_session_is_stable_across_rounds() -> None:
+    assert _acceptance_session_id("CHAT-01") == _acceptance_session_id("CHAT-01")
+    assert _acceptance_session_id("CHAT-01") != _acceptance_session_id("CHAT-02")
+
+
 def run_acceptance(rounds: int, output: Path) -> int:
     import agent
     import main
@@ -793,10 +802,10 @@ def run_acceptance(rounds: int, output: Path) -> int:
             monkeypatch.setenv("MITAKO_PRIVACY_DELETION_SLA", "身份核验通过后 15 个工作日内处理")
             monkeypatch.setattr(agent, "call_llm", _reply_plan_only)
             client = TestClient(main.app)
-            for round_no in range(1, rounds + 1):
-                for case in cases:
-                    user_id = _CASE_USER_OVERRIDES.get(case["case_id"], _PERSONA_USERS[case["persona"]])
-                    session_id = f"accept-{round_no}-{case['case_id'].lower()}"
+            for case in cases:
+                user_id = _CASE_USER_OVERRIDES.get(case["case_id"], _PERSONA_USERS[case["persona"]])
+                session_id = _acceptance_session_id(case["case_id"])
+                for round_no in range(1, rounds + 1):
                     events = _run_chat(client, user_id, session_id, case["message"])
                     done = next((item["data"] for item in events if item["event"] == "done"), None)
                     expected = (
@@ -815,6 +824,7 @@ def run_acceptance(rounds: int, output: Path) -> int:
                     row = {
                         "round": round_no,
                         "case_id": case["case_id"],
+                        "session_id": session_id,
                         "priority": case["priority"],
                         "passed": passed,
                         "expected": expected,
@@ -837,6 +847,10 @@ def run_acceptance(rounds: int, output: Path) -> int:
         "run_count": len(rows),
         "passed": len(rows) - len(failures),
         "failed": len(failures),
+        "same_session_per_case": all(
+            len({row["session_id"] for row in rows if row["case_id"] == case["case_id"]}) == 1
+            for case in cases
+        ),
         "model_mode": "deterministic_reply_plan_renderer",
         "rows": rows,
     }

@@ -454,6 +454,8 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
     _assert(any(name.endswith("minor_material_pipeline.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料审核管线")
     _assert(any(name.endswith("minor_material_model_prompt.pyc") for name in runtime_names), "甲方运行时缺少未成年人资料识别协议")
     _assert(any(name.endswith("prompts/customer_service.pyc") for name in runtime_names), "甲方运行时缺少集中客服规则模块")
+    _assert(any(name.endswith("customer_service/fact_resolver.pyc") for name in runtime_names), "甲方运行时缺少客服事实解析模块")
+    _assert(any(name.endswith("customer_service/reply_plan.pyc") for name in runtime_names), "甲方运行时缺少客服回复计划模块")
     _assert(any(name.endswith("prompts/visual_review/core.pyc") for name in runtime_names), "甲方运行时缺少集中视觉审核规则模块")
     _assert(any(name.endswith("prompts/visual_review/schemas.pyc") for name in runtime_names), "甲方运行时缺少四场景结构化契约模块")
     _assert(any(name.endswith("configs/model_catalog.pyc") for name in runtime_names), "甲方运行时缺少统一模型目录模块")
@@ -705,7 +707,7 @@ def _verify_runtime(customer_root: Path, python: Path) -> dict[str, Any]:
             "MITAKO_DATA_DIR": str(customer_root / ".runtime-data"),
             "MITAKO_MOCK_DATA_FILE": str(customer_root / "sample_data.json"),
             "MITAKO_VISUAL_WORKBENCH_DIR": str(customer_root / "visual_review_workbench"),
-            "MITAKO_BUSINESS_DEMO_API_ENABLED": "1",
+            "MITAKO_BUSINESS_CONTRACT_API_ENABLED": "1",
             "MITAKO_AUTH_REQUIRED": "0",
             "MITAKO_PROTECTED_API_AUTH_REQUIRED": "0",
             "MITAKO_DEV_AUTH_BYPASS": "1",

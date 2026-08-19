@@ -15,7 +15,9 @@ from pydantic import ValidationError
 
 from auth.jwt_utils import create_handoff_user_token, create_token
 from auth.roles import Role
+import handoff_store
 from handoff_ws import HandoffHub
+from handoff_service import build_public_handoff_brief
 from main import AuthLoginRequest, app
 from private_domain import store as private_store
 
@@ -31,6 +33,73 @@ def test_admin_login_requires_non_blank_tenant_id() -> None:
 def test_token_factories_require_explicit_tenant_id() -> None:
     assert signature(create_token).parameters["tenant_id"].default is Parameter.empty
     assert signature(create_handoff_user_token).parameters["tenant_id"].default is Parameter.empty
+
+
+def test_handoff_offer_cannot_be_consumed_by_another_tenant() -> None:
+    secret = "handoff-offer-tenant-secret-0123456789abcdef"
+    with TemporaryDirectory() as temp_dir, patch.object(
+        handoff_store, "_DB_DIR", temp_dir
+    ), patch.object(
+        handoff_store, "_DB_PATH", str(Path(temp_dir) / "handoff.db")
+    ), patch.object(
+        handoff_store, "_db_ready", False
+    ), patch.dict(
+        "os.environ",
+        {
+            "MITAKO_JWT_SECRET": secret,
+            "MITAKO_PROTECTED_API_AUTH_REQUIRED": "1",
+            "MITAKO_DEV_AUTH_BYPASS": "0",
+        },
+        clear=False,
+    ):
+        session_id = "shared-session"
+        user_id = "shared-user"
+        token_a = create_token(
+            sub=user_id,
+            role=Role.CUSTOMER_USER.value,
+            tenant_id="tenant-a",
+            extra={"session_id": session_id},
+        )
+        token_b = create_token(
+            sub=user_id,
+            role=Role.CUSTOMER_USER.value,
+            tenant_id="tenant-b",
+            extra={"session_id": session_id},
+        )
+        client = TestClient(app)
+        created = client.post(
+            "/api/v1/handoff/offer",
+            headers={"Authorization": f"Bearer {token_a}"},
+            json={"user_id": user_id, "session_id": session_id, "tenant_id": "tenant-a"},
+        )
+        assert created.status_code == 200
+        offer_id = created.json()["offer"]["offer_id"]
+
+        consumed = client.post(
+            "/api/v1/handoff/request",
+            headers={"Authorization": f"Bearer {token_b}"},
+            json={
+                "user_id": user_id,
+                "session_id": session_id,
+                "tenant_id": "tenant-b",
+                "offer_id": offer_id,
+            },
+        )
+
+        assert consumed.status_code == 409
+        assert handoff_store.update_handoff_offer(
+            offer_id,
+            "declined",
+            session_id,
+            user_id,
+            tenant_id="tenant-a",
+        )["tenant_id"] == "tenant-a"
+
+
+def test_queued_handoff_copy_does_not_claim_human_is_connected() -> None:
+    assert build_public_handoff_brief({})["reason"] == "已进入人工队列，正在等待客服接入。"
+    source = Path("src/hooks/useChatSSE.js").read_text(encoding="utf-8")
+    assert "已为您转接VIP客服继续处理。" not in source
 
 
 def test_handoff_hub_echoes_the_authenticated_websocket_subprotocol() -> None:
