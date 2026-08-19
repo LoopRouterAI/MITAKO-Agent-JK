@@ -563,6 +563,7 @@ Copy-File "docs\delivery\甲方技术对接与私有化部署说明.html"
 Copy-File "docs\release\2026-08-18-customer-update-notes.md"
 Copy-File "docs\release\2026-08-19-v3-beta-customer-notes.md"
 Copy-File "docs\release\2026-08-19-v3.1-beta-customer-notes.md"
+Copy-File "docs\release\2026-08-19-v3.1-beta-release-receipt.md"
 Copy-File "docs\testing\客服Agent用户沟通回归验收-20260819.md"
 Copy-File "甲方沟通交付文档\0819客服Agent用户沟通问题闭环验收报告.html"
 Copy-File "甲方沟通交付文档\0819v3.1_API与WebDemo功能与测试说明.html"
@@ -980,6 +981,7 @@ $customerEvidenceFiles = @(
     "docs\release\2026-08-18-customer-update-notes.md",
     "docs\release\2026-08-19-v3-beta-customer-notes.md",
     "docs\release\2026-08-19-v3.1-beta-customer-notes.md",
+    "docs\release\2026-08-19-v3.1-beta-release-receipt.md",
     "docs\testing\客服Agent用户沟通回归验收-20260819.md",
     "甲方沟通交付文档\0819客服Agent用户沟通问题闭环验收报告.html",
     "甲方沟通交付文档\0819v3.1_API与WebDemo功能与测试说明.html",

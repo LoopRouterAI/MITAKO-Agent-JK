@@ -253,6 +253,7 @@ $evidenceFiles = @(
     "docs\testing\客服Agent用户沟通回归验收-20260819.md",
     "docs\release\2026-08-19-v3.1-beta-customer-notes.md",
     "docs\release\2026-08-19-v3.1-beta-developer-notes.md",
+    "docs\release\2026-08-19-v3.1-beta-release-receipt.md",
     "甲方沟通交付文档\0819客服Agent用户沟通问题闭环验收报告.html",
     "甲方沟通交付文档\0819v3.1_API与WebDemo功能与测试说明.html",
     "tests\reports\review_0816_four_scenario_blind_results_latest.json",
