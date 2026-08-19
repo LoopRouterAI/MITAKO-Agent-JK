@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MITAKO Agent v3.1 Beta API 与 Web Demo 功能测试说明</title>
+  <style>
+    :root{--ink:#18212b;--muted:#66727f;--line:#dce4e8;--bg:#f5f8f7;--card:#fff;--lime:#c8ec5f;--green:#176b4f;--blue:#235b87;--amber:#9a6811;--radius:10px}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:auto;padding:28px 20px 64px}.hero,.card,.panel,.metric{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 8px 24px #2740470b}.hero{padding:30px 32px;background:linear-gradient(135deg,#efffc4,#fff 60%,#eef8f5)}.eyebrow{color:var(--green);font-weight:700;letter-spacing:.08em;font-size:13px}.hero h1{font-size:clamp(28px,4vw,46px);line-height:1.16;margin:8px 0 12px;letter-spacing:-.03em}.hero p{color:var(--muted);max-width:940px}.notice{margin-top:16px;padding:14px 16px;border-left:4px solid var(--amber);background:#fff8e8;border-radius:8px}.metrics,.grid{display:grid;gap:12px;margin-top:18px}.metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metric,.card,.panel{padding:17px}.metric b{display:block;font-size:26px;line-height:1.1}.metric span,.muted{color:var(--muted);font-size:13px}.section{margin-top:28px}.section h2{font-size:24px;margin:0 0 10px}.section>p{color:var(--muted)}.card h3{margin:0 0 7px;font-size:18px}.card p{margin:7px 0}.tag{display:inline-block;background:#e8f1ff;color:var(--blue);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700}.steps{counter-reset:step;list-style:none;padding:0;margin:12px 0}.steps li{counter-increment:step;padding:11px 12px 11px 44px;border-top:1px solid var(--line);position:relative}.steps li:before{content:counter(step);position:absolute;left:0;top:9px;width:28px;height:28px;border-radius:50%;background:var(--lime);display:grid;place-items:center;font-weight:700;color:#29420c}.code{font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;background:#17212b;color:#edf7f4;padding:14px;border-radius:8px;overflow:auto;white-space:pre-wrap}.footer{margin-top:28px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}@media(max-width:760px){.wrap{padding:16px 12px 40px}.hero{padding:22px 18px}.metrics,.grid{grid-template-columns:1fr 1fr}.metric{padding:12px}.metric b{font-size:22px}.grid{grid-template-columns:1fr}.section h2{font-size:21px}}
+  </style>
+</head>
+<body><main class="wrap">
+  <header class="hero">
+    <div class="eyebrow">MITAKO Agent v3.1 Beta · API / Web Demo / Java 联调</div>
+    <h1>现在系统能做什么，应该怎么测？</h1>
+    <p>这份说明给甲方客服主管、项目经理和 Java 研发使用。它只描述当前代码中存在、可以通过本地 Demo 或 API 验证的功能；需要甲方真实订单、仓库或 CRM 接口的部分会明确标注为“联调后启用”。</p>
+    <div class="notice"><b>测试原则：</b>先看状态和回执，再看自然语言。没有附件回执、工具回执或业务接口返回，系统不得显示“已上传、已修改、已转接、已完成”等完成态。</div>
+  </header>
+  <section class="metrics">
+    <div class="metric"><b>2</b><span>交付入口：API 与 Web Demo</span></div>
+    <div class="metric"><b>4</b><span>Web 端：用户端、坐席台、JKAdmin、视觉工作台</span></div>
+    <div class="metric"><b>10</b><span>人工反馈问题已有本地回归</span></div>
+    <div class="metric"><b>3</b><span>发布包：客户包、研发包、验收证据包</span></div>
+  </section>
+  <section class="section"><h2>API 版本功能</h2><div class="grid">
+    <article class="card"><span class="tag">客服对话</span><h3>统一意图、事实和处理状态</h3><p>API 先确定场景，再生成回复。用户端、坐席端和 API 读取同一个公开状态，不靠自然语言猜测“是否已转人工”。</p><p class="muted">可验证：未提交、待执行、排队中、已完成、未执行成功、等待人工。</p></article>
+    <article class="card"><span class="tag">异步审核</span><h3>创建任务、轮询、JSON 与 HTML</h3><p>视觉审核通过正式 <code>/api/v1/review/*</code> 接口创建任务，返回材料状态、审核建议、证据引用和签名报告。四场景使用不同的 Prompt、Schema 和报告细节。</p><p class="muted">真实订单、仓库、退款执行仍由甲方接口决定。</p></article>
+    <article class="card"><span class="tag">安全边界</span><h3>公开结果自动脱敏</h3><p>公开 DTO 不包含模型名称、渠道、Key、Prompt、内部工具名和证件原值。租户、幂等、签名媒体和失败回执是 API 的固定边界。</p></article>
+    <article class="card"><span class="tag">Java 接入</span><h3>推荐调用顺序</h3><ol class="steps"><li>校验场景和业务字段。</li><li>提交 metadata 与附件。</li><li>轮询任务状态或批次状态。</li><li>读取公开 JSON；需要时读取签名 HTML。</li><li>根据材料齐全性和下一步生成客服动作。</li></ol></article>
+  </div></section>
+  <section class="section"><h2>Web Demo 功能</h2><div class="grid">
+    <article class="card"><h3>用户端 / 客服对话</h3><p>上传材料、查看真实处理状态、停止生成、重试失败操作、进入人工队列。状态变化不要求刷新页面。</p></article>
+    <article class="card"><h3>VIP 坐席台</h3><p>查看用户当前公开状态、人工队列、简报和下一步；不显示模型渠道和内部调试字段。</p></article>
+    <article class="card"><h3>JKAdmin</h3><p>查看租户级审核策略、模型启停、默认档和历史版本。业务策略修改必须填写理由并留存账号、时间、版本和回档记录。底层 Prompt、Schema 和密钥不开放给客服人员。</p></article>
+    <article class="card"><h3>视觉审核工作台</h3><p>接收目录或多文件、盘点材料、进行图片 WebP/视频代理预处理、运行四场景审核并查看双层 HTML 报告。</p></article>
+  </div></section>
+  <section class="section"><h2>建议测试顺序</h2><ol class="steps"><li><b>先测未提交：</b>只输入用户说“我有材料”，确认系统不会假装已经收到附件。</li><li><b>再测场景识别：</b>分别测试商品咨询、发错货、漏发货、退款、隐私和高风险投诉，检查主回复与右侧意图一致。</li><li><b>再测失败：</b>让工具返回失败，确认页面显示失败、重试或人工入口，不显示成功。</li><li><b>再测转人工：</b>分别验证入队成功、入队失败、等待回执，确认 API、用户端和坐席端一致。</li><li><b>再测视觉审核：</b>用四场景各自材料，检查材料齐全性、场景专属字段、证据跳秒和报告首层结论。</li><li><b>最后做甲方联调：</b>接入真实订单、包裹、仓库、CRM、改址、隐私和退款接口后，再验证业务动作，不把 Mock 结果当生产能力。</li></ol></section>
+  <section class="section"><h2>当前可改变与不可改变的设置</h2><div class="grid"><article class="card"><h3>客服主管可调整</h3><p>审核强度、材料缺口处理倾向、是否启用高成本模型档、媒体压缩阈值、1 FPS 回退开关、人工复核等级和场景策略版本。每次修改需要填写不少于 6 个汉字的理由，并支持历史查看和回档。</p></article><article class="card"><h3>研发或管理员维护</h3><p>Prompt、Schema、租户密钥、签名规则、模型请求协议和内部日志详情属于技术配置，不开放给普通客服人员。生产 Java 服务应以 API 契约为准，不直接调用工作台内部路由。</p></article></div></section>
+  <section class="section"><h2>联调边界：不是当前代码缺陷</h2><div class="panel"><p>以下事项需要甲方提供真实接口、凭证、回调或测试数据后才能完成：订单和 SKU 查询、包裹/仓库实发查询、历史客诉查询、改址写入、隐私删除、退款执行、CRM/企微/飞书消息回写。当前系统会保留诉求、显示待执行、失败或人工入口，不会伪造成功。</p><p class="muted">这类事项记录为“外部联调依赖”，不作为 v3.1 Beta 本地代码质量障碍。</p></div></section>
+  <section class="section"><h2>研发验收命令</h2><div class="code">.venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe scripts\check_documentation_release.py
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_release.ps1 -ReuseValidatedAcceptanceEvidence
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_internal_release.ps1 -ReuseValidatedAcceptanceEvidence
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_four_scenario_evidence.ps1
+.venv\Scripts\python.exe scripts\check_release_packages.py</div></section>
+  <footer class="footer">相关文档：<a href="0819客服Agent用户沟通问题闭环验收报告.html">问题修复说明</a> · <a href="../docs/release/2026-08-19-v3.1-beta-customer-notes.md">甲方更新说明</a> · <a href="../docs/release/2026-08-19-v3.1-beta-developer-notes.md">研发说明</a> · <a href="../docs/testing/客服Agent用户沟通回归验收-20260819.md">回归记录</a></footer>
+</main></body></html>

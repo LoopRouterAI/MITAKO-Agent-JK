@@ -68,7 +68,7 @@
 - PC、1024×768 Pad、390×844 手机：公开状态一致且无横向溢出。
 - 前端构建：`1926 modules transformed`。
 
-机器证据：[客服沟通验收 JSON](../testing/evidence/customer_chat_20260819_acceptance.json)；人工可读报告：[客服沟通回归验收](../testing/客服Agent用户沟通回归验收-20260819.md)。
+机器证据：[客服沟通验收 JSON](../testing/evidence/customer_chat_20260819_acceptance.json)；研发验收记录：[客服沟通回归验收](../testing/客服Agent用户沟通回归验收-20260819.md)；甲方可读问题闭环：[0819 客服 Agent 用户沟通问题闭环 HTML](../../甲方沟通交付文档/0819客服Agent用户沟通问题闭环验收报告.html)。
 
 ## 仍未接通的边界
 

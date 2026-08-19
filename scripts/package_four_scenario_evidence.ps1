@@ -79,6 +79,10 @@ Copy-File "docs\release\2026-08-18-developer-release-notes.md"
 Copy-File "docs\release\2026-08-19-v3-beta-customer-notes.md"
 Copy-File "docs\release\2026-08-19-v3-beta-developer-notes.md"
 Copy-File "docs\testing\客服Agent用户沟通回归验收-20260819.md"
+Copy-File "docs\release\2026-08-19-v3.1-beta-customer-notes.md"
+Copy-File "docs\release\2026-08-19-v3.1-beta-developer-notes.md"
+Copy-File "甲方沟通交付文档\0819客服Agent用户沟通问题闭环验收报告.html"
+Copy-File "甲方沟通交付文档\0819v3.1_API与WebDemo功能与测试说明.html"
 foreach ($report in $Reports) {
     Copy-File "甲方沟通交付文档\四场景审核报告\$report" "甲方沟通交付文档\四场景审核报告\$report"
 }

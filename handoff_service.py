@@ -329,6 +329,20 @@ def build_handoff_brief(state: Dict[str, Any], reason: Optional[str] = None) -> 
 def build_public_handoff_brief(brief: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """用户端只返回服务记录，不暴露内部研判字段。"""
     src = brief or {}
+    action_state = src.get("action_state")
+    if not isinstance(action_state, dict):
+        conversation_state = src.get("conversation_state")
+        action_state = conversation_state.get("action_state") if isinstance(conversation_state, dict) else None
+    action_status = str((action_state or {}).get("status") or "").strip().lower()
+    if not action_status:
+        # 兼容历史空简报调用；正式转接会在上游写入最终 action_state。
+        public_reason = "已进入人工队列，正在等待客服接入。"
+    elif action_status == "failed":
+        public_reason = "尚未进入人工队列，请重试或使用人工入口。"
+    elif action_status in {"queued", "succeeded", "connected"}:
+        public_reason = "已进入人工队列，正在等待客服接入。"
+    else:
+        public_reason = "人工接入状态待确认，请等待队列回执。"
     snippet = []
     for m in (src.get("conversation_snippet") or [])[-4:]:
         role = m.get("role")
@@ -341,7 +355,7 @@ def build_public_handoff_brief(brief: Optional[Dict[str, Any]]) -> Dict[str, Any
         })
     return {
         "summary": _sanitize_customer_text(src.get("summary") or "已同步您的服务记录，客服会继续协助处理。"),
-        "reason": "已进入人工队列，正在等待客服接入。",
+        "reason": public_reason,
         "orders": [_sanitize_customer_text(o) for o in (src.get("orders") or [])],
         "conversation_snippet": snippet,
         "conversation_state": project_conversation_state(src.get("conversation_state") or {}),

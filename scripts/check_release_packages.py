@@ -59,7 +59,11 @@ CUSTOMER_RELEASE_NOTES = "docs/release/2026-08-18-customer-update-notes.md"
 DEVELOPER_RELEASE_NOTES = "docs/release/2026-08-18-developer-release-notes.md"
 V3_CUSTOMER_RELEASE_NOTES = "docs/release/2026-08-19-v3-beta-customer-notes.md"
 V3_DEVELOPER_RELEASE_NOTES = "docs/release/2026-08-19-v3-beta-developer-notes.md"
+V31_CUSTOMER_RELEASE_NOTES = "docs/release/2026-08-19-v3.1-beta-customer-notes.md"
+V31_DEVELOPER_RELEASE_NOTES = "docs/release/2026-08-19-v3.1-beta-developer-notes.md"
 CUSTOMER_CHAT_ACCEPTANCE = "docs/testing/客服Agent用户沟通回归验收-20260819.md"
+CUSTOMER_CHAT_CLOSURE_HTML = "甲方沟通交付文档/0819客服Agent用户沟通问题闭环验收报告.html"
+API_WEB_TEST_HTML = "甲方沟通交付文档/0819v3.1_API与WebDemo功能与测试说明.html"
 PACKAGE_LAYOUT_GUIDE = "docs/release/2026-08-18-package-layout.md"
 FOUR_SCENARIO_REPORT_FILES = tuple(
     f"{FOUR_SCENARIO_REPORT_DIR}/review_0816_blind_{scenario}_{case_id}.html"
@@ -365,7 +369,11 @@ def _verify_internal(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         DEVELOPER_RELEASE_NOTES,
         V3_CUSTOMER_RELEASE_NOTES,
         V3_DEVELOPER_RELEASE_NOTES,
+        V31_CUSTOMER_RELEASE_NOTES,
+        V31_DEVELOPER_RELEASE_NOTES,
         CUSTOMER_CHAT_ACCEPTANCE,
+        CUSTOMER_CHAT_CLOSURE_HTML,
+        API_WEB_TEST_HTML,
         PACKAGE_LAYOUT_GUIDE,
         "docs/delivery/review-advisory-api.md",
         "docs/delivery/after-sales-agent-integration.md",
@@ -423,7 +431,10 @@ def _verify_customer(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "docs/delivery/after-sales-agent-integration.md",
         CUSTOMER_RELEASE_NOTES,
         V3_CUSTOMER_RELEASE_NOTES,
+        V31_CUSTOMER_RELEASE_NOTES,
         CUSTOMER_CHAT_ACCEPTANCE,
+        CUSTOMER_CHAT_CLOSURE_HTML,
+        API_WEB_TEST_HTML,
         PACKAGE_LAYOUT_GUIDE,
         "甲方沟通交付文档/README.md",
         FOUR_SCENARIO_CUSTOMER_GUIDE,
@@ -537,7 +548,11 @@ def _verify_evidence(zip_path: Path, root: Path, expected_commit: str) -> dict[s
         "甲方沟通交付文档/0817甲方技术对接与私有化部署说明.html",
         V3_CUSTOMER_RELEASE_NOTES,
         V3_DEVELOPER_RELEASE_NOTES,
+        V31_CUSTOMER_RELEASE_NOTES,
+        V31_DEVELOPER_RELEASE_NOTES,
         CUSTOMER_CHAT_ACCEPTANCE,
+        CUSTOMER_CHAT_CLOSURE_HTML,
+        API_WEB_TEST_HTML,
         FOUR_SCENARIO_REPORT_MEDIA_MANIFEST,
         FOUR_SCENARIO_EVIDENCE_MANIFEST,
         "证据包说明.md",

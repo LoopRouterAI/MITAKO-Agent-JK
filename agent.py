@@ -1681,6 +1681,12 @@ async def transfer_to_chatwoot(state: AgentState, config: RunnableConfig) -> Dic
             "error": action.reason_code,
         }
     queue_meta = {**queue_meta, "action_state": action.model_dump(mode="json")}
+    # 简报必须使用最终动作回执；否则失败转人工会被公开投影误写成已入队。
+    brief["action_state"] = action.model_dump(mode="json")
+    brief["conversation_state"] = {
+        **(brief.get("conversation_state") or {}),
+        "action_state": action.model_dump(mode="json"),
+    }
     if action.status.value == "queued" and state.get("handoff_offer_id"):
         try:
             import handoff_store
